@@ -102,6 +102,8 @@ def agent_tools_unverified(key: Any, model: Any) -> bool:
     """自动识别成 Gemini 原生格式、地址又不是 Google 官方的模型：工具调用未经验证（P5 实测 Tuzi 的这种入口
     两次都没有函数调用），不进 Agent。手动选了 Gemini（`KeySpec.text_protocol`）或官方地址照常可用；一次性
     文本调用不受影响。Agent 模型列表、`build_agent`、`/api/keys` 的 `agent_unverified` 标记都读这一处。"""
+    if getattr(key, "provider", None) == "atelier":
+        return any(member.agent_tools_unverified for member in getattr(model, "via", None) or [])
     if model is None or getattr(model, "protocol", None) != GEMINI_GENERATE_CONTENT:
         return False
     if getattr(key, "text_protocol", None) == GEMINI_GENERATE_CONTENT:

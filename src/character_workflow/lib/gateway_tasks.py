@@ -791,7 +791,7 @@ def _resume_member(task: GatewayTask):
 def _pick_member(
     route_id: str, tried: list[str], owner: GatewayKeyRecord, modality="image", *,
     params: dict | None = None, route_order: list[str] | None = None,
-    freeze_order: list[str] | None = None, consume: bool = False,
+    freeze_order: list[str] | None = None, consume: bool = False, wire_protocol: str | None = None,
 ):
     try:
         route = model_routes.find_route(modality, route_id)
@@ -799,7 +799,7 @@ def _pick_member(
         return None
     excluded = [m.alias for m in route.members
                 if m.provider == GATEWAY_PROVIDER or not gateway_access.member_in_scope(owner, m)
-                or not gateway_access.member_relayable(modality, m)]
+                or not gateway_access.member_relayable(modality, m, wire_protocol)]
     if len(excluded) == len(route.members):
         return None
     if route_order is None and not tried:
