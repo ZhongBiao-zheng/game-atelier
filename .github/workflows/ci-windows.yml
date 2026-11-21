@@ -35,7 +35,16 @@ jobs:
         run: uv python install 3.11
 
       - name: Install Python deps
-        run: uv sync
+        shell: bash
+        # 依赖源是清华镜像（pyproject.toml 的 tool.uv.index），GitHub 的机器连它偶发下载失败：
+        # 失败后等一会儿再装，最多 4 次；已下载的包留在 uv 缓存里，重试只补缺的。
+        run: |
+          for attempt in 1 2 3 4; do
+            uv sync && exit 0
+            echo "uv sync 第 ${attempt} 次失败，$((attempt * 15)) 秒后重试"
+            sleep $((attempt * 15))
+          done
+          exit 1
 
       - name: Measure first and daily startup (informational)
         shell: pwsh
