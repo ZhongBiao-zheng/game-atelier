@@ -20,7 +20,6 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
-from character_workflow.lib import provider_icons
 from character_workflow.lib.callers import task_submission
 
 PROTOCOL = "atelier_gateway"
@@ -151,6 +150,9 @@ def check_gateway(base_url: str, token: str) -> dict[str, Any]:
 
 def gateway_models(routes: list[dict[str, Any]]) -> list[_keys.ModelSpec]:
     """网关的路由组 → 接入端的模型（id 用路由 id，via 存网关成员快照）。"""
+    # 函数内导入：provider_icons 带着 Pillow，服务启动时不加载（test_server_startup_imports）。
+    from character_workflow.lib import provider_icons
+
     return [
         _keys.ModelSpec(
             id=route["id"], name=route["name"], modality=route["modality"],
