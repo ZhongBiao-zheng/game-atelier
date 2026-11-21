@@ -351,11 +351,8 @@ def test_build_agent_refuses_anthropic_without_base_url():
 
 
 @pytest.mark.parametrize("protocol", ["openai-chat", "anthropic-messages"])
-@pytest.mark.parametrize("proxy", ["socks5://127.0.0.1:1080", "socks5h://127.0.0.1:1080",
-                                   "socks://127.0.0.1:1080"])
-def test_socks_proxy_in_the_environment_gets_a_clear_error(monkeypatch, protocol, proxy):
-    """本项目没装 socksio：环境变量里是 socks 代理时，SDK 与协议转换构造客户端都会失败。
-    报成能照着改的中文，而不是 ImportError / ValueError 原文。"""
+def test_unversioned_socks_proxy_gets_a_clear_error(monkeypatch, protocol):
+    """socks:// 没有协议版本：保留能照着改的中文提示。"""
     from types import SimpleNamespace
 
     from character_workflow.lib import canvas_agent_runtime
@@ -364,7 +361,7 @@ def test_socks_proxy_in_the_environment_gets_a_clear_error(monkeypatch, protocol
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
-    monkeypatch.setenv("ALL_PROXY", proxy)
+    monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:1080")
     keys.add_key(keys.KeySpec(alias="v", provider="custom", base_url="https://vendor.example",
                               access_key="k", created_at="t", models=[
         keys.ModelSpec(id="m", name="m", modality="text", protocol=protocol)]))
