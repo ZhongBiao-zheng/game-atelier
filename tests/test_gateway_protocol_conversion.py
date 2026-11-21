@@ -254,3 +254,37 @@ def test_gemini_finish_reason_with_text(gateway, stream, reason, expected):
     response = client.post(CHAT, json={"model": "shared", "stream": stream, "messages": [{"role": "user", "content": "q"}]})
     events = sse_events(response) if stream else [response.json()]
     assert [c["finish_reason"] for e in events for c in e["choices"] if c["finish_reason"]] == [expected]
+
+
+def test_native_refusal_can_switch_member_but_ambiguous_failure_stops(gateway):
+    from tests.fake_http_vendor import FakeVendor
+    from tests.test_anthropic_protocol_calls import REPLY
+    first, client = gateway
+    with FakeVendor() as second:
+        member("a", "anthropic-messages", first.url)
+        member("b", "anthropic-messages", second.url)
+        first.on("POST", "/v1/messages", (503, {"error": {"message": "quota exceeded"}}),
+                 (401, {"error": {"message": "refused"}}))
+        second.on("POST", "/v1/messages", REPLY)
+        body = {"model": "shared", "messages": [{"role": "user", "content": "q"}]}
+        assert client.post(CHAT, json=body).status_code == 503 and not second.received
+        assert client.post(CHAT, json=body).status_code == 200
+        assert len(first.received) == 2 and len(second.received) == 1
+
+
+def test_anthropic_stream_parallel_tools_and_image(gateway):
+    from pathlib import Path
+    first, client = gateway
+    member("native", "anthropic-messages", first.url)
+    wire = (Path(__file__).parent / "fixtures/anthropic_stream/tool_use.sse").read_bytes()
+    before, finish = wire.split(b"event: message_delta", 1)
+    _, tool = before.rsplit(b"event: content_block_start", 1)
+    second = tool.replace(b'"index":1', b'"index":2').replace(b'"get_weather"', b'"get_temperature"').replace(
+        b'toolu_01T1x1fJ34qAmk2tNTrN7Up6', b'toolu_second')
+    first.on("POST", "/v1/messages", before + b"event: content_block_start" + second + b"event: message_delta" + finish)
+    result = client.post(CHAT, json={"model": "shared", "stream": True, "messages": [
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}}]}]})
+    calls = [t for e in sse_events(result) for c in e["choices"] for t in c["delta"].get("tool_calls", [])]
+    assert [(t["index"], t["function"]["name"]) for t in calls if t["function"].get("name")] == [
+        (0, "get_weather"), (1, "get_temperature")]
+    assert first.received[0].json()["messages"][0]["content"][0]["source"]["data"] == "YQ=="
