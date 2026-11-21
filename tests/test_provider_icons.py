@@ -510,13 +510,14 @@ def site(monkeypatch):
     real_open = outbound_guard._open_public
     with FakeVendor() as vendor:
         @contextmanager
-        def routed(url, parts, timeout, https_when_proxied=False):
+        def routed(url, parts, timeout, https_when_proxied=False, headers=None):
             if parts.hostname and parts.hostname.endswith(".test"):
                 local = vendor.url + url.split(parts.netloc, 1)[1]
-                with requests.get(local, timeout=timeout, stream=True, allow_redirects=False) as response:
+                with requests.get(local, timeout=timeout, stream=True, allow_redirects=False,
+                                  headers=headers) as response:
                     yield response
             else:
-                with real_open(url, parts, timeout, https_when_proxied) as response:
+                with real_open(url, parts, timeout, https_when_proxied, headers) as response:
                     yield response
 
         monkeypatch.setattr(outbound_guard, "_open_public", routed)
@@ -652,13 +653,13 @@ def test_a_slow_drip_upstream_ends_within_the_time_budget(client, monkeypatch):
     real_open = outbound_guard._open_public
 
     @contextmanager
-    def routed(url, parts, timeout, https_when_proxied=False):
+    def routed(url, parts, timeout, https_when_proxied=False, headers=None):
         if parts.hostname == "drip.test":
             with requests.get(f"http://127.0.0.1:{server.server_port}/", timeout=timeout, stream=True,
-                              allow_redirects=False) as response:
+                              allow_redirects=False, headers=headers) as response:
                 yield response
         else:
-            with real_open(url, parts, timeout, https_when_proxied) as response:
+            with real_open(url, parts, timeout, https_when_proxied, headers) as response:
                 yield response
 
     monkeypatch.setattr(outbound_guard, "_open_public", routed)
@@ -691,13 +692,14 @@ def test_private_addresses_never_leave_the_machine(client, url, monkeypatch):
     assert response.status_code == 422 and response.json()["detail"] == "不能使用本机或内网地址"
 
 
-@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x"])
-def test_non_http_addresses_are_refused_without_a_request(client, url, monkeypatch):
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "http://[::1/", "http://a..b/"])
+def test_non_http_or_malformed_addresses_are_refused_without_a_request(client, url, monkeypatch):
     from character_workflow.lib import outbound_guard
 
     monkeypatch.setattr(outbound_guard.requests.Session, "get",
                         lambda *a, **k: pytest.fail("不应发出请求"))
-    assert _fetch(client, url).status_code == 422
+    response = _fetch(client, url)
+    assert response.status_code == 422 and response.json()["detail"] == "连接失败"
 
 
 def test_dns_that_resolves_to_a_private_address_is_refused(client, monkeypatch):
@@ -764,3 +766,154 @@ def test_fetch_is_management_only():
     from viewer_server.connection_capabilities import local_capability
 
     assert local_capability("POST", "/api/provider-icons/fetch") == "manage"
+
+
+# --- 验收复核 G1–G4：上游故障一律按连接失败、候选出错换下一个、文案只有约定的几句 ----------------
+
+class _RawHandler(BaseHTTPRequestHandler):
+    """按路径模拟各种坏上游：回完头不发字节、定长或分块读到一半断开、标了 gzip 却不是 gzip。"""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _head(self, headers):
+        self.send_response(200)
+        for name, value in headers.items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.flush()
+
+    def do_GET(self):
+        server = self.server
+        server.seen.append((self.path, self.headers.get("Accept-Encoding")))  # type: ignore[attr-defined]
+        if self.path in ("/stall", "/stall.png"):
+            self._head({"Content-Type": "text/html", "Content-Length": "100"})
+            server.stopping.wait(30)  # type: ignore[attr-defined]
+        elif self.path == "/short":
+            self._head({"Content-Type": "text/html", "Content-Length": "100"})
+            self.wfile.write(b"<html>")
+            self.close_connection = True
+        elif self.path == "/chunked":
+            self._head({"Content-Type": "text/html", "Transfer-Encoding": "chunked"})
+            self.wfile.write(b"5\r\n<htm")
+            self.close_connection = True
+        elif self.path == "/gzip":
+            body = b"<html>not really gzip</html>"
+            self._head({"Content-Type": "text/html", "Content-Encoding": "gzip", "Content-Length": str(len(body))})
+            self.wfile.write(body)
+        elif self.path == "/page":
+            body = b'<link rel="icon" href="/stall.png" sizes="64x64"><link rel="icon" href="/ok.png">'
+            self._head({"Content-Type": "text/html", "Content-Length": str(len(body))})
+            self.wfile.write(body)
+        elif self.path == "/gzip-icon-page":
+            body = b'<link rel="icon" href="/gzip" sizes="64x64"><link rel="icon" href="/ok.png">'
+            self._head({"Content-Type": "text/html", "Content-Length": str(len(body))})
+            self.wfile.write(body)
+        elif self.path == "/ok.png":
+            body = _image("PNG")
+            self._head({"Content-Type": "image/png", "Content-Length": str(len(body))})
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+
+@pytest.fixture
+def raw_site(monkeypatch):
+    """`raw.test` 接到上面的坏上游；其余地址照常走 outbound_guard 的真实检查。"""
+    from character_workflow.lib import outbound_guard
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RawHandler)
+    server.daemon_threads = True
+    server.handle_error = lambda *args: None  # 半途断开的连接会让 socketserver 打印回溯，与用例无关
+    server.stopping = threading.Event()  # type: ignore[attr-defined]
+    server.seen = []  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    real_open = outbound_guard._open_public
+
+    @contextmanager
+    def routed(url, parts, timeout, https_when_proxied=False, headers=None):
+        if parts.hostname == "raw.test":
+            local = f"http://127.0.0.1:{server.server_port}" + url.split(parts.netloc, 1)[1]
+            with requests.get(local, timeout=timeout, stream=True, allow_redirects=False,
+                              headers=headers) as response:
+                yield response
+        else:
+            with real_open(url, parts, timeout, https_when_proxied, headers) as response:
+                yield response
+
+    monkeypatch.setattr(outbound_guard, "_open_public", routed)
+    yield server
+    server.stopping.set()
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+
+@pytest.mark.parametrize("path", ["/stall", "/short", "/chunked", "/gzip"])
+def test_broken_upstreams_are_a_connection_failure_not_a_500(client, raw_site, monkeypatch, path):
+    """回完头不再发字节、定长或分块读到一半断开、标了 gzip 却不是：都按连接失败，不是 500。"""
+    from character_workflow.lib import provider_icon_fetch
+
+    monkeypatch.setattr(provider_icon_fetch, "TOTAL_SECONDS", 2.0)
+    response = _fetch(client, f"http://raw.test{path}")
+    assert response.status_code == 422 and response.json()["detail"] == "连接失败"
+
+
+def test_a_stalled_candidate_is_skipped_for_the_next_one(client, raw_site):
+    """页面正常、第一个候选回完头就卡住：读超时后换下一个候选。"""
+    response = _fetch(client, "http://raw.test/page")
+    assert response.status_code == 200, response.text
+    assert [path for path, _ in raw_site.seen] == ["/page", "/stall.png", "/ok.png"]
+
+
+def test_icon_requests_ask_for_identity_and_never_decompress(client, raw_site):
+    """请求都带 Accept-Encoding: identity；上游仍回 gzip 的候选按不可用处理，不解压。"""
+    response = _fetch(client, "http://raw.test/gzip-icon-page")
+    assert response.status_code == 200, response.text
+    assert raw_site.seen == [("/gzip-icon-page", "identity"), ("/gzip", "identity"), ("/ok.png", "identity")]
+
+
+def test_total_time_budget_stops_trying_candidates(client, raw_site, monkeypatch):
+    """时限在第一个候选上用完：后面的候选（含 /favicon.ico）不再请求。"""
+    from character_workflow.lib import provider_icon_fetch
+
+    monkeypatch.setattr(provider_icon_fetch, "TOTAL_SECONDS", 2.0)
+    response = _fetch(client, "http://raw.test/page")
+    assert response.status_code == 422 and response.json()["detail"] == "没有找到图标"
+    assert [path for path, _ in raw_site.seen] == ["/page", "/stall.png"]
+
+
+def test_a_malformed_link_only_skips_itself():
+    from character_workflow.lib.provider_icon_fetch import candidates
+
+    html = ('<link rel="icon" href="http://[::1/x.png" sizes="64x64">'
+            '<link rel="icon" href="/after.png" sizes="32x32">')
+    assert candidates("https://site.example/", html) == [
+        "https://site.example/after.png", "https://site.example/favicon.ico"]
+    assert candidates("http://[::1/", "") == []
+
+
+def test_unexpected_errors_still_show_one_agreed_sentence(client, monkeypatch, caplog):
+    from character_workflow.lib import provider_icon_fetch
+
+    def boom(_url):
+        raise KeyError("surprise")
+
+    monkeypatch.setattr(provider_icon_fetch, "fetch_site_icon", boom)
+    response = _fetch(client, "https://site.example/")
+    assert response.status_code == 422 and response.json()["detail"] == "连接失败"
+    assert "KeyError" in caplog.text
+
+    monkeypatch.setattr(provider_icons, "store", boom)
+    uploaded = client.post("/api/provider-icons", files={"file": ("a.png", _image("PNG"), "image/png")})
+    assert uploaded.status_code == 422 and uploaded.json()["detail"] == "图片无法识别"
+
+
+def test_an_overlong_address_says_so(client):
+    response = _fetch(client, "https://site.example/" + "a" * 2048)
+    assert response.status_code == 422 and response.json()["detail"] == "网址过长"
