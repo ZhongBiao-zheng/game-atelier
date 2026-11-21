@@ -42,7 +42,7 @@ stdio 工具的参数包在 `payload`。适配器取出参数对象，作为 JSO
 
 `canvas_wait_for_run` 轮询同一个 run，等待上限为 240 秒。stdio 到 viewer-server 的读取超时为 270 秒，给最后一次查询和返回留出时间。等待会占用适配器 4 个并发名额中的 1 个；满额时返回 `CONNECTION_RATE_LIMITED`。客户端应为这次工具调用留足时间。等到期可用原 run_id 再查。
 
-批量生成接受 1–20 个不同节点，每项 count 为 1–4，默认 1。客户端传入用户核对过的画布修订号；整批重复节点或起始修订冲突时直接退回。提交成功后，下一项沿用刚提交的修订号。中途的其他编辑会触发修订冲突。结果按输入顺序返回，每项含 index（从 0 起）、surface_node_id、count 和 status。submitted 项带 run_id、result_node_id，failed 项带 error。持有 canvas_generate 即获服务端批准，MCP 不产生内置 Agent 的逐项确认卡，因此 rejected 为 0。
+批量生成接受 1–20 个不同节点，每项 count 为 1–4，默认 1。客户端传入用户核对过的画布修订号；整批重复节点或起始修订冲突时直接退回。批次通过起始修订检查后，每项在提交时读取画布的最新修订和节点草稿。其他生成写回或用户编辑引起的修订变化不会使后续项发生修订冲突。结果按输入顺序返回，每项含 index（从 0 起）、surface_node_id、count 和 status。submitted 项带 run_id、result_node_id，failed 项带 error。持有 canvas_generate 即获服务端批准，MCP 不产生内置 Agent 的逐项确认卡，因此 rejected 为 0。
 
 提交成功只表示任务已登记。以 run_id 等待或查询最终的生成状态；网关逐项核算额度。后续项失败时，已成功的项保留，返回结果中的订单号可继续查询。网关返回的标准额度与重置时间可见，其他厂商的原始报错使用安全摘要。自动重复整批会产生新任务。
 

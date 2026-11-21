@@ -28,7 +28,7 @@ from character_workflow.lib.canvas_projects import (
 from character_workflow.lib.canvas_agent_schema import (
     MAX_BATCH_GENERATIONS, RunBatchInput, ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
     CanvasReadSpecInput, CanvasSearchLibraryInput, CanvasSearchTeamInput,
-    CanvasReadMediaInput, CanvasReadVideoFramesInput, GetRunInput, ImportMediaInput, RunInput,
+    CanvasReadMediaInput, CanvasReadVideoFramesInput, CurrentRevisionRunInput, GetRunInput, ImportMediaInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_vision import TERMINAL_STATUSES
 from character_workflow.lib.jobs import list_jobs
@@ -476,13 +476,14 @@ def _job_view(job: Job, *, agent: bool) -> dict:
     }
 
 
-def run(principal: Any, payload: RunInput) -> tuple[dict, Job]:
+def run(principal: Any, payload: CurrentRevisionRunInput) -> tuple[dict, Job]:
     """Submit one run; the caller schedules execution (server BackgroundTasks)."""
     from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_canvas_run
     authorize(principal, payload.project_id, "canvas_generate")
     try:
         job, document = submit_canvas_run(payload.project_id, payload.surface_node_id,
-                                          payload.expected_revision, payload.requested_count)
+                                          payload.expected_revision if isinstance(payload, RunInput) else None,
+                                          payload.requested_count)
     except KeyError:
         raise CanvasToolError("INVALID_TARGET", "找不到这个生成节点", 404) from None
     except CanvasRunCommandError as error:
@@ -547,16 +548,13 @@ def submit_batch(items: list[dict], submit: Callable[[dict], tuple[dict, list[st
 
 def run_batch(principal: Any, payload: RunBatchInput, schedule: Callable[[str], None]) -> dict:
     authorize(principal, payload.project_id, "canvas_generate")
-    revision = payload.expected_revision
-    if read_canvas_document(payload.project_id).revision != revision:
+    if read_canvas_document(payload.project_id).revision != payload.expected_revision:
         raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
 
     def submit(item: dict) -> tuple[dict, list[str]]:
-        nonlocal revision
-        result, job = run(principal, RunInput(
+        result, job = run(principal, CurrentRevisionRunInput(
             project_id=payload.project_id, surface_node_id=item["surface_node_id"],
-            expected_revision=revision, requested_count=item["count"]))
-        revision = result["revision"]
+            requested_count=item["count"]))
         schedule(job.job_id)
         return result, []
 
