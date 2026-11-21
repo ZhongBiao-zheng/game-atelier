@@ -1,4 +1,4 @@
-"""无认证 SOCKS5 CONNECT，只允许转到本用例的回环假上游。"""
+"""无认证 SOCKS4/5 CONNECT，只允许转到本用例的回环假上游。"""
 import select
 import socket
 import socketserver
@@ -17,21 +17,30 @@ def socks_network(request, monkeypatch):
 
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
-                version, count = self.rfile.read(2)
-                assert version == 5 and 0 in self.rfile.read(count)
-                self.wfile.write(b"\x05\x00")
-                version, command, _, kind = self.rfile.read(4)
-                assert (version, command) == (5, 1)
-                if kind == 1:
-                    host = socket.inet_ntoa(self.rfile.read(4))
+                version, command = self.rfile.read(2)
+                if version == 4:
+                    assert command == 1
+                    port = int.from_bytes(self.rfile.read(2), "big")
+                    address = self.rfile.read(4)
+                    assert self.rfile.read(1) == b"\x00"  # empty user ID
+                    host = socket.inet_ntoa(address)
+                    reply = b"\x00\x5a" + port.to_bytes(2, "big") + address
                 else:
-                    assert kind == 3
-                    host = self.rfile.read(self.rfile.read(1)[0]).decode()
-                port = int.from_bytes(self.rfile.read(2), "big")
+                    assert version == 5 and 0 in self.rfile.read(command)
+                    self.wfile.write(b"\x05\x00")
+                    version, command, _, kind = self.rfile.read(4)
+                    assert (version, command) == (5, 1)
+                    if kind == 1:
+                        host = socket.inet_ntoa(self.rfile.read(4))
+                    else:
+                        assert kind == 3
+                        host = self.rfile.read(self.rfile.read(1)[0]).decode()
+                    port = int.from_bytes(self.rfile.read(2), "big")
+                    reply = b"\x05\x00\x00\x01" + b"\x00" * 6
                 assert host == "127.0.0.1" and port == vendor.server_port
                 destinations.append((host, port))
                 with socket.create_connection((host, port), timeout=3) as remote:
-                    self.wfile.write(b"\x05\x00\x00\x01" + b"\x00" * 6)
+                    self.wfile.write(reply)
                     peers = {self.connection: remote, remote: self.connection}
                     while ready := select.select(list(peers), [], [], 3)[0]:
                         for source in ready:
@@ -117,7 +126,7 @@ def test_requests_gateway_and_domestic_vendor_bypass_socks(socks_network, monkey
     assert len(vendor.received) == 2 and not tunnels
 
 
-@pytest.mark.parametrize("socks_network", ["socks", "socks4", "socks4a"], indirect=True)
+@pytest.mark.parametrize("socks_network", ["socks"], indirect=True)
 def test_sync_text_explains_unsupported_socks(socks_network):
     from character_workflow.lib import net_env, structured_text_call
     from character_workflow.lib.callers import openai_text
@@ -127,3 +136,14 @@ def test_sync_text_explains_unsupported_socks(socks_network):
         openai_text._post_json(url=vendor.url, access_key="test", payload={}, timeout=1)
     assert structured_text_call.failure_reason(str(error.value)) == net_env.SOCKS_PROXY_MESSAGE
     assert not tunnels and not vendor.received
+
+
+@pytest.mark.parametrize("socks_network", ["socks4", "socks4a"], indirect=True)
+def test_sync_text_reaches_upstream_through_socks4(socks_network):
+    from character_workflow.lib.callers import openai_text
+
+    vendor, tunnels = socks_network
+    vendor.on("POST", "/chat", CHAT)
+    assert openai_text._post_json(url=vendor.url + "/chat", access_key="test",
+                                  payload={}, timeout=2) == CHAT
+    assert len(tunnels) == len(vendor.calls("POST", "/chat")) == 1

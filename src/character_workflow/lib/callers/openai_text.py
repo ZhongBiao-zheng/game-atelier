@@ -240,7 +240,7 @@ def _post_json(
                 waiting=gateway_wait)
         else:
             proxy = requests.utils.select_proxy(url, requests.utils.get_environ_proxies(url))
-            if proxy and proxy.lower().startswith(net_env.UNSUPPORTED_SOCKS_PREFIXES):
+            if proxy and proxy.lower().startswith("socks://"):
                 raise OpenAITextError(net_env.SOCKS_PROXY_MESSAGE)
             response = direct_text_retry.send_sync(send)
     except (gateway_text_wait.GatewayTextUpdating, direct_text_retry.TextInterrupted) as error:
