@@ -10,7 +10,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "requests[socks]>=2.32",
   # Async streaming for the OpenAI-compatible LAN gateway relay.
-  "httpx[socks]>=0.27",
+  "httpx[socks]>=0.27",  # Also provides socksio for the Agent SDK’s httpx2/httpcore2 stack.
   "pypinyin>=0.53",
   "platformdirs>=4",
   'pywin32>=308; sys_platform == "win32"',

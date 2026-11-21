@@ -26,7 +26,7 @@ from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
 from character_workflow.lib import keys, canvas_specs, team_library_specs
-from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE
+from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE, UNSUPPORTED_SOCKS_PREFIXES
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
@@ -1220,9 +1220,11 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         set_tracing_disabled(True)  # SDK 首次构造 tracing 客户端也会读取代理环境。
         client = _agent_client(key, protocol, on_gateway_wait, call_tag)
     except ValueError as error:
-        if "Unknown scheme for proxy URL" not in str(error) or "socks://" not in str(error).lower():
+        detail = str(error).lower()
+        if not (detail.startswith("unknown scheme for proxy url")
+                and any(prefix in detail for prefix in UNSUPPORTED_SOCKS_PREFIXES)):
             raise
-        raise CanvasToolError("MODEL_UNAVAILABLE", SOCKS_PROXY_MESSAGE, 422) from error
+        raise CanvasToolError("MODEL_UNAVAILABLE", SOCKS_PROXY_MESSAGE, 422) from None
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(

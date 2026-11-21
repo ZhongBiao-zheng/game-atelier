@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import os
 
-SOCKS_PROXY_MESSAGE = ("环境变量里的 socks:// 代理缺少版本号，请改成 socks5://、socks5h:// "
-                       "或 http 代理地址")
+UNSUPPORTED_SOCKS_PREFIXES = ("socks://", "socks4://", "socks4a://")
+SOCKS_PROXY_MESSAGE = "当前对话连接不支持此 SOCKS 代理格式，请改成 socks5://、socks5h:// 或 http 代理地址"
 
 
 # 强制直连的国内 host 后缀（这些厂商有国内入口，套代理只会坏事）。
