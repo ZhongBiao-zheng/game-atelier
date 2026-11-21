@@ -463,7 +463,7 @@ def test_agent_status_paths_and_tool_catalog_for_all_control_responses(client, t
         assert [row["id"] for row in status["clients"]] == list(CLIENT_IDS)
         assert next(row for row in status["clients"] if row["id"] == "codex")["path"] == str(codex_config_path())
         assert status["tools"] == expected_tools
-        assert [tool["name"] for tool in status["tools"] if tool["billable"]] == ["canvas_run"]
+        assert [tool["name"] for tool in status["tools"] if tool["billable"]] == ["canvas_run", "canvas_run_batch"]
         assert "grant_token" not in response.text and ".claude.json" not in response.text
         if enabled:
             assert data_root.agent_credential_file().exists()
