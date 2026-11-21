@@ -443,14 +443,24 @@ def cancel(key_id: str, task_id: str) -> GatewayTask:
     logger.info("网关任务请求取消 task=%s", task_id)
     with _lock:
         current = _read(task_id)
-        if current and current.status == "pending":
-            return _finish(current, status="canceled", error="已停止")
-        if current and current.status == "running" and (
-                current.sent_at is None or _runs_on_this_host(current)):
-            # 刚开始执行、还没发出：run_task 发上游前在同一把锁里看到标记就取消。
-            # 主机本机执行的任务例外（见 _runs_on_this_host）：能真正中断、不计费，「跑完并计费」的理由不成立。
+        if current is None or current.status in TERMINAL:
+            return current or task
+        registered = ("comfyui" in (current.resume_params or {}) and resumable(current)
+                      and _runs_on_this_host(current))
+        if current.status == "pending" or (registered and current.phase == "resuming"):
+            finished = _finish(current, status="canceled", error="已停止")
+        elif current.sent_at is None or _runs_on_this_host(current):
             return _update(task_id, cancel_requested=True)
-        return current or task
+        else:
+            return current
+    if registered:
+        from character_workflow.lib.callers.comfyui import cancel_registered_prompt
+
+        try:
+            cancel_registered_prompt(current.member_base_url, current.upstream_task_ids[-1])
+        except Exception:  # Best effort: the gateway cancellation is already durable.
+            logger.warning("停止已登记的 ComfyUI 订单失败 task=%s", task_id, exc_info=True)
+    return finished
 
 
 def _runs_on_this_host(task: GatewayTask) -> bool:
@@ -625,7 +635,10 @@ def run_task(task: GatewayTask) -> GatewayTask:
             alias, reason = switched_from
             warnings.append(f"{alias}{model_routes.FAILOVER_LABELS[reason]}，已改用 {key.alias}")
         with _lock:
-            if _read(task_id).cancel_requested:
+            current = _read(task_id)
+            if current.status in TERMINAL:
+                return current
+            if current.cancel_requested:
                 # 成员在发上游之前停止了（cancel 在同一把锁里只对还没发出的任务设标记）：取消、扣 0。
                 return _finish(_read(task_id), status="canceled", error="已停止")
             sent = _update(task_id, member_alias=key.alias, member_provider=key.provider,

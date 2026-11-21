@@ -21,7 +21,11 @@ ANTHROPIC = {"id": "m", "model": "m", "role": "assistant", "type": "message",
 @pytest.fixture(autouse=True)
 def local_network(monkeypatch):
     monkeypatch.setenv("no_proxy", "*")
-    monkeypatch.setattr(retry, "BACKOFF", (0, 0))
+    async def skip_pause(_seconds):
+        pass
+
+    monkeypatch.setattr(retry, "_async_pause", skip_pause)
+    monkeypatch.setattr(retry, "_sync_pause", lambda _seconds: None)
 
 
 def client_for(url, protocol="openai-chat", provider="custom"):
@@ -234,3 +238,24 @@ async def test_anthropic_interrupted_stream_is_sent_once(broken_upstream):
                 pass
     assert runtime.friendly_error(caught.value) == "连接中断，未自动重发（可能已计费）"
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("kind", ["agent", "sync"])
+async def test_gateway_errors_ignore_retry_after_on_direct_text(kind, monkeypatch):
+    waits = []
+
+    async def record_pause(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(retry, "_async_pause", record_pause)
+    monkeypatch.setattr(retry, "_sync_pause", waits.append)
+    path = "/v1/chat/completions"
+    with FakeVendor() as vendor:
+        vendor.on("POST", path, (502, {}, {"Retry-After": "60"}), (503, {}, {"Retry-After": "8"}), CHAT)
+        if kind == "agent":
+            async with client_for(vendor.url) as client:
+                assert (await chat(client)).choices[0].message.content == "ok"
+        else:
+            assert openai_text._post_json(url=vendor.url + path, access_key="t", payload={}, timeout=1) == CHAT
+        assert waits == [0.5, 1.0]
+        assert len(vendor.received) == 3
