@@ -16,6 +16,11 @@ from character_workflow.lib.canvas_agent_schema import (
     CanvasReadVideoFramesInput, CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
 )
 
+from character_workflow.mcp.client import MAX_RESPONSE_BYTES
+
+# Reserve one quarter of the HTTP response for metadata.
+PREVIEW_BASE64_BUDGET = MAX_RESPONSE_BYTES * 3 // 4
+
 router = APIRouter(prefix="/api/canvas-agent")
 
 
@@ -35,10 +40,8 @@ def get_document(request: Request, payload: CanvasProjectInput):
 
 def _attach_previews(result, images):
     from character_workflow.lib.canvas_agent_vision import MAX_ATTACH_IMAGES
-    from character_workflow.mcp.client import MAX_RESPONSE_BYTES
 
-    # Leave room for metadata in the adapter's 1 MiB HTTP envelope.
-    remaining = MAX_RESPONSE_BYTES * 3 // 4
+    remaining = PREVIEW_BASE64_BUDGET
     refs, previews = [], []
     for ref, preview in images:
         if preview and len(preview["data_base64"]) <= remaining:
@@ -118,7 +121,10 @@ def check_run(request: Request, payload: GetRunInput):
 
 @router.post("/read-video-frames")
 def read_video_frames(request: Request, payload: CanvasReadVideoFramesInput):
-    return tools.read_video_frames(principal(request), payload)
+    result = tools.read_video_frames(principal(request), payload)
+    if len(result["preview"]["data_base64"]) > PREVIEW_BASE64_BUDGET:
+        del result["preview"]
+    return result
 
 
 @router.post("/wait-for-run")

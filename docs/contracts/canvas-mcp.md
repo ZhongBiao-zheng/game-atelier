@@ -36,7 +36,7 @@ stdio 工具的参数包在 `payload`。适配器取出参数对象，作为 JSO
 | `canvas_read_video_frames` | project_id、version_id、count?（1–9，默认 6）、start_ms?（≥0）、end_ms?（≥1）→ version_id、duration_ms、fps、width、height、frames[{index,t_ms}] 及一张带时间码的 JPEG 联系表 | canvas_read |
 | `canvas_run_batch` | project_id、expected_revision、items[{surface_node_id,count?}] → items[]、submitted、failed、rejected、note | canvas_generate |
 
-搜索与等待结果用 MCP 的 ImageContent 返回可用预览，最多 4 张。`attach_images` 按相同顺序列出图片引用。大小预算不足时仍返回资产或候选的文本记录。视频联系表单独作为 ImageContent，文本与 structuredContent 里只保留元数据。
+搜索与等待结果用 MCP 的 ImageContent 返回可用预览，最多 4 张。`attach_images` 按相同顺序列出图片引用。大小预算不足时仍返回资产或候选的文本记录。视频联系表单独作为 ImageContent，文本与 structuredContent 里只保留元数据。联系表的 Base64 超过 768 KiB 时，只返回帧时间码、尺寸等元数据。
 
 `canvas_get_run` 和 `canvas_wait_for_run` 返回 `done` 或 `partial` 时，成功候选的产物已登记为画布版本。任务文件已写完、候选仍待登记时，查询返回 `pending`。
 
@@ -44,7 +44,7 @@ stdio 工具的参数包在 `payload`。适配器取出参数对象，作为 JSO
 
 批量生成接受 1–20 个不同节点，每项 count 为 1–4，默认 1。客户端传入用户核对过的画布修订号；整批重复节点或起始修订冲突时直接退回。批次通过起始修订检查后，每项在提交时读取画布的最新修订和节点草稿。其他生成写回或用户编辑引起的修订变化不会使后续项发生修订冲突。结果按输入顺序返回，每项含 index（从 0 起）、surface_node_id、count 和 status。submitted 项带 run_id、result_node_id，failed 项带 error。持有 canvas_generate 即获服务端批准，MCP 不产生内置 Agent 的逐项确认卡，因此 rejected 为 0。
 
-提交成功只表示任务已登记。以 run_id 等待或查询最终的生成状态；网关逐项核算额度。后续项失败时，已成功的项保留，返回结果中的订单号可继续查询。网关返回的标准额度与重置时间可见，其他厂商的原始报错使用安全摘要。自动重复整批会产生新任务。
+提交成功只表示任务已登记。以 run_id 等待或查询最终的生成状态；网关逐项核算额度。后续项失败时，已成功的项保留，返回结果中的订单号可继续查询。网关返回的标准额度与重置时间可见，其他厂商的原始报错使用安全摘要。若某项已创建任务，随后出现未预期异常，该项可能返回 failed，而任务已落盘并处于待执行状态。服务重启后可能执行并计费。先用 `canvas_get_document` 核对节点及已有任务，避免重复提交。自动重复整批会产生新任务。
 
 ### 插件工具（ADR-0043）
 
