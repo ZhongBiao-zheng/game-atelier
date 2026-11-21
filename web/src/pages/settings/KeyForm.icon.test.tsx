@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createKey, patchKey } from '@/api/keys';
+import { ApiError } from '@/api/http';
 import { defaultIconUrl, fetchProviderIcon, uploadProviderIcon } from '@/api/providerIcons';
 import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial } from './providerPresets';
@@ -72,13 +73,14 @@ describe('供应商图标弹层', () => {
   });
 
   it('上传被拒时在弹层里显示服务端的原因', async () => {
-    vi.mocked(uploadProviderIcon).mockRejectedValue(new Error('上传图标失败：只支持 PNG、JPEG、WebP、GIF、ICO 图片'));
+    vi.mocked(uploadProviderIcon).mockRejectedValue(new ApiError('上传图标失败：不支持这种图片格式（HTTP 422）',
+      { status: 422, reason: '不支持这种图片格式' }));
     openNew();
     fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
     fireEvent.mouseDown(await screen.findByRole('tab', { name: '上传' }), { button: 0 });
     const file = new File(['<svg/>'], 'logo.png', { type: 'image/png' });
     fireEvent.change(await screen.findByLabelText('图标图片'), { target: { files: [file] } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('只支持');
+    expect((await screen.findByRole('alert')).textContent).toBe('不支持这种图片格式');
   });
 
   it('编辑时恢复默认提交 null，没改动不提交', async () => {
@@ -120,13 +122,76 @@ describe('按网址获取图标', () => {
   });
 
   it('取不到时显示原因', async () => {
-    vi.mocked(fetchProviderIcon).mockRejectedValue(new Error('获取图标失败：没有找到图标'));
+    vi.mocked(fetchProviderIcon).mockRejectedValue(new ApiError('获取图标失败：没有找到图标（HTTP 422）',
+      { status: 422, reason: '没有找到图标' }));
     openNew();
     fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
     fireEvent.mouseDown(await screen.findByRole('tab', { name: '网址' }), { button: 0 });
     fireEvent.change(await screen.findByLabelText('图标网址'), { target: { value: 'https://other.example' } });
     fireEvent.click(screen.getByRole('button', { name: '获取' }));
     await waitFor(() => expect(fetchProviderIcon).toHaveBeenCalledWith('https://other.example'));
-    expect(await screen.findByRole('alert')).toHaveTextContent('没有找到图标');
+    expect((await screen.findByRole('alert')).textContent).toBe('没有找到图标');
+  });
+});
+
+// 验收 F10：请求进行中用户另做了选择，之后回来的结果丢弃，不能盖掉用户后做的选择。
+describe('进行中的请求被后来的选择取代', () => {
+  const deferred = () => {
+    let resolve!: (value: { icon: string }) => void;
+    const promise = new Promise<{ icon: string }>(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const startUpload = async () => {
+    fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '上传' }), { button: 0 });
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'logo.png', { type: 'image/png' });
+    fireEvent.change(await screen.findByLabelText('图标图片'), { target: { files: [file] } });
+    await waitFor(() => expect(uploadProviderIcon).toHaveBeenCalled());
+  };
+  const savedIcon = async () => {
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(createKey).toHaveBeenCalled());
+    return vi.mocked(createKey).mock.calls[0][0].icon;
+  };
+
+  it('上传中选了品牌：上传结果丢弃', async () => {
+    const pending = deferred();
+    vi.mocked(uploadProviderIcon).mockReturnValue(pending.promise);
+    vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
+    openNew();
+    await startUpload();
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '品牌' }), { button: 0 });
+    fireEvent.click(await screen.findByRole('button', { name: 'DeepSeek' }));
+    await act(async () => { pending.resolve({ icon: `file:${SHA}` }); });
+    expect(await savedIcon()).toBe('brand:deepseek');
+  });
+
+  it('上传中点了恢复默认：上传结果丢弃', async () => {
+    const pending = deferred();
+    vi.mocked(uploadProviderIcon).mockReturnValue(pending.promise);
+    vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
+    render(<KeyForm presetId="custom" initial={{ ...presetInitial(custom, 'https://relay.example/v1'), alias: 'relay',
+      access_key: 'sk-test-0123', icon: 'brand:gemini', models: [{ id: 'gpt-x', name: 'GPT', modality: 'text' }] }}
+      onCreated={vi.fn()} onCancel={vi.fn()} />);
+    await startUpload();
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+    await act(async () => { pending.resolve({ icon: `file:${SHA}` }); });
+    expect(await savedIcon()).toBeUndefined();
+  });
+
+  it('获取中关了弹层：结果与报错都丢弃', async () => {
+    const pending = deferred();
+    vi.mocked(fetchProviderIcon).mockReturnValue(pending.promise);
+    vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
+    openNew();
+    fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '网址' }), { button: 0 });
+    fireEvent.click(await screen.findByRole('button', { name: '获取' }));
+    await waitFor(() => expect(fetchProviderIcon).toHaveBeenCalled());
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('tab', { name: '网址' })).toBeNull());
+    await act(async () => { pending.resolve({ icon: `file:${SHA}` }); });
+    expect(screen.getByRole('button', { name: '更换图标' }).querySelector('img')).toBeNull();
+    expect(await savedIcon()).toBeUndefined();
   });
 });

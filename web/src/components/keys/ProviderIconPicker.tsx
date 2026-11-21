@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { ApiError } from '@/api/http';
 import { fetchProviderIcon, uploadProviderIcon } from '@/api/providerIcons';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { BrandGlyph, PROVIDER_BRANDS } from '@/components/providerBrands';
@@ -10,6 +11,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Hint } from '@/components/ui/tooltip';
 
 type Display = { provider?: string; base_url?: string | null; alias?: string };
+
+/** 弹层里只显示一句原因（服务端的 detail），不带「获取图标失败：」前缀和状态码。 */
+function reasonOf(error: unknown): string {
+  return error instanceof ApiError && error.reason ? error.reason : '连接失败';
+}
 
 /** 供应商图标弹层（I1）：选内置品牌、上传图片、按网址获取、恢复默认。只改表单里的值，保存时随 KEY 一起写。 */
 export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
@@ -24,21 +30,32 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 每次选择、关闭弹层或发起新请求都换一个编号：请求回来时编号变了，说明用户已经另做了选择，结果丢弃。
+  const attempt = useRef(0);
 
-  const choose = (next: string | null) => {
-    onChange(next);
+  const settle = () => {
+    attempt.current += 1;
+    setUploading(false);
     setError(null);
+  };
+  const choose = (next: string | null) => {
+    settle();
+    onChange(next);
     setOpen(false);
   };
   const run = async (task: () => Promise<{ icon: string }>) => {
+    const mine = ++attempt.current;
     setUploading(true);
     setError(null);
     try {
-      choose((await task()).icon);
+      const { icon: next } = await task();
+      if (mine === attempt.current) choose(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (mine === attempt.current) {
+        setError(reasonOf(e));
+        setUploading(false);
+      }
     } finally {
-      setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -46,7 +63,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
   const address = (url ?? defaultUrl).trim();
 
   return (
-    <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setError(null); }}>
+    <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) settle(); }}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" type="button" aria-label="更换图标"
           className="h-8 w-8 shrink-0 bg-secondary text-xs [&_svg]:size-5">
@@ -64,7 +81,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
             <div className="grid grid-cols-7 gap-1">
               {PROVIDER_BRANDS.map(brand => {
                 const value = `brand:${brand.id}`;
-                return <Hint key={brand.id} label={brand.label}>
+                return <Hint key={brand.id} label={brand.label} side="bottom">
                   <Button variant="ghost" size="icon" type="button" aria-label={brand.label}
                     aria-pressed={icon === value} onClick={() => choose(value)}
                     className="text-muted-foreground hover:text-foreground aria-pressed:bg-secondary aria-pressed:text-foreground aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-primary/60">
