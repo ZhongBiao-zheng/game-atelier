@@ -20,6 +20,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from character_workflow.lib.periodic_sync import PeriodicSync
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 
@@ -29,8 +30,8 @@ MISSING_RETRY_SECONDS = 600
 _TIMEOUT = (10, 15)
 _log = logging.getLogger(__name__)
 _cache: tuple[float, dict[str, Any]] | None = None
-_worker_started = False
-_worker_lock = threading.Lock()
+_worker = PeriodicSync("tokendance-price-sync")
+stop_background_sync = _worker.stop
 # 全量同步与补拉都是「读快照 → 合并 → 写快照」，串行执行才不会互相覆盖。
 _sync_lock = threading.Lock()
 _missing_attempts: dict[str, float] = {}
@@ -174,18 +175,4 @@ def start_missing_sync() -> None:
 
 def start_background_sync() -> None:
     """进程内只起一个守护线程：立即同步一次，之后每 6 小时一次。"""
-    global _worker_started
-    with _worker_lock:
-        if _worker_started:
-            return
-        _worker_started = True
-
-    def loop() -> None:
-        while True:
-            try:
-                sync()
-            except Exception:  # noqa: BLE001 —— 同步失败不能拖垮服务，下一轮再试
-                _log.exception("TokenDance 价格同步失败")
-            time.sleep(SYNC_INTERVAL_SECONDS)
-
-    threading.Thread(target=loop, name="tokendance-price-sync", daemon=True).start()
+    _worker.start(sync, SYNC_INTERVAL_SECONDS, _log, "TokenDance 价格同步失败")

@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -19,6 +17,7 @@ from typing import Any
 import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from character_workflow.lib.periodic_sync import PeriodicSync
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 
@@ -30,8 +29,8 @@ REMOTE_URLS = (
 )
 _TIMEOUT = 15
 _log = logging.getLogger(__name__)
-_worker_started = False
-_worker_lock = threading.Lock()
+_worker = PeriodicSync("announcement-sync")
+stop_background_sync = _worker.stop
 
 
 class AnnouncedModel(BaseModel):
@@ -109,18 +108,4 @@ def visible(app_version: str) -> list[dict[str, Any]]:
 
 
 def start_background_sync() -> None:
-    global _worker_started
-    with _worker_lock:
-        if _worker_started:
-            return
-        _worker_started = True
-
-    def loop() -> None:
-        while True:
-            try:
-                sync()
-            except Exception:  # noqa: BLE001 — 公告刷新失败不能影响服务
-                _log.exception("公告源同步失败")
-            time.sleep(SYNC_INTERVAL_SECONDS)
-
-    threading.Thread(target=loop, name="announcement-sync", daemon=True).start()
+    _worker.start(sync, SYNC_INTERVAL_SECONDS, _log, "公告源同步失败")

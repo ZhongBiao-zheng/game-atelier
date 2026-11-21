@@ -8,7 +8,9 @@ import time
 
 import pytest
 
-from character_workflow.lib import gateway_tasks
+from character_workflow.lib import (
+    announcement_feed, gateway_tasks, openai_hk_prices, tokendance_prices, tuzi_prices,
+)
 from character_workflow.lib.timed_lock import TimedLock
 from viewer_server import gateway_app, loop_watch
 
@@ -219,3 +221,71 @@ def test_idle_background_threads_exit(monkeypatch):
     assert not supervisor.is_alive()
     watcher.join(2)  # 没有被监测的事件循环：看守线程退出，下次登记再起
     assert not watcher.is_alive() or loop_watch._watches
+
+
+@pytest.mark.parametrize("module,start", [
+    (module, module.start_background_sync)
+    for module in (announcement_feed, openai_hk_prices, tokendance_prices, tuzi_prices)
+])
+def test_sync_worker_waits_and_can_restart(monkeypatch, module, start):
+    import threading
+
+    refreshed = threading.Event()
+    calls = []
+
+    def sync():
+        calls.append(1)
+        refreshed.set()
+        raise ValueError("offline")
+
+    monkeypatch.setattr(module, "sync", sync)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "SYNC_INTERVAL_SECONDS", 3600)
+    for count in (1, 2):
+        refreshed.clear()
+        start()
+        start()
+        assert refreshed.wait(2)
+        threading.Event().wait(0.03)
+        thread = module.stop_background_sync()
+        thread.join(1)
+        assert not thread.is_alive() and len(calls) == count
+
+
+def test_while_loops_do_not_sleep_in_background_workers():
+    """Scan direct time.sleep calls inside while loops; allow finite per-operation polling."""
+    import ast
+    from pathlib import Path
+
+    allowed = {
+        ("viewer_server/server.py", "_wait_for_exit"),   # CLI stop deadline
+        ("viewer_server/server.py", "_wait_for_server"),  # CLI startup deadline
+        ("viewer_server/bundle_update.py", "_wait_ready"),  # restart readiness deadline
+        ("viewer_server/bundle_update.py", "report"),  # one startup report with a deadline
+        ("character_workflow/lib/callers/atelier_gateway.py", "submit"),  # one queued submission
+        ("character_workflow/lib/callers/atelier_gateway.py", "_poll"),  # one gateway task
+        ("character_workflow/lib/callers/video_poll.py", "poll_responses"),  # one video task
+        ("character_workflow/lib/callers/comfyui.py", "render"),  # one workflow with a deadline
+    }
+    root = Path(__file__).resolve().parents[1] / "src"
+    unexpected = []
+    for path in root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "sleep" not in source:
+            continue
+        tree = ast.parse(source)
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for call in ast.walk(tree):
+            if not isinstance(call, ast.Call) or ast.unparse(call.func) != "time.sleep":
+                continue
+            node = call
+            in_loop = False
+            while node in parents:
+                node = parents[node]
+                if isinstance(node, ast.While):
+                    in_loop = True
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if in_loop and (path.relative_to(root).as_posix(), node.name) not in allowed:
+                        unexpected.append(f"{path.name}:{call.lineno} {node.name}")
+                    break
+    assert not unexpected
