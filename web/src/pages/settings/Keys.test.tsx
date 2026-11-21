@@ -786,15 +786,26 @@ describe('供应商图标经过列表转换', () => {
 });
 
 // ADR-0044 补漏：已选的对话接口要带进编辑表单，否则重开时下拉显示「自动」。
-it('编辑表单显示 KEY 已选的对话接口', async () => {
-  (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-    ok: true,
-    json: async () => ({ keys: [{ ...mockKey, alias: 'relay', provider: 'custom', base_url: 'https://relay.example/v1',
-      text_protocol: 'anthropic-messages', models: [{ id: 'claude-x', name: 'Claude', modality: 'text', protocol: 'anthropic-messages' }] }],
-    default_alias: 'relay' }),
+it('编辑表单显示 KEY 已选的对话接口，不改动保存时既不提交接口也不改模型协议', async () => {
+  const listed = { keys: [{ ...mockKey, alias: 'relay', provider: 'custom', base_url: 'https://relay.example/v1',
+    text_protocol: 'anthropic-messages', models: [{ id: 'claude-x', name: 'Claude', modality: 'text', protocol: 'anthropic-messages' }] }],
+  default_alias: 'relay' };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const known = init?.method === 'PATCH' || url === '/api/keys';
+    // 列表页顺带读的「最近使用」「成员状态」不在这条用例里：回 404，页面按读不到处理。
+    return { ok: known, status: known ? 200 : 404, statusText: '',
+      json: async () => (init?.method === 'PATCH' ? { alias: 'relay' } : known ? listed : {}) };
   });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
   render(<KeysPage embedded />);
   fireEvent.click(await screen.findByLabelText('编辑 relay'));
   expect(screen.getByRole('combobox', { name: '对话接口' })).toHaveTextContent('Anthropic');
   expect(screen.getByRole('combobox', { name: '对话接口' })).not.toHaveTextContent('自动');
+  fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/keys/relay', expect.objectContaining({ method: 'PATCH' })));
+  const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+  const body = JSON.parse(String(patch[1]!.body));
+  expect(body).not.toHaveProperty('text_protocol');
+  expect(body.models.map((model: { id: string; protocol: string }) => [model.id, model.protocol]))
+    .toEqual([['claude-x', 'anthropic-messages']]);
 });
