@@ -152,34 +152,52 @@ def test_translated_stream_terminal_and_usage(gateway, protocol, monkeypatch):
     assert latest_usage()["status"] == "failed" and latest_usage()["charged_cny"] == 0
 
 
-async def test_member_sdk_streams_real_gateway_and_anthropic(monkeypatch):
-    from pathlib import Path
-    from character_workflow.lib.canvas_agent_runtime import _agent_client
-    from tests.fake_http_vendor import FakeVendor
+@pytest.fixture
+def live_hub(monkeypatch):
+    import time
+    import requests
+    from character_workflow.lib.callers.atelier_gateway import check_gateway
     from tests.test_gateway_client import _free_port
     from viewer_server.gateway_app import GatewayServer
 
     monkeypatch.setenv("no_proxy", "*")
     _, token = gateway_keys.create_key("member")
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    server = GatewayServer(host="127.0.0.1")
+    server.start(port)
+    try:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                check_gateway(base_url, token)
+                break
+            except requests.ConnectionError as error:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Gateway did not start listening at {base_url}") from error
+                time.sleep(0.05)
+        yield keys.KeySpec(alias="Hub", provider="atelier", base_url=base_url,
+                           access_key=token, created_at="test")
+    finally:
+        server.stop()
+
+
+async def test_member_sdk_streams_real_gateway_and_anthropic(live_hub):
+    from pathlib import Path
+    from character_workflow.lib.canvas_agent_runtime import _agent_client
+    from tests.fake_http_vendor import FakeVendor
+
     with FakeVendor() as vendor:
         member("native", "anthropic-messages", vendor.url)
         wire = (Path(__file__).parent / "fixtures/anthropic_stream/tool_use.sse").read_bytes()
         vendor.on("POST", "/v1/messages", wire)
-        server = GatewayServer(host="127.0.0.1")
-        port = _free_port()
-        server.start(port)
-        try:
-            hub = keys.KeySpec(alias="Hub", provider="atelier", base_url=f"http://127.0.0.1:{port}",
-                               access_key=token, created_at="test")
-            async with _agent_client(hub, "openai-chat", None, None) as client:
-                stream = await client.chat.completions.create(model="shared", stream=True,
-                    messages=[{"role": "user", "content": "weather?"}])
-                chunks = [chunk async for chunk in stream]
-            deltas = [c.delta for chunk in chunks for c in chunk.choices]
-            assert any(d.content for d in deltas) and any(d.tool_calls for d in deltas)
-            assert len(vendor.received) == 1
-        finally:
-            server.stop()
+        async with _agent_client(live_hub, "openai-chat", None, None) as client:
+            stream = await client.chat.completions.create(model="shared", stream=True,
+                messages=[{"role": "user", "content": "weather?"}])
+            chunks = [chunk async for chunk in stream]
+        deltas = [c.delta for chunk in chunks for c in chunk.choices]
+        assert any(d.content for d in deltas) and any(d.tool_calls for d in deltas)
+        assert len(vendor.received) == 1
 
 def test_cache_write_priced_and_recorded_locally(monkeypatch):
     from character_workflow.lib import agent_usage, generation_pricing
@@ -327,35 +345,23 @@ def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_membe
 
 
 @pytest.mark.parametrize("status", [401, 429])
-def test_native_refusal_exhaustion_is_not_member_auth_or_quota(status, monkeypatch):
+def test_native_refusal_exhaustion_is_not_member_auth_or_quota(status, live_hub):
     import json
     from character_workflow.lib import structured_text_call
     from character_workflow.lib.callers.openai_text import OpenAITextError
     from tests.fake_http_vendor import FakeVendor
-    from tests.test_gateway_client import _free_port
-    from viewer_server.gateway_app import GatewayServer
 
-    monkeypatch.setenv("no_proxy", "*")
-    _, token = gateway_keys.create_key("member")
     with FakeVendor() as vendor:
         member("native", "anthropic-messages", vendor.url)
         vendor.on("POST", "/v1/messages", (status, {"error": {"message": "upstream rejected fixture-key"}}))
-        server = GatewayServer(host="127.0.0.1")
-        port = _free_port()
-        server.start(port)
-        try:
-            hub = keys.KeySpec(alias="Hub", provider="atelier", base_url=f"http://127.0.0.1:{port}",
-                               access_key=token, created_at="test")
-            spec = keys.ModelSpec(id="shared", name="shared", modality="text", protocol="openai-chat")
-            with pytest.raises(OpenAITextError, match="^text api 503: ") as caught:
-                structured_text_call.call_model(hub, spec, "test", "q", max_output_tokens=10, timeout=(2, 5))
-            detail = json.loads(str(caught.value).removeprefix("text api 503: "))["error"]
-            assert (detail["type"], detail["code"], detail["upstream_status"]) == ("gateway_unavailable", 503, status)
-            assert "upstream rejected <redacted>" in detail["message"] and "fixture-key" not in detail["message"]
-            assert not model_routes._cooling("text", "Hub")
-            assert model_routes._cooling("text", "native") and len(vendor.received) == 1
-        finally:
-            server.stop()
+        spec = keys.ModelSpec(id="shared", name="shared", modality="text", protocol="openai-chat")
+        with pytest.raises(OpenAITextError, match="^text api 503: ") as caught:
+            structured_text_call.call_model(live_hub, spec, "test", "q", max_output_tokens=10, timeout=(2, 5))
+        detail = json.loads(str(caught.value).removeprefix("text api 503: "))["error"]
+        assert (detail["type"], detail["code"], detail["upstream_status"]) == ("gateway_unavailable", 503, status)
+        assert "upstream rejected <redacted>" in detail["message"] and "fixture-key" not in detail["message"]
+        assert not model_routes._cooling("text", "Hub")
+        assert model_routes._cooling("text", "native") and len(vendor.received) == 1
 
 
 def test_native_balance_refusal_with_http_400_switches_to_next_member(gateway):
