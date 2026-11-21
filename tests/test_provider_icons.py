@@ -5,15 +5,20 @@ import hashlib
 import json
 import os
 import struct
+import threading
 import time
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from PIL import Image
 from pydantic import BaseModel, create_model
 
 from character_workflow.lib import data_root, keys, provider_icons
+from tests.fake_http_vendor import FakeVendor
 from tests.local_client import LocalTestClient
 from viewer_server.gateway_app import create_gateway_app
 from viewer_server.server_app import build_app
@@ -84,7 +89,7 @@ def test_ico_uses_the_largest_image():
 ])
 def test_svg_html_and_unknown_content_are_rejected(raw):
     """normalize 只拿到字节：SVG 改名 .png、Content-Type 写 image/png 都进不来。"""
-    with pytest.raises(provider_icons.IconRejected, match="只支持"):
+    with pytest.raises(provider_icons.IconRejected, match="^不支持这种图片格式$"):
         provider_icons.normalize(raw)
 
 
@@ -95,35 +100,80 @@ def test_truncated_png_is_unreadable():
 
 
 def test_over_one_megabyte_is_rejected():
-    with pytest.raises(provider_icons.IconRejected, match="1 MB"):
+    with pytest.raises(provider_icons.IconRejected, match="^图片超过 1 MB$"):
         provider_icons.normalize(_image("PNG")[:8] + b"\x00" * (provider_icons.MAX_BYTES + 1))
 
 
-def test_wide_png_is_rejected_before_decoding():
-    with pytest.raises(provider_icons.IconRejected, match="5000×10"):
-        provider_icons.normalize(_image("PNG", size=(5000, 10)))
+def _forbid_decoding(monkeypatch):
+    """之后的解码一律失败：被测的拒绝必须发生在解码之前（ImageFile.load 才是真正的解码入口）。
 
+    要在造好测试图之后再调用：保存图片本身也会走 load。"""
+    from PIL import ImageFile
 
-def test_decompression_bomb_is_rejected_from_the_header(monkeypatch):
-    """小文件声明 4000×4001（超 1600 万像素）：只读头部就拒绝，不进解码。"""
-    raw = _image("PNG", size=(4000, 4001), color=(0, 0, 0, 0))
-    assert len(raw) < 200_000
+    monkeypatch.setattr(ImageFile.ImageFile, "load", lambda self: pytest.fail("不应解码"))
     monkeypatch.setattr(Image.Image, "load", lambda self: pytest.fail("不应解码"))
-    with pytest.raises(provider_icons.IconRejected, match="过大"):
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "WEBP", "GIF"])
+def test_oversized_images_are_rejected_from_the_header(fmt, monkeypatch):
+    raw = _image(fmt, size=(2049, 16), color=(0, 0, 0, 255))
+    _forbid_decoding(monkeypatch)
+    with pytest.raises(provider_icons.IconRejected, match="^图片尺寸超过 2048×2048$"):
         provider_icons.normalize(raw)
 
 
-def test_ico_with_a_huge_embedded_png_is_rejected_before_pillow_opens_it():
-    """ICO 目录项宽高只有一个字节；内嵌 PNG 的真实尺寸要读它自己的头。"""
-    inner = _image("PNG", size=(5000, 5000), color=(0, 0, 0, 0))
+def test_decompression_bomb_is_rejected_from_the_header(monkeypatch):
+    """小文件声明 4000×4001：只读头部就拒绝，不进解码。"""
+    raw = _image("PNG", size=(4000, 4001), color=(0, 0, 0, 0))
+    assert len(raw) < 200_000
+    _forbid_decoding(monkeypatch)
+    with pytest.raises(provider_icons.IconRejected, match="尺寸超过"):
+        provider_icons.normalize(raw)
+
+
+def test_extreme_aspect_ratio_says_so():
+    with pytest.raises(provider_icons.IconRejected, match="^图片长宽比过大$"):
+        provider_icons.normalize(_image("PNG", size=(2048, 4)))
+    assert _decoded(provider_icons.normalize(_image("PNG", size=(2048, 8)))).size == (128, 128)
+
+
+def _ico(entry_body: bytes) -> bytes:
     header = struct.pack("<HHH", 0, 1, 1)
-    entry = struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 32, len(inner), 6 + 16)
-    with pytest.raises(provider_icons.IconRejected, match="过大"):
-        provider_icons.normalize(header + entry + inner)
+    entry = struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 32, len(entry_body), 6 + 16)
+    return header + entry + entry_body
 
 
-def test_decoder_is_the_one_the_header_names():
-    """文件头说 PNG 就只用 PNG 解码器：头部是 PNG、身子是 GIF 的拼接文件解不出来。"""
+def test_ico_with_a_huge_embedded_png_is_rejected_before_pillow_opens_it(monkeypatch):
+    """ICO 目录项宽高只有一个字节；内嵌 PNG 的真实尺寸要读它自己的头。Pillow 打开 ICO 就会解码，所以连 open 都不能走到。"""
+    monkeypatch.setattr(provider_icons.Image, "open", lambda *a, **k: pytest.fail("不应打开"))
+    with pytest.raises(provider_icons.IconRejected, match="尺寸超过"):
+        provider_icons.normalize(_ico(_image("PNG", size=(5000, 5000), color=(0, 0, 0, 0))))
+
+
+def test_ico_with_a_huge_dib_entry_is_rejected_before_pillow_opens_it(monkeypatch):
+    """DIB（BMP）条目：真实宽高在 BITMAPINFOHEADER 里，高度是两倍（含掩码）。"""
+    monkeypatch.setattr(provider_icons.Image, "open", lambda *a, **k: pytest.fail("不应打开"))
+    dib = struct.pack("<IiiHHIIiiII", 40, 3000, 6000, 1, 32, 0, 0, 0, 0, 0, 0) + b"\x00" * 64
+    with pytest.raises(provider_icons.IconRejected, match="尺寸超过"):
+        provider_icons.normalize(_ico(dib))
+    small = struct.pack("<IiiHHIIiiII", 40, 4000, 2, 1, 32, 0, 0, 0, 0, 0, 0)
+    with pytest.raises(provider_icons.IconRejected, match="尺寸超过"):
+        provider_icons.normalize(_ico(small))  # 宽 4000、高 1：同样按 DIB 头拦下
+
+
+def test_decoder_is_the_one_the_header_names(monkeypatch):
+    """文件头说是哪种格式，Pillow 就只能用那一个解码器（formats=[...]），不让它按内容另猜。"""
+    seen = []
+    real_open = provider_icons.Image.open
+
+    def spy(fp, *args, **kwargs):
+        seen.append(kwargs.get("formats"))
+        return real_open(fp, *args, **kwargs)
+
+    monkeypatch.setattr(provider_icons.Image, "open", spy)
+    for fmt in ("PNG", "JPEG", "WEBP", "GIF", "ICO"):
+        provider_icons.normalize(_image(fmt))
+    assert seen == [["PNG"], ["JPEG"], ["WEBP"], ["GIF"], ["ICO"]]
     with pytest.raises(provider_icons.IconRejected):
         provider_icons.normalize(b"\x89PNG\r\n\x1a\n" + _image("GIF"))
 
@@ -215,7 +265,10 @@ def test_icon_is_saved_patched_and_reset(client):
 def test_invalid_icon_is_rejected_at_write(client, icon, detail):
     response = client.post("/api/keys", json=_custom(icon=icon))
     assert response.status_code == 422 and detail in response.json()["detail"]
-    assert client.patch("/api/keys/relay", json={"icon": icon}).status_code in {404, 422}
+    assert client.post("/api/keys", json=_custom()).status_code == 201
+    patched = client.patch("/api/keys/relay", json={"icon": icon})
+    assert patched.status_code == 422 and detail in patched.json()["detail"]
+    assert keys.find_by_alias("relay").icon is None
 
 
 def test_dangling_icon_never_breaks_the_key_list(client):
@@ -292,9 +345,40 @@ def test_prune_leaves_unrelated_files_alone(isolated_data_root):
     folder.mkdir(parents=True)
     other = folder / "notes.txt"
     other.write_text("x")
-    os.utime(other, (0, 0))
+    leftover = folder / f"{'e' * 64}.{'f' * 32}.tmp"  # atomic_write_bytes 中断后留下的临时文件
+    leftover.write_bytes(b"x")
+    for path in (other, leftover):
+        os.utime(path, (0, 0))
     provider_icons.prune(set())
-    assert other.exists()
+    assert other.exists() and not leftover.exists()
+
+
+def test_unreadable_icon_folder_never_fails_saving_a_provider(client, monkeypatch):
+    """清理在 keys.json 替换之后：目录读不了只记日志，保存供应商照样成功、照样落盘。"""
+    provider_icons.icons_dir().mkdir(parents=True)
+
+    def unreadable(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(type(provider_icons.icons_dir()), "iterdir", unreadable)
+    assert client.post("/api/keys", json=_custom()).status_code == 201
+    assert keys.find_by_alias("relay") is not None
+    assert client.patch("/api/keys/relay", json={"notes": "x"}).status_code == 200
+
+
+def test_store_survives_the_file_being_pruned_between_check_and_touch(isolated_data_root, monkeypatch):
+    """同一张图再次存入时旧文件恰好被清理：按新文件写入，不报错。"""
+    icon = provider_icons.store(_image("PNG"))
+    path = provider_icons.file_path(icon[5:])
+    real_utime = os.utime
+
+    def pruned_then_touch(target, *args, **kwargs):
+        path.unlink(missing_ok=True)
+        return real_utime(target, *args, **kwargs)
+
+    monkeypatch.setattr(provider_icons.os, "utime", pruned_then_touch)
+    assert provider_icons.store(_image("PNG")) == icon
+    assert provider_icons.file_path(icon[5:]) is not None
 
 
 # --- 上传接口（I1 2/n）：只返回引用、不改 KEY -------------------------------------------------
@@ -379,51 +463,79 @@ def test_member_snapshot_keeps_only_brand_icons():
     assert [("icon" in member.model_dump()) for member in model.via] == [True, False, False]
 
 
-# --- 按网址获取（I1 6/n）：全部走 outbound_guard -----------------------------------------------
+@pytest.mark.parametrize("icon", [123, ["brand:x"], {"brand": "x"}, "brand:", "brand:Has Space",
+                                  "brand:" + "x" * 41, "brand:../x", True])
+def test_malformed_member_icon_is_dropped_without_failing_the_sync(icon):
+    """主机快照里的 icon 来自另一台机器：不合规就当没有，不能让整次网关同步失败。"""
+    from character_workflow.lib.callers.atelier_gateway import gateway_models
 
-class _Site:
-    """outbound_guard.fetch_document / fetch 的替身：按地址回内容，记录请求顺序。"""
+    route = {"id": "img-x", "name": "Img X", "modality": "image", "members": [
+        {"alias": "A", "provider": "custom", "model_id": "img-x", "name": "Img X", "icon": icon}]}
+    [model] = gateway_models([route])
+    assert model.via[0].icon is None
 
-    def __init__(self, pages: dict[str, object]):
-        self.pages = pages
-        self.seen: list[str] = []
 
-    def _get(self, url):
-        from character_workflow.lib import outbound_guard
+# --- 按网址获取（I1 6/n）：全部走 outbound_guard.fetch_bounded -----------------------------------
 
-        self.seen.append(url)
-        value = self.pages.get(url)
-        if value is None:
-            raise outbound_guard.OutboundError("下载失败：HTTP 404")
-        if isinstance(value, Exception):
-            raise value
-        return value
+class _DripHandler(BaseHTTPRequestHandler):
+    """先回响应头，然后每 0.5 秒吐 1 字节：模拟慢速滴流的上游。"""
 
-    def document(self, url, *, max_bytes, timeout):
-        from character_workflow.lib import provider_icon_fetch
+    def log_message(self, *args):
+        pass
 
-        assert max_bytes == provider_icon_fetch.PAGE_MAX_BYTES
-        value = self._get(url)
-        return value if isinstance(value, tuple) else (value, "text/html")
-
-    def fetch(self, url, *, max_bytes, timeout, **_):
-        assert max_bytes == provider_icons.MAX_BYTES
-        value = self._get(url)
-        return value[0] if isinstance(value, tuple) else value
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        for _ in range(120):
+            if self.server.stopping.is_set():  # type: ignore[attr-defined]
+                return
+            try:
+                self.wfile.write(b"<")
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(0.5)
 
 
 @pytest.fixture
 def site(monkeypatch):
+    """`*.test` 主机名接到本机假上游，只跳过对它们的公网检查；其余地址（重定向目标、页面里的候选）
+    照常走 outbound_guard 的真实检查。"""
     from character_workflow.lib import outbound_guard
 
-    holder = _Site({})
-    monkeypatch.setattr(outbound_guard, "fetch_document", holder.document)
-    monkeypatch.setattr(outbound_guard, "fetch", holder.fetch)
-    return holder
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    real_open = outbound_guard._open_public
+    with FakeVendor() as vendor:
+        @contextmanager
+        def routed(url, parts, timeout, https_when_proxied=False):
+            if parts.hostname and parts.hostname.endswith(".test"):
+                local = vendor.url + url.split(parts.netloc, 1)[1]
+                with requests.get(local, timeout=timeout, stream=True, allow_redirects=False) as response:
+                    yield response
+            else:
+                with real_open(url, parts, timeout, https_when_proxied) as response:
+                    yield response
+
+        monkeypatch.setattr(outbound_guard, "_open_public", routed)
+        yield vendor
 
 
 def _fetch(client, url):
     return client.post("/api/provider-icons/fetch", json={"url": url})
+
+
+def _paths(vendor):
+    return [call.path for call in vendor.calls("GET")]
+
+
+def _nothing_stored():
+    return not provider_icons.icons_dir().exists() or not any(provider_icons.icons_dir().iterdir())
+
+
+HTML = {"Content-Type": "text/html"}
 
 
 def test_candidates_prefer_declared_icons_by_size_then_favicon():
@@ -445,80 +557,147 @@ def test_candidates_prefer_declared_icons_by_size_then_favicon():
 
 
 def test_page_link_wins_over_favicon(client, site):
-    site.pages = {
-        "https://site.example/": b'<link rel="icon" href="/brand.png" sizes="64x64">',
-        "https://site.example/brand.png": _image("PNG", color=(0, 200, 0, 255)),
-        "https://site.example/favicon.ico": _image("ICO"),
-    }
-    response = _fetch(client, "https://site.example/")
+    site.on("GET", "/", (200, b'<link rel="icon" href="/brand.png" sizes="64x64">', HTML))
+    site.on("GET", "/brand.png", _image("PNG", color=(0, 200, 0, 255)))
+    site.on("GET", "/favicon.ico", _image("ICO"))
+    response = _fetch(client, "http://site.test/")
     assert response.status_code == 200, response.text
-    assert site.seen == ["https://site.example/", "https://site.example/brand.png"]
+    assert _paths(site) == ["/", "/brand.png"]
     png = provider_icons.file_path(response.json()["icon"][5:]).read_bytes()
     assert _decoded(png).getpixel((64, 64))[1] > 150
 
 
+def test_relative_icon_resolves_against_the_redirected_page(client, site):
+    """`/` 302 到 `/zh/`：页面里的 assets/icon.png 按最终地址解析成 /zh/assets/icon.png。"""
+    site.on("GET", "/", (302, b"", {"Location": "/zh/"}))
+    site.on("GET", "/zh/", (200, b'<link rel="icon" href="assets/icon.png">', HTML))
+    site.on("GET", "/zh/assets/icon.png", _image("PNG"))
+    response = _fetch(client, "http://site.test/")
+    assert response.status_code == 200, response.text
+    assert _paths(site) == ["/", "/zh/", "/zh/assets/icon.png"]
+
+
 def test_html_or_svg_pretending_to_be_an_icon_is_skipped(client, site):
-    site.pages = {
-        "https://site.example/": b'<link rel="icon" href="/a.png"><link rel="icon" href="/b.png">',
-        "https://site.example/a.png": b"<!doctype html><title>login</title>",
-        "https://site.example/b.png": b"<svg xmlns='http://www.w3.org/2000/svg'/>",
-        "https://site.example/favicon.ico": _image("ICO"),
-    }
-    response = _fetch(client, "https://site.example/")
-    assert response.status_code == 200
-    assert site.seen[-1] == "https://site.example/favicon.ico"
+    site.on("GET", "/", (200, b'<link rel="icon" href="/a.png"><link rel="icon" href="/b.png">', HTML))
+    site.on("GET", "/a.png", b"<!doctype html><title>login</title>")
+    site.on("GET", "/b.png", b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+    site.on("GET", "/favicon.ico", _image("ICO"))
+    assert _fetch(client, "http://site.test/").status_code == 200
+    assert _paths(site) == ["/", "/a.png", "/b.png", "/favicon.ico"]
 
 
-def test_redirect_into_private_network_on_a_candidate_is_skipped(client, site):
-    from character_workflow.lib import outbound_guard
+def test_candidate_redirecting_into_the_private_network_is_skipped(client, site):
+    """候选真的回 302 到 127.0.0.1：重定向目标照常过 outbound_guard 的检查，被拒后换下一个候选。"""
+    site.on("GET", "/", (200, b'<link rel="icon" href="/hop.png">', HTML))
+    site.on("GET", "/hop.png", (302, b"", {"Location": "http://127.0.0.1:9/secret.png"}))
+    site.on("GET", "/favicon.ico", _image("PNG"))
+    response = _fetch(client, "http://site.test/")
+    assert response.status_code == 200, response.text
+    assert _paths(site) == ["/", "/hop.png", "/favicon.ico"]
 
-    site.pages = {
-        "https://site.example/": b'<link rel="icon" href="/hop.png">',
-        "https://site.example/hop.png": outbound_guard.OutboundError("结果地址不能指向本机或私有网络"),
-        "https://site.example/favicon.ico": _image("PNG"),
-    }
-    assert _fetch(client, "https://site.example/").status_code == 200
+
+def test_page_redirecting_into_the_private_network_is_refused(client, site):
+    site.on("GET", "/", (302, b"", {"Location": "http://192.168.1.5/"}))
+    response = _fetch(client, "http://site.test/")
+    assert response.status_code == 422 and response.json()["detail"] == "不能使用本机或内网地址"
+
+
+def test_malformed_hostnames_are_just_unusable_candidates(client, site):
+    site.on("GET", "/", (200, b'<link rel="icon" href="http://a..b/x.png" sizes="64x64">', HTML))
+    site.on("GET", "/favicon.ico", _image("PNG"))
+    assert _fetch(client, "http://site.test/").status_code == 200
+    response = _fetch(client, "http://a..b/")
+    assert response.status_code == 422 and response.json()["detail"] == "连接失败"
 
 
 def test_nothing_usable_is_422_and_stores_nothing(client, site):
-    site.pages = {"https://site.example/": b'<link rel="icon" href="/1.png"><link rel="icon" href="/2.png">'
-                                           b'<link rel="icon" href="/3.png"><link rel="icon" href="/4.png">'}
-    response = _fetch(client, "https://site.example/")
-    assert response.status_code == 422 and "没有找到图标" in response.json()["detail"]
-    assert len(site.seen) == 1 + 4  # 页面加最多 4 个候选
-    assert not provider_icons.icons_dir().exists() or not any(provider_icons.icons_dir().iterdir())
+    site.on("GET", "/", (200, b'<link rel="icon" href="/1.png"><link rel="icon" href="/2.png">'
+                              b'<link rel="icon" href="/3.png"><link rel="icon" href="/4.png">', HTML))
+    response = _fetch(client, "http://site.test/")
+    assert response.status_code == 422 and response.json()["detail"] == "没有找到图标"
+    assert len(_paths(site)) == 1 + 4  # 页面加最多 4 个候选
+    assert _nothing_stored()
 
 
 def test_a_direct_image_address_is_used_as_is(client, site):
-    site.pages = {"https://cdn.example/logo.webp": (_image("WEBP"), "image/webp")}
-    response = _fetch(client, "https://cdn.example/logo.webp")
-    assert response.status_code == 200 and site.seen == ["https://cdn.example/logo.webp"]
+    site.on("GET", "/logo.webp", _image("WEBP"))
+    response = _fetch(client, "http://site.test/logo.webp")
+    assert response.status_code == 200 and _paths(site) == ["/logo.webp"]
 
 
-def test_total_time_budget_stops_trying_candidates(client, site, monkeypatch):
-    from character_workflow.lib import provider_icon_fetch
+def test_a_direct_image_address_has_the_upload_size_limit(client, site):
+    site.on("GET", "/big.png", _image("PNG")[:8] + b"\0" * (provider_icons.MAX_BYTES + 10))
+    response = _fetch(client, "http://site.test/big.png")
+    assert response.status_code == 422 and response.json()["detail"] == "图片超过 1 MB"
+    assert _nothing_stored()
 
-    clock = iter([0.0, 100.0])
-    monkeypatch.setattr(provider_icon_fetch, "_now", lambda: next(clock, 100.0))
-    site.pages = {"https://site.example/": b'<link rel="icon" href="/a.png">'}
-    assert _fetch(client, "https://site.example/").status_code == 422
-    assert site.seen == ["https://site.example/"]
+
+def test_an_oversized_page_is_read_up_to_the_limit_and_its_head_still_used(client, site):
+    page = b'<html><head><link rel="icon" href="/i.png"></head><body>' + b"x" * (3 << 20)
+    site.on("GET", "/", (200, page, HTML))
+    site.on("GET", "/i.png", _image("PNG"))
+    assert _fetch(client, "http://site.test/").status_code == 200
+    assert _paths(site) == ["/", "/i.png"]
+
+
+def test_a_slow_drip_upstream_ends_within_the_time_budget(client, monkeypatch):
+    """上游每 0.5 秒吐 1 字节、永不结束：总时限对单个请求的读取也生效，接口按时返回失败。"""
+    from character_workflow.lib import outbound_guard, provider_icon_fetch
+
+    monkeypatch.setattr(provider_icon_fetch, "TOTAL_SECONDS", 2.0)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DripHandler)
+    server.stopping = threading.Event()  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    real_open = outbound_guard._open_public
+
+    @contextmanager
+    def routed(url, parts, timeout, https_when_proxied=False):
+        if parts.hostname == "drip.test":
+            with requests.get(f"http://127.0.0.1:{server.server_port}/", timeout=timeout, stream=True,
+                              allow_redirects=False) as response:
+                yield response
+        else:
+            with real_open(url, parts, timeout, https_when_proxied) as response:
+                yield response
+
+    monkeypatch.setattr(outbound_guard, "_open_public", routed)
+    try:
+        started = time.monotonic()
+        response = _fetch(client, "http://drip.test/")
+        elapsed = time.monotonic() - started
+    finally:
+        server.stopping.set()
+        server.shutdown()
+        server.server_close()
+        thread.join()
+    assert response.status_code == 422 and response.json()["detail"] == "连接失败"
+    assert elapsed < 4.0
 
 
 @pytest.mark.parametrize("url", [
     "http://127.0.0.1:9/", "http://localhost/", "http://192.168.1.5/", "http://10.0.0.2/x",
-    "http://169.254.169.254/latest/meta-data", "http://printer.local/", "file:///etc/passwd",
-    "ftp://example.com/x",
+    "http://169.254.169.254/latest/meta-data", "http://printer.local/",
+    "http://2130706433/", "http://0x7f.1/", "http://[::1]/", "http://[::ffff:127.0.0.1]/",
+    "http://[fe80::1]/", "http://[fd00::1]/",
 ])
-def test_private_and_non_http_addresses_never_leave_the_machine(client, url, monkeypatch):
-    """真实的 outbound_guard：本机、私网、链路本地、非 http(s) 都在连出去之前被拒。"""
+def test_private_addresses_never_leave_the_machine(client, url, monkeypatch):
+    """真实的 outbound_guard：本机、内网、链路本地（含十进制、十六进制与 IPv6 写法）都在连出去之前被拒。"""
     from character_workflow.lib import outbound_guard
 
     monkeypatch.setattr(outbound_guard.requests.Session, "get",
                         lambda *a, **k: pytest.fail("不应发出请求"))
-    monkeypatch.setattr(outbound_guard.requests, "get", lambda *a, **k: pytest.fail("不应发出请求"))
     response = _fetch(client, url)
-    assert response.status_code == 422 and "没有找到图标" in response.json()["detail"]
+    assert response.status_code == 422 and response.json()["detail"] == "不能使用本机或内网地址"
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x"])
+def test_non_http_addresses_are_refused_without_a_request(client, url, monkeypatch):
+    from character_workflow.lib import outbound_guard
+
+    monkeypatch.setattr(outbound_guard.requests.Session, "get",
+                        lambda *a, **k: pytest.fail("不应发出请求"))
+    assert _fetch(client, url).status_code == 422
 
 
 def test_dns_that_resolves_to_a_private_address_is_refused(client, monkeypatch):
@@ -530,7 +709,55 @@ def test_dns_that_resolves_to_a_private_address_is_refused(client, monkeypatch):
     monkeypatch.setattr(outbound_guard.requests.Session, "get",
                         lambda *a, **k: pytest.fail("不应发出请求"))
     response = _fetch(client, "https://rebind.example/")
-    assert response.status_code == 422 and "私有网络" in response.json()["detail"]
+    assert response.status_code == 422 and response.json()["detail"] == "不能使用本机或内网地址"
+
+
+class _Sent(Exception):
+    pass
+
+
+def _proxied(monkeypatch, responses):
+    """配了代理：记录真正发出去的地址；responses 依次作为响应（空了就抛 _Sent）。"""
+    from character_workflow.lib import outbound_guard
+
+    sent = []
+    monkeypatch.setattr(outbound_guard.requests.utils, "get_environ_proxies",
+                        lambda _u: {"http": "http://proxy.invalid:1", "https": "http://proxy.invalid:1"})
+
+    def get(self, url, **kwargs):
+        sent.append(url)
+        if not responses:
+            raise _Sent(url)
+        return responses.pop(0)
+
+    monkeypatch.setattr(outbound_guard.requests.Session, "get", get)
+    return sent
+
+
+def test_via_proxy_third_party_addresses_must_be_https(monkeypatch):
+    """走代理时本机看不到真实 IP：页面里解析出的候选与所有重定向目标只放行 https；
+    用户亲手填的首个地址维持 ADR-0036 的既有规则。"""
+    from character_workflow.lib import outbound_guard
+
+    deadline = time.monotonic() + 5
+    sent = _proxied(monkeypatch, [])
+    with pytest.raises(outbound_guard.OutboundError, match="https"):
+        outbound_guard.fetch_bounded("http://cdn.example/x.png", max_bytes=10, deadline=deadline,
+                                     third_party=True)
+    assert sent == []
+    with pytest.raises(_Sent):
+        outbound_guard.fetch_bounded("https://cdn.example/x.png", max_bytes=10, deadline=deadline,
+                                     third_party=True)
+    with pytest.raises(_Sent):  # 用户填的首个地址：http 也照常经代理发出
+        outbound_guard.fetch_bounded("http://user.example/", max_bytes=10, deadline=deadline)
+
+    hop = requests.Response()
+    hop.status_code, hop.headers["Location"] = 302, "http://evil.example/"
+    hop.raw = BytesIO(b"")
+    sent = _proxied(monkeypatch, [hop])
+    with pytest.raises(outbound_guard.OutboundError, match="https"):
+        outbound_guard.fetch_bounded("http://user.example/", max_bytes=10, deadline=deadline)
+    assert sent == ["http://user.example/"]
 
 
 def test_fetch_is_management_only():

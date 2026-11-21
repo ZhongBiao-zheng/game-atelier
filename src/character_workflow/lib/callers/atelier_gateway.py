@@ -20,6 +20,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib import provider_icons
 from character_workflow.lib.callers import task_submission
 
 PROTOCOL = "atelier_gateway"
@@ -154,7 +155,8 @@ def gateway_models(routes: list[dict[str, Any]]) -> list[_keys.ModelSpec]:
         _keys.ModelSpec(
             id=route["id"], name=route["name"], modality=route["modality"],
             protocol=(route["members"][0].get("protocol") if route["modality"] in {"text", "video"} else None),
-            via=[_keys.ViaMember(**member) for member in route["members"]],
+            via=[_keys.ViaMember(**{**member, "icon": provider_icons.brand_icon(member.get("icon"))})
+                 for member in route["members"]],
             workflow_inputs=route.get("workflow_inputs"),
             declared_snapshot=route.get("declared"),
         )

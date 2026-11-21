@@ -11,28 +11,35 @@ import logging
 import os
 import re
 import struct
-import tempfile
 import time
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import _replace_with_retry
+from character_workflow.lib.atomic_io import atomic_write_bytes
 
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 1 << 20
-MAX_SIDE = 4096
-MAX_PIXELS = 16_000_000
+# 供应商图标用不到更大的图；4000×4000 归一一次要多占约 150 MB 内存。
+MAX_SIDE = 2048
+# 再扁就缩不进 128 的画布（短边不足 1 像素）。
+MAX_ASPECT = 256
 OUTPUT_SIDE = 128
 # 上传后、表单保存前，别的 KEY 写入会触发清理：一小时内的未引用文件不删，保存后引用不会悬空。
 GRACE_SECONDS = 3600
 UNREADABLE = "图片无法识别"
+TOO_LARGE = "图片超过 1 MB"
+TOO_BIG = f"图片尺寸超过 {MAX_SIDE}×{MAX_SIDE}"
+UNSUPPORTED = "不支持这种图片格式"
+TOO_NARROW = "图片长宽比过大"
 
 _SHA = re.compile(r"[0-9a-f]{64}")
 _BRAND = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+# atomic_write_bytes 的临时文件：<sha>.<uuid>.tmp
+_LEFTOVER = re.compile(r"[0-9a-f]{64}\.[0-9a-f]{32}\.tmp")
 _PNG = b"\x89PNG\r\n\x1a\n"
 
 
@@ -66,8 +73,10 @@ def is_image(raw: bytes) -> bool:
 def _check_dims(width: int, height: int) -> None:
     if width <= 0 or height <= 0:
         raise IconRejected(UNREADABLE)
-    if width > MAX_SIDE or height > MAX_SIDE or width * height > MAX_PIXELS:
-        raise IconRejected(f"图片尺寸 {width}×{height} 过大，长边不超过 {MAX_SIDE}")
+    if width > MAX_SIDE or height > MAX_SIDE:
+        raise IconRejected(TOO_BIG)
+    if max(width, height) > MAX_ASPECT * min(width, height):
+        raise IconRejected(TOO_NARROW)
 
 
 def _ico_largest(raw: bytes) -> tuple[int, int]:
@@ -95,19 +104,26 @@ def _ico_largest(raw: bytes) -> tuple[int, int]:
         raise IconRejected(UNREADABLE) from None
 
 
+def _fit(image: Image.Image) -> Image.Image:
+    """等比缩放到长边 128；短边至少 1 像素（256:1 时按四舍五入会变成 0）。"""
+    scale = OUTPUT_SIDE / max(image.size)
+    size = tuple(max(1, round(side * scale)) for side in image.size)
+    return image.resize(size, Image.Resampling.LANCZOS)
+
+
 def normalize(raw: bytes) -> bytes:
     """校验并重新编码成 128×128 透明底 PNG。
 
     - 原始字节超过 1 MiB 拒绝；只认 PNG、JPEG、WebP、GIF、ICO（SVG、HTML 等一律拒绝）。
-    - 解码前按文件头核对尺寸：宽或高超过 4096、或像素超过 1600 万拒绝（挡住解压炸弹）。
+    - 解码前按文件头核对尺寸：宽或高超过 2048 拒绝（挡住解压炸弹）；长宽比超过 256:1 拒绝。
     - 动图（GIF、WebP）取第一帧；ICO 取最大的一张。
     - 完整解码后等比缩放进 128×128 透明画布；EXIF、ICC 与附加数据都不保留。
     """
     if len(raw) > MAX_BYTES:
-        raise IconRejected("图片超过 1 MB")
+        raise IconRejected(TOO_LARGE)
     kind = _format(raw)
     if kind is None:
-        raise IconRejected("只支持 PNG、JPEG、WebP、GIF、ICO 图片")
+        raise IconRejected(UNSUPPORTED)
     ico_size = _ico_largest(raw) if kind == "ICO" else None
     try:
         with Image.open(BytesIO(raw), formats=[kind]) as image:
@@ -116,8 +132,7 @@ def normalize(raw: bytes) -> bytes:
             _check_dims(*image.size)
             image.seek(0)
             image.load()
-            frame = ImageOps.contain(image.convert("RGBA"), (OUTPUT_SIDE, OUTPUT_SIDE),
-                                     Image.Resampling.LANCZOS)
+            frame = _fit(image.convert("RGBA"))
     except IconRejected:
         raise
     except (OSError, ValueError, SyntaxError, EOFError, Image.DecompressionBombError):
@@ -133,20 +148,12 @@ def store(raw: bytes) -> str:
     """校验、重新编码并落盘，返回 `file:<sha256>`。同一张图只存一份；再次存入会刷新宽限期。"""
     png = normalize(raw)
     sha = hashlib.sha256(png).hexdigest()
-    folder = icons_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{sha}.png"
-    if target.exists():
-        os.utime(target)
-        return f"file:{sha}"
-    fd, temporary = tempfile.mkstemp(prefix=".icon-", suffix=".tmp", dir=folder)
-    tmp = Path(temporary)
+    target = icons_dir() / f"{sha}.png"
     try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(png)
-        _replace_with_retry(tmp, target)
-    finally:
-        tmp.unlink(missing_ok=True)
+        os.utime(target)
+    except FileNotFoundError:
+        # 新图，或旧文件刚被清理掉：按新文件写入。
+        atomic_write_bytes(target, png)
     return f"file:{sha}"
 
 
@@ -172,19 +179,34 @@ def checked_icon(value: str | None) -> str | None:
     raise IconRejected("图标格式无效")
 
 
+def brand_icon(value: object) -> str | None:
+    """`brand:<id>` 原样返回，其余（含非字符串）一律 None：网关快照里的 icon 来自另一台主机。"""
+    if isinstance(value, str) and value.startswith("brand:") and _BRAND.fullmatch(value[6:]):
+        return value
+    return None
+
+
 def referenced_shas(icons: list[str | None]) -> set[str]:
     return {icon[5:] for icon in icons if icon and icon.startswith("file:")}
 
 
 def prune(referenced: set[str], now: float | None = None) -> None:
-    """删除没有 KEY 引用、且超过宽限期的图标文件。调用方持 keys_lock；失败只记日志，不影响 KEY 写入。"""
+    """删除没有 KEY 引用、且超过宽限期的图标文件。调用方持 keys_lock。
+
+    keys.json 此时已经替换完成：清理的任何失败都只记日志，不能让调用方以为没写成而回滚。"""
+    try:
+        _prune(referenced, (time.time() if now is None else now) - GRACE_SECONDS)
+    except Exception:  # noqa: BLE001 —— 目录不可读、权限变化等都不影响保存供应商
+        logger.warning("清理供应商图标失败", exc_info=True)
+
+
+def _prune(referenced: set[str], cutoff: float) -> None:
     folder = icons_dir()
     if not folder.is_dir():
         return
-    cutoff = (time.time() if now is None else now) - GRACE_SECONDS
     for path in folder.iterdir():
         stem = path.name.removesuffix(".png")
-        ours = (path.suffix == ".png" and _SHA.fullmatch(stem)) or path.name.startswith(".icon-")
+        ours = (path.suffix == ".png" and _SHA.fullmatch(stem)) or _LEFTOVER.fullmatch(path.name)
         if not ours or stem in referenced:
             continue
         try:
