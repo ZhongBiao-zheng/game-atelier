@@ -18,7 +18,10 @@ printf '%s  %s\n' "$digest" "$archive" | "${hash[@]}" -c -
 printf '%s  %s\n' "$digest" "$url" > source-sha256.txt
 tar -xf "$archive"
 case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) platform=(--enable-videotoolbox); encoder=h264_videotoolbox; suffix= ;;
+    Darwin-arm64)
+        platform=(--enable-videotoolbox --extra-cflags=-mmacosx-version-min=13.0
+                  --extra-ldflags=-mmacosx-version-min=13.0)
+        encoder=h264_videotoolbox; suffix= ;;
     MINGW*-x86_64|MSYS*-x86_64)
         platform=(--enable-mediafoundation --disable-x86asm --extra-ldflags=-static)
         encoder=h264_mf; suffix=.exe ;;

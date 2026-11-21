@@ -52,6 +52,25 @@ def frame_stamp():
     return ",".join(filters)
 
 
+def compression_quality(source, output):
+    """Decoded pixel PSNR over the entire clip, without inventing a product quality cutoff."""
+    reference, candidate = cv2.VideoCapture(str(source)), cv2.VideoCapture(str(output))
+    mse = []
+    try:
+        while True:
+            first, original = reference.read()
+            second, compressed = candidate.read()
+            require(first == second, "compressed video changed frame count")
+            if not first:
+                break
+            mse.append(np.mean((original.astype(np.float32) - compressed)**2))
+    finally:
+        reference.release()
+        candidate.release()
+    error = float(np.mean(mse))
+    return round(10 * np.log10(255**2/error), 2) if error else None
+
+
 def read_video(path, stamp=False):
     cap = cv2.VideoCapture(str(path))
     try:
@@ -191,6 +210,11 @@ class Check:
         for label, rate in (("small", "240k"), ("standard", "420k"), ("high", "700k")):
             operation("compress_"+label, ["-i", wide], self.encode(rate),
                       codes=range(72), pulses=[(.75, 1)])
+            row = self.rows[-1]
+            if row["status"] == "passed":
+                path = self.dir / ("compress_" + label + ".mp4")
+                row["psnr_db"] = compression_quality(wide, path)
+                row["size_ratio"] = round(path.stat().st_size / wide.stat().st_size, 3)
         for mute in (False, True):
             sound = ["-an"] if mute else ["-af", "areverse"]
             operation("reverse_mute" if mute else "reverse_audio", ["-i", wide],
