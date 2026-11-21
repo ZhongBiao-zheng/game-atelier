@@ -550,6 +550,12 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 名称去首尾空白后 1–12 字，所有主题的生效名称（内置主题取改后的名称或默认名）互不重名（忽略大小写）；`active` 必须是内置 id 或某个用户主题 id。
 不合规 422；revision 不符 409 `{ code: "revision_conflict", current_revision }`。服务端在文件锁内校验 revision 并原子替换。
 
+深浅色模式与品牌图标「黑白 / 彩色」只存在本机浏览器的 localStorage（`atelier:theme`、`atelier:brand-icons`），
+不进 `.config/accent-themes.json`，没有服务端接口：按设备生效，桌面版与浏览器各记各的。`atelier:brand-icons` 取值
+`mono` / `color`，缺省（含旧版本没有这个键）按 `mono`。彩色只换有彩色版的内置品牌（lobe-icons `*-color.svg`），
+暗色下主色对图标方块底色的对比度低于 3:1 的品牌退回单色；判定表在 `web/src/components/brandColors.ts`，数值由
+`scripts/brand_icon_contrast.py` 量出。上传的自定义图标与供应商遮罩图标不受这个选项影响。
+
 画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
 `GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
 schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-preferences` 请求为
