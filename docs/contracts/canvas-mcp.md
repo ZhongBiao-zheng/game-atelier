@@ -10,13 +10,13 @@
 
 | 能力 | 允许 |
 | --- | --- |
-| `canvas_read` | 列画布、读文档、读模型列表、读生成状态、读媒体预览 |
+| `canvas_read` | 列画布、读文档、读模型列表、读生成状态、读媒体预览、参考库和类别规范、等待与核对结果 |
 | `canvas_edit` | typed change set 改节点 / 连线 / 生成配置；从本机路径导入媒体 |
-| `canvas_generate` | 在 surface 节点发起生成（付费）。持有即批准，服务端记录会话来源 |
+| `canvas_generate` | 在一个或多个 surface 节点发起生成（付费）。持有即批准，服务端记录会话来源 |
 
 ## 工具表
 
-HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包在 `payload`。
+stdio 工具的参数包在 `payload`。适配器取出参数对象，作为 JSON 请求体发给 `POST /api/canvas-agent/<op>`。请求体和单次 HTTP 响应上限各为 1 MiB。
 
 | 工具 | 输入 → 结果 | 能力 |
 | --- | --- | --- |
@@ -28,6 +28,21 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | `canvas_run` | project_id、surface_node_id、expected_revision、requested_count → job / run 摘要 | canvas_generate |
 | `canvas_get_run` | project_id、run_id → 状态、候选与产物 version_id | canvas_read |
 | `canvas_read_media` | project_id、version_id → 有界 JPEG 预览或元数据 | canvas_read |
+| `canvas_search_library` | project_id、category?（1–24 字）、limit?（1–12，默认 12）→ 本项目定稿图片 assets[]，含 asset_id、title、category、width、height | canvas_read |
+| `canvas_search_team` | project_id、query?（最多 60 字）、category?、limit?（范围同上）→ 挂载库的图片 assets[]，含 asset_id（team:…）、title、category、tags、author、library | canvas_read |
+| `canvas_read_spec` | project_id、category（1–24 字）→ {text}，项目规范在前，之后为挂载库同类别的规范；均缺失时返回空字符串 | canvas_read |
+| `canvas_wait_for_run` | project_id、run_id → 当前生成状态、candidates、成功产物的 version_id；终态附可取得的 checks 和预览，等待期满仍在执行时带 note | canvas_read |
+| `canvas_check_run` | project_id、run_id → 生成状态与候选；成功候选的 checks[] 含 name、expected、actual、ok，失败候选带 error | canvas_read |
+| `canvas_read_video_frames` | project_id、version_id、count?（1–9，默认 6）、start_ms?（≥0）、end_ms?（≥1）→ version_id、duration_ms、fps、width、height、frames[{index,t_ms}] 及一张带时间码的 JPEG 联系表 | canvas_read |
+| `canvas_run_batch` | project_id、expected_revision、items[{surface_node_id,count?}] → items[]、submitted、failed、rejected、note | canvas_generate |
+
+搜索与等待结果用 MCP 的 ImageContent 返回可用预览，最多 4 张。`attach_images` 按相同顺序列出图片引用。大小预算不足时仍返回资产或候选的文本记录。视频联系表单独作为 ImageContent，文本与 structuredContent 里只保留元数据。
+
+`canvas_wait_for_run` 轮询同一个 run，等待上限为 240 秒。stdio 到 viewer-server 的读取超时为 270 秒，给最后一次查询和返回留出时间。等待会占用适配器 4 个并发名额中的 1 个；满额时返回 `CONNECTION_RATE_LIMITED`。客户端应为这次工具调用留足时间。等到期可用原 run_id 再查。
+
+批量生成接受 1–20 个不同节点，每项 count 为 1–4，默认 1。客户端传入用户核对过的画布修订号；整批重复节点或起始修订冲突时直接退回。提交成功后，下一项沿用刚提交的修订号。中途的其他编辑会触发修订冲突。结果按输入顺序返回，每项含 index（从 0 起）、surface_node_id、count 和 status。submitted 项带 run_id、result_node_id，failed 项带 error。持有 canvas_generate 即获服务端批准，MCP 不产生内置 Agent 的逐项确认卡，因此 rejected 为 0。
+
+提交成功只表示任务已登记。以 run_id 等待或查询最终的生成状态；网关逐项核算额度。后续项失败时，已成功的项保留，返回结果中的订单号可继续查询。网关返回的标准额度与重置时间可见，其他厂商的原始报错使用安全摘要。自动重复整批会产生新任务。
 
 ### 插件工具（ADR-0043）
 

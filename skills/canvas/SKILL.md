@@ -16,7 +16,7 @@ triggers:
 
 ## 定位
 
-画布是 server 持有、带 revision 的活文档，本 Skill 只有一条手：`canvas_*` MCP 工具
+画布是 server 持有、带 revision 的活文档，本 Skill 通过 Atelier MCP 工具操作画布
 （契约见 `docs/contracts/canvas-mcp.md`）。没有 CLI 路径，不读写画布文件，不改 Job。
 工具不可见时，让用户新开一个会话（插件自带的 MCP 只在会话启动时加载，`/reload-plugins` 不生效）；工具返回 `CREDENTIALS_INVALID`
 时，指用户去本机 Atelier「设置 → Agent 连接」打开开关（含全部画布与画布操作），
@@ -53,6 +53,12 @@ triggers:
 `params` 只收标量，按浏览器白名单过滤：图片常用 `n / size / ratio / quality`，视频 `duration / resolution / ratio`。
 路径类字段写了也会被丢弃，不要试。
 
+## 找规范与参考图
+
+写提示词前，用 `canvas_read_spec` 读该类别的项目与团队规范，冲突处按项目规范处理。
+用 `canvas_search_library` 找本项目的定稿参考，用 `canvas_search_team` 在画布已挂载的团队库里按类别或标题搜索。
+需要把选中的参考图放到画布时，把返回的 asset_id 交给 `canvas_apply_changes` 的 `add_asset_node`。
+
 ## 生成：先确认卡，再看能力
 
 1. 发起前打确认卡给用户：画布名、生成面节点、模型 alias / model、prompt 摘要、接入的素材节点列表、
@@ -60,6 +66,8 @@ triggers:
    渲染成卡片（按钮「出图 / 要改 / 先不出」，回话按下一条判定）。
 2. 等用户明确肯定（出图 / 可以 / 走）。沉默、模糊、「再想想」都不推进；模糊用 AskUserQuestion 二选一。
 3. 授权含 `canvas_generate` → 调 `canvas_run`（surface_node_id + 当前 revision + requested_count）。
+   多个已配置的节点要一起出图时，在同一张确认卡列清每项和合计数量。确认后调用 `canvas_run_batch`，
+   传刚核对的 expected_revision 与 items（1–20 个不同节点，每项 count 为 1–4）。逐项记录返回的 run_id 与失败原因。
    返回 `TARGET_NOT_AUTHORIZED` 表示授权没给发起生成，告知用户在授权页补勾，不能改走其他路径。
 4. `canvas_run` 后产物落在生成面节点本身（用 `add_surface` 建的空媒体节点）；若生成面是文本节点，
    服务端会另建结果节点并留下派生连线，那就是用错了。文档 revision 变化，之后所有修改先重读。
@@ -70,7 +78,15 @@ triggers:
 
 `canvas_read_media` 读产物或导入图的有界预览（≤1024 边长 JPEG）；预览尺寸不是原图尺寸，
 以返回的 width / height 为准。有视觉能力时对照用户要求点评构图、主体、明显崩坏；没有就明说未做视觉质检。
+想等结果用 `canvas_wait_for_run`。单次最多等 240 秒，仍在生成就保留 run_id 稍后再查。批量中有失败时，只汇报对应项，已提交的项按各自 run_id 查询。
+要核对尺寸、比例、透明通道、时长或格式，用 `canvas_check_run`。要看视频画面，用 `canvas_read_video_frames` 按指定时段抽 1–9 帧，对照带时间码的联系表判断。
+
 完整大图、拖动排版、定稿由用户在浏览器画布完成，本 Skill 不代选。
+
+## 自定义模型接口
+
+用户要接自定义 HTTP 接口时，先用 `atelier_protocol_manual` 读模板说明，再用 `atelier_protocol_validate` 干跑 JSON 模板，根据 issues 修正。
+校验通过后把 JSON 交给用户在设置页保存。两项工具都不发送厂商请求。
 
 ## 收尾（七件套，实质推进后）
 
@@ -90,7 +106,7 @@ triggers:
 
 ## Guardrails
 
-- 只用 `canvas_*` 工具；工具不可用不改走 shell / 文件 / 直接调供应商。
+- 画布操作只用 `canvas_*` 工具；工具不可用不改走 shell / 文件 / 直接调供应商。
 - 每次修改前重读 revision；`DOCUMENT_CONFLICT` 重读再改，不盲重试。
 - 生成必过确认卡 + 用户明确肯定；`canvas_generate` 缺失时不绕、不替用户补权限。
 - 不虚构 model / alias / 价格；`canvas_list_models` 里没有的不写进 draft。
