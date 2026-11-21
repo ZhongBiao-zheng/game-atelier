@@ -34,6 +34,11 @@ def _cancel(client: ComfyUIClient, prompt_id: str) -> None:
         client.request("POST", "/interrupt", json={"prompt_id": prompt_id})
 
 
+def cancel_registered_prompt(base_url: str, prompt_id: str) -> None:
+    with ComfyUIClient(base_url) as client:
+        _cancel(client, prompt_id)
+
+
 def _submit_prompts(client, workflow, *, prompt, n, params, prefix, check_cancel):
     workflows.validate_mappings(workflow.api_workflow, workflow.inputs)
     params = params if params is not None else {}
