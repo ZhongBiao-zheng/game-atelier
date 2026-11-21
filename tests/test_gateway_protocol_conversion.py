@@ -324,3 +324,35 @@ def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_membe
         assert canvas_agent_models._models_for(hub.model_copy(update={"models": [limited]}), 0)[0] == []
         with pytest.raises(gateway_tasks.GatewayRequestError):
             gateway_openai._pick(scoped, "shared", [], params={**body, "tools": tools})
+
+
+@pytest.mark.parametrize("status", [401, 429])
+def test_native_refusal_exhaustion_is_not_member_auth_or_quota(status, monkeypatch):
+    import json
+    from character_workflow.lib import structured_text_call
+    from character_workflow.lib.callers.openai_text import OpenAITextError
+    from tests.fake_http_vendor import FakeVendor
+    from tests.test_gateway_client import _free_port
+    from viewer_server.gateway_app import GatewayServer
+
+    monkeypatch.setenv("no_proxy", "*")
+    _, token = gateway_keys.create_key("member")
+    with FakeVendor() as vendor:
+        member("native", "anthropic-messages", vendor.url)
+        vendor.on("POST", "/v1/messages", (status, {"error": {"message": "upstream rejected fixture-key"}}))
+        server = GatewayServer(host="127.0.0.1")
+        port = _free_port()
+        server.start(port)
+        try:
+            hub = keys.KeySpec(alias="Hub", provider="atelier", base_url=f"http://127.0.0.1:{port}",
+                               access_key=token, created_at="test")
+            spec = keys.ModelSpec(id="shared", name="shared", modality="text", protocol="openai-chat")
+            with pytest.raises(OpenAITextError, match="^text api 503: ") as caught:
+                structured_text_call.call_model(hub, spec, "test", "q", max_output_tokens=10, timeout=(2, 5))
+            detail = json.loads(str(caught.value).removeprefix("text api 503: "))["error"]
+            assert (detail["type"], detail["code"], detail["upstream_status"]) == ("gateway_unavailable", 503, status)
+            assert "upstream rejected <redacted>" in detail["message"] and "fixture-key" not in detail["message"]
+            assert not model_routes._cooling("text", "Hub")
+            assert model_routes._cooling("text", "native") and len(vendor.received) == 1
+        finally:
+            server.stop()

@@ -25,6 +25,12 @@ class _UpstreamFailure(gateway_tasks.GatewayRequestError):
     """The upstream may have executed; clients must not fail over to a local key."""
 
 
+class _UpstreamsUnavailable(gateway_tasks.GatewayRequestError):
+    def __init__(self, refusal: _UpstreamFailure):
+        super().__init__(503, f"网关的供应商都不可用：{refusal}")
+        self.upstream_status = refusal.status
+
+
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30), trust_env=True)
 
@@ -49,8 +55,10 @@ def error_response(error: gateway_tasks.GatewayRequestError) -> JSONResponse:
         "gateway_unavailable" if error.status == 503 else "gateway_error"
     )
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
-    return JSONResponse({"error": {"message": message, "type": kind, "code": error.status}},
-                        status_code=error.status, headers=headers)
+    detail = {"message": message, "type": kind, "code": error.status}
+    if isinstance(error, _UpstreamsUnavailable):
+        detail["upstream_status"] = error.upstream_status
+    return JSONResponse({"error": detail}, status_code=error.status, headers=headers)
 
 
 def _pick(owner, route_id, tried, *, endpoint="chat/completions", params=None, route_order=None, freeze_order=None, consume=False):
@@ -242,9 +250,9 @@ async def _relay(request, owner, endpoint):
                 try:
                     picked = await asyncio.to_thread(_pick, owner, route_id, call.task.route_tried,
                                                      route_order=route_order, params=payload, endpoint=endpoint)
-                except gateway_tasks.GatewayRequestError:
-                    if isinstance(error, _UpstreamFailure):
-                        raise error from None
+                except gateway_tasks.GatewayRequestError as unavailable:
+                    if isinstance(error, _UpstreamFailure) and unavailable.status == 503:
+                        raise _UpstreamsUnavailable(error) from error
                     raise
                 continue
             except BaseException:
