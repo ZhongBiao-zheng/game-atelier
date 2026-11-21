@@ -29,12 +29,12 @@ case "$(uname -s)-$(uname -m)" in
 esac
 mkdir -p build bin
 configure="../ffmpeg-$version/configure"
-make_args=()
+build_shell=/bin/sh
 if [[ -n "$suffix" ]]; then
     # Native Win32 GNU make cannot open MSYS /d/... paths in an out-of-tree Makefile.
     cd "ffmpeg-$version"
     configure=./configure
-    make_args=(SHELL=sh.exe)
+    build_shell=sh.exe
 else
     cd build
 fi
@@ -49,7 +49,7 @@ fi
     --enable-filter=scale,pad,setsar,fps,format,trim,atrim,setpts,asetpts,concat,reverse,areverse,palettegen,paletteuse,split,aresample,aformat,transpose,hflip,vflip,testsrc2,drawbox,aevalsrc,anullsrc,select \
     "${platform[@]}"
 builder=$(command -v make || command -v gmake || command -v mingw32-make)
-"$builder" "${make_args[@]}" -j"${ENCODER_BUILD_JOBS:-4}" ffmpeg ffprobe
+"$builder" SHELL="$build_shell" -j"${ENCODER_BUILD_JOBS:-4}" ffmpeg ffprobe
 cp "ffmpeg$suffix" "ffprobe$suffix" "$root/bin/"
 "$root/bin/ffmpeg$suffix" -version > "$root/version.txt"
 "$root/bin/ffmpeg$suffix" -L > "$root/license.txt" 2>&1
