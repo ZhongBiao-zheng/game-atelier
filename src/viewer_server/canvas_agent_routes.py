@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
+    CanvasSearchLibraryInput, CanvasSearchTeamInput, CanvasReadSpecInput,
     CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
 )
 
@@ -29,6 +30,35 @@ def list_projects(request: Request, payload: CanvasListProjectsInput):
 @router.post("/get-document")
 def get_document(request: Request, payload: CanvasProjectInput):
     return tools.get_document(principal(request), payload)
+
+
+def _reference_previews(project_id: str, result: dict) -> dict:
+    from character_workflow.lib.canvas_agent_library import reference_preview
+    from character_workflow.lib.canvas_agent_vision import MAX_ATTACH_IMAGES
+
+    refs = result.pop("attach_images", [])
+    previews, attached = [], []
+    for ref in refs[:MAX_ATTACH_IMAGES]:
+        url = reference_preview(project_id, ref)
+        if url:
+            attached.append(ref)
+            previews.append({"mime_type": "image/jpeg", "data_base64": url.split(",", 1)[1]})
+    return {**result, "attach_images": attached, "previews": previews}
+
+
+@router.post("/search-library")
+def search_library(request: Request, payload: CanvasSearchLibraryInput):
+    return _reference_previews(payload.project_id, tools.search_library(principal(request), payload))
+
+
+@router.post("/search-team")
+def search_team(request: Request, payload: CanvasSearchTeamInput):
+    return _reference_previews(payload.project_id, tools.search_team(principal(request), payload))
+
+
+@router.post("/read-spec")
+def read_spec(request: Request, payload: CanvasReadSpecInput):
+    return tools.read_spec(principal(request), payload)
 
 
 @router.post("/list-models")

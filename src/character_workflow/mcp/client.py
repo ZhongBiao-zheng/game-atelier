@@ -12,15 +12,13 @@ import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
+from character_workflow.lib.canvas_agent_schema import CANVAS_TOOL_INPUT_MODELS
+
 MAX_RESPONSE_BYTES = 1024 * 1024
-_CANVAS_OPERATIONS = (
-    "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
-    "get-run", "read-media",
-)
 # 操作名 → 本机 HTTP 路径。画布操作以 "canvas-" 前缀区分，工具名相应为 canvas_*。
 _PS_TOOLS = ("inspect", "import", "place", "preview", "execute")
 OPERATIONS: dict[str, str] = {
-    **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in _CANVAS_OPERATIONS},
+    **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in CANVAS_TOOL_INPUT_MODELS},
     # PS 联动插件的工具（ADR-0043），走插件工具接口，请求体为 {project_id, arguments}。
     **{f"ps-{name}": f"/api/canvas-agent/plugin-tools/ps-bridge/{name}" for name in _PS_TOOLS},
     # 自定义接口的接入说明与干跑校验（ADR-0036），不挂项目，请求体就是参数本身。

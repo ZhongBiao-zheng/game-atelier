@@ -38,7 +38,10 @@ def _success_result(operation: str, result: dict) -> CallToolResult:
     content = []
     metadata = dict(result)
     preview = metadata.pop("preview", None) if operation in ("canvas-read-media", "ps-preview") else None
+    previews = metadata.pop("previews", []) if operation in ("canvas-search-library", "canvas-search-team") else []
     if preview is not None:
+        previews.append(preview)
+    for preview in previews:
         try:
             if not isinstance(preview, dict) or preview.get("mime_type") != "image/jpeg":
                 raise ValueError("invalid preview")
