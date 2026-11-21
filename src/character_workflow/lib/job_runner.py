@@ -736,7 +736,9 @@ def _run_once(
 
     job = _normalize_reference_images(job)
     params = _params(job)
-    _freeze_estimated_cost(job, params)
+    comfyui_resume = job.params.comfyui_resume if job.provider == "comfyui" else None
+    if not comfyui_resume:
+        _freeze_estimated_cost(job, params)
 
     try:
         if not job.alias:
@@ -776,12 +778,17 @@ def _run_once(
 
                 workflow_kwargs["on_prompt_submitted"] = record_prompt
                 workflow_kwargs["studio_should_stop"] = studio_stop
-                if state := job.params.comfyui_resume:
-                    key = find_by_alias(job.alias)
+                if comfyui_resume:
+                    try:
+                        key = find_by_alias(job.alias)
+                        base_url = local_base_url(key.base_url) if key else None
+                    except ValueError as error:
+                        # Stored key validation can reject the address before normalization.
+                        raise ComfyUIUnavailableError(execution_started=True) from error
                     if (key is None or not key.enabled or key.provider != "comfyui"
                             or not any(m.id == job.model for m in key.models)
-                            or state.get("base_url") != local_base_url(key.base_url)
-                            or state.get("prefix") != f"atelier/{job.job_id}"
+                            or comfyui_resume.get("base_url") != base_url
+                            or comfyui_resume.get("prefix") != f"atelier/{job.job_id}"
                             or not job.params.provider_task_ids):
                         raise ComfyUIUnavailableError(execution_started=True)
                     render = comfyui.render
