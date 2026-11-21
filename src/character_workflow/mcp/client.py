@@ -36,6 +36,7 @@ _ERROR_MESSAGES = {
     "REFERENCE_NOT_ALLOWED": "参考素材不属于已授权目标。",
     "MODEL_UNAVAILABLE": "模型不可用，请重新读取画布模型列表。",
     "INVALID_PARAMETERS": "生成参数不符合模型能力，请检查数量、质量、时长和参考素材。",
+    "MEDIA_UNREADABLE": "视频无法解码。",
     "INVALID_TARGET": "目标信息无效，请使用已授权项目和工具返回的完整目标。",
     "DOCUMENT_NOT_ALLOWED": "当前目标不支持此文档类型，请核对文档与目标归属。",
     "CONTENT_TOO_LARGE": "内容超过本次操作的大小限制，请缩小范围。",
@@ -252,10 +253,17 @@ class CanvasClient:
         headers = {}
         if self._session is not None and path.startswith(("/api/canvas-agent/",)):
             headers["Authorization"] = f"Bearer {self._session.session_token}"
+        return self._send(self._http, self._base_url, method, path, payload, headers)
+
+    @staticmethod
+    def _send(http, base_url, method, path, payload, headers):
+        from character_workflow.lib.canvas_agent_vision import WAIT_SECONDS
+
+        read_timeout = WAIT_SECONDS + 30 if path == "/api/canvas-agent/wait-for-run" else 30
         try:
-            with self._http.request(
-                method, self._base_url + path, json=payload, headers=headers,
-                allow_redirects=False, timeout=(3, 30), stream=True,
+            with http.request(
+                method, base_url + path, json=payload, headers=headers,
+                allow_redirects=False, timeout=(3, read_timeout), stream=True,
             ) as response:
                 if 300 <= response.status_code < 400:
                     raise AdapterError("RESPONSE_INVALID", "本机服务返回了不允许的重定向。")
@@ -280,7 +288,7 @@ class CanvasClient:
             # No retry after an ambiguous write: the server may already have committed it.
             raise AdapterError(
                 "LOCAL_SERVICE_UNAVAILABLE",
-                f"无法连接本机 Atelier（{self._base_url}）。请先启动本机服务；"
+                f"无法连接本机 Atelier（{base_url}）。请先启动本机服务；"
                 "若操作已提交，请查询状态而非重复生成。",
             ) from None
 
@@ -333,27 +341,33 @@ class CanvasClient:
         return {f"ps-{item['tool']}" for item in tools or []
                 if isinstance(item, dict) and item.get("plugin_id") == "ps-bridge" and f"ps-{item.get('tool')}" in OPERATIONS}
 
-    def call(self, operation: str, payload: BaseModel) -> dict:
-        if operation not in OPERATIONS:
-            raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于画布工具。")
+    def _tool_target(self, expired_token=None):
         with self._lock:
             credentials = self._load_credentials()
             status = self._status(credentials)
-            if (
-                self._session is None or self._session.instance_id != status.instance_id
-                or _parse_expiry(self._session.expires_at) <= datetime.now(timezone.utc)
-            ):
+            if (self._session is None or self._session.instance_id != status.instance_id
+                    or self._session.session_token == expired_token
+                    or _parse_expiry(self._session.expires_at) <= datetime.now(timezone.utc)):
                 self._connect(credentials, status)
-            body = _request_body(operation, payload)
+            return self._base_url, self._session.session_token
+
+    def call(self, operation: str, payload: BaseModel) -> dict:
+        if operation not in OPERATIONS:
+            raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于画布工具。")
+        path, body = OPERATIONS[operation], _request_body(operation, payload)
+        base_url, token = self._tool_target()
+        # Long polls occupy one adapter slot. Session renewal is locked, each tool HTTP call is independent.
+        with requests.Session() as http:
+            http.trust_env = False
+            http.headers.update({"Accept": "application/json"})
             try:
-                result = self._request("POST", OPERATIONS[operation], body)
+                result = self._send(http, base_url, "POST", path, body, {"Authorization": f"Bearer {token}"})
             except AdapterError as error:
                 if error.code != "SESSION_EXPIRED":
                     raise
-                # SESSION_EXPIRED is emitted before the route reads or executes the operation.
-                self._session = None
-                self._connect(credentials, self._status(credentials))
-                result = self._request("POST", OPERATIONS[operation], body)
-            if not _safe_result(result):
-                raise AdapterError("RESPONSE_INVALID", "画布响应包含不允许通过工具返回的字段。")
-            return result
+                # The middleware rejected this session before dispatching the operation.
+                base_url, token = self._tool_target(expired_token=token)
+                result = self._send(http, base_url, "POST", path, body, {"Authorization": f"Bearer {token}"})
+        if not _safe_result(result):
+            raise AdapterError("RESPONSE_INVALID", "画布响应包含不允许通过工具返回的字段。")
+        return result

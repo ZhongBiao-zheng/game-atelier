@@ -21,10 +21,14 @@ _DESCRIPTIONS = {
     "canvas-search-library": "Find approved image references in the current project by category.",
     "canvas-search-team": "Search image references in team libraries mounted on this canvas.",
     "canvas-read-spec": "Read the project and mounted team specifications for a category.",
+    "canvas-wait-for-run": "Wait up to 240 seconds for an existing run, then return its current status.",
+    "canvas-check-run": "Check output dimensions, duration, transparency and format of successful candidates.",
+    "canvas-read-video-frames": "Read a bounded JPEG contact sheet of evenly spaced frames in a video version.",
     "canvas-read-media": "Read a bounded preview/metadata of one media version in this canvas.",
 }
 _READ_ONLY = frozenset({
     "canvas-list-projects", "canvas-get-document", "canvas-list-models", "canvas-get-run",
+    "canvas-wait-for-run", "canvas-check-run", "canvas-read-video-frames",
     "canvas-search-library", "canvas-search-team", "canvas-read-spec", "canvas-read-media",
 })
 

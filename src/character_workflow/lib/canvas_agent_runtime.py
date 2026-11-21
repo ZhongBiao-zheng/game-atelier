@@ -25,6 +25,7 @@ from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
+from character_workflow.lib.canvas_agent_tools import is_image_version as _is_image_version
 from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
@@ -698,22 +699,13 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
     return True
 
 
-def _is_image_version(project_id: str, version_id: str) -> bool:
-    version = read_canvas_document(project_id).content_versions.get(version_id)
-    return version is not None and version.kind == "image"
-
-
 async def _wait_for_run(project_id: str, run_id: str) -> str:
     """轮询期间不占线程：每次查询进线程池，等待用 asyncio.sleep。"""
     try:
-        result = await vision.wait_for_run(
-            lambda: tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id)),
-            lambda version_id: _is_image_version(project_id, version_id),
-        )
+        result, video = await tools.wait_for_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
+        result = _attach_video_preview(result, video)
     except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}"
-    if result.get("status") in vision.TERMINAL_STATUSES:
-        result = await asyncio.to_thread(_with_run_checks, project_id, run_id, result)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -778,26 +770,14 @@ def _runs_result(project_id: str, views: dict[str, dict]) -> dict:
 
 
 def _with_run_checks(project_id: str, run_id: str, result: dict, sheet: bool = True) -> dict:
-    """跑完的生成：附上 check_run 的检查结果；第一个成功的视频附一张联系表（sheet=False 时不做）。
-    检查失败不影响结果。"""
-    try:
-        checked = tools.check_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
-    except CanvasToolError:
-        return result
-    result = {**result, "candidates": checked["candidates"]}
-    document = read_canvas_document(project_id)
-    video = sheet and next((c["version_id"] for c in checked["candidates"] if c["status"] == "succeeded"
-                  and getattr(document.content_versions.get(c["version_id"] or ""), "kind", None) == "video"),
-                 None)
-    if video:
-        try:
-            frames = tools.read_video_frames(LOCAL, CanvasReadVideoFramesInput(
-                project_id=project_id, version_id=video))
-            ref = vision.store_preview(frames["preview"])
-        except CanvasToolError:
-            ref = None
-        if ref:
-            result[vision.ATTACH_KEY] = [*result.get(vision.ATTACH_KEY, []), ref]
+    result, video = tools.with_run_checks(LOCAL, GetRunInput(project_id=project_id, run_id=run_id),
+                                         result, sheet=sheet)
+    return _attach_video_preview(result, video)
+
+
+def _attach_video_preview(result, video):
+    if video and (ref := vision.store_preview(video["preview"])):
+        result[vision.ATTACH_KEY] = [*result.get(vision.ATTACH_KEY, []), ref]
     return result
 
 
