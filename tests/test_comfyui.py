@@ -493,3 +493,56 @@ def test_studio_resume_stays_on_original_comfy_server(host, monkeypatch):
         assert not replacement.prompts and replacement.polls == 0
     new_job = jobs.clone_job_for_retry(job.job_id)
     assert new_job.params.comfyui_resume is None and not new_job.params.provider_task_ids
+
+
+@pytest.mark.parametrize("stop", ["before_submit", "shutdown", "user_during_shutdown"])
+def test_studio_shutdown_preserves_registered_prompt(host, monkeypatch, stop):
+    from threading import Event
+
+    from character_workflow.lib import job_runner, jobs
+    from viewer_server import routes
+
+    workflow = imported()
+    body = routes._StudioJobCreate(prompt="cat", model=workflow.id, alias="local", params={})
+    job = routes._create_user_job(body, namespace="studio")
+    shutdown = Event()
+    monkeypatch.setattr(routes, "_STUDIO_SHUTDOWN_EVENT", shutdown)
+    if stop == "before_submit":
+        shutdown.set()
+        assert not routes._run_studio_job_once(job.job_id)
+        assert jobs.read_job(job.job_id).status.value == "canceled"
+        assert not host.prompts
+        return
+
+    host.delay = 100
+    update_phase = job_runner.update_job_phase
+
+    def stop_at_queue(identifier, phase):
+        saved = update_phase(identifier, phase)
+        if phase.startswith("queued:"):
+            if stop == "user_during_shutdown":
+                jobs.request_job_cancel(identifier)
+            shutdown.set()
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(job_runner, "update_job_phase", stop_at_queue)
+        resumable = routes._run_studio_job_once(job.job_id)
+    saved = jobs.read_job(job.job_id)
+    if stop == "user_during_shutdown":
+        assert not resumable and saved.status.value == "canceled"
+        assert host.deleted == ["prompt-1"]
+        return
+    assert resumable and saved.status.value == "pending"
+    assert saved.params.provider_task_ids == ["prompt-1"]
+    assert saved.params.comfyui_resume == {"base_url": host.url, "prefix": f"atelier/{job.job_id}"}
+    assert jobs.resumable_studio_jobs() == [job.job_id]
+    assert not host.deleted and not host.interrupted
+
+    shutdown.clear()
+    host.delay = 0
+    assert not routes._run_studio_job_once(job.job_id)
+    done = jobs.read_job(job.job_id)
+    assert done.status.value == "done"
+    assert len(host.prompts) == len(done.output_paths) == 1
+    assert Path(done.output_paths[0]).read_bytes() == host.png

@@ -692,17 +692,6 @@ def _run_job_claimed(
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
-    gateway_stop: Callable[[], bool] | None = None
-    if park_gateway_wait and job.provider == "atelier":
-        # 本机服务关停不是用户停止：局域网 Atelier 的任务不向主机发取消、不落「已停止」，
-        # 而是停下轮询、留在「等待网关」，下次启动凭同一把幂等键接回。
-        gateway_stop, should_cancel_external = should_cancel_external, None
-    should_cancel = _cancel_checker(job, should_cancel_external)
-
-    def on_phase(phase: str) -> None:
-        _raise_if_canceled(should_cancel)
-        update_job_phase(job.job_id, phase)
-
     # CLI 路径：终端确认即批准，PENDING_CONFIRM 在此推进；工坊请求路径的批准记录在 request 上。
     if job.status not in (JobStatus.PENDING_CONFIRM, JobStatus.PENDING):
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
@@ -710,9 +699,18 @@ def _run_job_claimed(
         job = update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
     # 「自动」任务在确定没执行的失败上换下一家：分支不落 FAILED，抛 _RouteSwitched 回到这里重跑。
     while True:
+        # Studio shutdown pauses a registered remote task. Re-evaluate after a route switch.
+        studio_can_pause = park_gateway_wait and job.provider in {"atelier", "comfyui"}
+        studio_stop = should_cancel_external if studio_can_pause else None
+        should_cancel = _cancel_checker(job, None if studio_can_pause else should_cancel_external)
+
+        def on_phase(phase: str) -> None:
+            _raise_if_canceled(should_cancel)
+            update_job_phase(job.job_id, phase)
+
         try:
             return _run_once(job, defer_terminal=defer_terminal, should_cancel=should_cancel,
-                             park_gateway_wait=park_gateway_wait, gateway_stop=gateway_stop,
+                             park_gateway_wait=park_gateway_wait, studio_stop=studio_stop,
                              on_phase=on_phase)
         except _RouteSwitched:
             job = read_job(job_id)
@@ -725,8 +723,9 @@ def _run_once(
     should_cancel: Callable[[], bool],
     on_phase: Callable[[str], None],
     park_gateway_wait: bool = False,
-    gateway_stop: Callable[[], bool] | None = None,
+    studio_stop: Callable[[], bool] | None = None,
 ) -> Job:
+    from character_workflow.lib.callers.comfyui import ComfyUIPollingPaused
     from character_workflow.lib.schemas import JobKind
     if job.kind == JobKind.TEXT:
         return _run_text_job(job, should_cancel=should_cancel, on_phase=on_phase)
@@ -776,6 +775,7 @@ def _run_once(
                     on_params_changed()
 
                 workflow_kwargs["on_prompt_submitted"] = record_prompt
+                workflow_kwargs["studio_should_stop"] = studio_stop
                 if state := job.params.comfyui_resume:
                     key = find_by_alias(job.alias)
                     if (key is None or not key.enabled or key.provider != "comfyui"
@@ -802,7 +802,7 @@ def _run_once(
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
                 **workflow_kwargs, **_gateway_kwargs(job),
-                **({"gateway_should_stop": gateway_stop} if gateway_stop else {}),
+                **({"gateway_should_stop": studio_stop} if studio_stop and job.provider == "atelier" else {}),
             )
             resumed_ids = workflow_kwargs.get("resume_prompt_ids")
             partial_workflow = bool(resumed_ids and len(resumed_ids) < (job.params.n or 1))
@@ -854,12 +854,14 @@ def _run_once(
                 output_paths=persisted_paths,
                 error=None,
             )
+    except ComfyUIPollingPaused:
+        return read_job(job.job_id)
     except Exception as e:
         from character_workflow.lib.callers.evolink import EvoLinkPendingError
         from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 
         # 停止请求压过一切：Tuzi 轮询被打断时抛的也是 PendingError，不能让它把 job 留在 PENDING。
-        if should_cancel():
+        if isinstance(e, JobCanceled) or should_cancel():
             _settle_canceled(job.job_id, params)
             raise JobCanceled("已按请求停止") from e
         if (parked := _park_gateway_wait(job, e, park_gateway_wait)) is not None:
