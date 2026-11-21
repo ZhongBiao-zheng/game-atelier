@@ -195,3 +195,10 @@ describe('进行中的请求被后来的选择取代', () => {
     expect(await savedIcon()).toBeUndefined();
   });
 });
+
+it('网址输入框限长 2048 字符（与服务端「网址过长」一致）', async () => {
+  openNew();
+  fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '网址' }), { button: 0 });
+  expect(await screen.findByLabelText('图标网址')).toHaveAttribute('maxLength', '2048');
+});

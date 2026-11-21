@@ -100,7 +100,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
             <p className="text-xs text-muted-foreground">PNG、JPEG、WebP、GIF、ICO，1 MB 以内</p>
           </TabsContent>
           <TabsContent value="url" className="space-y-2 py-1">
-            <Input aria-label="图标网址" placeholder="https://" value={url ?? defaultUrl} onChange={event => setUrl(event.target.value)}
+            <Input aria-label="图标网址" placeholder="https://" maxLength={2048} value={url ?? defaultUrl} onChange={event => setUrl(event.target.value)}
               onKeyDown={event => { if (event.key === 'Enter' && address && !uploading) { event.preventDefault(); void run(() => fetchProviderIcon(address)); } }} />
             <Button variant="outline" type="button" className="w-full" disabled={uploading || !address} onClick={() => void run(() => fetchProviderIcon(address))}>
               {uploading ? '获取中…' : '获取'}
