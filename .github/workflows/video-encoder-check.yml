@@ -35,7 +35,9 @@ jobs:
         run: |
           $env:MSYSTEM = 'MINGW64'
           $env:CHERE_INVOKING = '1'
-          & C:\msys64\usr\bin\bash.exe -lc 'set -e; cd "$(cygpath -u "$GITHUB_WORKSPACE")"; command -v gcc; bash scripts/video_encoder_check_build.sh .scratch/encoder'
+          $env:MSYS2_PATH_TYPE = 'inherit'
+          Get-Command gcc,make,gmake -All -ErrorAction SilentlyContinue | Select-Object Name,Source
+          & C:\msys64\usr\bin\bash.exe -lc 'set -e; cd "$(cygpath -u "$GITHUB_WORKSPACE")"; export PATH="/usr/bin:/mingw64/bin:/c/mingw64/bin:/c/Strawberry/c/bin:$PATH"; command -v gcc; bash scripts/video_encoder_check_build.sh .scratch/encoder'
           exit $LASTEXITCODE
       - name: Measure native distribution
         if: matrix.build == 'minimal'

@@ -26,7 +26,7 @@ case "$(uname -s)-$(uname -m)" in
 esac
 mkdir -p build bin
 cd build
-"$root/ffmpeg-$version/configure" --disable-everything --disable-autodetect \
+"../ffmpeg-$version/configure" --disable-everything --disable-autodetect \
     --disable-gpl --disable-nonfree --disable-network --disable-shared --enable-static \
     --disable-debug --disable-doc --disable-ffplay --enable-ffmpeg --enable-ffprobe \
     --enable-zlib --enable-protocol=file,pipe --enable-indev=lavfi \
@@ -36,7 +36,8 @@ cd build
     --enable-encoder="$encoder",aac,png,gif,pcm_s16le,wrapped_avframe \
     --enable-filter=scale,pad,setsar,fps,format,trim,atrim,setpts,asetpts,concat,reverse,areverse,palettegen,paletteuse,split,aresample,aformat,transpose,hflip,vflip,testsrc2,drawbox,aevalsrc,anullsrc,select \
     "${platform[@]}"
-make -j"${ENCODER_BUILD_JOBS:-4}" ffmpeg ffprobe
+builder=$(command -v make || command -v gmake || command -v mingw32-make)
+"$builder" -j"${ENCODER_BUILD_JOBS:-4}" ffmpeg ffprobe
 cp "ffmpeg$suffix" "ffprobe$suffix" "$root/bin/"
 "$root/bin/ffmpeg$suffix" -version > "$root/version.txt"
 "$root/bin/ffmpeg$suffix" -L > "$root/license.txt" 2>&1
