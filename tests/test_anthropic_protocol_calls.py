@@ -243,16 +243,14 @@ def test_anthropic_only_annotation_is_classified_as_callable_text():
     assert _text_protocol(both) == "openai-chat"
 
 
-# --- 局域网网关：接上主机端转换（第 4 批）之前不碰 Anthropic 成员 -------------------------
-# 临时边界（ADR-0044）：第 4 批完成后这几条改成断言转换后的行为，不要删。Agent 的边界已在第 2 批改写（见下）。
+# --- 局域网网关：主机转换 Anthropic 成员，接入端使用 Chat 协议 ---
 
 def _gateway(monkeypatch):
     seen = []
 
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={"choices": [], "usage": {"prompt_tokens": 1,
-                                                                   "completion_tokens": 1}})
+        return httpx.Response(200, json=REPLY)
     monkeypatch.setattr(gateway_openai, "_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(gateway_tasks, "pump", lambda: None)
@@ -261,7 +259,7 @@ def _gateway(monkeypatch):
     return client, seen
 
 
-def test_gateway_skips_anthropic_members_and_hides_anthropic_only_routes(monkeypatch):
+def test_gateway_converts_anthropic_members_and_lists_anthropic_only_routes(monkeypatch):
     # 同名模型：Anthropic 成员排第一；另有一个只有 Anthropic 成员的路由。
     add_claude("https://claude.example", alias="claude", model_id="shared")
     add_claude("https://claude.example", alias="claude-only", model_id="only-claude")
@@ -270,17 +268,17 @@ def test_gateway_skips_anthropic_members_and_hides_anthropic_only_routes(monkeyp
         keys.ModelSpec(id="shared", name="shared", modality="text", protocol="openai-chat")]))
     client, seen = _gateway(monkeypatch)
     routes = {route["id"]: route for route in client.get("/gateway/v1/models").json()["models"]}
-    assert "only-claude" not in routes
-    assert [m["alias"] for m in routes["shared"]["members"]] == ["relay"]
+    assert "only-claude" in routes
+    assert [m["alias"] for m in routes["shared"]["members"]] == ["claude", "relay"]
     response = client.post("/gateway/v1/openai/chat/completions",
                            json={"model": "shared", "messages": [{"role": "user", "content": "x"}]})
     assert response.status_code == 200, response.text
-    assert [str(request.url) for request in seen] == ["https://relay.example/v1/chat/completions"]
+    assert [str(request.url) for request in seen] == ["https://claude.example/v1/messages"]
 
 
-def test_gateway_snapshot_for_members_keeps_old_shape_and_openai_protocol(monkeypatch):
+def test_gateway_snapshot_for_members_keeps_openai_wire_protocol(monkeypatch):
     """旧版成员端把 members[0].protocol 当成自己这条模型的协议（atelier_gateway.gateway_models）：
-    混合路由里它必须拿到 OpenAI 格式的成员，成员快照不多不少还是原来那几个字段。"""
+    混合路由里它必须拿到 OpenAI 格式的成员，上游协议另列在可选字段。"""
     add_claude("https://claude.example", alias="claude", model_id="shared")
     keys.add_key(keys.KeySpec(alias="relay", provider="custom", base_url="https://relay.example",
                               access_key="r", created_at="t", models=[
@@ -289,7 +287,7 @@ def test_gateway_snapshot_for_members_keeps_old_shape_and_openai_protocol(monkey
     [route] = [r for r in client.get("/gateway/v1/models").json()["models"] if r["id"] == "shared"]
     assert route["members"][0]["protocol"] == "openai-chat"
     assert set(route["members"][0]) == {"alias", "provider", "base_url", "billing_group",
-                                        "model_id", "name", "protocol"}
+                                        "model_id", "name", "protocol", "upstream_protocol"}
     from character_workflow.lib.callers.atelier_gateway import gateway_models
     [model] = gateway_models([route])
     assert model.protocol == "openai-chat"

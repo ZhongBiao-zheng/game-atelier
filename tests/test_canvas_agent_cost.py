@@ -27,7 +27,7 @@ def priced_text(monkeypatch):
     """1 元 / 百万输入 token、2 元 / 百万输出 token；缓存 token 按 0 元。"""
     calls = []
 
-    def fake(model_id, input_tokens, output_tokens, *, key=None, cached_tokens=0):
+    def fake(model_id, input_tokens, output_tokens, *, key=None, cached_tokens=0, cache_write_tokens=0):
         calls.append((model_id, input_tokens, output_tokens, cached_tokens))
         if model_id == "unpriced-model":
             return None
@@ -70,7 +70,7 @@ def test_rows_hold_statistics_only(isolated_data_root, priced_text):
     priced = _record(PRICED)
     unpriced = _record(PRICED, model="unpriced-model")
     assert set(priced) == {"time", "project_id", "session_id", "alias", "model", "provider", "source",
-                           "input_tokens", "output_tokens", "cached_tokens", "cost_cny", "cost_source"}
+                           "input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens", "cost_cny", "cost_source"}
     assert (priced["cost_source"], unpriced["cost_source"]) == ("price_table", None)
 
 
