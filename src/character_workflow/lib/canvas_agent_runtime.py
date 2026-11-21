@@ -1297,6 +1297,7 @@ def record_usage(turn: TurnContext, usage: Any) -> None:
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
             cached_tokens=int(getattr(details, "cached_tokens", 0) or 0),
+            cache_write_tokens=int(getattr(details, "cache_write_tokens", 0) or 0),
         )
     except Exception:  # noqa: BLE001 — 记账失败不能打断对话；日志里留原因
         logger.warning("canvas agent usage not recorded", exc_info=True)

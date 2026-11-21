@@ -336,7 +336,7 @@ def _token_tier_fits(plan: dict, prompt_tokens: int) -> bool:
 
 
 def _tokendance_text(model_id: str, input_tokens: int, output_tokens: int,
-                     cached_tokens: int) -> float | None:
+                     cached_tokens: int, cache_write_tokens: int) -> float | None:
     """TokenDance 公开价：元 / 百万 token，按本次 prompt 长度分档（2026-11-18 付费小测逐位对上）。"""
     from character_workflow.lib.tokendance_prices import model_pricing
 
@@ -355,13 +355,17 @@ def _tokendance_text(model_id: str, input_tokens: int, output_tokens: int,
     cached_rate = rate("cached_tokens") if cached else 0
     if input_rate is None or output_rate is None or cached_rate is None:
         return None
-    return _priced(((input_tokens - cached) * input_rate + cached * cached_rate
+    write_rate = rate("cache_write_tokens") if cache_write_tokens else None
+    # Input totals already include cache writes. Using the input rate when no write rate
+    # is published underestimates Anthropic cache creation; do not add those tokens twice.
+    write_delta = cache_write_tokens * (write_rate - input_rate) if write_rate is not None else 0
+    return _priced(((input_tokens - cached) * input_rate + cached * cached_rate + write_delta
                     + output_tokens * output_rate) / 1_000_000)
 
 
 def estimate_text_cost_cny(
     model_id: str, input_tokens: int, output_tokens: int, *, key: Any = None,
-    cached_tokens: int = 0, manual: bool = True,
+    cached_tokens: int = 0, cache_write_tokens: int = 0, manual: bool = True,
 ) -> float | None:
     """文本按 token 估价；None 表示未计价。
 
@@ -370,8 +374,9 @@ def estimate_text_cost_cny(
     拿不到同步价时，用主机手设的输入 / 输出单价（`ModelSpec.input_cny_per_m` / `output_cny_per_m`，
     元 / 百万 token，两个都填才生效）；同步价优先。网关受理、结算与本机花费显示都经过这里。
     """
+    cache_write_tokens = min(max(0, cache_write_tokens), max(0, input_tokens - max(0, cached_tokens)))
     synced = _synced_text_cost(model_id, input_tokens, output_tokens, key=key,
-                               cached_tokens=cached_tokens)
+                               cached_tokens=cached_tokens, cache_write_tokens=cache_write_tokens)
     if synced is not None or not manual or key is None:
         return synced
     spec = next((item for item in getattr(key, "models", None) or [] if item.id == model_id), None)
@@ -383,7 +388,7 @@ def estimate_text_cost_cny(
 
 
 def _synced_text_cost(model_id: str, input_tokens: int, output_tokens: int, *, key: Any,
-                      cached_tokens: int) -> float | None:
+                      cached_tokens: int, cache_write_tokens: int) -> float | None:
     if key is not None:
         host = _hostname(key.base_url)
         if _domain(host, "tu-zi.com"):
@@ -393,7 +398,7 @@ def _synced_text_cost(model_id: str, input_tokens: int, output_tokens: int, *, k
                                  input_tokens=input_tokens, output_tokens=output_tokens,
                                  cached_tokens=cached_tokens)
         if key.provider == "tokendance":
-            return _tokendance_text(model_id, input_tokens, output_tokens, cached_tokens)
+            return _tokendance_text(model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens)
         if _domain(host, "openai-hk.com"):
             from character_workflow.lib.openai_hk_prices import text_cost_cny as hk_text_cost
 
@@ -402,7 +407,9 @@ def _synced_text_cost(model_id: str, input_tokens: int, output_tokens: int, *, k
     rate = _PRICES["text_yuan_per_million_tokens"].get(model_id)
     if rate is None:
         return None
-    return _priced((input_tokens * rate["input"] + output_tokens * rate["output"]) / 1_000_000)
+    write_rate = rate.get("cache_write", rate["input"])
+    return _priced(((input_tokens - cache_write_tokens) * rate["input"] + cache_write_tokens * write_rate
+                    + output_tokens * rate["output"]) / 1_000_000)
 
 
 AUDIO_UNIT_CHARACTERS = 1000
