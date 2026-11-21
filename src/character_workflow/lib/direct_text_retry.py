@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from asyncio import sleep as _async_pause
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from email.utils import parsedate_to_datetime
 from math import isfinite
 from time import sleep as _sync_pause, time
@@ -19,12 +19,12 @@ _INTERRUPTED_ERRORS = (httpx.ReadTimeout, httpx.ReadError, httpx.WriteError,
                        httpx.WriteTimeout, httpx.RemoteProtocolError)
 
 
-def _retry_delay(status: int, headers: Mapping[str, str], attempt: int) -> float | None:
-    if status not in RETRY_STATUS or attempt == len(BACKOFF):
+def _retry_delay(response: httpx.Response | requests.Response, attempt: int) -> float | None:
+    if response.status_code not in RETRY_STATUS or attempt == len(BACKOFF):
         return None
-    if status == 429:
+    if response.status_code == 429:
         for header, scale in (("retry-after-ms", 0.001), ("retry-after", 1)):
-            value = headers.get(header)
+            value = response.headers.get(header)
             if value is None:
                 continue
             try:
@@ -78,7 +78,7 @@ class DirectTextTransport(httpx.AsyncBaseTransport):
             except _INTERRUPTED_ERRORS as error:
                 raise TextInterrupted() from error
             else:
-                delay = _retry_delay(response.status_code, response.headers, attempt)
+                delay = _retry_delay(response, attempt)
                 if delay is None:
                     response.stream = _ResponseStream(response.stream)
                     return response
@@ -106,7 +106,7 @@ def send_sync(send: Callable[[], requests.Response]) -> requests.Response:
                 raise
             delay = BACKOFF[attempt]
         else:
-            delay = _retry_delay(response.status_code, response.headers, attempt)
+            delay = _retry_delay(response, attempt)
             if delay is None:
                 return response
             response.close()
