@@ -1,4 +1,5 @@
 """真实 SDK、真实 TCP 和产品客户端接线，按上游收到的 POST 验证重发边界。"""
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -50,13 +51,24 @@ async def test_retries_upstream_status(protocol, path, success, status):
         assert first.body == second.body
 
 
-async def test_connection_refused_then_recovered(monkeypatch):
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
+async def test_connection_refused_then_recovered(monkeypatch, host):
+    # Windows / CI may only configure one localhost address. Exercise both real sockets.
+    resolve = socket.getaddrinfo
+
+    def dual_loopback(name, port, *args, **kwargs):
+        if name in ("localhost", b"localhost"):
+            return [*resolve("::1", port, *args, **kwargs),
+                    *resolve("127.0.0.1", port, *args, **kwargs)]
+        return resolve(name, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", dual_loopback)
     from character_workflow.lib.llm_protocols import transport
     inner = _RefuseFirstConnect()
     monkeypatch.setattr(transport, "direct_or_proxied", lambda _: inner)
     with FakeVendor() as vendor:
         vendor.on("POST", "/v1/chat/completions", CHAT)
-        async with client_for(vendor.url) as client:
+        async with client_for(f"http://{host}:{vendor.server_port}") as client:
             assert (await chat(client)).choices[0].message.content == "ok"
         assert inner.refused == 1 and len(vendor.received) == 1
 

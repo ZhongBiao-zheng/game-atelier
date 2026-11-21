@@ -160,3 +160,14 @@ def test_proxy_that_answers_502_to_the_tunnel_is_possibly_sent():
         proxy.close()
     assert isinstance(error, requests.exceptions.ProxyError)
     assert not never_sent(error)
+
+
+@pytest.mark.parametrize("other,expected", [
+    (socket.gaierror(), True), (RuntimeError("unknown"), False),
+    (requests.exceptions.SSLError(), False),
+])
+def test_every_address_must_have_failed_before_delivery(other, expected):
+    group = ExceptionGroup("addresses", [ConnectionRefusedError(), ExceptionGroup("other", [other])])
+    wrapped = OSError("All connection attempts failed")
+    wrapped.__cause__ = group
+    assert never_sent(wrapped) is expected
