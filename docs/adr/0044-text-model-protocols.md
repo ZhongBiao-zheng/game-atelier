@@ -115,5 +115,7 @@ Azure OpenAI、Vertex AI、AWS Bedrock、Gemini Interactions API、TypeSafe Syst
 
 Agent 的 Chat、Responses、Anthropic 和 Gemini 均关闭 SDK 自带重试。协议转换在重发层之外，
 只有连接未建立，或上游返回 429、502、503、504 时，才按 0.5 秒、1 秒退避，最多重发两次。
+上游 429 指定等待时间时，优先用 `retry-after-ms`，其次用 `Retry-After`。10 秒以内按指定时间等待，
+超过 10 秒直接返回这次 429。Agent 在等待期间可随时停止。
 一次性文本与结构化文本调用遵循相同规则。上游接收后读超时、断开连接、流中途失败均保留一次提交，
 显示「连接中断，未自动重发（可能已计费）」。网关沿用其受理与更新等待规则。
