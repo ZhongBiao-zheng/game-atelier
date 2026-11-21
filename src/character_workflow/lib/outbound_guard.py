@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
 
 import requests
@@ -30,6 +32,22 @@ Origin = tuple[str, str, int]
 
 class OutboundError(RuntimeError):
     pass
+
+
+class OutboundBlocked(OutboundError):
+    """目标是本机、私网、链路本地等不允许访问的地址。"""
+
+
+class OutboundTooLarge(OutboundError):
+    """响应超过调用方给的体积上限。"""
+
+
+class OutboundTimeout(OutboundError):
+    """超过调用方给的总时限。"""
+
+
+def _mb(limit: int) -> str:
+    return f"{limit / (1024 * 1024):g}"
 
 
 def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -106,10 +124,14 @@ def _public_hostname(parts: SplitResult) -> str:
     host = parts.hostname.lower().rstrip(".")
     ip = _ip_literal(host)
     if host in _LOCAL_NAMES or host.endswith(_LOCAL_SUFFIXES):
-        raise OutboundError("结果地址不能指向本机或私有网络")
+        raise OutboundBlocked("结果地址不能指向本机或私有网络")
     if ip is not None and (not ip.is_global or ip.is_multicast):
-        raise OutboundError("结果地址不能指向本机或私有网络")
-    return host.encode("idna").decode("ascii")
+        raise OutboundBlocked("结果地址不能指向本机或私有网络")
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError:
+        # 空标签（a..b）、超长标签：这个地址不可用，不能让 UnicodeError 冒成 500。
+        raise OutboundError("地址无效") from None
 
 
 class _PinnedTLSAdapter(requests.adapters.HTTPAdapter):
@@ -125,13 +147,17 @@ class _PinnedTLSAdapter(requests.adapters.HTTPAdapter):
 
 
 @contextmanager
-def _open_public(url: str, parts: SplitResult, timeout) -> Iterator[requests.Response]:
+def _open_public(url: str, parts: SplitResult, timeout,
+                 https_when_proxied: bool = False) -> Iterator[requests.Response]:
     hostname = _public_hostname(parts)
     proxies = requests.utils.get_environ_proxies(url)
     with requests.Session() as session:
         # 一律不读环境凭据：trust_env 会把 ~/.netrc 里的账号密码附到结果地址上。
         session.trust_env = False
         if proxies.get(parts.scheme) or proxies.get("all"):
+            if https_when_proxied and parts.scheme != "https":
+                # 走代理时本机看不到真实 IP：由第三方内容决定的地址只放行 https（证书按域名校验）。
+                raise OutboundError("经代理时只允许 https 地址")
             # 走用户配置的代理：域名由代理解析，本机拿不到真实 IP，不做 IP 固定（ADR-0036）。
             # 代理显式传入，仍不读 netrc；字面量私网 IP 与本机域名在上面已拦下。
             with session.get(url, headers=_HEADERS, timeout=timeout, stream=True,
@@ -148,7 +174,7 @@ def _open_public(url: str, parts: SplitResult, timeout) -> Iterator[requests.Res
         fake = parts.scheme == "https" and all(
             (ip.is_global and not ip.is_multicast) or ip in FAKE_IP_NETWORK for ip in addresses)
         if not addresses or not (public or fake):
-            raise OutboundError("结果地址不能指向本机或私有网络")
+            raise OutboundBlocked("结果地址不能指向本机或私有网络")
         if not public:
             # Fake-IP 由 TUN 接管，本机看不到真实目标；只放行 https（证书仍按域名校验）。
             with session.get(url, headers=_HEADERS, timeout=timeout, stream=True,
@@ -181,7 +207,7 @@ def read_limited(response: requests.Response, max_bytes: int,
                  sink: Callable[[bytes], None] | None = None) -> bytes:
     declared = response.headers.get("Content-Length", "")
     if declared.isdigit() and int(declared) > max_bytes:
-        raise OutboundError(f"响应超过 {max_bytes // (1024 * 1024)} MB 上限")
+        raise OutboundTooLarge(f"响应超过 {_mb(max_bytes)} MB 上限")
     total = 0
     chunks: list[bytes] = []
     for chunk in response.iter_content(chunk_size=64 * 1024):
@@ -189,7 +215,7 @@ def read_limited(response: requests.Response, max_bytes: int,
             continue
         total += len(chunk)
         if total > max_bytes:
-            raise OutboundError(f"响应超过 {max_bytes // (1024 * 1024)} MB 上限")
+            raise OutboundTooLarge(f"响应超过 {_mb(max_bytes)} MB 上限")
         if sink is not None:
             sink(chunk)
         else:
@@ -224,3 +250,65 @@ def fetch_document(url: str, *, max_bytes: int,
                    timeout: tuple[float, float] = (10.0, 30.0)) -> tuple[bytes, str]:
     """抓一个用户填的文档网址：只放行公网，每次重定向重新检查。返回 (内容, Content-Type)。"""
     return _fetch(url, max_bytes=max_bytes, trusted=None, timeout=timeout, sink=None)
+
+
+@dataclass(frozen=True)
+class Fetched:
+    content: bytes
+    content_type: str
+    url: str  # 跟完重定向后的最终地址：页面里的相对路径按它解析
+    truncated: bool
+
+
+def _remaining(deadline: float) -> float:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise OutboundTimeout("连接超时")
+    return left
+
+
+def _read_until(response: requests.Response, max_bytes: int, deadline: float,
+                truncate: bool) -> tuple[bytes, bool]:
+    """逐块读响应体，每块都核对总时限：上游慢速滴流时请求也会在时限到达时结束。
+
+    read1 有数据就返回，不像 iter_content 要攒满一块，才能在滴流时回到这里检查时限。"""
+    declared = response.headers.get("Content-Length", "")
+    if not truncate and declared.isdigit() and int(declared) > max_bytes:
+        raise OutboundTooLarge(f"响应超过 {_mb(max_bytes)} MB 上限")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        _remaining(deadline)
+        chunk = response.raw.read1(64 * 1024, decode_content=True)
+        if not chunk:
+            return b"".join(chunks), False
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            if not truncate:
+                raise OutboundTooLarge(f"响应超过 {_mb(max_bytes)} MB 上限")
+            return b"".join(chunks)[:max_bytes], True
+
+
+def fetch_bounded(url: str, *, max_bytes: int, deadline: float, truncate: bool = False,
+                  third_party: bool = False) -> Fetched:
+    """抓一个不可信地址：只放行公网，每次重定向重新检查，整个过程（含读响应体）受 deadline 约束。
+
+    - truncate：超过 max_bytes 时读到上限为止（页面只要 head），否则抛 OutboundTooLarge。
+    - third_party：地址来自第三方内容（页面里解析出的链接）。走代理时，这类地址与所有重定向目标
+      只放行 https；用户亲手填的首个地址按 ADR-0036 的既有规则。
+    """
+    current = url
+    for hop in range(_MAX_REDIRECTS + 1):
+        left = min(5.0, _remaining(deadline))
+        parts = _split(current)
+        with _open_public(current, parts, (left, left),
+                          https_when_proxied=third_party or hop > 0) as response:
+            if 300 <= response.status_code < 400 and response.headers.get("Location"):
+                current = urljoin(current, response.headers["Location"])
+                continue
+            if response.status_code >= 400:
+                raise OutboundError(f"下载失败：HTTP {response.status_code}")
+            body, truncated = _read_until(response, max_bytes, deadline, truncate)
+            return Fetched(body, response.headers.get("Content-Type", ""), current, truncated)
+    raise OutboundError("重定向次数过多")
