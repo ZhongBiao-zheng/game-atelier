@@ -290,8 +290,11 @@ def _visible_members(owner):
         members = [m for m in route.members if m.provider != "atelier"
                    and gateway_access.member_in_scope(owner, m) and gateway_access.member_relayable("text", m)]
         # Mixed routes advertise Chat. Describe a member that this entrance can actually select.
-        member = next((m for m in members if m.protocol != "openai-responses"), members[0])
-        key, model = model_routes._member_key_and_model(member)
+        chat = [model_routes._member_key_and_model(m) for m in members if m.protocol != "openai-responses"]
+        if chat:
+            key, model = next((pair for pair in chat if not detect.agent_tools_unverified(*pair)), chat[0])
+        else:
+            key, model = model_routes._member_key_and_model(members[0])
         visible.append((route, key, model))
     return visible
 

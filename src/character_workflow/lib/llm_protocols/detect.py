@@ -103,7 +103,9 @@ def agent_tools_unverified(key: Any, model: Any) -> bool:
     两次都没有函数调用），不进 Agent。手动选了 Gemini（`KeySpec.text_protocol`）或官方地址照常可用；一次性
     文本调用不受影响。Agent 模型列表、`build_agent`、`/api/keys` 的 `agent_unverified` 标记都读这一处。"""
     if getattr(key, "provider", None) == "atelier":
-        return any(member.agent_tools_unverified for member in getattr(model, "via", None) or [])
+        chat = [member for member in getattr(model, "via", None) or []
+                if (member.upstream_protocol or member.protocol) != OPENAI_RESPONSES]
+        return bool(chat) and all(member.agent_tools_unverified for member in chat)
     if model is None or getattr(model, "protocol", None) != GEMINI_GENERATE_CONTENT:
         return False
     if getattr(key, "text_protocol", None) == GEMINI_GENERATE_CONTENT:

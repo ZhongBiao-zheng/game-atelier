@@ -288,3 +288,39 @@ def test_anthropic_stream_parallel_tools_and_image(gateway):
     assert [(t["index"], t["function"]["name"]) for t in calls if t["function"].get("name")] == [
         (0, "get_weather"), (1, "get_temperature")]
     assert first.received[0].json()["messages"][0]["content"][0]["source"]["data"] == "YQ=="
+
+
+def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_members(gateway, monkeypatch):
+    from character_workflow.lib import canvas_agent_models
+    from tests.fake_http_vendor import FakeVendor
+
+    gemini, client = gateway
+    with FakeVendor() as chat:
+        member("a-gem", "gemini-generate-content", gemini.url)
+        member("b-chat", "openai-chat", chat.url)
+        chat.on("GET", "/v1/models", {"data": [{"id": "shared", "supported_parameters": ["tools"]}]})
+        snapshot = client.get("/gateway/v1/models").json()["models"]
+        [model] = gateway_models(snapshot)
+        hub = keys.KeySpec(alias="Hub", provider="atelier", access_key="fixture-key",
+                           models=[model], created_at="test")
+        assert [item.alias for item in model.via] == ["a-gem", "b-chat"]
+        [catalog] = client.get("/gateway/v1/openai/models").json()["data"]
+        assert catalog["supported_parameters"] == ["tools"] and not gemini.received
+        monkeypatch.setattr(canvas_agent_models, "_upstream_for", lambda *_: (
+            {"shared": {"agent": canvas_agent_models.is_chat_model(catalog), "reasoning": False}}, None))
+        assert [row["model"] for row in canvas_agent_models._models_for(hub, 0)[0]] == ["shared"]
+        body = {"model": "shared", "messages": [{"role": "user", "content": "q"}]}
+        tools = [{"type": "function", "function": {"name": "weather", "parameters": {"type": "object"}}}]
+        chat.on("POST", "/v1/chat/completions", {"choices": [{"message": {"content": "chat"}}]})
+        assert client.post(CHAT, json={**body, "tools": tools}).json()["choices"][0]["message"]["content"] == "chat"
+        assert chat.received[-1].json()["tools"] == tools and not gemini.received
+        model_routes.cool_down("text", "b-chat", "rate_limited")
+        gemini.on("POST", "/v1beta/models/shared:generateContent",
+                  {"candidates": [{"content": {"parts": [{"text": "gemini"}]}}]})
+        assert client.post(CHAT, json=body).json()["choices"][0]["message"]["content"] == "gemini"
+
+        scoped, _ = gateway_keys.create_key("gem-only", scope=[{"alias": "a-gem"}])
+        [limited] = gateway_models([_route_view(model_routes.find_route("text", "shared"), scoped)])
+        assert canvas_agent_models._models_for(hub.model_copy(update={"models": [limited]}), 0)[0] == []
+        with pytest.raises(gateway_tasks.GatewayRequestError):
+            gateway_openai._pick(scoped, "shared", [], params={**body, "tools": tools})
