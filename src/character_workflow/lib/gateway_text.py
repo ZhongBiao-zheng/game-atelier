@@ -167,7 +167,7 @@ class TextCall:
         elif has_usage:
             priced = generation_pricing.estimate_text_cost_cny(
                 task.member_model_id, task.input_tokens or 0, task.output_tokens or 0,
-                key=self.key, cached_tokens=self.cached_tokens,
+                key=self.key, cached_tokens=self.cached_tokens, cache_write_tokens=self.cache_write_tokens,
             )
             if priced is not None:
                 task.actual_cost_cny = priced

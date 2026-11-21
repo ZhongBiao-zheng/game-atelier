@@ -115,8 +115,11 @@ def latest_usage():
 
 
 @pytest.mark.parametrize("protocol", NATIVES)
-def test_translated_stream_terminal_and_usage(gateway, protocol):
+def test_translated_stream_terminal_and_usage(gateway, protocol, monkeypatch):
     from pathlib import Path
+    from character_workflow.lib import generation_pricing
+    monkeypatch.setitem(generation_pricing._PRICES["text_yuan_per_million_tokens"], "shared",
+                        {"input": 5, "output": 10})
     vendor, client = gateway
     member("native", protocol, vendor.url)
     payload = {"model": "shared", "stream": True, "messages": [{"role": "user", "content": "q"}]}
@@ -143,6 +146,7 @@ def test_translated_stream_terminal_and_usage(gateway, protocol):
     assert choices[-1]["finish_reason"] == "tool_calls"
     row = latest_usage()
     assert tuple(row[field] for field in ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens")) == expected
+    assert row["charged_cny"] == (expected[0] * 5 + expected[3] * 10) / 1_000_000
     assert row["status"] == "done"
     assert sse_events(client.post(CHAT, json=payload))[-1]["error"]["message"] == "interrupted"
     assert latest_usage()["status"] == "failed" and latest_usage()["charged_cny"] == 0
@@ -176,3 +180,12 @@ async def test_member_sdk_streams_real_gateway_and_anthropic(monkeypatch):
             assert len(vendor.received) == 1
         finally:
             server.stop()
+
+def test_cache_write_priced_and_recorded_locally(monkeypatch):
+    from character_workflow.lib import agent_usage, generation_pricing
+    key = member("chat", "anthropic-messages")
+    rates = {"input": 5, "output": 10, "cache_write": 8}
+    monkeypatch.setitem(generation_pricing._PRICES["text_yuan_per_million_tokens"], "shared", rates)
+    row = agent_usage.record_request(project_id="p", session_id="s", key=key, alias="chat", model="shared",
+                                     input_tokens=100, output_tokens=10, cached_tokens=0, cache_write_tokens=20)
+    assert row["cache_write_tokens"] == 20 and row["cost_cny"] == (80 * 5 + 20 * 8 + 10 * 10) / 1_000_000

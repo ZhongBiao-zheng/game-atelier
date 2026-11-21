@@ -42,28 +42,28 @@ def usage_file(month: str) -> Path:
 
 
 def request_cost(key: Any, model_id: str, input_tokens: int, output_tokens: int,
-                 cached_tokens: int) -> float | None:
+                 cached_tokens: int, cache_write_tokens: int = 0) -> float | None:
     """一次请求的金额。按请求算而不是按整轮算：TokenDance 按本次 prompt 长度分档。"""
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
     if key is None or key.provider == GATEWAY_PROVIDER:
         return None
     return estimate_text_cost_cny(model_id, input_tokens, output_tokens, key=key,
-                                  cached_tokens=cached_tokens)
+                                  cached_tokens=cached_tokens, cache_write_tokens=cache_write_tokens)
 
 
 def record_request(*, project_id: str, session_id: str, key: Any, alias: str, model: str,
                    input_tokens: int, output_tokens: int, cached_tokens: int,
-                   at: datetime | None = None) -> dict:
+                   cache_write_tokens: int = 0, at: datetime | None = None) -> dict:
     moment = (at or datetime.now(timezone.utc)).astimezone()
     provider = getattr(key, "provider", None)
-    cost = request_cost(key, model, input_tokens, output_tokens, cached_tokens)
+    cost = request_cost(key, model, input_tokens, output_tokens, cached_tokens, cache_write_tokens)
     row = {
         "time": moment.isoformat(), "project_id": project_id, "session_id": session_id,
         "alias": alias, "model": model, "provider": provider,
         "source": "lan" if provider == GATEWAY_PROVIDER else "local",
         "input_tokens": input_tokens, "output_tokens": output_tokens,
-        "cached_tokens": cached_tokens,
+        "cached_tokens": cached_tokens, "cache_write_tokens": cache_write_tokens,
         "cost_cny": cost,
         "cost_source": "host" if provider == GATEWAY_PROVIDER
         else "price_table" if cost is not None else None,
