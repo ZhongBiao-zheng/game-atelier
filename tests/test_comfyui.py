@@ -572,3 +572,20 @@ def test_studio_resume_with_invalid_stored_address_is_unconfirmed(host, monkeypa
     assert saved.params.provider_task_ids == ["prompt-1"]
     assert saved.params.actual_cost_cny == 0
     assert len(host.prompts) == 1 and host.polls == polls
+
+
+def test_studio_cancel_requested_before_recovery_stops_last_registered_prompt(host, monkeypatch):
+    from character_workflow.lib import job_runner, jobs
+    from viewer_server import routes
+
+    workflow = imported()
+    body = routes._StudioJobCreate(prompt="cat", model=workflow.id, alias="local", params={"n": 3})
+    job = routes._create_user_job(body, namespace="studio")
+    _stop_local_job(monkeypatch, job_runner.run_job, job.job_id, accepted=2)
+    assert host.completed == {"prompt-1"}
+
+    jobs.request_job_cancel(job.job_id)
+    assert not routes._run_studio_job_once(job.job_id)
+    assert jobs.read_job(job.job_id).status.value == "canceled"
+    assert host.deleted == ["prompt-2"] and not host.interrupted
+    assert len(host.prompts) == 2
