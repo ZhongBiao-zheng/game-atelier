@@ -553,8 +553,8 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 深浅色模式与品牌图标「黑白 / 彩色」只存在本机浏览器的 localStorage（`atelier:theme`、`atelier:brand-icons`），
 不进 `.config/accent-themes.json`，没有服务端接口：按设备生效，桌面版与浏览器各记各的。`atelier:brand-icons` 取值
 `mono` / `color`，缺省（含旧版本没有这个键）按 `mono`。彩色只换有彩色版的内置品牌（lobe-icons `*-color.svg`），
-主色对图标方块底色的对比度低于 3:1 的品牌在该主题下退回单色（亮、暗同一条规则、同一阈值，另一主题照常彩色）；判定表在 `web/src/components/brandColors.ts`，数值由
-`scripts/brand_icon_contrast.py` 量出。上传的自定义图标与供应商遮罩图标不受这个选项影响。
+按人工判定的名单在对应主题下退回单色（亮色：openrouter；暗色：aws、baidu），另一主题照常彩色；名单与判定都在
+`web/src/components/brandColors.ts`。上传的自定义图标与供应商遮罩图标不受这个选项影响。
 
 画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
 `GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
