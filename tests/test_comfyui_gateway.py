@@ -483,3 +483,76 @@ def test_restart_lost_comfy_history_and_queue_is_unconfirmed(client, host, monke
     failed = _resume(task_id)
     assert (failed.status, failed.error_kind, failed.charged_cny) == ("failed", "unconfirmed", 0)
     assert not host.prompts and not failed.outputs
+
+
+@pytest.mark.parametrize("phase", ["pending", "resuming", "offline"])
+def test_stop_before_comfy_resume(client, host, monkeypatch, phase):
+    tid = _stop_after_accepting(monkeypatch, client.record, imported(), requested=3, accepted=2)
+    gateway_tasks.recover_after_restart()
+    host.polls = 0
+    if phase == "resuming":
+        gateway_tasks._update(tid, status="running", phase="resuming")
+        pick = gateway_tasks._resume_member
+
+        def stop_while_picking(task):
+            gateway_tasks.cancel(client.record.id, tid)
+            return pick(task)
+
+        monkeypatch.setattr(gateway_tasks, "_resume_member", stop_while_picking)
+        result = gateway_tasks.run_task(gateway_tasks._read(tid))
+    else:
+        if phase == "offline":
+            from character_workflow.lib.comfyui_client import ComfyUIClient
+            def offline(*_args, **_kwargs):
+                raise ConnectionError("offline")
+            monkeypatch.setattr(ComfyUIClient, "request", offline)
+        result = gateway_tasks.cancel(client.record.id, tid)
+    assert result.status == gateway_tasks._read(tid).status == "canceled"
+    assert result.charged_cny == 0 and len(host.prompts) == 2
+    assert host.deleted == ([] if phase == "offline" else ["prompt-2"])
+    assert host.interrupted == []
+
+
+def test_stop_second_recovery_while_first_owns_only_slot(host, monkeypatch):
+    import threading
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+
+    owner, _ = gateway_keys.create_key("成员", None)
+    workflow = imported()
+    with monkeypatch.context() as patch:
+        patch.setattr(gateway_tasks, "pump", lambda: None)
+        first = gateway_tasks.submit(owner, idempotency_key="first", model=workflow.id, prompt="cat",
+                                     n=1, size=None, params={}, files={}, kind="image")
+        second = _stop_after_accepting(patch, owner, workflow, requested=3, accepted=2)
+        with ComfyUIClient(host.url) as upstream:
+            third = upstream.post("/prompt", json={"prompt": workflow.api_workflow})["prompt_id"]
+        gateway_tasks._update(first.task_id, status="running", member_provider="comfyui", member_alias="local",
+                              member_model_id=workflow.id, member_base_url=host.url, upstream_task_ids=[third],
+                              resume_params={"comfyui": {"prefix": f"atelier/{first.task_id}"}})
+        gateway_tasks.recover_after_restart()
+    monkeypatch.setattr(gateway_tasks, "MAX_RUNNING", 1)
+    host.polls = 0
+    entered, release = threading.Event(), threading.Event()
+    execute = gateway_tasks._execute
+    finished = threading.Event()
+
+    def hold_slot(task_id):
+        try:
+            assert task_id == first.task_id
+            entered.set()
+            assert release.wait(5)
+            execute(task_id)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(gateway_tasks, "_execute", hold_slot)
+    gateway_tasks.pump()
+    try:
+        assert entered.wait(3)
+        assert gateway_tasks._read(second).status == "pending"
+        assert gateway_tasks.cancel(owner.id, second).status == "canceled"
+        assert host.deleted == ["prompt-2"] and len(host.prompts) == 3
+    finally:
+        release.set()
+        assert finished.wait(6)
+    assert gateway_tasks._read(first.task_id).status == "done"
