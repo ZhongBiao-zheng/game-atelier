@@ -356,3 +356,18 @@ def test_native_refusal_exhaustion_is_not_member_auth_or_quota(status, monkeypat
             assert model_routes._cooling("text", "native") and len(vendor.received) == 1
         finally:
             server.stop()
+
+
+def test_native_balance_refusal_with_http_400_switches_to_next_member(gateway):
+    from tests.fake_http_vendor import FakeVendor
+    from tests.test_anthropic_protocol_calls import REPLY
+
+    first, client = gateway
+    with FakeVendor() as second:
+        member("a-balance", "anthropic-messages", first.url)
+        member("b-balance", "anthropic-messages", second.url)
+        first.on("POST", "/v1/messages", (400, {"error": {"message": "余额不足"}}))
+        second.on("POST", "/v1/messages", REPLY)
+        result = client.post(CHAT, json={"model": "shared", "messages": [{"role": "user", "content": "q"}]})
+        assert result.status_code == 200, result.text
+        assert len(first.received) == len(second.received) == 1
