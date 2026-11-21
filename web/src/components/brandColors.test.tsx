@@ -1,6 +1,6 @@
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { COLOR_BRANDS, COLOR_FILES, MIN_CONTRAST, colorBrandSource } from './brandColors';
+import { COLOR_BRANDS, COLOR_FILES, COLOR_TABLE, MIN_CONTRAST, colorBrandSource } from './brandColors';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { PROVIDER_BRANDS } from './providerBrands';
@@ -16,13 +16,31 @@ describe('彩色品牌表（唯一判定处）', () => {
     expect(COLOR_BRANDS.filter(id => !known.has(id))).toEqual([]);
   });
 
-  it('暗色下对比度不足 3:1 的品牌退回单色；亮色照常（2026-11-21 只限制暗色）', () => {
+  it('两种主题同一条规则：对比度低于 3:1 的品牌只在该主题下退回单色，另一主题照常彩色', () => {
     expect(MIN_CONTRAST).toBe(3);
-    for (const id of ['aws', 'baidu', 'doubao', 'siliconcloud', 'tencent', 'zhipu']) {
+    const darkOnlyMono = ['aws', 'baidu', 'doubao', 'siliconcloud', 'tencent', 'zhipu'];
+    const lightOnlyMono = ['alibaba', 'bytedance', 'gemini', 'google', 'kling', 'mistral', 'newapi', 'openrouter', 'volcengine'];
+    for (const id of darkOnlyMono) {
       expect(colorBrandSource(id, 'dark'), id).toBeNull();
       expect(colorBrandSource(id, 'light'), id).not.toBeNull();
     }
-    for (const id of ['deepseek', 'gemini', 'openrouter', 'volcengine']) expect(colorBrandSource(id, 'dark'), id).not.toBeNull();
+    for (const id of lightOnlyMono) {
+      expect(colorBrandSource(id, 'light'), id).toBeNull();
+      expect(colorBrandSource(id, 'dark'), id).not.toBeNull();
+    }
+    for (const id of ['azure', 'deepseek', 'fal', 'minimax']) {
+      expect(colorBrandSource(id, 'light'), id).not.toBeNull();
+      expect(colorBrandSource(id, 'dark'), id).not.toBeNull();
+    }
+    expect([...darkOnlyMono, ...lightOnlyMono, 'azure', 'deepseek', 'fal', 'minimax'].sort()).toEqual([...COLOR_BRANDS].sort());
+  });
+
+  it('表里每个主题的结果都由实测对比度与同一阈值判出', () => {
+    for (const [brand, themes] of Object.entries(COLOR_TABLE)) {
+      for (const theme of ['light', 'dark'] as const) {
+        expect(themes[theme].color, `${brand} ${theme}`).toBe(themes[theme].contrast >= MIN_CONTRAST);
+      }
+    }
   });
 
   it('没有彩色版的品牌两种主题都是单色', () => {
@@ -50,6 +68,10 @@ describe('品牌图标「黑白 / 彩色」', () => {
     rerender(<ProviderBrandIcon provider={{ provider: 'custom', icon: 'brand:tencent' }} size="sm" />);
     expect(container.querySelector('img')).toBeNull();  // 暗色下腾讯退回单色
     act(() => setTheme('light'));
+    expect(container.querySelector('img')).not.toBeNull();  // 亮色下照常彩色
+    rerender(<ProviderBrandIcon provider={{ provider: 'openrouter' }} size="sm" />);
+    expect(container.querySelector('svg')).toHaveAttribute('fill', 'currentColor');  // 亮色下 OpenRouter 退回单色
+    act(() => setTheme('dark'));
     expect(container.querySelector('img')).not.toBeNull();
     rerender(<ModelBrandIcon brand="anthropic" size="sm" />);
     expect(container.querySelector('svg')).toHaveAttribute('fill', 'currentColor');

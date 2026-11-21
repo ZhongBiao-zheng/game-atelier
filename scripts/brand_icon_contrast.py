@@ -5,7 +5,7 @@
 - 主色：SVG 里 fill 与渐变 stop-color 出现次数最多的颜色；次数相同取先出现的。
   currentColor 在 <img> 里没有文字色可继承，按黑色算。
 - 底色：图标所在方块的 --secondary（web/src/styles/tokens.css）：暗色 #26262A、亮色 #E9E9EB。
-- 对比度：WCAG 2.x 相对亮度公式 (L1 + 0.05) / (L2 + 0.05)，非文本元素按 3:1 判。
+- 对比度：WCAG 2.x 相对亮度公式 (L1 + 0.05) / (L2 + 0.05)，非文本元素按 3:1 判；两种底色同一阈值。
 """
 from __future__ import annotations
 
@@ -44,11 +44,16 @@ def main_color(svg: str) -> str:
     return next(c for c in colors if counts[c] == top)
 
 
+MIN_CONTRAST = 3.0
+
+
 def main() -> None:
+    """每行：表里的数值（贴进 brandColors.ts 的 CONTRAST），注释里是主色与两种底色下是否可用彩色。"""
     for path in sorted(ICONS.glob("*.svg")):
         color = main_color(path.read_text(encoding="utf-8"))
-        dark, light = (round(contrast(color, SURFACES[k]), 2) for k in ("dark", "light"))
-        print(f"  {path.stem}: {{ main: '{color}', dark: {dark}, light: {light} }},")
+        light, dark = (round(contrast(color, SURFACES[k]), 2) for k in ("light", "dark"))
+        verdict = ", ".join(f"{k} {'彩色' if v >= MIN_CONTRAST else '单色'}" for k, v in (("light", light), ("dark", dark)))
+        print(f"  {path.stem}: {{ dark: {dark}, light: {light} }},  // 主色 {color}；{verdict}")
 
 
 if __name__ == "__main__":

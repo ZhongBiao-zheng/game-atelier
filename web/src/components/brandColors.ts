@@ -27,16 +27,17 @@ import { useTheme, type Theme } from '@/lib/theme';
 /**
  * 品牌图标「彩色」的唯一判定处：哪些品牌有彩色版、在哪个主题下能用。
  *
- * 数值由 scripts/brand_icon_contrast.py 量出：SVG 里出现最多的颜色（主色）对图标方块底色 --secondary
- * （暗 #26262A、亮 #E9E9EB）的 WCAG 对比度。非文本元素按 3:1 判，低于它的品牌在暗色下退回单色
- * （2026-11-21 定：只限制暗色；亮色的数值一并记下，供以后决定）。
+ * 量法（scripts/brand_icon_contrast.py）：SVG 里 fill 与渐变 stop-color 出现最多的颜色为主色（currentColor 按黑色），
+ * 算它对图标方块底色 --secondary（暗 #26262A、亮 #E9E9EB）的 WCAG 对比度。两种主题同一条规则、同一个阈值：
+ * 非文本元素按 3:1，低于它的品牌在该主题下退回单色，另一主题照常彩色（2026-11-21 定）。
  *
  * 不在表里的品牌没有彩色版：anthropic、openai、midjourney、flux、moonshot（lobe-icons 没有彩色版），
  * xai、runway、replicate（同上），以及 tokendance、tuzi、openai-hk、evolink（不在 lobe-icons 里，官网原图许可未找到）。
  */
 export const MIN_CONTRAST = 3;
 
-const CONTRAST: Record<string, { dark: number; light: number }> = {
+/** 品牌 → 亮底、暗底的实测对比度；是否可用彩色由 usable() 按 MIN_CONTRAST 判出，见 COLOR_TABLE。 */
+const CONTRAST: Record<string, Record<Theme, number>> = {
   alibaba: { dark: 4.97, light: 2.5 },
   aws: { dark: 1.39, light: 17.32 },
   azure: { dark: 3.33, light: 3.73 },
@@ -63,12 +64,19 @@ const FILES = import.meta.glob('../assets/brands-color/*.svg', { eager: true, qu
 const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(FILES).map(([path, url]) => [path.split('/').pop()!.replace(/\.svg$/, ''), url]));
 
-/** 这个品牌在这个主题下用彩色版时的地址；没有彩色版或对比度不足返回 null（用单色）。 */
+const usable = (ratio: number) => ratio >= MIN_CONTRAST;
+
+/** 品牌 → 亮底、暗底各自是否可用彩色（对比度一并给出）。 */
+export const COLOR_TABLE: Record<string, Record<Theme, { contrast: number; color: boolean }>> = Object.fromEntries(
+  Object.entries(CONTRAST).map(([brand, ratio]) => [brand, {
+    light: { contrast: ratio.light, color: usable(ratio.light) },
+    dark: { contrast: ratio.dark, color: usable(ratio.dark) },
+  }]));
+
+/** 这个品牌在这个主题下用彩色版时的地址；没有彩色版或该主题下对比度不足返回 null（用单色）。 */
 export function colorBrandSource(brand: string, theme: Theme): string | null {
-  const measured = CONTRAST[brand];
   const source = SOURCES[brand];
-  if (!measured || !source) return null;
-  return theme === 'dark' && measured.dark < MIN_CONTRAST ? null : source;
+  return source && COLOR_TABLE[brand]?.[theme].color ? source : null;
 }
 
 /** 当前设置下该用的彩色版地址；「黑白」或没有可用彩色版时为 null。 */
