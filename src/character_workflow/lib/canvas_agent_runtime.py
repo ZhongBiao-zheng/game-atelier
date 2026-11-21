@@ -412,7 +412,7 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     if tool == "run_generations":
         return tools.submit_batch(_generation_items(arguments),
                                   lambda item: execute_tool(project_id, "run_generation", item, scope),
-                                  rejected=rejected)
+                                  wait_tool="wait_for_runs", document_tool="get_canvas", rejected=rejected)
     if tool.startswith(PLUGIN_TOOL_PREFIX):
         return _execute_plugin_tool(project_id, tool, arguments)
     raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)

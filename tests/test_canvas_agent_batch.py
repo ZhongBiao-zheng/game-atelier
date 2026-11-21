@@ -148,6 +148,11 @@ def test_items_run_one_by_one_and_partial_success_is_kept(client, scheduled):
     assert result["items"][1]["error"] == "INVALID_TARGET：找不到这个生成节点"
     assert (result["submitted"], result["rejected"], result["failed"]) == (2, 0, 1)
     assert "部分成功不回滚" in result["note"] and "不要自动重试" in result["note"]
+    assert result["note"] == (
+        "部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
+        "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
+        "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
+        "已提交的项也可能失败，用 wait_for_runs 查看每一项的最终结果。")
     # 失败的那一项不影响前后两项：两个任务都已调度，结果节点都在画布上。
     assert len(scheduled) == 2
     submitted = [row for row in result["items"] if row["status"] == "submitted"]
@@ -186,6 +191,7 @@ def test_unexpected_error_on_one_item_keeps_the_submitted_run_ids(client, schedu
     assert [row["status"] for row in rows] == ["submitted", "failed", "submitted"]
     assert rows[0]["run_id"] and rows[2]["run_id"]
     assert rows[1]["error"].startswith("未预期错误（OSError）") and "不要重试" in rows[1]["error"]
+    assert rows[1]["error"] == "未预期错误（OSError）：这一项可能已经建了任务，先用 get_canvas 看这个节点，不要重试"
     assert len(scheduled) == 2 and len(created) == 2
 
 
