@@ -58,6 +58,7 @@ jobs:
           path: |
             evidence/
             .scratch/encoder/source-sha256.txt
+            .scratch/encoder/ffmpeg-*/ffbuild/config.log
             .scratch/encoder/build/ffbuild/config.log
             .scratch/encoder/bin/ffmpeg
             .scratch/encoder/bin/ffprobe
