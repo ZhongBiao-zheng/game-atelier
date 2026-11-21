@@ -351,8 +351,8 @@ def test_build_agent_refuses_anthropic_without_base_url():
 
 
 @pytest.mark.parametrize("protocol", ["openai-chat", "anthropic-messages"])
-def test_unversioned_socks_proxy_gets_a_clear_error(monkeypatch, protocol):
-    """socks:// 没有协议版本：保留能照着改的中文提示。"""
+@pytest.mark.parametrize("scheme", ["socks", "socks4", "socks4a"])
+def test_unsupported_socks_proxy_gets_a_clear_error(monkeypatch, protocol, scheme):
     from types import SimpleNamespace
 
     from character_workflow.lib import canvas_agent_runtime
@@ -361,14 +361,14 @@ def test_unversioned_socks_proxy_gets_a_clear_error(monkeypatch, protocol):
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
-    monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:1080")
+    monkeypatch.setenv("ALL_PROXY", f"{scheme}://127.0.0.1:1080")
     keys.add_key(keys.KeySpec(alias="v", provider="custom", base_url="https://vendor.example",
                               access_key="k", created_at="t", models=[
         keys.ModelSpec(id="m", name="m", modality="text", protocol=protocol)]))
     with pytest.raises(CanvasToolError) as caught:
         canvas_agent_runtime.build_agent(SimpleNamespace(
             project_id="p", model_alias="v", model="m", effort=None, creation_mode="all"))
-    assert "socks" in caught.value.message and "http 代理" in caught.value.message
+    assert caught.value.message.endswith("请改成 socks5://、socks5h:// 或 http 代理地址")
 
 
 def test_build_agent_still_refuses_unknown_protocols():

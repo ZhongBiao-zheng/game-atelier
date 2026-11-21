@@ -239,14 +239,13 @@ def _post_json(
                 pre_flight=_is_pre_flight_failure, network_errors=(requests.RequestException,),
                 waiting=gateway_wait)
         else:
+            proxy = requests.utils.select_proxy(url, requests.utils.get_environ_proxies(url))
+            if proxy and proxy.lower().startswith(net_env.UNSUPPORTED_SOCKS_PREFIXES):
+                raise OpenAITextError(net_env.SOCKS_PROXY_MESSAGE)
             response = direct_text_retry.send_sync(send)
     except (gateway_text_wait.GatewayTextUpdating, direct_text_retry.TextInterrupted) as error:
         raise OpenAITextError(str(error)) from error
-    except (requests.RequestException, ValueError) as error:
-        if str(error).startswith("Unable to determine SOCKS version from socks://"):
-            raise OpenAITextError(net_env.SOCKS_PROXY_MESSAGE) from None
-        if not isinstance(error, requests.RequestException):
-            raise
+    except requests.RequestException as error:
         raise OpenAITextError(str(error)) from error
     if gateway_alias and response.status_code == 429:
         from .atelier_gateway import GatewayError, _raise_for_status

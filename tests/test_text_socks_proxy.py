@@ -117,8 +117,8 @@ def test_requests_gateway_and_domestic_vendor_bypass_socks(socks_network, monkey
     assert len(vendor.received) == 2 and not tunnels
 
 
-@pytest.mark.parametrize("socks_network", ["socks"], indirect=True)
-def test_sync_text_explains_unversioned_socks(socks_network):
+@pytest.mark.parametrize("socks_network", ["socks", "socks4", "socks4a"], indirect=True)
+def test_sync_text_explains_unsupported_socks(socks_network):
     from character_workflow.lib import net_env, structured_text_call
     from character_workflow.lib.callers import openai_text
 
