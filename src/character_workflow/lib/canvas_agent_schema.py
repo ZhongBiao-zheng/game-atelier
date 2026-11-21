@@ -60,6 +60,10 @@ class CanvasSearchTeamInput(CanvasProjectInput):
     limit: int = Field(default=12, ge=1, le=12)
 
 
+class CanvasReadSpecInput(CanvasProjectInput):
+    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)]
+
+
 class AddSurfaceChange(StrictInput):
     """空的图片 / 视频 / 音频节点：Web 的生成面就是它，跑完产物直接落在同一个节点上。"""
     op: Literal["add_surface"]
@@ -158,6 +162,9 @@ class CanvasListModelsInput(CanvasProjectInput):
 CANVAS_TOOL_INPUT_MODELS: dict[str, type[StrictInput]] = {
     "list-projects": CanvasListProjectsInput,
     "get-document": CanvasProjectInput,
+    "search-library": CanvasSearchLibraryInput,
+    "search-team": CanvasSearchTeamInput,
+    "read-spec": CanvasReadSpecInput,
     "list-models": CanvasListModelsInput,
     "apply-changes": ApplyChangesInput,
     "import-media": ImportMediaInput,

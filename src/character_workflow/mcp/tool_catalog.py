@@ -18,11 +18,14 @@ _DESCRIPTIONS = {
     "canvas-import-media": "Copy one local media file into the canvas as an immutable version plus node.",
     "canvas-run": "Start a generation run on a surface node. Paid; requires canvas_generate.",
     "canvas-get-run": "Read a run's status, candidates and output version ids; never retries.",
+    "canvas-search-library": "Find approved image references in the current project by category.",
+    "canvas-search-team": "Search image references in team libraries mounted on this canvas.",
+    "canvas-read-spec": "Read the project and mounted team specifications for a category.",
     "canvas-read-media": "Read a bounded preview/metadata of one media version in this canvas.",
 }
 _READ_ONLY = frozenset({
     "canvas-list-projects", "canvas-get-document", "canvas-list-models", "canvas-get-run",
-    "canvas-read-media",
+    "canvas-search-library", "canvas-search-team", "canvas-read-spec", "canvas-read-media",
 })
 
 

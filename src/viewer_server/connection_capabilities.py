@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from starlette.routing import compile_path
 
+from character_workflow.lib.canvas_agent_schema import CANVAS_TOOL_INPUT_MODELS
+
 # Local editor owns the existing personal workspace. Agent sessions never inherit these routes.
 _LOCAL_ROUTES = """
 GET /api/update/state
@@ -301,10 +303,7 @@ MEDIA_ROUTES = frozenset({
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
     "/api/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb",
 })
-CANVAS_TOOLS = frozenset({
-    "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
-    "get-run", "read-media",
-})
+CANVAS_TOOLS = frozenset(CANVAS_TOOL_INPUT_MODELS)
 # 自定义接口的接入说明与干跑校验（ADR-0036，第 5 批 5-6B）：不挂项目，接口里再核对是 Agent。
 PROTOCOL_TOOLS = frozenset({"protocol-manual", "protocol-validate"})
 

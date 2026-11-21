@@ -107,6 +107,17 @@ def team_preview(project_id: str, ref: str) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
+def reference_preview(project_id: str, ref: str) -> str | None:
+    try:
+        if ref.startswith(TEAM_ASSET_PREFIX):
+            return team_preview(project_id, ref)
+        if ref.startswith(ASSET_IMAGE_PREFIX):
+            return preview(project_id, ref.removeprefix(ASSET_IMAGE_PREFIX))[0]
+    except (KeyError, OSError, ValueError):
+        pass
+    return None
+
+
 def _matches_category(entry, category: str) -> bool:
     # 原始文件和旧分享没有类别：退回按标题、标签和所在目录名匹配（团队常按类别分文件夹）。
     if entry.category is not None:

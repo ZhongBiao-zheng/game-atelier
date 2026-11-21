@@ -25,6 +25,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
+    CanvasReadSpecInput, CanvasSearchLibraryInput, CanvasSearchTeamInput,
     CanvasReadMediaInput, CanvasReadVideoFramesInput, GetRunInput, ImportMediaInput, RunInput,
 )
 from character_workflow.lib.jobs import list_jobs
@@ -51,6 +52,24 @@ def authorize(principal: Any, project_id: str, capability: str) -> None:
         read_canvas_project(project_id)
     except (KeyError, ValueError, OSError):
         raise CanvasToolError("TARGET_NOT_AUTHORIZED", "画布不存在或不在当前授权中", 404) from None
+
+
+def search_library(principal: Any, payload: CanvasSearchLibraryInput) -> dict:
+    from character_workflow.lib import canvas_agent_library
+    authorize(principal, payload.project_id, "canvas_read")
+    return canvas_agent_library.search_library(payload.project_id, payload.category, payload.limit)
+
+
+def search_team(principal: Any, payload: CanvasSearchTeamInput) -> dict:
+    from character_workflow.lib import canvas_agent_library
+    authorize(principal, payload.project_id, "canvas_read")
+    return canvas_agent_library.search_team(payload.project_id, payload.query, payload.category, payload.limit)
+
+
+def read_spec(principal: Any, payload: CanvasReadSpecInput) -> dict:
+    from character_workflow.lib import team_library_specs
+    authorize(principal, payload.project_id, "canvas_read")
+    return {"text": team_library_specs.agent_category_spec(payload.project_id, payload.category)}
 
 
 def list_projects(principal: Any, payload: CanvasListProjectsInput) -> dict:

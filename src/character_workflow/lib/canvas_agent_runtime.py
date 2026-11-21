@@ -29,7 +29,7 @@ from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasReadSpecInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -354,17 +354,11 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。
     rejected: run_generations 里用户在确认卡上拒绝的项（下标）。"""
     if tool == "search_library":
-        from character_workflow.lib.canvas_agent_library import search_library
-        payload = CanvasSearchLibraryInput(project_id=project_id, **arguments)
-        tools.authorize(LOCAL, project_id, "canvas_read")
-        return search_library(project_id, payload.category, payload.limit), []
+        return tools.search_library(LOCAL, CanvasSearchLibraryInput(project_id=project_id, **arguments)), []
     if tool == "search_team":
-        from character_workflow.lib.canvas_agent_library import search_team
-        payload = CanvasSearchTeamInput(project_id=project_id, **arguments)
-        tools.authorize(LOCAL, project_id, "canvas_read")
-        return search_team(project_id, payload.query, payload.category, payload.limit), []
+        return tools.search_team(LOCAL, CanvasSearchTeamInput(project_id=project_id, **arguments)), []
     if tool == "read_spec":
-        return {"text": team_library_specs.agent_category_spec(project_id, arguments["category"])}, []
+        return tools.read_spec(LOCAL, CanvasReadSpecInput(project_id=project_id, **arguments)), []
     if tool == "append_lesson":
         return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
@@ -852,21 +846,11 @@ def build_tools() -> list:
 # ── 历史 ↔ 模型输入 ──────────────────────────────────────────────────────────────
 
 def _media_data_url(project_id: str, version_id: str) -> str | None:
-    from character_workflow.lib.canvas_agent_library import (
-        ASSET_IMAGE_PREFIX, TEAM_ASSET_PREFIX, preview, team_preview,
-    )
+    from character_workflow.lib.canvas_agent_library import ASSET_IMAGE_PREFIX, TEAM_ASSET_PREFIX, reference_preview
     if version_id.startswith(vision.PREVIEW_PREFIX):
         return vision.preview_data_url(version_id)
-    if version_id.startswith(TEAM_ASSET_PREFIX):
-        try:
-            return team_preview(project_id, version_id)
-        except (KeyError, OSError, ValueError):
-            return None
-    if version_id.startswith(ASSET_IMAGE_PREFIX):
-        try:
-            return preview(project_id, version_id.removeprefix(ASSET_IMAGE_PREFIX))[0]
-        except (KeyError, OSError, ValueError):
-            return None
+    if version_id.startswith((ASSET_IMAGE_PREFIX, TEAM_ASSET_PREFIX)):
+        return reference_preview(project_id, version_id)
     try:
         media = tools.read_media(LOCAL, CanvasReadMediaInput(project_id=project_id,
                                                              version_id=version_id))
