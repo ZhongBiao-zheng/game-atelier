@@ -193,13 +193,8 @@ async def _relay(request, owner, endpoint):
                         if len(detail) >= 65536:
                             break
                     if adapter:
-                        # Preserve upstream diagnostics inside the gateway envelope. Only the host
-                        # may emit a top-level updating code (the member would resend the request).
-                        message = await asyncio.to_thread(gateway_tasks._safe_error, RuntimeError(
-                            detail.decode("utf-8", errors="replace")))
-                        await stack.aclose()
-                        return JSONResponse({"error": {"message": message, "type": "gateway_upstream_error",
-                                                       "code": response.status_code}}, status_code=response.status_code)
+                        # The member must never mistake a provider's error for host admission (updating).
+                        raise _UpstreamFailure(response.status_code, detail.decode("utf-8", errors="replace"))
                     raise RuntimeError(f"text api {response.status_code}: "
                                        + detail.decode("utf-8", errors="replace"))
                 call.accepted = True
@@ -231,14 +226,26 @@ async def _relay(request, owner, endpoint):
                 await stack.aclose()
                 if isinstance(error, ProtocolError) and not call.accepted:
                     raise gateway_tasks.GatewayRequestError(422, str(error)) from error
-                reason = None if call.accepted else _reason(error)
+                if isinstance(error, _UpstreamFailure):
+                    # Only an explicit refusal can move a request to a different authorized member.
+                    # Never probe a different endpoint on this member after a native failure.
+                    if error.status not in {401, 402, 403, 404, 429}:
+                        raise
+                    reason = _reason(RuntimeError(f"text api {error.status}"))
+                else:
+                    reason = None if call.accepted else _reason(error)
                 if reason is None:
                     raise _UpstreamFailure(
                         503, gateway_tasks._safe_error(error),
                     ) from error
                 model_routes.cool_down("text", key.alias, reason)
-                picked = await asyncio.to_thread(_pick, owner, route_id, call.task.route_tried,
-                                                 route_order=route_order, params=payload, endpoint=endpoint)
+                try:
+                    picked = await asyncio.to_thread(_pick, owner, route_id, call.task.route_tried,
+                                                     route_order=route_order, params=payload, endpoint=endpoint)
+                except gateway_tasks.GatewayRequestError:
+                    if isinstance(error, _UpstreamFailure):
+                        raise error from None
+                    raise
                 continue
             except BaseException:
                 await stack.aclose()
