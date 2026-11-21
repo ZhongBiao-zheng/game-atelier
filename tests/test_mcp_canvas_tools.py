@@ -442,3 +442,18 @@ def test_batch_uses_current_document_after_first_job_finishes(monkeypatch):
         assert [item["status"] for item in result["items"]] == ["submitted", "submitted"]
         assert len(read_canvas_document(pid).content_versions) == 2
         assert len(vendor.calls("POST", path)) == 2
+
+
+async def test_oversize_contact_sheet_preserves_frame_metadata(isolated_data_root, tmp_path, video_project, monkeypatch):
+    from character_workflow.lib import canvas_agent_video as video
+    from character_workflow.mcp.client import MAX_RESPONSE_BYTES
+
+    pid, video_id, _ = video_project
+    info = {"duration_ms": 1000, "fps": 10, "width": 480, "height": 270}
+    monkeypatch.setattr(video, "contact_sheet_for",
+                        lambda *_: (info, [(5, 500)], bytes(MAX_RESPONSE_BYTES)))
+    async with adapter_session(isolated_data_root, tmp_path) as client:
+        result = await client.call_tool("canvas_read_video_frames", {"payload": {
+            "project_id": pid, "version_id": video_id, "count": 1}})
+        assert not result.is_error and [part.type for part in result.content] == ["text"]
+        assert result.structured_content == {**info, "version_id": video_id, "frames": [{"index": 5, "t_ms": 500}]}
