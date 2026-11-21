@@ -195,6 +195,7 @@ class JobParams(BaseModel):
     mj_submit_uncertain: bool | None = None
     # EvoLink 的提交边界、原订单与下载进度；仅 runner 可写，不能复用到新订单。
     evolink_state: dict[str, Any] | None = None
+    comfyui_resume: dict[str, str] | None = None
     # Canvas 多角度生成专用：结构化相机参数进入 Snapshot，caller 只消费最终 prompt。
     angle_horizontal: int | None = Field(default=None, ge=-60, le=60)
     angle_pitch: int | None = Field(default=None, ge=-45, le=45)

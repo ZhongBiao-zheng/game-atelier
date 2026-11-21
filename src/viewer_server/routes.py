@@ -232,7 +232,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
                     "mask_image", "markup_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
-                    "evolink_state", "edit_inputs", "edit_prompt",
+                    "comfyui_resume", "evolink_state", "edit_inputs", "edit_prompt",
                     "route_id", "route_order", "route_tried",
                     "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of", "gateway_cancel_pending",
                     "gateway_settlement", "gateway_charged_on",
@@ -2014,6 +2014,7 @@ def _create_user_job(
     params.mj_submission_ids = None
     params.mj_submit_uncertain = None
     params.evolink_state = None
+    params.comfyui_resume = None
     params.edit_inputs = None
     params.edit_prompt = None
     params.gateway_idempotency_key = None

@@ -297,6 +297,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "mj_submission_ids": None,
         "mj_submit_uncertain": None,
         "evolink_state": None,
+        "comfyui_resume": None,
         # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
         "route_tried": None,
         "gateway_idempotency_key": None,
@@ -392,7 +393,15 @@ def has_resumable_music_task(job: Job) -> bool:
     return bool(job.params.provider_task_protocol == "yinchao" and job.params.provider_task_ids)
 
 
+def has_resumable_comfyui_task(job: Job) -> bool:
+    state = job.params.comfyui_resume or {}
+    return (job.provider == "comfyui" and bool(job.params.provider_task_ids)
+            and state.get("prefix") == f"atelier/{job.job_id}")
+
+
 def is_resumable_studio_job(job: Job) -> bool:
+    if has_resumable_comfyui_task(job):
+        return job.namespace == "studio" and job.status == JobStatus.PENDING
     if job.provider == "evolink":
         from .canvas_image_edits import has_resumable_mj_task
         return (job.namespace == "studio" and job.status == JobStatus.PENDING

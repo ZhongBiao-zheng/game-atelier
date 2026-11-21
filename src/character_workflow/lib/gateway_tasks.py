@@ -674,7 +674,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     render = dispatch_audio
                 resume_kwargs: dict[str, Any] = {}
                 if key.provider == "comfyui":
-                    def on_prompt_submitted(prompt_id, prefix):
+                    def on_prompt_submitted(prompt_id, prefix, _base_url):
                         ids = [*_read(task_id).upstream_task_ids, prompt_id]
                         _update(task_id, upstream_task_ids=ids, resume_params={
                             "comfyui": {"prefix": prefix},
@@ -727,7 +727,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     return _finish(current, status="failed", error="上游任务结果未确认：" + _safe_error(error),
                                    error_kind="unconfirmed")
                 reason = model_routes.failover_reason(error)
-                if reason is None:
+                if reason is None or (key.provider == "comfyui" and current.upstream_task_ids):
                     # 未确认已在上面按类型（is_unconfirmed）与尝试记录处理；到这里的是明确的失败（第 6 批删了按文案判断）。
                     return _finish(_read(task_id), status="failed", error=_safe_error(error),
                                    error_kind="failed")

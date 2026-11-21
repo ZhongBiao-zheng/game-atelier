@@ -1314,6 +1314,7 @@ Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/
 - WorkflowInput：`id, label, type, node_id, class_type, field, default, min?, max?, step?,
   options: [{value,label}], required`。type 为 prompt / text / int / float / boolean /
   select / seed / image / mask；prompt 和 mask 最多一个，image 按声明顺序对应参考图。
+- 本机 Studio 与画布由 runner 在 `params.comfyui_resume` 记输出前缀与本机地址，在 `provider_task_ids` 登记同一次运行的订单。它们只用于续查，不可由浏览器创建或修改，不进入配方或重试克隆。
 - JobParams 新增 `workflow_inputs: Record<string, string | number | boolean | null>`，
   只允许普通参数和种子值；prompt、图片、mask 仍使用现有专用字段。seed 的 null 表示随机。
   未声明参数、越界值、错误类型和非法选项直接拒绝。固定种子要求 n=1。

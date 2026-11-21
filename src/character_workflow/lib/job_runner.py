@@ -763,6 +763,29 @@ def _run_once(
                     from character_workflow.lib.callers.atelier_gateway import render_edit as render
                 else:
                     from character_workflow.lib.callers.image_edit import render
+            workflow_kwargs = {}
+            if job.provider == "comfyui":
+                from character_workflow.lib.callers import comfyui
+                from character_workflow.lib.comfyui_client import ComfyUIUnavailableError
+                from character_workflow.lib.comfyui_schema import local_base_url
+                from character_workflow.lib.keys import find_by_alias
+
+                def record_prompt(prompt_id, prefix, base_url):
+                    params["provider_task_ids"] = [*(params.get("provider_task_ids") or []), prompt_id]
+                    params["comfyui_resume"] = {"prefix": prefix, "base_url": base_url}
+                    on_params_changed()
+
+                workflow_kwargs["on_prompt_submitted"] = record_prompt
+                if state := job.params.comfyui_resume:
+                    key = find_by_alias(job.alias)
+                    if (key is None or not key.enabled or key.provider != "comfyui"
+                            or not any(m.id == job.model for m in key.models)
+                            or state.get("base_url") != local_base_url(key.base_url)
+                            or state.get("prefix") != f"atelier/{job.job_id}"
+                            or not job.params.provider_task_ids):
+                        raise ComfyUIUnavailableError(execution_started=True)
+                    render = comfyui.render
+                    workflow_kwargs["resume_prompt_ids"] = job.params.provider_task_ids
             paths = render(
                 job_id=job.job_id,
                 prompt=_with_reference_numbering(job.prompt, params),
@@ -778,9 +801,14 @@ def _run_once(
                 on_params_changed=on_params_changed,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
-                **_gateway_kwargs(job),
+                **workflow_kwargs, **_gateway_kwargs(job),
                 **({"gateway_should_stop": gateway_stop} if gateway_stop else {}),
             )
+            resumed_ids = workflow_kwargs.get("resume_prompt_ids")
+            partial_workflow = bool(resumed_ids and len(resumed_ids) < (job.params.n or 1))
+            if partial_workflow:
+                params["warnings"] = [*(params.get("warnings") or []),
+                                      f"部分完成：重启前登记了 {len(resumed_ids)}/{job.params.n} 个工作流"]
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
                 raise JobRunnerError(f"{job.provider or job.alias} returned no valid image artifacts")
@@ -819,9 +847,10 @@ def _run_once(
             if defer_terminal:
                 persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
             _mark_member_healthy(job)
+            terminal = JobStatus.PARTIAL if partial_workflow else JobStatus.DONE
             return update_job_status(
                 job.job_id,
-                status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
+                status=JobStatus.PENDING if defer_terminal else terminal,
                 output_paths=persisted_paths,
                 error=None,
             )

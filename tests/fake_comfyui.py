@@ -90,7 +90,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/history/"):
             state.polls += 1
             identifier = path.rsplit("/", 1)[-1]
-            if state.mode == "timeout" or state.polls <= state.delay + 1:
+            if identifier not in state.prompts or (identifier not in state.completed and (
+                    state.mode == "timeout" or state.polls <= state.delay + 1)):
                 return self.respond({})
             state.completed.add(identifier)
             status = {"status_str": "success", "completed": True, "messages": []}

@@ -409,3 +409,87 @@ def test_mask_without_declared_input_is_rejected_before_upload(host, tmp_path):
         comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path,
                        params={"mask_image": str(mask)})
     assert not host.uploads and not host.prompts
+
+
+class _ProcessExit(BaseException):
+    pass
+
+
+def _stop_local_job(monkeypatch, run, job_id, accepted=1):
+    from character_workflow.lib import job_runner
+    persist = job_runner.update_job_params
+
+    def stop_after_save(identifier, params):
+        saved = persist(identifier, params)
+        if saved.params.comfyui_resume and len(saved.params.provider_task_ids) == accepted:
+            raise _ProcessExit
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(job_runner, "update_job_params", stop_after_save)
+        with pytest.raises(_ProcessExit):
+            run(job_id)
+
+
+@pytest.mark.parametrize("requested,accepted,missing", [(1, 1, False), (3, 2, False), (1, 1, True)])
+def test_studio_resume_registered_comfyui_jobs(host, monkeypatch, requested, accepted, missing):
+    from character_workflow.lib import jobs
+    from character_workflow.lib.job_runner import JobRunnerError, run_job
+    from viewer_server.routes import _StudioJobCreate, _create_user_job
+
+    workflow = imported()
+    job = _create_user_job(_StudioJobCreate(prompt="cat", model=workflow.id, alias="local",
+                                            params={"n": requested}), namespace="studio")
+    _stop_local_job(monkeypatch, run_job, job.job_id, accepted)
+    assert jobs.resumable_studio_jobs() == [job.job_id]
+    assert jobs.fail_orphan_studio_jobs() == []
+    if missing:
+        host.prompts.clear()
+        host.mode = "timeout"
+        with pytest.raises(JobRunnerError, match="未确认"):
+            run_job(job.job_id)
+        assert not host.prompts and jobs.read_job(job.job_id).status.value == "failed"
+    else:
+        done = run_job(job.job_id)
+        assert done.status.value == ("partial" if requested > accepted else "done")
+        assert done.params.actual_cost_cny == 0
+        assert len(done.output_paths) == len(host.prompts) == accepted
+        assert all(Path(path).read_bytes() == host.png for path in done.output_paths)
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_canvas_reconciles_and_resumes_comfyui(host, monkeypatch, count):
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    from character_workflow.lib.canvas_runs import reconcile_canvas_jobs, run_canvas_job, submit_canvas_run
+    from tests.test_generation_recipe import NOW, _media_node, _save_nodes
+
+    workflow = imported()
+    project = create_canvas_project("恢复工作流")
+    draft = {"mode": "image", "prompt": "cat", "alias": "local", "model": workflow.id,
+             "params": {"n": count}, "updated_at": NOW}
+    doc = _save_nodes(project.project_id, [_media_node("source", draft)], [])
+    job, _ = submit_canvas_run(project.project_id, "source", doc.revision, requested_count=count)
+    _stop_local_job(monkeypatch, run_canvas_job, job.job_id)
+    assert reconcile_canvas_jobs(fail_pending=True) == [job.job_id]
+    done = run_canvas_job(job.job_id)
+    assert done.status.value == ("partial" if count > 1 else "done"), done.error
+    assert len(host.prompts) == len(done.output_paths) == 1
+    assert sum(c.status == "succeeded" for c in done.canvas_run.candidates) == 1
+
+
+def test_studio_resume_stays_on_original_comfy_server(host, monkeypatch):
+    from character_workflow.lib import jobs
+    from character_workflow.lib.job_runner import JobRunnerError, run_job
+    from viewer_server.routes import _StudioJobCreate, _create_user_job
+
+    workflow = imported()
+    body = _StudioJobCreate(prompt="cat", model=workflow.id, alias="local", params={})
+    job = _create_user_job(body, namespace="studio")
+    _stop_local_job(monkeypatch, run_job, job.job_id)
+    with FakeComfyUI() as replacement:
+        keys.patch_key("local", {"base_url": replacement.url})
+        with pytest.raises(JobRunnerError, match="未确认"):
+            run_job(job.job_id)
+        assert not replacement.prompts and replacement.polls == 0
+    new_job = jobs.clone_job_for_retry(job.job_id)
+    assert new_job.params.comfyui_resume is None and not new_job.params.provider_task_ids

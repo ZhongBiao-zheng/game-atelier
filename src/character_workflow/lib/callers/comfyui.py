@@ -133,7 +133,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
         for prompt_id in prompt_ids:
             client.execution_started = True
             if on_prompt_submitted and resume_prompt_ids is None:
-                on_prompt_submitted(prompt_id, prefix)
+                on_prompt_submitted(prompt_id, prefix, client.base_url)
             deadline = time.monotonic() + workflow.timeout_seconds
             while True:
                 check_cancel(prompt_id)
