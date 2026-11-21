@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 OPENAI_CHAT = "openai-chat"
 OPENAI_RESPONSES = "openai-responses"
 ANTHROPIC_MESSAGES = "anthropic-messages"
@@ -62,3 +64,12 @@ def mismatch_hint(raw: str) -> str | None:
     if "response is not json" in low:
         return NOT_AN_API
     return None
+
+
+async def translated_chunks(chunks, translator) -> AsyncIterator[bytes]:
+    """Feed one native SSE response to its translator and flush the terminal event."""
+    async for chunk in chunks:
+        if data := translator.feed(chunk):
+            yield data
+    if data := translator.finish():
+        yield data

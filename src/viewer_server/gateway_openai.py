@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from character_workflow.lib import gateway_access, gateway_tasks, model_routes
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini
+from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini, translated_chunks
 from character_workflow.lib.gateway_text import (
     CALL_TAG_HEADER, TextCall, input_tokens_estimate, valid_call_tag,
 )
@@ -222,6 +222,8 @@ async def _relay(request, owner, endpoint):
                     return JSONResponse(result)
                 # Prime before sending headers: connection failures before any byte may fail over.
                 iterator = response.aiter_bytes()
+                if adapter:
+                    iterator = translated_chunks(iterator, adapter.StreamTranslator(model=route_id))
                 first = await anext(iterator, None)
                 if first is None:
                     raise ValueError("上游返回空流")

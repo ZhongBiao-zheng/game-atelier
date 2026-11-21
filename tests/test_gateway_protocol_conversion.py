@@ -97,3 +97,82 @@ def test_native_json_tools_image_and_errors(protocol, gateway):
         assert failure.status_code == status and detail in failure.json()["error"]["message"]
         assert "code" not in failure.json()
     assert len(vendor.received) == 3
+
+
+def sse_events(response):
+    import json
+    return [json.loads(line[5:]) for line in response.text.splitlines()
+            if line.startswith("data:") and line[5:].strip() != "[DONE]"]
+
+
+def as_sse(*events):
+    import json
+    return b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in events)
+
+
+def latest_usage():
+    return gateway_tasks.read_usage(gateway_tasks._now().astimezone().strftime("%Y-%m"))[-1]
+
+
+@pytest.mark.parametrize("protocol", NATIVES)
+def test_translated_stream_terminal_and_usage(gateway, protocol):
+    from pathlib import Path
+    vendor, client = gateway
+    member("native", protocol, vendor.url)
+    payload = {"model": "shared", "stream": True, "messages": [{"role": "user", "content": "q"}]}
+    if protocol == "anthropic-messages":
+        path = "/v1/messages"
+        wire = (Path(__file__).parent / "fixtures/anthropic_stream/tool_use.sse").read_bytes()
+        wire = wire.replace(b'"input_tokens":472', b'"input_tokens":472,"cache_read_input_tokens":30,"cache_creation_input_tokens":10')
+        expected = (512, 30, 10, 89)
+        error = as_sse({"type": "error", "error": {"type": "overloaded_error", "message": "interrupted"}})
+    else:
+        path = "/v1beta/models/shared:streamGenerateContent"
+        wire = as_sse({"candidates": [{"content": {"parts": [{"text": "one"}, {"functionCall": {"name": "tool", "args": {}}}]},
+                                      "finishReason": "STOP"}], "usageMetadata": {
+                           "promptTokenCount": 80, "cachedContentTokenCount": 20,
+                           "candidatesTokenCount": 5, "thoughtsTokenCount": 4}})
+        expected = (80, 20, 0, 9)
+        error = as_sse({"error": {"message": "interrupted"}})
+    vendor.on("POST", path, wire, error)
+    response = client.post(CHAT, json=payload)
+    events = sse_events(response)
+    choices = [choice for event in events for choice in event["choices"]]
+    assert any(c["delta"].get("content") for c in choices)
+    assert any(c["delta"].get("tool_calls") for c in choices)
+    assert choices[-1]["finish_reason"] == "tool_calls"
+    row = latest_usage()
+    assert tuple(row[field] for field in ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens")) == expected
+    assert row["status"] == "done"
+    assert sse_events(client.post(CHAT, json=payload))[-1]["error"]["message"] == "interrupted"
+    assert latest_usage()["status"] == "failed" and latest_usage()["charged_cny"] == 0
+
+
+async def test_member_sdk_streams_real_gateway_and_anthropic(monkeypatch):
+    from pathlib import Path
+    from character_workflow.lib.canvas_agent_runtime import _agent_client
+    from tests.fake_http_vendor import FakeVendor
+    from tests.test_gateway_client import _free_port
+    from viewer_server.gateway_app import GatewayServer
+
+    monkeypatch.setenv("no_proxy", "*")
+    _, token = gateway_keys.create_key("member")
+    with FakeVendor() as vendor:
+        member("native", "anthropic-messages", vendor.url)
+        wire = (Path(__file__).parent / "fixtures/anthropic_stream/tool_use.sse").read_bytes()
+        vendor.on("POST", "/v1/messages", wire)
+        server = GatewayServer(host="127.0.0.1")
+        port = _free_port()
+        server.start(port)
+        try:
+            hub = keys.KeySpec(alias="Hub", provider="atelier", base_url=f"http://127.0.0.1:{port}",
+                               access_key=token, created_at="test")
+            async with _agent_client(hub, "openai-chat", None, None) as client:
+                stream = await client.chat.completions.create(model="shared", stream=True,
+                    messages=[{"role": "user", "content": "weather?"}])
+                chunks = [chunk async for chunk in stream]
+            deltas = [c.delta for chunk in chunks for c in chunk.choices]
+            assert any(d.content for d in deltas) and any(d.tool_calls for d in deltas)
+            assert len(vendor.received) == 1
+        finally:
+            server.stop()
