@@ -252,8 +252,49 @@ def test_sync_worker_waits_and_can_restart(monkeypatch, module, start):
         assert not thread.is_alive() and len(calls) == count
 
 
+def test_sync_restart_during_active_refresh(monkeypatch):
+    import logging
+    import threading
+
+    from character_workflow.lib.periodic_sync import PeriodicSync
+
+    worker = PeriodicSync("restart-test")
+    logger = logging.getLogger(__name__)
+    refreshing, release, joining, restarted = (threading.Event() for _ in range(4))
+
+    def first_refresh():
+        refreshing.set()
+        release.wait(5)
+
+    worker.start(first_refresh, 3600, logger, "refresh failed")
+    assert refreshing.wait(2)
+    old = worker.stop()
+    join = old.join
+
+    def observe_join():
+        joining.set()
+        join()
+
+    monkeypatch.setattr(old, "join", observe_join)
+    start = threading.Thread(target=worker.start, args=(restarted.set, 3600, logger, "failed"))
+    start.start()
+    try:
+        assert joining.wait(2)
+        assert not restarted.is_set()
+        release.set()
+        assert restarted.wait(2)
+        assert not old.is_alive()
+    finally:
+        release.set()
+        start.join(2)
+        worker.stop().join(2)
+
+
 def test_while_loops_do_not_sleep_in_background_workers():
-    """Scan direct time.sleep calls inside while loops; allow finite per-operation polling."""
+    """Scan direct time.sleep in src while loops, except finite per-operation polling.
+
+    For loops, from time import sleep, aliased imports and plugins/*/server/ are outside this scan.
+    """
     import ast
     from pathlib import Path
 
