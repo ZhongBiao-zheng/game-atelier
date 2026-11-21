@@ -221,14 +221,14 @@ def test_output_without_shots_is_an_error(client, vendor):
     assert response.status_code == 422 and "没有给出任何镜头" in response.json()["detail"]["message"]
 
 
-def test_model_failure_is_recorded_once_without_retry(client, vendor):
+def test_repeated_upstream_502_is_recorded_as_one_failed_job(client, vendor):
     chat_provider(vendor)
     vendor.on("POST", "/v1/chat/completions", (502, {"error": "upstream"}))
     project_id, ids = project_with_script(SCRIPT)
     response = post(client, project_id, ids)
     assert response.status_code == 502
     assert response.json()["detail"]["message"] == "对话模型调用失败"
-    assert len(vendor.calls("POST")) == 1
+    assert len(vendor.calls("POST")) == 3
     [job] = list_jobs()
     assert job.status.value == "failed" and job.namespace == "assist"
 

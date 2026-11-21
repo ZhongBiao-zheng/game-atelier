@@ -472,8 +472,8 @@ def test_real_sdk_client_reads_a_compressed_plain_503(monkeypatch):
     assert error.value.body == {"error": {"message": "no channel"}} or "no channel" in str(error.value)
 
 
-def test_agent_on_other_providers_keeps_the_sdk_defaults(isolated_data_root):
-    """不经局域网 Atelier 的 Agent 不受 5-4 影响：SDK 自带重试仍是 2 次，客户端是 SDK 默认的。"""
+def test_direct_agent_disables_sdk_retries(isolated_data_root):
+    """直连 Agent 只走自己的重发层，网关继续使用更新等待逻辑。"""
     from character_workflow.lib import canvas_agent_runtime
     from character_workflow.lib.canvas_projects import create_canvas_project
 
@@ -484,7 +484,10 @@ def test_agent_on_other_providers_keeps_the_sdk_defaults(isolated_data_root):
                               creation_mode=next(iter(canvas_agent_runtime.CREATION_MODE_PROMPTS)),
                               project_id=project_id)
     client = canvas_agent_runtime.build_agent(session, on_gateway_wait=lambda: None).model._client
-    assert client.max_retries == 2
+    from character_workflow.lib.direct_text_retry import DirectTextTransport
+
+    assert client.max_retries == 0
+    assert isinstance(client._client._transport, DirectTextTransport)
     assert not isinstance(client._client._transport, gateway_text_wait.UpdatingAwareTransport)
 
 
