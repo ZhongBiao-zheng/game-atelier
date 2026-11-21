@@ -8,7 +8,7 @@ dependencies = [
   "watchdog>=5.0",
   "pydantic>=2.9",
   "python-multipart>=0.0.9",
-  "requests>=2.32",
+  "requests[socks]>=2.32",
   # Async streaming for the OpenAI-compatible LAN gateway relay.
   "httpx[socks]>=0.27",
   "pypinyin>=0.53",

@@ -26,6 +26,7 @@ from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
 from character_workflow.lib import keys, canvas_specs, team_library_specs
+from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
@@ -1164,10 +1165,6 @@ def start_host_settlement(session: CanvasAgentSession) -> None:
             logger.warning("canvas agent host settlement failed", exc_info=True)
 
     threading.Thread(target=work, name="agent-host-settlement", daemon=True).start()
-
-
-SOCKS_PROXY_MESSAGE = ("环境变量里的 socks:// 代理缺少版本号，请改成 socks5://、socks5h:// "
-                       "或 http 代理地址")
 
 
 def _agent_client(key: keys.KeySpec, protocol: str | None,

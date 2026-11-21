@@ -89,7 +89,7 @@ class GatewayNotAccepted(GatewayError):
 
 
 # 文本 / Agent 这类不走 _session() 的请求也要直连网关：把环境代理逐个置空（requests 合并时删除）。
-DIRECT_PROXIES = {"http": None, "https": None}
+DIRECT_PROXIES = {"http": None, "https": None, "all": None}
 
 
 def _session() -> requests.Session:
