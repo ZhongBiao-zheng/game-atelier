@@ -275,13 +275,16 @@ async def normal_lifespan(app: FastAPI):
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
-    from character_workflow.lib.jobs import has_resumable_gateway_task, has_resumable_music_task
+    from character_workflow.lib.jobs import (
+        has_resumable_comfyui_task, has_resumable_gateway_task, has_resumable_music_task,
+    )
     resumable = [
         job_id for job_id in reconciled
         if (
             (job := read_job(job_id)).status.value in {"pending", "pending_confirm"}
             and (job.runner_started_at is None or has_resumable_mj_task(job)
-                 or has_resumable_gateway_task(job) or has_resumable_music_task(job))
+                 or has_resumable_gateway_task(job) or has_resumable_music_task(job)
+                 or has_resumable_comfyui_task(job))
         )
     ]
     if reconciled:

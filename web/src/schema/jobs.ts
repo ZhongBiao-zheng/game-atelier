@@ -35,6 +35,7 @@ export interface JobParams {
   mj_submission_ids?: string[];
   mj_submit_uncertain?: boolean;
   evolink_state?: Record<string, unknown>;
+  comfyui_resume?: Record<string, string> | null;
   /** Canvas 多角度生成的服务端受控相机参数。 */
   angle_horizontal?: number;
   angle_pitch?: number;

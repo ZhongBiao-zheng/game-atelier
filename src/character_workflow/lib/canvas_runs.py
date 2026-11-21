@@ -35,6 +35,7 @@ from character_workflow.lib.job_runner import (
 )
 from character_workflow.lib.media_probe import video_dimensions
 from character_workflow.lib.jobs import (
+    has_resumable_comfyui_task,
     job_lock,
     list_jobs,
     new_job_id,
@@ -2946,6 +2947,8 @@ def _commit_canvas_candidate_attempt(
             if version is not None and output_path is not None and output_path not in output_paths:
                 output_paths.append(output_path)
             restored_params = original_params.model_copy(update={
+                **({"comfyui_resume": None, "provider_task_ids": None}
+                   if job.params.comfyui_resume else {}),
                 "actual_size": job.params.actual_size or original_params.actual_size,
                 "warnings": job.params.warnings or original_params.warnings,
                 # 每个候选发出的编辑输入相同，保留第一份记录。
@@ -3126,6 +3129,9 @@ def _run_canvas_candidates_incrementally(job: Job) -> Job:
             output_path=output_path,
             attempt_error=attempt_error,
         )
+        if has_resumable_comfyui_task(job) and committed.status == JobStatus.PENDING:
+            return _fail_pending_canvas_candidates(job.canvas_project_id, job.job_id,
+                                                   "主机重启，没有已登记的 ComfyUI 订单可以续查")
         original_params = committed.params
 
 
@@ -3684,7 +3690,7 @@ def reconcile_canvas_jobs(
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
                 reconciled.append(job.job_id)
                 continue
-            elif (has_resumable_mj_task(job) or has_resumable_gateway_task(job)
+            elif (has_resumable_comfyui_task(job) or has_resumable_mj_task(job) or has_resumable_gateway_task(job)
                   or has_resumable_music_task(job)):
                 # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
