@@ -51,6 +51,8 @@ class ViaMember(BaseModel):
     model_id: str
     name: str
     protocol: str | None = None
+    upstream_protocol: str | None = None
+    agent_tools_unverified: bool = False
     billing_group: str | None = None
     # 主机为这个成员选的内置品牌（I1）。只有 brand: 形式，在读网关快照时过滤（atelier_gateway）。
     icon: str | None = None
@@ -61,6 +63,10 @@ class ViaMember(BaseModel):
         data = handler(self)
         if data.get("icon") is None:
             data.pop("icon", None)
+        if data.get("upstream_protocol") is None:
+            data.pop("upstream_protocol", None)
+        if not data.get("agent_tools_unverified"):
+            data.pop("agent_tools_unverified", None)
         return data
 
 

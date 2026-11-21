@@ -66,6 +66,8 @@ def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[s
     members = [m for m in route.members if m.provider != gateway_tasks.GATEWAY_PROVIDER
                and gateway_access.member_in_scope(key, m)
                and gateway_access.member_relayable(route.modality, m)]
+    text_protocol = ("openai-responses" if all(m.protocol == "openai-responses" for m in members)
+                     else "openai-chat")
     view = {
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{
@@ -73,11 +75,18 @@ def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[s
             "alias": m.alias, "provider": m.provider,
             "base_url": None if m.protocol == "declarative" else m.base_url,
             "billing_group": m.billing_group,
-            "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
+            "model_id": m.model_id, "name": m.name, "protocol": text_protocol if route.modality == "text" else m.protocol,
+            **({"upstream_protocol": m.protocol} if route.modality == "text" and m.protocol else {}),
             # 只下发内置品牌；上传的图片（file:）是主机本地文件，不经网关。
             **({"icon": m.icon} if m.icon and m.icon.startswith("brand:") else {}),
         } for m in members],
     }
+    if route.modality == "text":
+        from character_workflow.lib.llm_protocols import detect
+        for member, snapshot in zip(members, view["members"]):
+            if member.protocol == "gemini-generate-content" and detect.agent_tools_unverified(
+                    *model_routes._member_key_and_model(member)):
+                snapshot["agent_tools_unverified"] = True
     if (declared := gateway_access.declared_view(route)) is not None:
         view["declared"] = declared
     if members[0].provider == "comfyui":

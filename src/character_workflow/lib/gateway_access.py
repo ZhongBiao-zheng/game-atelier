@@ -12,14 +12,18 @@ def member_in_scope(key: GatewayKeyRecord, member: model_routes.RouteMember) -> 
     return entry is not None and (entry.models is None or member.model_id in entry.models)
 
 
-def member_relayable(modality: str, member: model_routes.RouteMember) -> bool:
-    """网关能不能转这个成员：文本成员目前只转 OpenAI 格式（Chat / Responses）。
+def text_wire_protocol(protocol: str | None) -> str | None:
+    from character_workflow.lib.llm_protocols import OPENAI_CHAT, OPENAI_RESPONSES, TEXT_PROTOCOLS
+    if protocol not in TEXT_PROTOCOLS:
+        return None
+    return OPENAI_RESPONSES if protocol == OPENAI_RESPONSES else OPENAI_CHAT
 
-    接入端始终按 OpenAI 格式打网关；Anthropic 等协议要等主机端转换才放进来。
-    临时边界（ADR-0044），第 4 批完成后移除。"""
-    from character_workflow.lib.llm_protocols import speaks_openai
 
-    return modality != "text" or speaks_openai(member.protocol)
+def member_relayable(modality: str, member: model_routes.RouteMember, wire_protocol: str | None = None) -> bool:
+    if modality != "text":
+        return True
+    wire = text_wire_protocol(member.protocol)
+    return wire is not None and (wire_protocol is None or wire == wire_protocol)
 
 
 def member_declared(member: model_routes.RouteMember) -> dict | None:

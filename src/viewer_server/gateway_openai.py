@@ -52,11 +52,12 @@ def error_response(error: gateway_tasks.GatewayRequestError) -> JSONResponse:
                         status_code=error.status, headers=headers)
 
 
-def _pick(owner, route_id, tried, *, params=None, route_order=None, freeze_order=None, consume=False):
+def _pick(owner, route_id, tried, *, endpoint="chat/completions", params=None, route_order=None, freeze_order=None, consume=False):
     gateway_access.check_route(owner, "text", route_id)
     picked = gateway_tasks._pick_member(route_id, tried, owner, "text", params=params,
                                         route_order=route_order, freeze_order=freeze_order,
-                                        consume=consume)
+                                        consume=consume, wire_protocol=("openai-responses" if endpoint == "responses"
+                                                                         else "openai-chat"))
     if picked is None:
         raise gateway_tasks.GatewayRequestError(503, "网关的供应商都不可用")
     return picked
@@ -153,7 +154,7 @@ async def _relay(request, owner, endpoint):
     # 选成员（读 KEY 文件、路由锁）与受理（持 gateway_tasks._lock、读用量算预占）都是同步阻塞调用，
     # 不能在网关事件循环里做：锁被图片任务的调度 / 结算占着时，整个网关端口（轮询、健康检查）一起停。
     picked = await asyncio.to_thread(_pick, owner, route_id, [], params=payload,
-                                     freeze_order=route_order, consume=True)
+                                     freeze_order=route_order, consume=True, endpoint=endpoint)
     call = await asyncio.to_thread(TextCall, owner, route_id, picked,
                                    input_tokens_estimate(payload, body_size), streaming,
                                    route_order=route_order,
@@ -211,7 +212,7 @@ async def _relay(request, owner, endpoint):
                     ) from error
                 model_routes.cool_down("text", key.alias, reason)
                 picked = await asyncio.to_thread(_pick, owner, route_id, call.task.route_tried,
-                                                 route_order=route_order, params=payload)
+                                                 route_order=route_order, params=payload, endpoint=endpoint)
                 continue
             except BaseException:
                 await stack.aclose()
