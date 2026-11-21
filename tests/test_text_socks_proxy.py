@@ -80,3 +80,50 @@ async def test_gateway_agent_skips_socks(socks_network):
     async with client_for(vendor.url, provider="atelier") as client:
         assert (await chat(client)).choices[0].message.content == "ok"
     assert len(vendor.received) == 1 and not tunnels
+
+
+@pytest.mark.parametrize("socks_network", ["socks5", "socks5h"], indirect=True)
+def test_requests_image_and_text_use_socks(socks_network):
+    from character_workflow.lib.callers import openai_image, openai_text
+
+    vendor, tunnels = socks_network
+    vendor.on("POST", "/images", {"data": []})
+    vendor.on("POST", "/chat", CHAT)
+    assert openai_image._post_json(vendor.url + "/images", "test", {}, timeout=2) == {"data": []}
+    assert openai_text._post_json(url=vendor.url + "/chat", access_key="test",
+                                  payload={}, timeout=2) == CHAT
+    assert len(tunnels) == len(vendor.received) == 2
+
+
+@pytest.mark.parametrize("socks_network", ["socks5h"], indirect=True)
+def test_requests_gateway_and_domestic_vendor_bypass_socks(socks_network, monkeypatch):
+    import socket
+    from character_workflow.lib import net_env
+    from character_workflow.lib.callers import openai_text
+
+    vendor, tunnels = socks_network
+    vendor.on("POST", "/chat", CHAT)
+    net_env.configure_proxy_bypass()
+    resolve = socket.getaddrinfo
+
+    def local_dns(host, *args):
+        assert host in {"api.volces.com", "127.0.0.1"}
+        return resolve("127.0.0.1", *args)
+
+    monkeypatch.setattr(socket, "getaddrinfo", local_dns)
+    for url, alias in [(vendor.url, "hub"), (f"http://api.volces.com:{vendor.server_port}", None)]:
+        assert openai_text._post_json(url=url + "/chat", access_key="test", payload={},
+                                      gateway_alias=alias, timeout=1) == CHAT
+    assert len(vendor.received) == 2 and not tunnels
+
+
+@pytest.mark.parametrize("socks_network", ["socks"], indirect=True)
+def test_sync_text_explains_unversioned_socks(socks_network):
+    from character_workflow.lib import net_env, structured_text_call
+    from character_workflow.lib.callers import openai_text
+
+    vendor, tunnels = socks_network
+    with pytest.raises(openai_text.OpenAITextError) as error:
+        openai_text._post_json(url=vendor.url, access_key="test", payload={}, timeout=1)
+    assert structured_text_call.failure_reason(str(error.value)) == net_env.SOCKS_PROXY_MESSAGE
+    assert not tunnels and not vendor.received

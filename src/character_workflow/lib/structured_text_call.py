@@ -37,14 +37,13 @@ def failure_reason(raw: str, error: BaseException | None = None) -> str:
     """对话模型调用失败的中文原因。欠费排在 403 前面：方舟欠费回的就是 403 AccountOverdueError。
 
     `error` 是原始异常：经局域网网关、主机正在更新时按类型直接给「网关正在更新，请稍后重试」。"""
-    from character_workflow.lib.gateway_text_wait import updating_message
-
-    from character_workflow.lib.llm_protocols import mismatch_hint
-
     from character_workflow.lib.direct_text_retry import INTERRUPTED
+    from character_workflow.lib.gateway_text_wait import updating_message
+    from character_workflow.lib.llm_protocols import mismatch_hint
+    from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE
 
-    if raw == INTERRUPTED:
-        return INTERRUPTED
+    if raw in (INTERRUPTED, SOCKS_PROXY_MESSAGE):
+        return raw
     if (updating := updating_message(error)) is not None:
         return updating
     if (hint := mismatch_hint(raw)) is not None:
