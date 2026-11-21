@@ -1,0 +1,64 @@
+name: Video encoder check
+on:
+  push:
+    branches: [codex/video-encoder-check]
+permissions:
+  contents: read
+jobs:
+  encoder:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            build: minimal
+          - os: windows-2022
+            build: minimal
+          - os: windows-2022
+            build: btbn
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      PYTHONUTF8: '1'
+      ENCODER_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build on Apple Silicon
+        if: runner.os == 'macOS'
+        run: bash scripts/video_encoder_check_build.sh .scratch/encoder
+      - name: Build with the runner's MinGW-w64 toolchain
+        if: runner.os == 'Windows' && matrix.build == 'minimal'
+        shell: pwsh
+        run: |
+          $env:MSYSTEM = 'MINGW64'
+          $env:CHERE_INVOKING = '1'
+          & C:\msys64\usr\bin\bash.exe -lc 'set -e; cd "$(cygpath -u "$GITHUB_WORKSPACE")"; command -v gcc; bash scripts/video_encoder_check_build.sh .scratch/encoder'
+          exit $LASTEXITCODE
+      - name: Measure native distribution
+        if: matrix.build == 'minimal'
+        run: python scripts/video_encoder_check_inventory.py .scratch/encoder/bin evidence
+      - name: Measure pinned BtbN distribution
+        if: matrix.build == 'btbn'
+        run: python scripts/video_encoder_check_inventory.py .scratch/encoder/bin evidence --btbn
+      - name: Prepare the repository's locked OpenCV test dependencies
+        run: python -m pip install --only-binary=:all: numpy==2.4.6 opencv-python-headless==4.11.0.86
+      - name: Exercise the native encoder and inspect outputs
+        run: python scripts/video_encoder_check.py --bin-dir .scratch/encoder/bin --out evidence
+      - name: Keep measurements and minimal binaries for native retest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encoder-${{ matrix.os }}-${{ matrix.build }}
+          path: |
+            evidence/
+            .scratch/encoder/source-sha256.txt
+            .scratch/encoder/build/ffbuild/config.log
+            .scratch/encoder/bin/ffmpeg
+            .scratch/encoder/bin/ffprobe
+            .scratch/encoder/bin/ffmpeg.exe
+            .scratch/encoder/bin/ffprobe.exe
+          include-hidden-files: true
+          retention-days: 7
