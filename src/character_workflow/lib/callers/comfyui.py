@@ -14,6 +14,10 @@ CLIENT_ID = uuid4().hex
 POLL_INTERVAL = 1.5
 
 
+class ComfyUIPollingPaused(Exception):
+    """Studio is shutting down. The registered prompt remains on the ComfyUI host."""
+
+
 def _queue_ids(queue: dict, name: str) -> list[str]:
     rows = [item for item in queue.get(name, []) if isinstance(item, list) and len(item) > 1]
     return [str(item[1]) for item in sorted(rows, key=lambda item: item[0])]
@@ -98,7 +102,7 @@ def _submit_prompts(client, workflow, *, prompt, n, params, prefix, check_cancel
 def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
            n: int = 1, params: dict | None = None, on_phase=None,
            should_cancel=None, job_id: str | None = None, resume_prompt_ids: list[str] | None = None,
-           on_prompt_submitted=None, **kwargs) -> list[str]:
+           on_prompt_submitted=None, studio_should_stop=None, **kwargs) -> list[str]:
     from character_workflow.lib.job_runner import JobCanceled
 
     key = workflows.provider(alias)
@@ -113,6 +117,10 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                 if prompt_id:
                     _cancel(client, prompt_id)
                 raise JobCanceled("任务已取消")
+            if studio_should_stop and studio_should_stop():
+                if client.execution_started:
+                    raise ComfyUIPollingPaused()
+                raise JobCanceled("已按请求停止")
 
         def phase_changed(phase, prompt_id):
             # Runner phase callbacks can observe cancellation before the next poll.
@@ -123,11 +131,11 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                 _cancel(client, prompt_id)
                 raise
 
-        check_cancel()
         if resume_prompt_ids is not None:
             prompt_ids = resume_prompt_ids
             client.execution_started = True
         else:
+            check_cancel()
             prompt_ids = _submit_prompts(client, workflow, prompt=prompt, n=n, params=params,
                                          prefix=prefix, check_cancel=check_cancel)
         for prompt_id in prompt_ids:
