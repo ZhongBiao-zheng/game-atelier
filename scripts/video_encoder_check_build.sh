@@ -23,7 +23,7 @@ case "$(uname -s)-$(uname -m)" in
                   --extra-ldflags=-mmacosx-version-min=13.0)
         encoder=h264_videotoolbox; suffix= ;;
     MINGW*-x86_64|MSYS*-x86_64)
-        platform=(--enable-mediafoundation --disable-x86asm --extra-ldflags=-static)
+        platform=(--enable-mediafoundation --enable-d3d11va --disable-x86asm --extra-ldflags=-static)
         encoder=h264_mf; suffix=.exe ;;
     *) echo "Expected native arm64 Darwin or x86_64 MinGW" >&2; exit 1 ;;
 esac
