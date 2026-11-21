@@ -1,4 +1,5 @@
 """真实 SDK、真实 TCP 和产品客户端接线，按上游收到的 POST 验证重发边界。"""
+import asyncio
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,8 @@ async def chat(client, **options):
 @pytest.mark.parametrize("protocol,path,success", [
     ("openai-chat", "/v1/chat/completions", CHAT),
     ("anthropic-messages", "/v1/messages", ANTHROPIC),
+    ("gemini-generate-content", "/v1beta/models/m:generateContent",
+     {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}]}),
     ("openai-responses", "/v1/responses", {"id": "r1", "object": "response", "output": []}),
 ])
 @pytest.mark.parametrize("status", [429, 502, 503, 504])
@@ -99,6 +102,9 @@ def broken_upstream(request):
                 release.wait(5)
             elif mode == "stream":
                 data = b'data: {"choices":[{"index":0,"delta":{"content":"ok"}}]}\n\n'
+                if self.path == "/v1/messages":
+                    data = (b'event: content_block_delta\ndata: {"type":"content_block_delta",'
+                            b'"index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n')
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Content-Length", str(len(data) + 100))
@@ -152,3 +158,79 @@ async def test_gateway_plain_502_sent_once():
             with pytest.raises(APIStatusError):
                 await chat(client)
         assert len(vendor.received) == 1
+
+
+@pytest.mark.parametrize("kind", ["agent", "sync"])
+@pytest.mark.parametrize("headers,waits", [
+    ({"Retry-After": "2"}, [2]), ({"Retry-After": "60"}, []),
+    ({"retry-after-ms": "10000", "Retry-After": "60"}, [10]),
+    ({"retry-after-ms": "10001"}, []),
+])
+async def test_rate_limit_observes_server_delay(kind, headers, waits, monkeypatch):
+    delays = []
+
+    async def record_delay(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(retry, "_async_pause", record_delay)
+    monkeypatch.setattr(retry, "_sync_pause", delays.append)
+    path = "/v1/chat/completions"
+    with FakeVendor() as vendor:
+        vendor.on("POST", path, (429, {}, headers), CHAT)
+        if kind == "agent":
+            async with client_for(vendor.url) as client:
+                if waits:
+                    assert (await chat(client)).choices[0].message.content == "ok"
+                else:
+                    with pytest.raises(APIStatusError) as caught:
+                        await chat(client)
+                    assert caught.value.status_code == 429
+        elif waits:
+            assert openai_text._post_json(url=vendor.url + path, access_key="t",
+                                          payload={}, timeout=1) == CHAT
+        else:
+            with pytest.raises(openai_text.OpenAITextError, match="429"):
+                openai_text._post_json(url=vendor.url + path, access_key="t", payload={}, timeout=1)
+        assert delays == waits
+        assert len(vendor.received) == len(waits) + 1
+
+
+async def test_agent_can_cancel_rate_limit_wait(monkeypatch):
+    waiting = asyncio.Event()
+
+    async def wait_for_cancel(delay):
+        assert delay == 2
+        waiting.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(retry, "_async_pause", wait_for_cancel)
+    with FakeVendor() as vendor:
+        vendor.on("POST", "/v1/chat/completions", (429, {}, {"Retry-After": "2"}))
+        async with client_for(vendor.url) as client:
+            task = asyncio.create_task(chat(client))
+            await asyncio.wait_for(waiting.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+        assert len(vendor.received) == 1
+
+
+@pytest.mark.parametrize("status", [408, 409, 500])
+def test_sync_final_status_is_sent_once(status):
+    with FakeVendor() as vendor:
+        vendor.on("POST", "/chat", (status, {}))
+        with pytest.raises(openai_text.OpenAITextError, match=str(status)):
+            openai_text._post_json(url=vendor.url + "/chat", access_key="t", payload={}, timeout=1)
+        assert len(vendor.received) == 1
+
+
+@pytest.mark.parametrize("broken_upstream", ["stream"], indirect=True)
+async def test_anthropic_interrupted_stream_is_sent_once(broken_upstream):
+    url, seen = broken_upstream
+    async with client_for(url, "anthropic-messages") as client:
+        with pytest.raises(retry.TextInterrupted) as caught:
+            stream = await chat(client, stream=True)
+            async for _ in stream:
+                pass
+    assert runtime.friendly_error(caught.value) == "连接中断，未自动重发（可能已计费）"
+    assert len(seen) == 1

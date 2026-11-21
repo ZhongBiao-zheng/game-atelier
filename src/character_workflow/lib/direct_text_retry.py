@@ -1,9 +1,11 @@
 """直连文本请求的重发边界（ADR-0044）。"""
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import AsyncIterator, Callable
+from asyncio import sleep as _async_pause
+from collections.abc import AsyncIterator, Callable, Mapping
+from email.utils import parsedate_to_datetime
+from math import isfinite
+from time import sleep as _sync_pause, time
 
 import httpx2 as httpx
 import requests
@@ -15,6 +17,28 @@ RETRY_STATUS = {429, 502, 503, 504}
 INTERRUPTED = "连接中断，未自动重发（可能已计费）"
 _INTERRUPTED_ERRORS = (httpx.ReadTimeout, httpx.ReadError, httpx.WriteError,
                        httpx.WriteTimeout, httpx.RemoteProtocolError)
+
+
+def _retry_delay(status: int, headers: Mapping[str, str], attempt: int) -> float | None:
+    if status not in RETRY_STATUS or attempt == len(BACKOFF):
+        return None
+    if status == 429:
+        for header, scale in (("retry-after-ms", 0.001), ("retry-after", 1)):
+            value = headers.get(header)
+            if value is None:
+                continue
+            try:
+                delay = float(value) * scale
+            except ValueError:
+                if header != "retry-after":
+                    continue
+                try:
+                    delay = max(0.0, parsedate_to_datetime(value).timestamp() - time())
+                except (ValueError, OverflowError, OSError, TypeError):
+                    continue
+            if isfinite(delay) and delay >= 0:
+                return delay if delay <= 10 else None
+    return BACKOFF[attempt]
 
 
 class TextInterrupted(RuntimeError):
@@ -50,14 +74,16 @@ class DirectTextTransport(httpx.AsyncBaseTransport):
                     isinstance(error, httpx.ConnectTimeout) or never_sent(error)
                 ):
                     raise
+                delay = BACKOFF[attempt]
             except _INTERRUPTED_ERRORS as error:
                 raise TextInterrupted() from error
             else:
-                if response.status_code not in RETRY_STATUS or attempt == len(BACKOFF):
+                delay = _retry_delay(response.status_code, response.headers, attempt)
+                if delay is None:
                     response.stream = _ResponseStream(response.stream)
                     return response
                 await response.aclose()
-            await asyncio.sleep(BACKOFF[attempt])
+            await _async_pause(delay)
         raise AssertionError("unreachable")
 
     async def aclose(self) -> None:
@@ -78,8 +104,11 @@ def send_sync(send: Callable[[], requests.Response]) -> requests.Response:
                 raise
             if attempt == len(BACKOFF):
                 raise
+            delay = BACKOFF[attempt]
         else:
-            if response.status_code not in RETRY_STATUS or attempt == len(BACKOFF):
+            delay = _retry_delay(response.status_code, response.headers, attempt)
+            if delay is None:
                 return response
-        time.sleep(BACKOFF[attempt])
+            response.close()
+        _sync_pause(delay)
     raise AssertionError("unreachable")
