@@ -64,6 +64,8 @@ def test_old_config_file_is_read_and_written_back_in_the_new_shape(isolated_data
     path.write_text(json.dumps(raw), encoding="utf-8")
     loaded = gateway_keys.read_config().keys[0]
     assert (loaded.quota.period, loaded.quota.cap_cny) == ("month", 50)
+    read_back = json.loads(path.read_text(encoding="utf-8"))["keys"][0]  # 读入本身就写回，不等下一次修改
+    assert "limits" not in read_back and read_back["quota"]["period"] == "month"
     gateway_keys.update_key(record.id, name="小王2")
     saved = json.loads(path.read_text(encoding="utf-8"))["keys"][0]
     assert "limits" not in saved and saved["quota"]["period"] == "month"
@@ -100,16 +102,18 @@ def test_no_reset_counts_everything_since_the_quota_was_set(isolated_data_root, 
 # ---------------------------------------------------------------- since 的写法
 
 
-def test_since_is_kept_when_only_the_amount_changes_and_reset_when_the_period_changes(isolated_data_root):
+def test_since_is_kept_when_only_the_amount_changes_and_reset_when_the_period_changes(isolated_data_root, monkeypatch):
+    ticks = iter(f"2026-11-20T00:00:{second:02d}+00:00" for second in range(60))
+    monkeypatch.setattr(gateway_keys, "_now", lambda: next(ticks))  # 每次取时间都不同，才能分清「沿用」与「重置」
     record, _token = gateway_keys.create_key("小王", {"cap_cny": 10, "period": "none"})
     first = record.quota.since
     assert first
     raised = gateway_keys.update_key(record.id, quota={"cap_cny": 20, "period": "none"})
     assert raised.quota.since == first and raised.quota.cap_cny == 20  # 加额：累计不清零
     switched = gateway_keys.update_key(record.id, quota={"cap_cny": 20, "period": "week"})
-    assert switched.quota.period == "week" and switched.quota.since >= first
+    assert switched.quota.period == "week" and switched.quota.since > first
     back = gateway_keys.update_key(record.id, quota={"cap_cny": 20, "period": "none"})
-    assert back.quota.since >= switched.quota.since  # 改回不重置：从现在重新累计
+    assert back.quota.since > switched.quota.since  # 改回不重置：从现在重新累计
     assert gateway_keys.update_key(record.id, quota=None).quota is None
 
 

@@ -193,6 +193,8 @@ ALL_MEMBERS = [("A", "gpt-image-2"), ("B", "gpt-image-2"), ("V", "sd-a"), ("V", 
      "当时等价，以后新增的供应商不含（变严）"),
     (["gpt-image-2"], ["V"], [], "等价：本来就不可见"),
     ([], None, [], "等价：仍不可用"),
+    (["seedance:*"], ["V"], [{"alias": "V", "models": ["sd-a", "sd-b"]}], "前缀 + 供应商名单：当时命中的具体模型（变严）"),
+    (["seedance:*"], ["A"], [], "前缀 + 供应商名单：名单里的供应商没有命中的模型，等价"),
 ])
 def test_legacy_scope_conversion_table(models, aliases, expected, change):
     _add_video_provider()
@@ -202,6 +204,25 @@ def test_legacy_scope_conversion_table(models, aliases, expected, change):
     for alias, model_id in ALL_MEMBERS:  # 转换当时，新判定与旧判定逐个成员一致
         member = _member_of(alias, model_id)
         assert gateway_access.member_in_scope(record, member) is _old_visible(models, aliases, member), change
+
+
+# 旧的通配规则（第 7 批前 test_model_permissions 的 8 条）：它现在决定转换结果，原样钉住。
+@pytest.mark.parametrize(("pattern", "route", "matches"), [
+    ("gpt-image-2", "gpt-image-2", True), ("gpt-image-2", "GPT-image-2", False),  # 区分大小写
+    ("seedance:*", "seedance:model", True), ("seedance:*", "other:model", False),
+    ("gpt*2", "gpt-image-2", False),        # * 只在结尾才算前缀
+    ("gpt?image-2", "gpt-image-2", False),  # ? 不是通配符
+    ("*", "anything", True), ("gpt-image", "gpt-image-2", False),  # 不带 * 时整串相等
+])
+def test_legacy_pattern_rule(pattern, route, matches):
+    assert gateway_keys._legacy_pattern_matches(pattern, route) is matches
+
+
+@pytest.mark.parametrize(("models", "visible"), [(None, 3), ([], 0)])
+def test_legacy_none_means_every_model_and_empty_means_none(models, visible):
+    members = [("A", "gpt-image-2", "gpt-image-2"), ("B", "x", "x"), ("V", "sd-a", "seedance:sd-a")]
+    scope, _kind = gateway_keys.legacy_scope(models, None, members)
+    assert (3 if scope is None else sum(len(entry["models"] or []) for entry in scope)) == visible
 
 
 def test_models_with_every_provider_off_become_usable_through_current_providers(caplog):

@@ -6,11 +6,14 @@
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from character_workflow.lib import gateway_keys, keys
+from character_workflow.lib import gateway_keys, gateway_tasks, keys
 from character_workflow.lib.callers import atelier_gateway
 from viewer_server import gateway_routes
 from viewer_server.gateway_admin_proxy import router as proxy_router
@@ -87,9 +90,17 @@ def test_old_remote_admin_gets_an_error_it_can_show_instead_of_new_shapes(member
 
 
 def test_old_remote_admin_keeps_endpoints_whose_shape_did_not_change(member):
+    now = datetime.now().astimezone()
+    path = gateway_tasks.usage_file(now.strftime("%Y-%m"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"time": now.isoformat(), "key_id": "k1", "kind": "image", "charged_cny": .5}) + "\n")
     client = member(old=True)
-    assert client.get("/api/gateway/providers/Hub/admin/usage").status_code == 200
-    assert client.get("/api/gateway/providers/Hub/admin/tasks").status_code == 200
+    usage = client.get("/api/gateway/providers/Hub/admin/usage")
+    assert usage.status_code == 200
+    totals = usage.json()["totals"]
+    assert usage.json()["scope"] == "team" and (totals["count"], totals["cost_cny"]) == (1, .5)
+    tasks = client.get("/api/gateway/providers/Hub/admin/tasks")
+    assert tasks.status_code == 200 and tasks.json() == {"tasks": []}
 
 
 def test_unauthenticated_request_is_still_401_before_the_version_check(isolated_data_root):

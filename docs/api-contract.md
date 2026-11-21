@@ -120,7 +120,8 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
 - 密钥策略（第 7 批）：`quota: {cap_cny, period: day|week|month|none, since} | null`（金额 >0 且 ≤1,000,000；since 由主机写，只改金额时保留、改周期时重置）；
   `scope: [{alias, models: [model_id] | null}] | null`：null 表示全部模型；条目 `models: null` 表示该供应商全部（含以后新增），列表是该供应商自己的 model id。
-  同一 alias 只能出现一次；新保存不允许空范围（`[]` 或某条 `models: []` 返回 422），旧数据转换出的空范围照常读出。旧 `limits` / `allowed_*` 读入时转换并写回（ADR-0025）。
+  同一 alias 只能出现一次；新保存不允许空范围（`[]` 或某条 `models: []` 返回 422），旧数据转换出的空范围照常读出。
+  别名 1–120 字、模型 id 1–200 字、每条最多 500 个模型、最多 200 条，只在接口写入时查。`.config/gateway.json` 读写上限同为 2 MiB，修改会超限时返回 413 并不保存。旧 `limits` / `allowed_*` 读入时转换并写回（ADR-0025）。
   day / week / month 按网关本地日历零点、周一和月初重置，none 不重置、从 since 起累计；受理时按首个可选成员估价预占，与限额判断共用锁。
   终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
 - 接入端接回原任务（2026-11-18 起）：第一次提交前生成幂等键并连同请求指纹（提示词、模型、发给主机的参数、素材字节的 sha256）
