@@ -5,12 +5,22 @@ export type BrandIconMode = 'mono' | 'color';
 const KEY = 'atelier:brand-icons';
 const CHANGE_EVENT = 'atelier:brand-icons-change';
 
+/** 每个品牌图标渲染时都会读：读不了（隐私模式、存储被禁用）按黑白，不能让图标所在的树崩掉。 */
 export function loadBrandIconMode(): BrandIconMode {
-  return window.localStorage.getItem(KEY) === 'color' ? 'color' : 'mono';
+  try {
+    return window.localStorage.getItem(KEY) === 'color' ? 'color' : 'mono';
+  } catch {
+    return 'mono';
+  }
 }
 
+/** 写不了时忽略：本次显示照读取结果走。 */
 export function setBrandIconMode(mode: BrandIconMode) {
-  window.localStorage.setItem(KEY, mode);
+  try {
+    window.localStorage.setItem(KEY, mode);
+  } catch {
+    return;
+  }
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
