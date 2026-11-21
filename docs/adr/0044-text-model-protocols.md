@@ -73,12 +73,6 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
     缺任何一个结果就报错，不发出去等上游 400；结束原因不是 STOP、又没有文本和调用（如 `MALFORMED_FUNCTION_CALL`、
     `SAFETY`、思考用完 `MAX_TOKENS`）时报错并带上 `finishMessage`，不当成空回答；HTTP 200 但内容是
     `{"error": …}`（中转站余额不足常这样回）时把上游原文报出来；流式最后一行没有换行结尾也照常处理。
-- **转换接上之前的临时边界**：局域网网关只按 OpenAI 格式收发。在它接上转换之前，`anthropic-messages`、
-  `gemini-generate-content` 成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用）。**网关的边界在第 4 批
-  完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员上游协议转换；
-  Gemini 成员的 `extra_content`（签名）要原样穿过主机。
-  Agent 的边界已在第 2 批移除：`canvas_agent_models.agent_can_use` 改为「协议在 `TEXT_PROTOCOLS` 里」，原样存下的
-  未知标注（如 `anthropic:messages`）仍报「该模型的接口暂不支持 Agent」。
 - **协议检测只发不计费的 GET**（第 3 批）：先看地址，再看 `GET /models` 的返回形状，必要时对用户填的同一个 origin
   换鉴权头再 GET；不发任何 POST（「校验类 400 不计费」没有官方依据），不跟随重定向。检测不出时按 OpenAI Chat，
   保留手动选择。One API / New API 不做单独的供应商类型：由「自定义供应商」入口识别，按 `/v1/models` 的
@@ -119,3 +113,9 @@ Agent 的 Chat、Responses、Anthropic 和 Gemini 均关闭 SDK 自带重试。�
 超过 10 秒直接返回这次 429。Agent 在等待期间可随时停止。
 一次性文本与结构化文本调用遵循相同规则。上游接收后读超时、断开连接、流中途失败均保留一次提交，
 显示「连接中断，未自动重发（可能已计费）」。网关沿用其受理与更新等待规则。
+
+## 局域网网关
+
+成员使用 OpenAI Chat 或 Responses 连接主机。主机先按密钥范围与入口选择成员，再用所选成员的地址、协议和鉴权头发请求。Chat 入口复用本机的 Anthropic、Gemini 请求、响应及 SSE 转换；Responses 入口只选 Responses 成员。Gemini 工具调用中的签名随 Chat 消息往返。协议不匹配时保留上游诊断，可能已执行的请求停止转发。只有主机可以发出成员端识别的更新等待标记。
+
+主机读取转换后的用量结算。总输入包含缓存读与缓存写，输出包含厂商计入用量的思考 token。累计事件取最终数值。同步价格缺少缓存写入价时，缓存写入按普通输入价估算；Anthropic 缓存写入通常更贵，因此这部分估价偏低。失败、准入预占、额度和主机更新等待继续沿用 ADR-0025。

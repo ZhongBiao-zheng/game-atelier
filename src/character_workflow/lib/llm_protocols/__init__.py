@@ -31,7 +31,7 @@ LABELS = {
 
 
 def speaks_openai(protocol: str | None) -> bool:
-    """按 OpenAI 格式（Chat / Responses）收发，不需要转换。局域网网关目前只接这类（第 4 批前）。"""
+    """按 OpenAI 格式（Chat / Responses）收发，不需要转换。"""
     return protocol in OPENAI_WIRE
 
 

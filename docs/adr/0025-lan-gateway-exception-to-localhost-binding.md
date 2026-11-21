@@ -73,3 +73,7 @@ ComfyUI 每一张对应一次 `POST /prompt`。主机每拿到一个 `prompt_id`
 
 本机 Studio 与画布共用相同的订单查询和下载逻辑。启动恢复器凭本机任务里登记的订单重新调用 runner。
 Studio 使用现有的 partial 状态，画布沿用候选的逐项结果，网关在成功响应的 warnings 中说明少取回的工作流数量。
+
+## 文本成员快照与协议转换
+
+文本路由向所有成员公布可用的 OpenAI 接入协议。仅当授权范围内全部成员均使用 Responses 时，`members[].protocol` 才为 `openai-responses`；混合路由使用 `openai-chat`。可选的 `upstream_protocol` 记录真实上游协议。旧客户端可以忽略它，新客户端仍可读取只有 `protocol` 的旧快照。自动识别的第三方 Gemini 原生接口若未经工具调用验证，主机将既有检测结果一并放入快照，供成员端 Agent 检查。网关协议版本保持 2。转换、用量与价格口径见 ADR-0044。
