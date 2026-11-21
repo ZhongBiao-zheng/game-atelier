@@ -5,7 +5,6 @@ ADR-0017 决定 4：画布是 server 持有、带修订号的活文档，Agent �
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import io
@@ -710,9 +709,9 @@ def check_run(principal: Any, payload: GetRunInput) -> dict:
     return view
 
 
-def is_image_version(project_id: str, version_id: str) -> bool:
-    version = read_canvas_document(project_id).content_versions.get(version_id)
-    return version is not None and version.kind == "image"
+def image_versions(project_id: str, version_ids: list[str]) -> list[str]:
+    versions = read_canvas_document(project_id).content_versions
+    return [vid for vid in version_ids if getattr(versions.get(vid), "kind", None) == "image"]
 
 
 def with_run_checks(principal, payload: GetRunInput, result: dict, *, sheet: bool = True):
@@ -739,8 +738,5 @@ def with_run_checks(principal, payload: GetRunInput, result: dict, *, sheet: boo
 async def wait_for_run(principal, payload: GetRunInput):
     from character_workflow.lib import canvas_agent_vision as vision
 
-    result = await vision.wait_for_run(lambda: get_run(principal, payload),
-                                       lambda vid: is_image_version(payload.project_id, vid))
-    if result.get("status") in vision.TERMINAL_STATUSES:
-        return await asyncio.to_thread(with_run_checks, principal, payload, result)
-    return result, None
+    return await vision.wait_for_run(lambda: get_run(principal, payload),
+                                     lambda ids: image_versions(payload.project_id, ids))

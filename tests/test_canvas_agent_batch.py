@@ -345,7 +345,7 @@ def _fake_views(monkeypatch, views: dict[str, dict]) -> dict[str, bool]:
         return {**view, "checked": True}
 
     monkeypatch.setattr(runtime, "_lookup_run", lookup)
-    monkeypatch.setattr(runtime, "_is_image_version", lambda _project_id, vid: vid.startswith("img"))
+    monkeypatch.setattr(tools, "image_versions", lambda _pid, ids: [v for v in ids if v.startswith("img")])
     monkeypatch.setattr(runtime, "_with_run_checks", checks)
     return sheets
 

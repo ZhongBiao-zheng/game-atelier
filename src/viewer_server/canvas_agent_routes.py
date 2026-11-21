@@ -124,7 +124,16 @@ def read_video_frames(request: Request, payload: CanvasReadVideoFramesInput):
 @router.post("/wait-for-run")
 async def wait_for_run(request: Request, payload: GetRunInput):
     current = principal(request)
-    result, video = await tools.wait_for_run(current, payload)
+    result = await tools.wait_for_run(current, payload)
+    return await asyncio.to_thread(_run_previews, current, payload, result)
+
+
+def _run_previews(current, payload, result):
+    from character_workflow.lib.canvas_agent_vision import TERMINAL_STATUSES
+
+    video = None
+    if result["status"] in TERMINAL_STATUSES:
+        result, video = tools.with_run_checks(current, payload, result)
 
     def images():
         if video:
@@ -136,7 +145,7 @@ async def wait_for_run(request: Request, payload: GetRunInput):
             except CanvasToolError:
                 continue
             yield vid, media.get("preview")
-    return await asyncio.to_thread(_attach_previews, result, images())
+    return _attach_previews(result, images())
 
 
 @router.post("/read-media")

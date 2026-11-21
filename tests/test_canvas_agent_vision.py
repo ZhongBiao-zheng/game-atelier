@@ -51,6 +51,6 @@ async def test_wait_for_run_stops_at_terminal_status(monkeypatch):
             {"status": "failed", "version_id": None},
         ]},
     ])
-    result = await vision.wait_for_run(lambda: next(views), lambda vid: vid == "img")
+    result = await vision.wait_for_run(lambda: next(views), lambda ids: [vid for vid in ids if vid == "img"])
     assert result["status"] == "done"
     assert result[vision.ATTACH_KEY] == ["img"]

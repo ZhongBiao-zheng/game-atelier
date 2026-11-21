@@ -25,7 +25,6 @@ from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
-from character_workflow.lib.canvas_agent_tools import is_image_version as _is_image_version
 from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE, UNSUPPORTED_SOCKS_PREFIXES
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
@@ -654,8 +653,9 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
 async def _wait_for_run(project_id: str, run_id: str) -> str:
     """轮询期间不占线程：每次查询进线程池，等待用 asyncio.sleep。"""
     try:
-        result, video = await tools.wait_for_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
-        result = _attach_video_preview(result, video)
+        result = await tools.wait_for_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
+        if result["status"] in vision.TERMINAL_STATUSES:
+            result = await asyncio.to_thread(_with_run_checks, project_id, run_id, result)
     except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}"
     return json.dumps(result, ensure_ascii=False)
@@ -702,8 +702,7 @@ def _runs_result(project_id: str, views: dict[str, dict]) -> dict:
             # 联系表只给可能附得上的 run 做：附图最多 4 个 run。
             view = _with_run_checks(project_id, run_id, view,
                                     sheet=len(media) < vision.MAX_ATTACH_IMAGES)
-            refs = [vid for vid in vision.succeeded_version_ids(view)
-                    if _is_image_version(project_id, vid)] + view.pop(vision.ATTACH_KEY, [])
+            refs = tools.image_versions(project_id, vision.succeeded_version_ids(view)) + view.pop(vision.ATTACH_KEY, [])
             if refs:
                 media[run_id] = refs
         runs.append({"run_id": run_id, **view})
