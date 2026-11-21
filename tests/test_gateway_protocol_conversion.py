@@ -51,3 +51,49 @@ def test_snapshot_supports_old_members_old_hosts_and_agent_restriction():
     [old] = gateway_models([only])
     assert old.protocol == "openai-responses" and old.via[0].upstream_protocol is None
     assert not detect.agent_tools_unverified(hub, old)
+
+
+@pytest.fixture
+def gateway(monkeypatch):
+    from fastapi.testclient import TestClient
+    from tests.fake_http_vendor import FakeVendor
+    from viewer_server.gateway_app import create_gateway_app
+
+    monkeypatch.setenv("no_proxy", "*")
+    _, token = gateway_keys.create_key("member")
+    with FakeVendor() as vendor:
+        with TestClient(create_gateway_app(), headers={"Authorization": "Bearer " + token}) as client:
+            yield vendor, client
+
+
+CHAT = "/gateway/v1/openai/chat/completions"
+NATIVES = ["anthropic-messages", "gemini-generate-content"]
+
+
+@pytest.mark.parametrize("protocol", NATIVES)
+def test_native_json_tools_image_and_errors(protocol, gateway):
+    from tests.test_anthropic_protocol_calls import REPLY
+    vendor, client = gateway
+    member("native", protocol, vendor.url)
+    req = {"model": "shared", "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "see"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}}]}]}
+    if protocol == "anthropic-messages":
+        path = "/v1/messages"
+        reply = {**REPLY, "stop_reason": "tool_use", "content": [{"type": "text", "text": "yes"}, *[
+            {"type": "tool_use", "id": "tool-" + n, "name": n, "input": {}} for n in ("one", "two")]]}
+    else:
+        path = "/v1beta/models/shared:generateContent"
+        reply = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "yes"}, *[
+            {"functionCall": {"name": n, "args": {}}} for n in ("one", "two")]]}}]}
+    vendor.on("POST", path, reply, (400, {"error": {"message": "native detail"}}),
+              (503, {"code": "updating", "error": {"message": "temporary upstream failure"}}))
+    result = client.post(CHAT, json=req)
+    assert result.status_code == 200, result.text
+    msg = result.json()["choices"][0]["message"]
+    assert msg["content"] == "yes" and [t["function"]["name"] for t in msg["tool_calls"]] == ["one", "two"]
+    assert b'YQ==' in vendor.received[0].body and b'image_url' not in vendor.received[0].body
+    for status, detail in [(400, "native detail"), (503, "temporary upstream failure")]:
+        failure = client.post(CHAT, json=req)
+        assert failure.status_code == status and detail in failure.json()["error"]["message"]
+        assert "code" not in failure.json()
+    assert len(vendor.received) == 3
