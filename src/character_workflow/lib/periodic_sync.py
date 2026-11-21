@@ -21,12 +21,18 @@ class PeriodicSync:
                 if self._stop.wait(interval):
                     return
 
-        with self._lock:
-            if self._thread and self._thread.is_alive():
-                return
-            self._stop.clear()
-            self._thread = threading.Thread(target=run, name=self.name, daemon=True)
-            self._thread.start()
+        while True:
+            with self._lock:
+                previous = self._thread
+                if previous is None or not previous.is_alive():
+                    self._stop.clear()
+                    self._thread = threading.Thread(target=run, name=self.name, daemon=True)
+                    self._thread.start()
+                    return
+                if not self._stop.is_set():
+                    return
+            # A stopped worker may still be refreshing. Only one concurrent start may replace it.
+            previous.join()
 
     def stop(self) -> threading.Thread | None:
         """Wake the worker and return the thread so the caller can join any active refresh."""
