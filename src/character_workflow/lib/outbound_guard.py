@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import socket
 import time
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
 
 import requests
+import urllib3
 
 from character_workflow.lib import data_root
 
@@ -148,8 +150,10 @@ class _PinnedTLSAdapter(requests.adapters.HTTPAdapter):
 
 @contextmanager
 def _open_public(url: str, parts: SplitResult, timeout,
-                 https_when_proxied: bool = False) -> Iterator[requests.Response]:
+                 https_when_proxied: bool = False,
+                 headers: dict[str, str] | None = None) -> Iterator[requests.Response]:
     hostname = _public_hostname(parts)
+    sent = {**_HEADERS, **(headers or {})}
     proxies = requests.utils.get_environ_proxies(url)
     with requests.Session() as session:
         # 一律不读环境凭据：trust_env 会把 ~/.netrc 里的账号密码附到结果地址上。
@@ -160,7 +164,7 @@ def _open_public(url: str, parts: SplitResult, timeout,
                 raise OutboundError("经代理时只允许 https 地址")
             # 走用户配置的代理：域名由代理解析，本机拿不到真实 IP，不做 IP 固定（ADR-0036）。
             # 代理显式传入，仍不读 netrc；字面量私网 IP 与本机域名在上面已拦下。
-            with session.get(url, headers=_HEADERS, timeout=timeout, stream=True,
+            with session.get(url, headers=sent, timeout=timeout, stream=True,
                              allow_redirects=False, proxies=proxies) as response:
                 yield response
             return
@@ -177,7 +181,7 @@ def _open_public(url: str, parts: SplitResult, timeout,
             raise OutboundBlocked("结果地址不能指向本机或私有网络")
         if not public:
             # Fake-IP 由 TUN 接管，本机看不到真实目标；只放行 https（证书仍按域名校验）。
-            with session.get(url, headers=_HEADERS, timeout=timeout, stream=True,
+            with session.get(url, headers=sent, timeout=timeout, stream=True,
                              allow_redirects=False) as response:
                 yield response
             return
@@ -186,7 +190,7 @@ def _open_public(url: str, parts: SplitResult, timeout,
         pinned = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
         if parts.scheme == "https":
             session.mount("https://", _PinnedTLSAdapter(hostname))
-        with session.get(pinned, headers={**_HEADERS, "Host": parts.netloc}, timeout=timeout,
+        with session.get(pinned, headers={**sent, "Host": parts.netloc}, timeout=timeout,
                          stream=True, allow_redirects=False) as response:
             yield response
 
@@ -271,7 +275,11 @@ def _read_until(response: requests.Response, max_bytes: int, deadline: float,
                 truncate: bool) -> tuple[bytes, bool]:
     """逐块读响应体，每块都核对总时限：上游慢速滴流时请求也会在时限到达时结束。
 
-    read1 有数据就返回，不像 iter_content 要攒满一块，才能在滴流时回到这里检查时限。"""
+    read1 有数据就返回，不像 iter_content 要攒满一块，才能在滴流时回到这里检查时限。
+    请求带了 Accept-Encoding: identity；仍回压缩内容时不解压（解压没有输出时 read1 会一直读，回不到时限检查）。"""
+    encoding = response.headers.get("Content-Encoding", "").strip().lower()
+    if encoding not in ("", "identity"):
+        raise OutboundError("响应经过压缩")
     declared = response.headers.get("Content-Length", "")
     if not truncate and declared.isdigit() and int(declared) > max_bytes:
         raise OutboundTooLarge(f"响应超过 {_mb(max_bytes)} MB 上限")
@@ -279,7 +287,7 @@ def _read_until(response: requests.Response, max_bytes: int, deadline: float,
     total = 0
     while True:
         _remaining(deadline)
-        chunk = response.raw.read1(64 * 1024, decode_content=True)
+        chunk = response.raw.read1(64 * 1024, decode_content=False)
         if not chunk:
             return b"".join(chunks), False
         chunks.append(chunk)
@@ -298,12 +306,25 @@ def fetch_bounded(url: str, *, max_bytes: int, deadline: float, truncate: bool =
     - third_party：地址来自第三方内容（页面里解析出的链接）。走代理时，这类地址与所有重定向目标
       只放行 https；用户亲手填的首个地址按 ADR-0036 的既有规则。
     """
+    try:
+        return _fetch_bounded(url, max_bytes, deadline, truncate, third_party)
+    except OutboundError:
+        raise
+    except ValueError:  # 畸形的 Location（如非法 IPv6 字面量）
+        raise OutboundError("地址无效") from None
+    except (urllib3.exceptions.HTTPError, requests.RequestException, http.client.HTTPException, OSError):
+        # read1 直接读 urllib3，读超时、半途断开、坏的分块都不经 requests 包装：一律按连接失败。
+        raise OutboundError("连接失败") from None
+
+
+def _fetch_bounded(url: str, max_bytes: int, deadline: float, truncate: bool,
+                   third_party: bool) -> Fetched:
     current = url
     for hop in range(_MAX_REDIRECTS + 1):
         left = min(5.0, _remaining(deadline))
         parts = _split(current)
-        with _open_public(current, parts, (left, left),
-                          https_when_proxied=third_party or hop > 0) as response:
+        with _open_public(current, parts, (left, left), https_when_proxied=third_party or hop > 0,
+                          headers={"Accept-Encoding": "identity"}) as response:
             if 300 <= response.status_code < 400 and response.headers.get("Location"):
                 current = urljoin(current, response.headers["Location"])
                 continue

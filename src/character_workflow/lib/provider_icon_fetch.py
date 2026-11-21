@@ -59,10 +59,20 @@ class _IconLinks(HTMLParser):
         rel = set(values.get("rel", "").lower().split())
         if not rel & _ICON_RELS:
             return
-        # SVG 反正会被 normalize 拒绝，不占候选名额。
-        if values.get("type", "").lower() == "image/svg+xml" or urlsplit(href).path.lower().endswith(".svg"):
+        # SVG 反正会被 normalize 拒绝，不占候选名额。只按字符串判，畸形 href 不能在这里抛错打断解析。
+        path = href.split("#", 1)[0].split("?", 1)[0].lower()
+        if values.get("type", "").lower() == "image/svg+xml" or path.endswith(".svg"):
             return
         self.links.append((_declared_size(rel, values.get("sizes", "")), href))
+
+
+def _http_url(base: str, href: str) -> str | None:
+    """按 base 解析 href；畸形（如非法 IPv6 字面量）或不是 http(s) 时返回 None，只跳过这一个。"""
+    try:
+        url = urljoin(base, href)
+        return url if urlsplit(url).scheme in ("http", "https") else None
+    except ValueError:
+        return None
 
 
 def candidates(page_url: str, html: str) -> list[str]:
@@ -74,15 +84,11 @@ def candidates(page_url: str, html: str) -> list[str]:
         parser.feed(html)
     except Exception:  # noqa: BLE001 —— 坏 HTML 只是少几个候选
         pass
+    base = (_http_url(page_url, parser.base) if parser.base else None) or page_url
+    hrefs = [href for _, href in sorted(parser.links, key=lambda item: -item[0])]
     out: list[str] = []
-    try:
-        base = urljoin(page_url, parser.base) if parser.base else page_url
-        ordered = [urljoin(base, href) for _, href in sorted(parser.links, key=lambda item: -item[0])]
-    except ValueError:  # 畸形的 base / href（如非法 IPv6 字面量）
-        ordered = []
-    ordered.append(urljoin(page_url, "/favicon.ico"))
-    for url in ordered:
-        if urlsplit(url).scheme in ("http", "https") and url not in out:
+    for url in [_http_url(base, href) for href in hrefs] + [_http_url(page_url, "/favicon.ico")]:
+        if url is not None and url not in out:
             out.append(url)
     return out[:MAX_CANDIDATES]
 
