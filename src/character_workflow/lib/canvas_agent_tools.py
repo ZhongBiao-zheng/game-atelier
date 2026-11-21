@@ -500,11 +500,11 @@ def repeated_nodes(items: list[dict]) -> list[str]:
 GENERATIONS_NOTE = ("部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
                     "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
                     "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
-                    "已提交的项也可能失败，请按 run_id 查询每一项的最终结果。")
+                    "已提交的项也可能失败，用 {wait_tool} 查看每一项的最终结果。")
 
 
 def submit_batch(items: list[dict], submit: Callable[[dict], tuple[dict, list[str]]], *,
-                 rejected: frozenset[int] = frozenset()) -> tuple[dict, list[str]]:
+                 wait_tool: str, document_tool: str, rejected: frozenset[int] = frozenset()) -> tuple[dict, list[str]]:
     """Each accepted item runs independently. Always return the IDs already submitted."""
     if not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
         raise CanvasToolError("INVALID_PARAMETERS", f"一次最多 {MAX_BATCH_GENERATIONS} 项", 422)
@@ -530,14 +530,14 @@ def submit_batch(items: list[dict], submit: Callable[[dict], tuple[dict, list[st
             logging.getLogger(__name__).exception("canvas agent batch item %s failed", index)
             rows.append({**row, "status": "failed", "error": (
                 f"未预期错误（{type(error).__name__}）：这一项可能已经建了任务，"
-                "先查看画布上的这个节点，不要重试")})
+                f"先用 {document_tool} 看这个节点，不要重试")})
             continue
         rows.append({**row, "status": "submitted", "run_id": result.get("run_id"),
                      "result_node_id": result.get("result_node_id")})
         created.extend(new_nodes)
     counts = {status: sum(1 for row in rows if row["status"] == status)
               for status in ("submitted", "rejected", "failed")}
-    return {"items": rows, **counts, "note": GENERATIONS_NOTE}, created
+    return {"items": rows, **counts, "note": GENERATIONS_NOTE.format(wait_tool=wait_tool)}, created
 
 
 def run_batch(principal: Any, payload: RunBatchInput, schedule: Callable[[str], None]) -> dict:
@@ -555,7 +555,8 @@ def run_batch(principal: Any, payload: RunBatchInput, schedule: Callable[[str], 
         schedule(job.job_id)
         return result, []
 
-    result, _ = submit_batch([item.model_dump() for item in payload.items], submit)
+    result, _ = submit_batch([item.model_dump() for item in payload.items], submit,
+                             wait_tool="canvas_wait_for_run", document_tool="canvas_get_document")
     from character_workflow.lib.schemas import redact_canvas_agent_private_text
 
     for row in result["items"]:
