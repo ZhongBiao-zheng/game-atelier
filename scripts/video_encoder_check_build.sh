@@ -49,7 +49,7 @@ fi
     --enable-filter=scale,pad,setsar,fps,format,trim,atrim,setpts,asetpts,concat,reverse,areverse,palettegen,paletteuse,split,aresample,aformat,transpose,hflip,vflip,testsrc2,drawbox,aevalsrc,anullsrc,select \
     "${platform[@]}"
 builder=$(command -v make || command -v gmake || command -v mingw32-make)
-"$builder" SHELL="$build_shell" -j"${ENCODER_BUILD_JOBS:-4}" ffmpeg ffprobe
+"$builder" SHELL="$build_shell" -j"${ENCODER_BUILD_JOBS:-4}" "ffmpeg$suffix" "ffprobe$suffix"
 cp "ffmpeg$suffix" "ffprobe$suffix" "$root/bin/"
 "$root/bin/ffmpeg$suffix" -version > "$root/version.txt"
 "$root/bin/ffmpeg$suffix" -L > "$root/license.txt" 2>&1
