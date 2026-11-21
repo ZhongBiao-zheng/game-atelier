@@ -17,7 +17,7 @@ import httpx2 as httpx
 from httpx2._utils import URLPattern, get_environment_proxies
 
 from character_workflow.lib.llm_protocols import (
-    ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini,
+    ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini, translated_chunks,
 )
 
 _LABELS = {ANTHROPIC_MESSAGES: "Anthropic", GEMINI_GENERATE_CONTENT: "Gemini"}
@@ -34,11 +34,8 @@ class _TranslatedStream(httpx.AsyncByteStream):
         self._translator = translator
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
-        async for chunk in self._upstream.stream:
-            if data := self._translator.feed(chunk):
-                yield data
-        if tail := self._translator.finish():
-            yield tail
+        async for chunk in translated_chunks(self._upstream.stream, self._translator):
+            yield chunk
 
     async def aclose(self) -> None:
         await self._upstream.aclose()

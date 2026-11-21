@@ -84,6 +84,7 @@ class TextCall:
         # 上游返回了 2xx（之后才可能计费）；用来区分「没回用量」与「根本没执行」。
         self.accepted = False
         self.cached_tokens = 0
+        self.cache_write_tokens = 0
         self.upstream_cost_usd: float | None = None
         self.member(key, model)
 
@@ -121,6 +122,11 @@ class TextCall:
         cached = details.get("cached_tokens") if isinstance(details, dict) else None
         if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
             self.cached_tokens = cached
+        from character_workflow.lib.llm_protocols.usage import from_openai
+        normalized = from_openai(usage)
+        if normalized is not None:
+            self.cached_tokens = normalized.cache_read
+            self.cache_write_tokens = normalized.cache_write
         # OpenRouter 的 usage.cost 是上游确认的实付（美元）；其他上游的同名字段含义未核实，不用。
         cost = usage.get("cost")
         if (self.key.provider == "openrouter" and isinstance(cost, int | float)
@@ -135,8 +141,10 @@ class TextCall:
             self._settle()
             self.task.updated_at = datetime.now().astimezone().isoformat()
             try:
-                gateway_tasks._append_usage(
-                    self.task, {"call_tag": self.call_tag} if self.call_tag else None)
+                extra = {"cached_tokens": self.cached_tokens, "cache_write_tokens": self.cache_write_tokens}
+                if self.call_tag:
+                    extra["call_tag"] = self.call_tag
+                gateway_tasks._append_usage(self.task, extra)
             finally:
                 gateway_quota._inflight.pop(self.task.task_id, None)
                 self.finished = True
