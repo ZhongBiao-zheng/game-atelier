@@ -416,3 +416,29 @@ async def test_wait_observes_registered_outputs(entry, isolated_data_root, tmp_p
             assert candidate["version_id"] and candidate["checks"]
             assert result["attach_images"] == [candidate["version_id"]]
             assert len(vendor.calls("POST", path)) == 1
+
+
+def test_batch_uses_current_document_after_first_job_finishes(monkeypatch):
+    import base64
+    from character_workflow.lib import canvas_runs, keys
+    from character_workflow.lib.canvas_agent_runtime import LOCAL
+    from character_workflow.lib.canvas_agent_schema import RunBatchInput
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from tests.fake_http_vendor import FakeVendor, png_bytes
+    from tests.test_canvas_agent_batch import IMAGE_KEY, _surfaces
+
+    monkeypatch.setenv("no_proxy", "*")
+    pid = create_canvas_project("Fast batch").project_id
+    with FakeVendor() as vendor:
+        keys.write_keys_db(keys.KeysDB(keys=[IMAGE_KEY.model_copy(update={"base_url": vendor.url + "/v1"})]))
+        _surfaces(pid, {"one": "gpt-image-2", "two": "gpt-image-2"})
+        path = "/v1/images/generations"
+        image = {"data": [{"b64_json": base64.b64encode(png_bytes()).decode()}]}
+        vendor.on("POST", path, image, image)
+        payload = RunBatchInput(project_id=pid, expected_revision=read_canvas_document(pid).revision,
+                                items=[{"surface_node_id": node} for node in ("one", "two")])
+        # Force the first result to advance the revision before the second submission starts.
+        result = tools.run_batch(LOCAL, payload, schedule=canvas_runs.run_canvas_job)
+        assert [item["status"] for item in result["items"]] == ["submitted", "submitted"]
+        assert len(read_canvas_document(pid).content_versions) == 2
+        assert len(vendor.calls("POST", path)) == 2

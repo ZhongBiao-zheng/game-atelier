@@ -133,10 +133,14 @@ class ImportMediaInput(CanvasProjectInput):
     position: CanvasPointInput | None = None
 
 
-class RunInput(CanvasProjectInput):
+class CurrentRevisionRunInput(CanvasProjectInput):
+    """Internal submission using the draft read under the project lock."""
     surface_node_id: NodeId
-    expected_revision: int = Field(ge=0)
     requested_count: int = Field(default=1, ge=1, le=4)
+
+
+class RunInput(CurrentRevisionRunInput):
+    expected_revision: int = Field(ge=0)
 
 
 MAX_BATCH_GENERATIONS = 20

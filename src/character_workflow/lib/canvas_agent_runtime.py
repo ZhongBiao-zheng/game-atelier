@@ -29,7 +29,8 @@ from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     MAX_BATCH_GENERATIONS, ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, CanvasReadSpecInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasReadSpecInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput,
+    CurrentRevisionRunInput, GetRunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -399,14 +400,10 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     if tool == "run_generation":
         _check_generation_allowed(project_id, arguments["surface_node_id"], scope)
 
-        def submit(revision: int) -> dict:
-            result, job = tools.run(LOCAL, RunInput(
-                project_id=project_id, surface_node_id=arguments["surface_node_id"],
-                expected_revision=revision, requested_count=arguments.get("count", 1),
-            ))
-            _schedule_canvas_job(job.job_id)
-            return result
-        result = _with_fresh_revision(project_id, submit)
+        result, job = tools.run(LOCAL, CurrentRevisionRunInput(
+            project_id=project_id, surface_node_id=arguments["surface_node_id"],
+            requested_count=arguments.get("count", 1)))
+        _schedule_canvas_job(job.job_id)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
     if tool == "run_generations":
         return tools.submit_batch(_generation_items(arguments),
@@ -631,17 +628,17 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
             ApplyChangesInput(project_id=project_id, expected_revision=0,
                               changes=arguments.get("changes") or [])
         elif tool == "run_generation":
-            RunInput(project_id=project_id, expected_revision=0,
-                     surface_node_id=arguments.get("surface_node_id", ""),
-                     requested_count=arguments.get("count", 1))
+            CurrentRevisionRunInput(
+                project_id=project_id, surface_node_id=arguments.get("surface_node_id", ""),
+                requested_count=arguments.get("count", 1))
         elif tool == "run_generations":
             items = arguments.get("items")
             if not isinstance(items, list) or not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
                 return False
             for item in items:
-                RunInput(project_id=project_id, expected_revision=0,
-                         surface_node_id=item.get("surface_node_id", ""),
-                         requested_count=item.get("count", 1))
+                CurrentRevisionRunInput(
+                    project_id=project_id, surface_node_id=item.get("surface_node_id", ""),
+                    requested_count=item.get("count", 1))
             if tools.repeated_nodes(_generation_items(arguments)):
                 return False
     except (ValidationError, TypeError, ValueError, AttributeError):

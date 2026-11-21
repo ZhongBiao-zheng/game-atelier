@@ -1640,14 +1640,14 @@ def commit_canvas_generation_under_lock(
 def submit_canvas_run(
     project_id: str,
     surface_node_id: str,
-    expected_revision: int,
+    expected_revision: int | None,
     requested_count: int = 1,
 ) -> tuple[Job, CanvasDocument]:
     """Atomically freeze one persisted draft into a Job and visible result surface."""
     with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
-        if current.revision != expected_revision:
+        if expected_revision is not None and current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
         if surface is None:
