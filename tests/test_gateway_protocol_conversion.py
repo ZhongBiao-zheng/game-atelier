@@ -210,3 +210,47 @@ def test_models_use_native_catalog(gateway, protocol, path, header, body, can_us
         assert "authorization" not in headers
     [fallback] = client.get("/gateway/v1/openai/models").json()["data"]
     assert fallback["supported_parameters"] == ["tools"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_gemini_signed_parallel_calls_round_trip(gateway, stream):
+    vendor, client = gateway
+    member("gem", "gemini-generate-content", vendor.url)
+    path = "/v1beta/models/shared:" + ("streamGenerateContent" if stream else "generateContent")
+    parts = [{"functionCall": {"name": "first", "args": {}}, "thoughtSignature": "original-signature"},
+             {"functionCall": {"name": "second", "args": {}}}]
+    tool = {"candidates": [{"content": {"parts": parts}, "finishReason": "STOP"}]}
+    text = {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}]}
+    vendor.on("POST", path, *(as_sse(item) if stream else item for item in (tool, text)))
+    messages = [{"role": "user", "content": "question"}]
+    def send():
+        return client.post(CHAT, json={"model": "shared", "stream": stream, "messages": messages})
+    initial = send()
+    if stream:
+        calls = [call for event in sse_events(initial) for choice in event["choices"]
+                 for call in choice["delta"].get("tool_calls", [])]
+        for call in calls:
+            call.pop("index", None)
+    else:
+        calls = initial.json()["choices"][0]["message"]["tool_calls"]
+    assert [call["function"]["name"] for call in calls] == ["first", "second"]
+    assert calls[0]["extra_content"]["google"]["thought_signature"] == "original-signature"
+    messages.append({"role": "assistant", "tool_calls": calls})
+    messages.extend({"role": "tool", "tool_call_id": c["id"], "content": "ok"} for c in calls)
+    assert send().status_code == 200
+    returned = next(c["parts"] for c in vendor.received[1].json()["contents"] if c["role"] == "model")
+    assert returned[0]["thoughtSignature"] == "original-signature" and "thoughtSignature" not in returned[1]
+    assert len(vendor.received) == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("reason,expected", [("MAX_TOKENS", "length"), ("FUTURE_REASON", "stop")])
+def test_gemini_finish_reason_with_text(gateway, stream, reason, expected):
+    vendor, client = gateway
+    member("gem", "gemini-generate-content", vendor.url)
+    path = "/v1beta/models/shared:" + ("streamGenerateContent" if stream else "generateContent")
+    result = {"candidates": [{"content": {"parts": [{"text": "partial"}]}, "finishReason": reason}]}
+    vendor.on("POST", path, as_sse(result) if stream else result)
+    response = client.post(CHAT, json={"model": "shared", "stream": stream, "messages": [{"role": "user", "content": "q"}]})
+    events = sse_events(response) if stream else [response.json()]
+    assert [c["finish_reason"] for e in events for c in e["choices"] if c["finish_reason"]] == [expected]
