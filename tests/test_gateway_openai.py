@@ -32,11 +32,11 @@ def clean(isolated_data_root):
 
 
 @pytest.fixture
-def setup(monkeypatch):
+def setup(monkeypatch, request):
     for alias, model in [('A', 'vendor/gpt-test'), ('B', 'gpt-test')]:
         keys.add_key(keys.KeySpec(alias=alias, provider='custom', access_key=f'secret-{alias}',
             base_url=f'https://{alias.lower()}.example', created_at='test',
-            models=[keys.ModelSpec(id=model, name=model, modality='text', protocol='openai-chat')]))
+            models=[keys.ModelSpec(id=model, name=model, modality='text', protocol=getattr(request, 'param', 'openai-chat'))]))
     owner, token = gateway_keys.create_key('文本测试')
     seen = []
 
@@ -58,7 +58,8 @@ def rows():
     return gateway_tasks.read_usage(gateway_tasks._now().astimezone().strftime('%Y-%m'))
 
 
-@pytest.mark.parametrize('endpoint', ['chat/completions', 'responses'])
+@pytest.mark.parametrize('endpoint,setup', [('chat/completions', 'openai-chat'), ('responses', 'openai-responses')],
+                         indirect=['setup'])
 def test_json_rewrites_model_and_does_not_forward_headers(setup, endpoint):
     owner, _, seen, _, _, client = setup
     response = client.post(f'{BASE}/{endpoint}', json={'model': 'gpt-test', 'messages': []},
@@ -90,7 +91,8 @@ class Chunks(httpx.AsyncByteStream):
         self.closed = True
 
 
-@pytest.mark.parametrize('endpoint', ['chat/completions', 'responses'])
+@pytest.mark.parametrize('endpoint,setup', [('chat/completions', 'openai-chat'), ('responses', 'openai-responses')],
+                         indirect=['setup'])
 def test_stream_bytes_unchanged_and_usage_across_chunks(setup, endpoint):
     _, _, seen, upstream, _, client = setup
     usage = {'usage': {'prompt_tokens': 7, 'completion_tokens': 11}}
@@ -156,6 +158,7 @@ def test_mid_stream_failure_never_switches_and_charges_nothing(setup, monkeypatc
     assert not gateway_quota._inflight
 
 
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 def test_quota_admission_settlement_and_error_shape(setup, monkeypatch):
     owner, _, seen, upstream, _, client = setup
     gateway_keys.update_key(owner.id, quota={'period': 'day', 'cap_cny': .0021})
@@ -215,6 +218,7 @@ def test_models_preserve_capabilities_and_filter_permissions(setup):
     assert client.get(f'{BASE}/models').json()['data'] == []
 
 
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 def test_all_upstreams_unavailable_error_hides_secrets_and_paths(setup):
     _, _, _, upstream, _, client = setup
     upstream(lambda request: httpx.Response(401, text='secret-A /private/user/key.json'))
@@ -310,6 +314,7 @@ async def test_agents_sdk_tool_call_stream_through_gateway(setup):
 
 
 @pytest.mark.parametrize('status', [500, 503, 504, 'read-timeout'])
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 def test_ambiguous_pre_stream_failure_does_not_retry(setup, status):
     _, _, seen, upstream, _, client = setup
     def handle(request):
@@ -327,6 +332,7 @@ def test_ambiguous_pre_stream_failure_does_not_retry(setup, status):
     assert rows()[0]['status'] == 'failed' and not gateway_quota._inflight
 
 
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 async def test_client_disconnect_releases_reservation(setup):
     from starlette.requests import Request
     owner, _, _, upstream, _, _ = setup
@@ -344,6 +350,7 @@ async def test_client_disconnect_releases_reservation(setup):
     assert not gateway_live.active() and not gateway_quota._inflight and source.closed
 
 
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 async def test_disconnect_before_body_starts_also_releases(setup):
     from starlette.requests import Request
     owner, _, _, upstream, _, _ = setup
@@ -374,6 +381,7 @@ def test_recent_output_estimate_uses_latest_fifty_calls(setup):
     assert average_output_tokens(owner.id) == 50
 
 
+@pytest.mark.parametrize('setup', ['openai-responses'], indirect=True)
 def test_alias_permission_and_cooldown_fallback_never_use_denied_member(setup):
     owner, _, seen, _, _, client = setup
     gateway_keys.update_key(owner.id, scope=[{'alias': 'B'}])

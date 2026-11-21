@@ -159,13 +159,12 @@ def test_agent_model_list_includes_gemini_models_listed_with_the_goog_key():
 # --- 局域网网关：接上主机端转换（第 4 批）之前不碰 Gemini 成员 ---------------------------
 # 临时边界（ADR-0044）：第 4 批完成后改成断言转换后的行为，不要删。
 
-def test_gateway_skips_gemini_members(monkeypatch):
+def test_gateway_converts_gemini_members(monkeypatch):
     seen = []
 
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={"choices": [], "usage": {"prompt_tokens": 1,
-                                                                   "completion_tokens": 1}})
+        return httpx.Response(200, json=REPLY)
     monkeypatch.setattr(gateway_openai, "_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(gateway_tasks, "pump", lambda: None)
@@ -177,12 +176,12 @@ def test_gateway_skips_gemini_members(monkeypatch):
     _, token = gateway_keys.create_key("成员")
     client = TestClient(create_gateway_app(), headers={"Authorization": f"Bearer {token}"})
     routes = {route["id"]: route for route in client.get("/gateway/v1/models").json()["models"]}
-    assert "only-gemini" not in routes
-    assert [m["alias"] for m in routes["shared"]["members"]] == ["relay"]
+    assert "only-gemini" in routes
+    assert [m["alias"] for m in routes["shared"]["members"]] == ["gem", "relay"]
     response = client.post("/gateway/v1/openai/chat/completions",
                            json={"model": "shared", "messages": [{"role": "user", "content": "x"}]})
     assert response.status_code == 200, response.text
-    assert [str(request.url) for request in seen] == ["https://relay.example/v1/chat/completions"]
+    assert [str(request.url) for request in seen] == ["https://gem.example/v1beta/models/shared:generateContent"]
 
 
 # --- 带自定义鉴权头的一次性调用不跟随跳转（审查第 2 条） ------------------------------------
