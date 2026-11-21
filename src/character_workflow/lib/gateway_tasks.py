@@ -560,7 +560,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
     task_id = task.task_id
     modality = modality_for(task.kind)
     tried: list[str] = []
-    warnings: list[str] = []
+    warnings: list[str] = list(task.warnings) if (task.resume_params or {}).get("comfyui") else []
     switched_from: tuple[str, model_routes.FailoverReason] | None = None
     last_error: BaseException | None = None
 
@@ -672,27 +672,41 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     render = dispatch_video
                 elif task.kind == "audio":
                     render = dispatch_audio
-                video_kwargs: dict[str, Any] = {}
+                resume_kwargs: dict[str, Any] = {}
+                if key.provider == "comfyui":
+                    def on_prompt_submitted(prompt_id, prefix):
+                        ids = [*_read(task_id).upstream_task_ids, prompt_id]
+                        _update(task_id, upstream_task_ids=ids, resume_params={
+                            "comfyui": {"prefix": prefix},
+                        })
+                    resume_kwargs["on_prompt_submitted"] = on_prompt_submitted
+                    if resume:
+                        resume_kwargs["resume_prompt_ids"] = list(task.upstream_task_ids)
                 if task.kind == "video":
                     from character_workflow.lib.callers import _effective_protocol
 
                     video_protocol = _effective_protocol(key, model.id)
-                    video_kwargs["on_resume_state"] = on_resume_state
+                    resume_kwargs["on_resume_state"] = on_resume_state
                     if resume and resume.get("video"):
                         if resume["video"].get("protocol") != video_protocol:
                             # 停机期间 KEY 被改过，按 KEY 算出的协议对不上存下的订单：
                             # 不把别的协议的续查状态交给 caller。
                             return _finish(_read(task_id), status="failed", error_kind="unconfirmed",
                                            error="网关重启后原供应商的视频接口已变，未确认是否已出片")
-                        video_kwargs["resume_video"] = copy.deepcopy(resume["video"])
+                        resume_kwargs["resume_video"] = copy.deepcopy(resume["video"])
                 paths = render(
                     prompt=task.prompt, model=model.id, alias=key.alias, output_dir=Path(tmp),
                     n=task.n, size=params.get("size"), params=params, job_id=task_id,
                     on_phase=lambda phase: _update(task_id, phase=phase),
                     on_params_changed=changed, on_task_id=on_task_id, on_submission=on_submission,
                     on_cost_usd=lambda usd: cost.__setitem__("usd", usd),
-                    should_cancel=should_cancel, **video_kwargs,
+                    should_cancel=should_cancel, **resume_kwargs,
                 )
+                if resume and "comfyui" in resume and len(task.upstream_task_ids) < task.n:
+                    note = (f"部分完成：重启前登记了 {len(task.upstream_task_ids)}/{task.n} 个工作流，"
+                            "仅取回已登记的结果")
+                    if note not in warnings:
+                        _update(task_id, warnings=[*warnings, note])
                 return _store_outputs(task_id, [Path(path) for path in paths],
                                       0.0 if key.provider == "comfyui" else cost.pop("usd", None), params)
             except Exception as error:  # noqa: BLE001 — 每种失败都要落成终态
@@ -707,7 +721,9 @@ def run_task(task: GatewayTask) -> GatewayTask:
 
                 uncertain = (any(a.get("outcome") == "unconfirmed" for a in current.submission_attempts)
                              or is_unconfirmed(error))
-                if current.upstream_task_ids or current.resume_params or uncertain:
+                # ComfyUI 的订单只用于重启续查；一次正常执行的错误仍按原有判据分类。
+                if uncertain or (key.provider != "comfyui" and (
+                        current.upstream_task_ids or current.resume_params)):
                     return _finish(current, status="failed", error="上游任务结果未确认：" + _safe_error(error),
                                    error_kind="unconfirmed")
                 reason = model_routes.failover_reason(error)
@@ -725,6 +741,9 @@ def run_task(task: GatewayTask) -> GatewayTask:
 def resumable(task: GatewayTask) -> bool:
     """这个任务有没有能续查的上游订单（主机重启后只轮询、不重提）。"""
     state = task.resume_params or {}
+    if "comfyui" in state:
+        return (task.member_provider == "comfyui" and bool(task.upstream_task_ids)
+                and state["comfyui"] == {"prefix": f"atelier/{task.task_id}"})
     if state.get("provider_task_protocol") in RESUMABLE_PROTOCOLS and state.get("provider_task_ids"):
         return True
     video = state.get("video") or {}
@@ -744,6 +763,14 @@ def _resume_member(task: GatewayTask):
     key = keys.find_by_alias(task.member_alias)
     if key is None or not key.enabled:
         return None
+    if "comfyui" in (task.resume_params or {}):
+        from character_workflow.lib.comfyui_schema import local_base_url
+
+        try:
+            if key.provider != "comfyui" or local_base_url(key.base_url) != local_base_url(task.member_base_url):
+                return None
+        except ValueError:
+            return None
     model = next((item for item in key.models if item.id == task.member_model_id), None)
     return (key, model) if model is not None else None
 
