@@ -38,6 +38,8 @@ stdio 工具的参数包在 `payload`。适配器取出参数对象，作为 JSO
 
 搜索与等待结果用 MCP 的 ImageContent 返回可用预览，最多 4 张。`attach_images` 按相同顺序列出图片引用。大小预算不足时仍返回资产或候选的文本记录。视频联系表单独作为 ImageContent，文本与 structuredContent 里只保留元数据。
 
+`canvas_get_run` 和 `canvas_wait_for_run` 返回 `done` 或 `partial` 时，成功候选的产物已登记为画布版本。任务文件已写完、候选仍待登记时，查询返回 `pending`。
+
 `canvas_wait_for_run` 轮询同一个 run，等待上限为 240 秒。stdio 到 viewer-server 的读取超时为 270 秒，给最后一次查询和返回留出时间。等待会占用适配器 4 个并发名额中的 1 个；满额时返回 `CONNECTION_RATE_LIMITED`。客户端应为这次工具调用留足时间。等到期可用原 run_id 再查。
 
 批量生成接受 1–20 个不同节点，每项 count 为 1–4，默认 1。客户端传入用户核对过的画布修订号；整批重复节点或起始修订冲突时直接退回。提交成功后，下一项沿用刚提交的修订号。中途的其他编辑会触发修订冲突。结果按输入顺序返回，每项含 index（从 0 起）、surface_node_id、count 和 status。submitted 项带 run_id、result_node_id，failed 项带 error。持有 canvas_generate 即获服务端批准，MCP 不产生内置 Agent 的逐项确认卡，因此 rejected 为 0。
