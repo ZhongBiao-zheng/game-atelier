@@ -59,8 +59,7 @@ def direct_or_proxied(url: str) -> httpx.AsyncHTTPTransport:
     """连上游用的内层 transport，代理按 `environment_proxy_for` 选。
 
     装了本 transport 的客户端必须 `trust_env=False`：否则 httpx 按环境代理把请求直接交给代理的 transport，
-    绕过协议转换（OpenAI 格式的请求原样打到上游）。代理改在这里按上游地址选。socks5 / socks5h 代理需要
-    `socksio`，本项目没装：与 SDK 默认客户端一样在构造时报 ImportError。"""
+    绕过协议转换（OpenAI 格式的请求原样打到上游）。代理改在这里按上游地址选。socks5 / socks5h 由 socksio 处理。"""
     return httpx.AsyncHTTPTransport(proxy=environment_proxy_for(url))
 
 
