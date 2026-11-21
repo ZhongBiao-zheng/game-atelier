@@ -189,3 +189,24 @@ def test_cache_write_priced_and_recorded_locally(monkeypatch):
     row = agent_usage.record_request(project_id="p", session_id="s", key=key, alias="chat", model="shared",
                                      input_tokens=100, output_tokens=10, cached_tokens=0, cache_write_tokens=20)
     assert row["cache_write_tokens"] == 20 and row["cost_cny"] == (80 * 5 + 20 * 8 + 10 * 10) / 1_000_000
+
+
+@pytest.mark.parametrize("protocol,path,header,body,can_use", [
+    ("openai-chat", "/v1/models", "Authorization", {"data": [{"id": "shared", "supported_parameters": ["tools"]}]}, True),
+    ("anthropic-messages", "/v1/models", "x-api-key", {"data": [{"id": "shared", "type": "model"}]}, True),
+    ("gemini-generate-content", "/v1beta/models", "x-goog-api-key", {"models": [
+        {"name": "models/shared", "supportedGenerationMethods": ["embedContent"]}]}, False),
+])
+def test_models_use_native_catalog(gateway, protocol, path, header, body, can_use):
+    from character_workflow.lib.canvas_agent_models import is_chat_model
+    vendor, client = gateway
+    member("native", protocol, vendor.url, manual=protocol)
+    vendor.on("GET", path, body, (503, {}))
+    [model] = client.get("/gateway/v1/openai/models").json()["data"]
+    assert is_chat_model(model) == can_use
+    headers = {name.lower(): value for name, value in vendor.received[0].headers.items()}
+    assert headers[header.lower()].endswith("fixture-key")
+    if header != "Authorization":
+        assert "authorization" not in headers
+    [fallback] = client.get("/gateway/v1/openai/models").json()["data"]
+    assert fallback["supported_parameters"] == ["tools"]

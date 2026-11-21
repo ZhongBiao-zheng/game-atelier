@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from character_workflow.lib import gateway_access, gateway_tasks, model_routes
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini, translated_chunks
+from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, detect, gemini, translated_chunks
 from character_workflow.lib.gateway_text import (
     CALL_TAG_HEADER, TextCall, input_tokens_estimate, valid_call_tag,
 )
@@ -280,12 +280,36 @@ def _visible_members(owner):
     for route in model_routes.list_routes("text"):
         if not gateway_access.route_visible(owner, route):
             continue
-        member = next(m for m in route.members if m.provider != "atelier"
-                      and gateway_access.member_in_scope(owner, m)
-                      and gateway_access.member_relayable("text", m))
+        members = [m for m in route.members if m.provider != "atelier"
+                   and gateway_access.member_in_scope(owner, m) and gateway_access.member_relayable("text", m)]
+        # Mixed routes advertise Chat. Describe a member that this entrance can actually select.
+        member = next((m for m in members if m.protocol != "openai-responses"), members[0])
         key, model = model_routes._member_key_and_model(member)
         visible.append((route, key, model))
     return visible
+
+
+async def _model_capabilities(client, key, protocol):
+    if protocol == ANTHROPIC_MESSAGES:
+        url = anthropic.models_url(key.base_url) + "?limit=1000"
+        headers = anthropic.headers(key.base_url, key.access_key)
+    elif protocol == GEMINI_GENERATE_CONTENT:
+        url = gemini.models_url(key.base_url) + "?pageSize=1000"
+        headers = gemini.headers(key.access_key)
+    else:
+        url = f"{key_api_root(key)}/models"
+        headers = {"Authorization": f"Bearer {key.access_key}"}
+    response = await client.get(url, headers=headers, timeout=10, follow_redirects=False)
+    response.raise_for_status()
+    body = response.json()
+    if protocol == GEMINI_GENERATE_CONTENT:
+        return {item["name"].removeprefix("models/"): {
+                    "architecture": {"output_modalities": ["text"]},
+                    "supported_parameters": ["tools"] if gemini.can_generate_content(item) else []}
+                for item in body.get("models", []) if isinstance(item, dict) and isinstance(item.get("name"), str)}
+    return {item["id"]: ({"supported_parameters": ["tools"]} if protocol == ANTHROPIC_MESSAGES else
+                         {name: item[name] for name in _CAPABILITIES if name in item})
+            for item in body.get("data", []) if isinstance(item, dict) and item.get("id")}
 
 
 def create_router(require_key):
@@ -298,22 +322,15 @@ def create_router(require_key):
         visible = await asyncio.to_thread(_visible_members, owner)
         async with _client() as client:
             for route, key, model in visible:
-                if key.alias not in upstreams:
+                cache_key = (key.alias, model.protocol)
+                if cache_key not in upstreams:
                     try:
-                        response = await client.get(
-                            f"{key_api_root(key)}/models",
-                            headers={"Authorization": f"Bearer {key.access_key}"}, timeout=10,
-                        )
-                        response.raise_for_status()
-                        data = response.json().get("data", [])
-                        upstreams[key.alias] = {r["id"]: r for r in data
-                                                if isinstance(r, dict) and r.get("id")}
+                        upstreams[cache_key] = await _model_capabilities(client, key, model.protocol)
                     except (httpx.HTTPError, ValueError, TypeError, AttributeError):
-                        upstreams[key.alias] = {}
-                info = upstreams[key.alias].get(model.id)
-                capabilities = {name: info[name] for name in _CAPABILITIES if name in info} if info else {
-                    "supported_parameters": ["tools"],
-                }
+                        upstreams[cache_key] = {}
+                capabilities = upstreams[cache_key].get(model.id, {"supported_parameters": ["tools"]})
+                if detect.agent_tools_unverified(key, model):
+                    capabilities = {"architecture": {"output_modalities": ["text"]}, "supported_parameters": []}
                 rows.append({"id": route.id, "object": "model", "owned_by": "atelier",
                              **capabilities})
         return {"object": "list", "data": rows}
