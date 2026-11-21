@@ -110,3 +110,10 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
 
 Azure OpenAI、Vertex AI、AWS Bedrock、Gemini Interactions API、TypeSafe System One 决策 API、Responses 内置工具；
 出错后自动换协议重试；对任意 New API 站点自动同步价格（各站换算口径不同）。
+
+## 直连文本请求的重发规则
+
+Agent 的 Chat、Responses、Anthropic 和 Gemini 均关闭 SDK 自带重试。协议转换在重发层之外，
+只有连接未建立，或上游返回 429、502、503、504 时，才按 0.5 秒、1 秒退避，最多重发两次。
+一次性文本与结构化文本调用遵循相同规则。上游接收后读超时、断开连接、流中途失败均保留一次提交，
+显示「连接中断，未自动重发（可能已计费）」。网关沿用其受理与更新等待规则。

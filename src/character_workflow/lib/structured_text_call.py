@@ -1,7 +1,7 @@
 """调一次对话模型拿结构化输出，并把这次调用记进用量。
 
 「AI 帮我配置」（http_protocol_assist）与分镜插件的剧本解析（plugins/storyboard/server/parse.py）共用。
-调用规则只有一套：不带 tools、不重试、失败也记账；经局域网网关的文本模型自动走网关。
+调用规则只有一套：不带 tools、直连按 ADR-0044 重发、失败也记账；经局域网网关的文本模型自动走网关。
 任务记成 namespace=assist 的文本任务。画布里发起的调用把项目 id 写在 params.assist_project_id，
 用量页据此归到那个项目（Job 的 canvas_project_id 只允许 namespace=canvas 使用）。
 """
@@ -41,6 +41,10 @@ def failure_reason(raw: str, error: BaseException | None = None) -> str:
 
     from character_workflow.lib.llm_protocols import mismatch_hint
 
+    from character_workflow.lib.direct_text_retry import INTERRUPTED
+
+    if raw == INTERRUPTED:
+        return INTERRUPTED
     if (updating := updating_message(error)) is not None:
         return updating
     if (hint := mismatch_hint(raw)) is not None:
@@ -75,7 +79,7 @@ def usage_of(body: Any) -> tuple[int | None, int | None]:
 def call_model(key: keys.KeySpec, model: keys.ModelSpec, system: str, user: str, *,
                max_output_tokens: int, timeout: tuple[float, float]
                ) -> tuple[str, int | None, int | None]:
-    """调一次对话模型，不带 tools、不重试。返回 (输出文本, 输入 token, 输出 token)。"""
+    """调一次对话模型，不带 tools、直连按 ADR-0044 重发。返回 (输出文本, 输入 token, 输出 token)。"""
     from character_workflow.lib.callers.openai_compat import key_api_root
     from character_workflow.lib.callers.openai_text import (
         _content_text, _post_json, _response_text, chat_completion,

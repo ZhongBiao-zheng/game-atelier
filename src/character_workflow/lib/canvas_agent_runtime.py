@@ -1185,24 +1185,24 @@ def _agent_client(key: keys.KeySpec, protocol: str | None,
     from character_workflow.lib import llm_protocols
     # 局域网网关：直连不读本机代理；SDK 自带重试关掉（读超时也会重发，可能重复计费），
     # 只保留「主机确定没收下才重发」（gateway_text_wait，第 5 批 5-4）。
-    http_client, retries = None, 2
     if key.provider == "atelier":
         from character_workflow.lib.gateway_text_wait import UpdatingAwareTransport
-        http_client = DefaultAsyncHttpxClient(
-            trust_env=False, transport=UpdatingAwareTransport(on_wait=on_gateway_wait))
-        retries = 0
-    elif protocol in (llm_protocols.ANTHROPIC_MESSAGES, llm_protocols.GEMINI_GENERATE_CONTENT):
-        # 与一次性调用相同：这两种协议没有默认地址，没填就报错（否则拼出相对地址，SDK 报「Connection error」）。
-        if not (key.base_url or "").strip():
-            raise CanvasToolError("MODEL_UNAVAILABLE", "供应商缺少 API 地址", 422)
-        # SDK 只会发 Chat Completions：在 HTTP 层转成上游协议（ADR-0044）。
-        # trust_env=False：否则环境代理会让请求绕过转换；代理改由内层按上游地址选。
-        from character_workflow.lib.llm_protocols.transport import ProtocolTransport
-        http_client = DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
-            protocol=protocol, base_url=(key.base_url or "").strip(), access_key=key.access_key))
+        transport = UpdatingAwareTransport(on_wait=on_gateway_wait)
+    else:
+        from character_workflow.lib.direct_text_retry import DirectTextTransport
+        from character_workflow.lib.llm_protocols.transport import ProtocolTransport, direct_or_proxied
+
+        transport = DirectTextTransport(direct_or_proxied(chat_base_url(key)))
+        if protocol in (llm_protocols.ANTHROPIC_MESSAGES, llm_protocols.GEMINI_GENERATE_CONTENT):
+            base_url = (key.base_url or "").strip()
+            if not base_url:
+                raise CanvasToolError("MODEL_UNAVAILABLE", "供应商缺少 API 地址", 422)
+            transport = ProtocolTransport(protocol=protocol, base_url=base_url,
+                                          access_key=key.access_key, inner=transport)
+    http_client = DefaultAsyncHttpxClient(trust_env=False, transport=transport)
     # 经网关时带关联标记，主机把它记在这把密钥的用量行上，成员每轮结束按它查回结算额。
     headers = {"X-Atelier-Call-Tag": call_tag} if key.provider == "atelier" and call_tag else None
-    return AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
+    return AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=0,
                        http_client=http_client, default_headers=headers)
 
 
@@ -1271,6 +1271,10 @@ _NO_IMAGE_SUPPORT = re.compile(
 def friendly_error(error: BaseException) -> str:
     from agents.exceptions import MaxTurnsExceeded, ModelBehaviorError, ModelRefusalError
     from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
+    from character_workflow.lib.direct_text_retry import INTERRUPTED, TextInterrupted
+
+    if isinstance(error, TextInterrupted) or isinstance(error.__cause__, TextInterrupted):
+        return INTERRUPTED
     if isinstance(error, CanvasToolError):
         return error.message
     if isinstance(error, MaxTurnsExceeded):

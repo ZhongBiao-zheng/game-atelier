@@ -1,6 +1,6 @@
 """分镜插件的服务端模块（宿主插件，ADR-0039）：剧本分段、剧本解析、Agent 镜头摘要。
 
-解析是计费调用：一次请求只调一次对话模型，失败不重试，成功失败都记一条 namespace=assist 的文本任务。
+解析是计费调用：直连重发按 ADR-0044，成功失败都记一条 namespace=assist 的文本任务。
 逐镜出图出视频不经过这里：前端按生成计划逐镜调用普通 Canvas Run。
 """
 from __future__ import annotations

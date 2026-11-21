@@ -213,7 +213,7 @@ def _post_json(
 
     `gateway_wait`（`gateway_text_wait.Waiting`）：经局域网网关、主机正在更新时等待重发；
     不传就直接报「网关正在更新，请稍后重试」（没有进度位置的入口不让用户干等）。"""
-    from character_workflow.lib import gateway_text_wait
+    from character_workflow.lib import direct_text_retry, gateway_text_wait
 
     from .atelier_gateway import DIRECT_PROXIES
     from .openai_image import _is_pre_flight_failure
@@ -239,8 +239,8 @@ def _post_json(
                 pre_flight=_is_pre_flight_failure, network_errors=(requests.RequestException,),
                 waiting=gateway_wait)
         else:
-            response = send()
-    except gateway_text_wait.GatewayTextUpdating as error:
+            response = direct_text_retry.send_sync(send)
+    except (gateway_text_wait.GatewayTextUpdating, direct_text_retry.TextInterrupted) as error:
         raise OpenAITextError(str(error)) from error
     except requests.RequestException as error:
         raise OpenAITextError(str(error)) from error

@@ -6,7 +6,7 @@
 - 密钥不进提示词也不进输出：接口不收供应商密钥；资料与输出里有明确密钥特征的值替换成
   <redacted>，长串只提示不替换（任务号、哈希、base64 示例常见）。
 - 网址抓取走 outbound_guard：只放行公网，每次重定向重新检查。
-一次点击只调用一次对话模型，失败不重试；调用记成一条 namespace=assist 的文本任务，计入用量。
+直连请求按 ADR-0044 重发；调用记成一条 namespace=assist 的文本任务，计入用量。
 """
 from __future__ import annotations
 
