@@ -67,13 +67,25 @@ def _walk(error: BaseException) -> list[BaseException]:
 
 def never_sent(error: BaseException) -> bool:
     """这次失败是不是「连接建立阶段失败、请求确定没发出」。认不出的返回 False。"""
+    return _never_sent(error, frozenset())
+
+
+def _never_sent(error: BaseException, parent_groups: frozenset[int]) -> bool:
     chain = _walk(error)
+    groups = [item for item in chain if isinstance(item, BaseExceptionGroup)]
+    for group in groups:
+        # 不同地址是独立的连接尝试。任何一条可能送达，都不能重发。
+        if id(group) in parent_groups or len(parent_groups) >= 32:
+            return False
+        ancestors = parent_groups | {id(group)}
+        if not all(_never_sent(child, ancestors) for child in group.exceptions):
+            return False
     if any(isinstance(item, _SSL) for item in chain):
         return False
     if any(isinstance(item, _PROXY) for item in chain):
         # 经代理：只有连代理本身都没连上才算没送达（NameResolutionError 是 NewConnectionError 的子类）。
         return any(isinstance(item, _CONNECT_TO_PROXY) for item in chain)
-    if isinstance(error, requests.exceptions.ConnectTimeout):
+    if groups or isinstance(error, requests.exceptions.ConnectTimeout):
         return True
     for item in chain:
         if isinstance(item, _CONNECT_TYPES):
