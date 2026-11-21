@@ -30,6 +30,7 @@ from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_r
 from character_workflow.lib.corrupt_files import count_files, parse_reason, quarantine
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
+from character_workflow.lib.llm_protocols import detect
 from character_workflow.lib.timed_lock import TimedLock
 
 GATEWAY_PROVIDER = "atelier"
@@ -797,9 +798,11 @@ def _pick_member(
         route = model_routes.find_route(modality, route_id)
     except model_routes.NoSuchRouteError:
         return None
+    needs_tools = modality == "text" and params and params.get("tools")
     excluded = [m.alias for m in route.members
                 if m.provider == GATEWAY_PROVIDER or not gateway_access.member_in_scope(owner, m)
-                or not gateway_access.member_relayable(modality, m, wire_protocol)]
+                or not gateway_access.member_relayable(modality, m, wire_protocol)
+                or (needs_tools and detect.agent_tools_unverified(*model_routes._member_key_and_model(m)))]
     if len(excluded) == len(route.members):
         return None
     if route_order is None and not tried:
