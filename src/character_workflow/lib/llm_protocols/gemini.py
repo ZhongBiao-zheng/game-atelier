@@ -132,6 +132,11 @@ def generate_url(base_url: str, model: str, *, stream: bool = False) -> str:
     return f"{api_root(base_url)}/models/{_model_path(model)}:{action}"
 
 
+def can_generate_content(item: dict) -> bool:
+    methods = item.get("supportedGenerationMethods") or []
+    return not methods or "generateContent" in methods
+
+
 def models_url(base_url: str) -> str:
     return f"{api_root(base_url)}/models"
 

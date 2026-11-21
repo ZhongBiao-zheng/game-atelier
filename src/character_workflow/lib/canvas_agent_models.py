@@ -130,9 +130,8 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
         for item in response.json().get("models") or []:
             if not isinstance(item, dict) or not item.get("name"):
                 continue
-            methods = item.get("supportedGenerationMethods") or []
             out[str(item["name"]).removeprefix("models/")] = {
-                "agent": not methods or "generateContent" in methods, "reasoning": False}
+                "agent": gemini.can_generate_content(item), "reasoning": False}
     return out
 
 
