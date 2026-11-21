@@ -52,9 +52,19 @@ class ScopeEntry(BaseModel):
     """范围里的一个供应商：models 为 None 时是它的全部模型（含以后新增），否则是它的这些模型（供应商自己的 model id）。
 
     持久化模型不加长度、条数与唯一性校验（读盘也会执行，转换出的条目超限会让整份配置报损坏）；
-    这些规则在接口写入边界查（viewer_server.gateway_routes.ScopeEntryInput）。"""
+    这些规则在接口写入边界查（viewer_server.gateway_routes.ScopeEntryInput）。
+    但读不懂的条目照旧报损坏：未知键（如手改写成 model）或缺 models 键，不能读成「该供应商全部」而变宽。
+    转换产物与接口写入总是带 models 键；库内直接调用经 _scope_input 补齐。"""
+    model_config = ConfigDict(extra="forbid")
     alias: str
-    models: list[str] | None = None
+    models: list[str] | None
+
+
+def _scope_input(scope):
+    """create_key / update_key 收到的范围：条目省略 models 时按「该供应商全部」补齐（与接口写入的默认一致）。"""
+    if scope is None:
+        return None
+    return [{"models": None, **entry} if isinstance(entry, dict) else entry for entry in scope]
 
 
 class GatewayPolicy(BaseModel):
@@ -273,8 +283,8 @@ def _read_config_locked() -> GatewayConfig:
     except PermissionError as error:  # 权限或属主不对：同样不能动它
         raise GatewayConfigCorruptError(path, str(error), unreadable=True) from None
     # 第 7 批前的旧字段读入即转换，并写回一次新格式；转换不了时不写回。
-    legacy_limits = isinstance(raw, dict) and any(
-        isinstance(item, dict) and "limits" in item for item in raw.get("keys") or [])
+    items = raw.get("keys") if isinstance(raw, dict) else None
+    legacy_limits = isinstance(items, list) and any(isinstance(item, dict) and "limits" in item for item in items)
     deferred = False
     try:
         changed = (_convert_legacy_scopes(raw) if isinstance(raw, dict) else False) or legacy_limits
@@ -286,17 +296,24 @@ def _read_config_locked() -> GatewayConfig:
         config = GatewayConfig.model_validate(raw)
     except ValueError as error:  # 校验
         raise GatewayConfigCorruptError(path, parse_reason(error)) from None
-    for record in config.keys:
-        if not record.revoked_at and not record.token:
-            record.token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-            record.token_sha256 = digest(record.token)
-            changed = True
-    if changed and not deferred:
+    reissued = [(record, record.token_sha256) for record in config.keys
+                 if not record.revoked_at and not record.token]
+    for record, _old in reissued:
+        record.token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+        record.token_sha256 = digest(record.token)
+    persisted = False
+    if (changed or reissued) and not deferred:
         try:
             _write(config)
+            persisted = True
         except (OSError, GatewayConfigTooLargeError) as error:
             # 写回失败（Windows 文件被占用、目录只读等）不能让服务起不来：本次用内存里转换好的配置，下次读时再写。
             logger.warning("网关配置写回失败（%s），本次按转换后的配置继续，下次读取时重试", type(error).__name__)
+    if reissued and not persisted:
+        # 只有哈希的旧密钥：没写回就不在内存里重发明文，否则每次读都换一把，管理员看到的明文下次就失效。
+        # 保持没有明文、照旧不可用，等能写回时再发。
+        for record, old in reissued:
+            record.token, record.token_sha256 = "", old
     return config
 
 
@@ -346,7 +363,7 @@ def create_key(
     token = TOKEN_PREFIX + (token if token is not None else secrets.token_urlsafe(32))
     record = GatewayKeyRecord(
         id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token), token=token,
-        quota=_with_since(quota, None), scope=scope,
+        quota=_with_since(quota, None), scope=_scope_input(scope),
         created_at=_now(), role=role,
     )
     with _lock():
@@ -368,6 +385,8 @@ def update_key(
     }.items() if v is not _UNSET}
     if isinstance(patch.get("name"), str):
         patch["name"] = patch["name"].strip()
+    if "scope" in patch:
+        patch["scope"] = _scope_input(patch["scope"])
 
     def change(record):
         values = {**record.model_dump(), **patch}

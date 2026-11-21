@@ -109,7 +109,8 @@ def test_stored_scope_is_read_without_the_write_limits(isolated_data_root):
     gateway_keys.create_key("小王")
     path = gateway_keys.gateway_file()
     raw = json.loads(path.read_text(encoding="utf-8"))
-    raw["keys"][0]["scope"] = [{"alias": "A" * 200, "models": ["m"] * 600}, {"alias": "B"}, {"alias": "B"}]
+    raw["keys"][0]["scope"] = [{"alias": "A" * 200, "models": ["m"] * 600},
+                               {"alias": "B", "models": None}, {"alias": "B", "models": None}]
     path.write_text(json.dumps(raw), encoding="utf-8")
     assert len(gateway_keys.read_config().keys[0].scope) == 3  # 读盘不报损坏
 
@@ -148,3 +149,49 @@ def test_a_write_over_the_limit_is_refused_and_the_file_is_untouched(isolated_da
     assert response.status_code == 413 and "上限" in response.json()["detail"]
     assert path.read_bytes() == before
     assert gateway_keys.read_config().keys[0].scope is None
+
+
+# ---------------------------------------------------------------- 复核收尾三项
+
+
+@pytest.mark.parametrize("entry", [{"alias": "A", "model": ["x"]}, {"alias": "A"}])
+def test_scope_entry_with_an_unknown_or_missing_models_key_is_corrupt(isolated_data_root, entry):
+    """手改把 models 写错成 model，或漏掉 models：读不懂就报损坏，不能读成「该供应商全部」。"""
+    gateway_keys.create_key("小王")
+    path = gateway_keys.gateway_file()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["keys"][0]["scope"] = [entry]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(gateway_keys.GatewayConfigCorruptError):
+        gateway_keys.read_config()
+
+
+@pytest.mark.parametrize("value", [5, True, "abc"])
+def test_keys_that_is_not_a_list_is_a_corrupt_config(isolated_data_root, value):
+    gateway_keys.create_key("小王")
+    path = gateway_keys.gateway_file()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["keys"] = value
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(gateway_keys.GatewayConfigCorruptError):
+        gateway_keys.read_config()
+
+
+def test_hash_only_key_is_not_reissued_until_the_file_can_be_written(isolated_data_root, monkeypatch):
+    record, _token = gateway_keys.create_key("小王")
+    path = gateway_keys.gateway_file()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["keys"][0]["token"] = ""  # 只存哈希的旧密钥
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    def locked(*_args, **_kwargs):
+        raise PermissionError("file is in use")
+    with monkeypatch.context() as patch:
+        patch.setattr(gateway_keys, "write_private_json", locked)
+        for _ in range(2):  # 每次读都不发明文，哈希不变
+            key = gateway_keys.read_config().keys[0]
+            assert key.token == "" and key.token_sha256 == record.token_sha256
+    issued = gateway_keys.read_config().keys[0].token
+    assert issued and gateway_keys.read_config().keys[0].token == issued  # 能写回时发一次，之后不变
+    assert json.loads(path.read_text(encoding="utf-8"))["keys"][0]["token"] == issued
+
