@@ -402,3 +402,84 @@ def test_studio_http_accepts_empty_prompt_only_for_workflow_without_prompt(
         assert done.prompt == "" and done.alias == "Hub"
         response = client.post("/api/studio/jobs", json={**payload, "model": lora.id, "params": {}})
         assert response.status_code == 422 and "提示词不能为空" in response.text
+
+
+class _HostStopped(BaseException):
+    """Simulate process termination outside the runner's normal failure handler."""
+
+
+def _stop_after_accepting(monkeypatch, owner, workflow, *, requested, accepted, files=None):
+    task = gateway_tasks.submit(owner, idempotency_key="restart", model=workflow.id, prompt="cat",
+                                n=requested, size=None, params={}, files=files or {}, kind="image")
+    running = gateway_tasks._update(task.task_id, status="running")
+    update = gateway_tasks._update
+
+    def stop_after_save(task_id, **changes):
+        saved = update(task_id, **changes)
+        if changes.get("resume_params") and len(saved.upstream_task_ids) == accepted:
+            raise _HostStopped
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(gateway_tasks, "_update", stop_after_save)
+        with pytest.raises(_HostStopped):
+            gateway_tasks.run_task(running)
+    stored = gateway_tasks._read(task.task_id)
+    assert stored.resume_params == {"comfyui": {"prefix": f"atelier/{task.task_id}"}}
+    assert stored.upstream_task_ids == [f"prompt-{index + 1}" for index in range(accepted)]
+    return task.task_id
+
+
+def _resume(task_id):
+    gateway_tasks.recover_after_restart()
+    pending = gateway_tasks._read(task_id)
+    assert (pending.status, pending.phase) == ("pending", "resuming")
+    return gateway_tasks.run_task(pending)
+
+
+@pytest.mark.parametrize("requested,accepted,where", [
+    (1, 1, "history"), (1, 1, "running"), (1, 1, "pending"), (2, 2, "history"),
+    (4, 2, "history"), (1, 1, "between_queries"),
+])
+def test_restart_retrieves_only_registered_prompts(client, host, monkeypatch, requested, accepted, where):
+    workflow = imported("upscale")
+    task_id = _stop_after_accepting(monkeypatch, client.record, workflow, requested=requested,
+                                    accepted=accepted, files={"ref": [("ref.png", host.png)]})
+    assert len(host.uploads) == 1
+    if where == "history":
+        host.polls = host.delay + 2
+    elif where in {"running", "between_queries"}:
+        host.polls = host.delay
+    queues = []
+    real_queue = host.queue
+
+    def queue():
+        result = real_queue()
+        if where == "between_queries":
+            result = {"queue_running": [], "queue_pending": []}
+        queues.append(result)
+        return result
+
+    monkeypatch.setattr(host, "queue", queue)
+    done = _resume(task_id)
+    assert done.status == "done", done.error
+    assert done.charged_cny == 0
+    assert len(done.outputs) == len(host.prompts) == accepted
+    assert len(host.uploads) == 1
+    if where in {"pending", "running"}:
+        assert queues and "prompt-1" in [row[1] for row in queues[0][f"queue_{where}"]]
+    if where == "between_queries":
+        assert queues
+    for name in done.outputs:
+        assert (gateway_tasks._files_dir(task_id) / "out" / name).read_bytes() == host.png
+    if accepted < requested:
+        assert any("部分完成" in w and "2/4" in w for w in done.warnings)
+
+
+def test_restart_lost_comfy_history_and_queue_is_unconfirmed(client, host, monkeypatch):
+    task_id = _stop_after_accepting(monkeypatch, client.record, imported(), requested=1, accepted=1)
+    host.prompts.clear()
+    host.mode = "timeout"
+    failed = _resume(task_id)
+    assert (failed.status, failed.error_kind, failed.charged_cny) == ("failed", "unconfirmed", 0)
+    assert not host.prompts and not failed.outputs

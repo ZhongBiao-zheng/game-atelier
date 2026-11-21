@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from character_workflow.lib import comfyui_workflows as workflows
-from character_workflow.lib.comfyui_client import ComfyUIClient
+from character_workflow.lib.comfyui_client import ComfyUIClient, ComfyUIUnavailableError
 
 CLIENT_ID = uuid4().hex
 POLL_INTERVAL = 1.5
@@ -30,13 +30,7 @@ def _cancel(client: ComfyUIClient, prompt_id: str) -> None:
         client.request("POST", "/interrupt", json={"prompt_id": prompt_id})
 
 
-def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
-           n: int = 1, params: dict | None = None, on_phase=None,
-           should_cancel=None, job_id: str | None = None, **kwargs) -> list[str]:
-    from character_workflow.lib.job_runner import JobCanceled
-
-    key = workflows.provider(alias)
-    workflow = workflows.read_workflow(alias, model)
+def _submit_prompts(client, workflow, *, prompt, n, params, prefix, check_cancel):
     workflows.validate_mappings(workflow.api_workflow, workflow.inputs)
     params = params if params is not None else {}
     values = workflows.validate_values(workflow.inputs, params.get("workflow_inputs") or {})
@@ -58,6 +52,57 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
             workflows.validate_value(item, prompt)
         if item.type == "mask":
             workflows.validate_value(item, params.get("mask_image"))
+    uploaded = {}
+    for item, path in [(item, refs[index] if index < len(refs) else None)
+                       for index, item in enumerate(image_inputs)] + [
+                           (item, params.get("mask_image")) for item in workflow.inputs
+                           if item.type == "mask"]:
+        if not path:
+            continue
+        check_cancel()
+        with Path(path).open("rb") as file:
+            result = client.post("/upload/image", files={
+                "image": (uuid4().hex + Path(path).suffix, file)}, data={"type": "input"})
+        uploaded[item.id] = "/".join(filter(None, [result.get("subfolder"), result["name"]]))
+    for _ in range(n):
+        check_cancel()
+        graph = copy.deepcopy(workflow.api_workflow)
+        declared_seeds = {(item.node_id, item.field) for item in workflow.inputs
+                          if item.type == "seed"}
+        for node_id, node in graph.items():
+            for field in ("seed", "noise_seed"):
+                if (node["class_type"] in {"KSampler", "KSamplerAdvanced"}
+                        and type(node["inputs"].get(field)) is int
+                        and (node_id, field) not in declared_seeds):
+                    node["inputs"][field] = secrets.randbelow(9007199254740992)
+        for item in workflow.inputs:
+            value = (prompt if item.type == "prompt" else uploaded.get(item.id)
+                     if item.type in {"image", "mask"} else values[item.id])
+            if item.type == "seed" and value is None:
+                low = max(0, int(item.min or 0))
+                high = min(9007199254740991, int(item.max) if item.max is not None
+                           else 9007199254740991)
+                value = low + secrets.randbelow(high - low + 1)
+            if value is not None:
+                graph[item.node_id]["inputs"][item.field] = value
+        for node in graph.values():
+            if node["class_type"] == "SaveImage":
+                node["inputs"]["filename_prefix"] = prefix
+        submitted = client.post("/prompt", json={"prompt": graph, "client_id": CLIENT_ID})
+        prompt_id = submitted.get("prompt_id")
+        if not prompt_id or submitted.get("node_errors"):
+            raise ValueError(f"ComfyUI 拒绝工作流：{submitted.get('node_errors', submitted)}")
+        yield prompt_id
+
+
+def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
+           n: int = 1, params: dict | None = None, on_phase=None,
+           should_cancel=None, job_id: str | None = None, resume_prompt_ids: list[str] | None = None,
+           on_prompt_submitted=None, **kwargs) -> list[str]:
+    from character_workflow.lib.job_runner import JobCanceled
+
+    key = workflows.provider(alias)
+    workflow = workflows.read_workflow(alias, model)
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     prefix = "atelier/" + (job_id or uuid4().hex)
@@ -79,47 +124,16 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                 raise
 
         check_cancel()
-        uploaded = {}
-        for item, path in [(item, refs[index] if index < len(refs) else None)
-                           for index, item in enumerate(image_inputs)] + [
-                               (item, params.get("mask_image")) for item in workflow.inputs
-                               if item.type == "mask"]:
-            if not path:
-                continue
-            check_cancel()
-            with Path(path).open("rb") as file:
-                result = client.post("/upload/image", files={
-                    "image": (uuid4().hex + Path(path).suffix, file)}, data={"type": "input"})
-            uploaded[item.id] = "/".join(filter(None, [result.get("subfolder"), result["name"]]))
-        for _ in range(n):
-            check_cancel()
-            graph = copy.deepcopy(workflow.api_workflow)
-            declared_seeds = {(item.node_id, item.field) for item in workflow.inputs
-                              if item.type == "seed"}
-            for node_id, node in graph.items():
-                for field in ("seed", "noise_seed"):
-                    if (node["class_type"] in {"KSampler", "KSamplerAdvanced"}
-                            and type(node["inputs"].get(field)) is int
-                            and (node_id, field) not in declared_seeds):
-                        node["inputs"][field] = secrets.randbelow(9007199254740992)
-            for item in workflow.inputs:
-                value = (prompt if item.type == "prompt" else uploaded.get(item.id)
-                         if item.type in {"image", "mask"} else values[item.id])
-                if item.type == "seed" and value is None:
-                    low = max(0, int(item.min or 0))
-                    high = min(9007199254740991, int(item.max) if item.max is not None
-                               else 9007199254740991)
-                    value = low + secrets.randbelow(high - low + 1)
-                if value is not None:
-                    graph[item.node_id]["inputs"][item.field] = value
-            for node in graph.values():
-                if node["class_type"] == "SaveImage":
-                    node["inputs"]["filename_prefix"] = prefix
-            submitted = client.post("/prompt", json={"prompt": graph, "client_id": CLIENT_ID})
-            prompt_id = submitted.get("prompt_id")
-            if not prompt_id or submitted.get("node_errors"):
-                raise ValueError(f"ComfyUI 拒绝工作流：{submitted.get('node_errors', submitted)}")
+        if resume_prompt_ids is not None:
+            prompt_ids = resume_prompt_ids
             client.execution_started = True
+        else:
+            prompt_ids = _submit_prompts(client, workflow, prompt=prompt, n=n, params=params,
+                                         prefix=prefix, check_cancel=check_cancel)
+        for prompt_id in prompt_ids:
+            client.execution_started = True
+            if on_prompt_submitted and resume_prompt_ids is None:
+                on_prompt_submitted(prompt_id, prefix)
             deadline = time.monotonic() + workflow.timeout_seconds
             while True:
                 check_cancel(prompt_id)
@@ -127,6 +141,15 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                     _cancel(client, prompt_id)
                     raise TimeoutError("ComfyUI 工作流执行超时")
                 entry = client.get(f"/history/{prompt_id}").get(prompt_id)
+                queue = None
+                if not entry and resume_prompt_ids is not None:
+                    queue = client.get("/queue")
+                    if (prompt_id not in _queue_ids(queue, "queue_pending")
+                            and prompt_id not in _queue_ids(queue, "queue_running")):
+                        # A prompt may move from the queue to history between the two GETs.
+                        entry = client.get(f"/history/{prompt_id}").get(prompt_id)
+                        if not entry:
+                            raise ComfyUIUnavailableError(execution_started=True)
                 if entry:
                     status = entry.get("status", {})
                     if status.get("status_str") == "error":
@@ -136,7 +159,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                         raise ValueError(f"ComfyUI：{message}")
                     if status.get("completed"):
                         break
-                queue = client.get("/queue")
+                if queue is None:
+                    queue = client.get("/queue")
                 pending = _queue_ids(queue, "queue_pending")
                 phase = (f"queued:{pending.index(prompt_id) + 1}" if prompt_id in pending
                          else "sent")
