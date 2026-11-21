@@ -16,6 +16,7 @@ _DESCRIPTIONS = {
         "expected revision. Never touches generated versions or derivation edges."
     ),
     "canvas-import-media": "Copy one local media file into the canvas as an immutable version plus node.",
+    "canvas-run-batch": "Submit 1–20 distinct surface nodes at the reviewed revision. Paid; never replay a batch.",
     "canvas-run": "Start a generation run on a surface node. Paid; requires canvas_generate.",
     "canvas-get-run": "Read a run's status, candidates and output version ids; never retries.",
     "canvas-search-library": "Find approved image references in the current project by category.",
@@ -110,7 +111,7 @@ TOOL_DEFINITIONS = tuple(
         operation=f"canvas-{name}", input_model=model,
         description=_DESCRIPTIONS[f"canvas-{name}"],
         read_only=f"canvas-{name}" in _READ_ONLY,
-        billable=name == "run",
+        billable=name in {"run", "run-batch"},
     )
     for name, model in CANVAS_TOOL_INPUT_MODELS.items()
 ) + tuple(

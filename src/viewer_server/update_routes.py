@@ -69,7 +69,7 @@ def admission() -> Admission:
 def work_request(path: str, method: str) -> bool:
     if method != "POST":
         return False
-    if path in {"/api/studio/jobs", "/api/canvas-agent/run", "/gateway/v1/tasks",
+    if path in {"/api/studio/jobs", "/api/canvas-agent/run", "/api/canvas-agent/run-batch", "/gateway/v1/tasks",
                 "/gateway/v1/openai/chat/completions", "/gateway/v1/openai/responses"}:
         return True
     if re.fullmatch(r"/api/jobs/[^/]+/confirm", path):

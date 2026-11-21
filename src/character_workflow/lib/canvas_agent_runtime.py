@@ -30,7 +30,7 @@ from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.net_env import SOCKS_PROXY_MESSAGE, UNSUPPORTED_SOCKS_PREFIXES
 from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
-    ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
+    MAX_BATCH_GENERATIONS, ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
     CanvasReadMediaInput, CanvasReadSpecInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
@@ -49,7 +49,6 @@ Notify = Callable[[str, dict], None]
 
 MAX_TURNS = 30
 TOOL_OUTPUT_LIMIT = 20_000
-MAX_BATCH_GENERATIONS = 20
 DELTA_FLUSH_SECONDS = 0.15
 MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
@@ -210,12 +209,6 @@ def _generations_estimate(project_id: str, arguments: dict, batch_changes: list[
     priced = [row["estimate_cny"] for row in rows if row["estimate_cny"] is not None]
     return {"rows": rows, "total": round(sum(priced), 6) if priced else None,
             "unpriced": len(rows) - len(priced)}
-
-
-def _repeated_nodes(items: list[dict]) -> list[str]:
-    """同一节点在一批里出现多次：两次提交会落进同一个结果节点、并发写入，归属不直观，整批退回。"""
-    ids = [item["surface_node_id"] for item in items]
-    return sorted({node_id for node_id in ids if ids.count(node_id) > 1})
 
 
 def _generation_items(arguments: dict) -> list[dict]:
@@ -418,54 +411,12 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         result = _with_fresh_revision(project_id, submit)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
     if tool == "run_generations":
-        return _run_generations(project_id, arguments, scope, rejected)
+        return tools.submit_batch(_generation_items(arguments),
+                                  lambda item: execute_tool(project_id, "run_generation", item, scope),
+                                  rejected=rejected)
     if tool.startswith(PLUGIN_TOOL_PREFIX):
         return _execute_plugin_tool(project_id, tool, arguments)
     raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
-
-
-GENERATIONS_NOTE = ("部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
-                    "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
-                    "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
-                    "已提交的项也可能失败，用 wait_for_runs 查看每一项的最终结果。")
-
-
-def _run_generations(project_id: str, arguments: dict, scope: ModelScope,
-                     rejected: frozenset[int]) -> tuple[dict, list[str]]:
-    """逐项走 run_generation；一项失败不影响其他项，已提交的不回滚。"""
-    items = _generation_items(arguments)
-    if not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
-        raise CanvasToolError("INVALID_PARAMETERS", f"一次最多 {MAX_BATCH_GENERATIONS} 项", 422)
-    if repeated := _repeated_nodes(items):
-        raise CanvasToolError("INVALID_PARAMETERS", f"同一批里节点 {', '.join(repeated)} 出现了多次；"
-                              "同一节点要多张用 count（最多 4），整批没有提交", 422)
-    rows: list[dict] = []
-    created: list[str] = []
-    for index, item in enumerate(items):
-        row = {"index": index, "surface_node_id": item["surface_node_id"], "count": item["count"]}
-        if index in rejected:
-            rows.append({**row, "status": "rejected", "reason": "用户在确认卡上拒绝了这一项"})
-            continue
-        try:
-            result, new_nodes = execute_tool(project_id, "run_generation", item, scope)
-        except CanvasToolError as error:
-            rows.append({**row, "status": "failed", "error": f"{error.code}：{error.message}"})
-            continue
-        except (KeyError, TypeError, ValueError) as error:
-            rows.append({**row, "status": "failed", "error": f"参数错误：{error}"})
-            continue
-        except Exception as error:  # noqa: BLE001 — 前面已提交的项必须把 run_id 带回给模型，不能让异常把整批结果丢掉
-            logger.exception("canvas agent batch item %s failed", index)
-            rows.append({**row, "status": "failed", "error": (
-                f"未预期错误（{type(error).__name__}）：这一项可能已经建了任务，"
-                "先用 get_canvas 看这个节点，不要重试")})
-            continue
-        rows.append({**row, "status": "submitted", "run_id": result.get("run_id"),
-                     "result_node_id": result.get("result_node_id")})
-        created.extend(new_nodes)
-    counts = {status: sum(1 for row in rows if row["status"] == status)
-              for status in ("submitted", "rejected", "failed")}
-    return {"items": rows, **counts, "note": GENERATIONS_NOTE}, created
 
 
 def generations_outcome(text: str) -> str | None:
@@ -693,7 +644,7 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
                 RunInput(project_id=project_id, expected_revision=0,
                          surface_node_id=item.get("surface_node_id", ""),
                          requested_count=item.get("count", 1))
-            if _repeated_nodes(_generation_items(arguments)):
+            if tools.repeated_nodes(_generation_items(arguments)):
                 return False
     except (ValidationError, TypeError, ValueError, AttributeError):
         return False

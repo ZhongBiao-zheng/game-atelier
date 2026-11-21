@@ -39,6 +39,8 @@ def _success_result(operation: str, result: dict) -> CallToolResult:
     metadata = dict(result)
     preview = metadata.pop("preview", None) if operation in ("canvas-read-media", "canvas-read-video-frames", "ps-preview") else None
     previews = metadata.pop("previews", []) if operation in ("canvas-search-library", "canvas-search-team", "canvas-wait-for-run") else []
+    if not isinstance(previews, list):
+        raise AdapterError("RESPONSE_INVALID", "画布图片预览格式不正确。")
     if preview is not None:
         previews.append(preview)
     for preview in previews:
@@ -112,12 +114,19 @@ def create_server(client: CanvasClient) -> MCPServer:
         async def invoke(payload) -> CallToolResult:
             if slots.locked():
                 return _error_result(AdapterError("CONNECTION_RATE_LIMITED", "并发工具过多，请稍后重试。"))
-            async with slots:
+            await slots.acquire()
+
+            async def call():
                 try:
                     result = await asyncio.to_thread(client.call, operation, payload)
                     return _success_result(operation, result)
                 except AdapterError as error:
                     return _error_result(error)
+                finally:
+                    slots.release()
+
+            # Cancelling an MCP request cannot stop requests' worker thread. Keep its slot until HTTP returns.
+            return await asyncio.shield(call())
 
         invoke.__name__ = tool.name
         invoke.__annotations__["payload"] = model
@@ -129,7 +138,7 @@ def create_server(client: CanvasClient) -> MCPServer:
             annotations=ToolAnnotations(
                 read_only_hint=tool.read_only,
                 destructive_hint=tool.operation in ("canvas-apply-changes", "ps-execute"),
-                idempotent_hint=True, open_world_hint=False,
+                idempotent_hint=not tool.billable, open_world_hint=False,
             ),
         )
     return server
