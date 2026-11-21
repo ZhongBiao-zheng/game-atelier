@@ -4,21 +4,20 @@ from __future__ import annotations
 import json
 import logging
 import math
-import threading
-import time
 from datetime import datetime, timezone
 from decimal import ROUND_CEILING, Decimal
 from urllib.parse import urlsplit
 
 import requests
 
+from character_workflow.lib.periodic_sync import PeriodicSync
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 
 SYNC_INTERVAL_SECONDS = 6 * 3600
 _log = logging.getLogger(__name__)
-_worker_started = False
-_worker_lock = threading.Lock()
+_worker = PeriodicSync("openai-hk-price-sync")
+stop_background_sync = _worker.stop
 
 
 def snapshot_path():
@@ -84,21 +83,7 @@ def sync() -> dict:
 
 
 def start_background_sync() -> None:
-    global _worker_started
-    with _worker_lock:
-        if _worker_started:
-            return
-        _worker_started = True
-
-    def loop():
-        while True:
-            try:
-                sync()
-            except Exception:  # noqa: BLE001 — refresh must not interrupt the server
-                _log.exception("OpenAI-HK 价格同步失败")
-            time.sleep(SYNC_INTERVAL_SECONDS)
-
-    threading.Thread(target=loop, name="openai-hk-price-sync", daemon=True).start()
+    _worker.start(sync, SYNC_INTERVAL_SECONDS, _log, "OpenAI-HK 价格同步失败")
 
 
 def estimate(*, model_id: str, n: int, billing_group: str | None) -> float | None:

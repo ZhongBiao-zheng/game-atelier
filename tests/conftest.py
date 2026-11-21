@@ -40,7 +40,12 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.setattr(openai_hk_prices, "start_background_sync", lambda: None)
     # 公告源同理：启动不拉 CNB / GitHub。
     monkeypatch.setattr(announcement_feed, "start_background_sync", lambda: None)
-    return root
+    yield root
+    for module in (announcement_feed, openai_hk_prices, tokendance_prices, tuzi_prices):
+        thread = module.stop_background_sync()
+        if thread is not None:
+            thread.join(10)
+            assert not thread.is_alive(), f"{thread.name} did not stop"
 
 
 @pytest.fixture(autouse=True)
