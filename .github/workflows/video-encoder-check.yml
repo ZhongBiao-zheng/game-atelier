@@ -44,7 +44,8 @@ jobs:
         if: matrix.build == 'btbn'
         run: python scripts/video_encoder_check_inventory.py .scratch/encoder/bin evidence --btbn
       - name: Prepare the repository's locked OpenCV test dependencies
-        run: python -m pip install --only-binary=:all: numpy==2.4.6 opencv-python-headless==4.11.0.86
+        run: >-
+          python -m pip install --only-binary=:all: numpy==2.4.6 opencv-python-headless==4.11.0.86
       - name: Exercise the native encoder and inspect outputs
         run: python scripts/video_encoder_check.py --bin-dir .scratch/encoder/bin --out evidence
       - name: Keep measurements and minimal binaries for native retest
