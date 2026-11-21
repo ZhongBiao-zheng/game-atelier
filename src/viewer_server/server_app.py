@@ -416,7 +416,11 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     async def handle_connection_error(_request, error: ConnectionError) -> JSONResponse:
         return connection_error(error)
 
-    from character_workflow.lib.gateway_keys import GatewayConfigCorruptError
+    from character_workflow.lib.gateway_keys import GatewayConfigCorruptError, GatewayConfigTooLargeError
+
+    @app.exception_handler(GatewayConfigTooLargeError)
+    async def handle_gateway_config_too_large(_request, error: GatewayConfigTooLargeError) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, status_code=413)
 
     @app.exception_handler(GatewayConfigCorruptError)
     async def handle_gateway_config_corrupt(_request, error: GatewayConfigCorruptError) -> JSONResponse:

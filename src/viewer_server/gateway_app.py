@@ -107,6 +107,10 @@ def create_gateway_app() -> FastAPI:
     app.include_router(share_router(_require_key))
     install_errors(app)
 
+    @app.exception_handler(gateway_keys.GatewayConfigTooLargeError)
+    async def config_too_large(_request, error):
+        return JSONResponse({"detail": str(error)}, status_code=413)
+
     @app.exception_handler(gateway_keys.GatewayConfigCorruptError)
     async def config_corrupt(_request, _error):
         # 网关开着时配置被写坏：不给接入端看本机路径，只说暂不可用。

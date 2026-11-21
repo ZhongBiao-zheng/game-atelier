@@ -32,19 +32,33 @@ class GatewaySettingsPatch(BaseModel):
     name: str | None = Field(default=None, max_length=40)
 
 
-def _no_new_empty_scope(scope):
-    """新保存不允许空范围（一个模型都没有）；已存在的空范围（旧数据转换来的）照常读出与显示。只在接口写入边界查。"""
-    if scope is not None and (not scope or any(entry.models == [] for entry in scope)):
+class ScopeEntryInput(BaseModel):
+    """接口写入的范围条目：长度与条数上限只在这里查（持久化模型不查，见 gateway_keys.ScopeEntry）。"""
+    model_config = ConfigDict(extra="forbid")
+    alias: str = Field(min_length=1, max_length=120)
+    models: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(default=None, max_length=500)
+
+
+def _check_new_scope(scope):
+    """新保存的范围：不能为空（一个模型都没有），同一供应商只能出现一次。已存在的空范围（旧数据转换来的）照常读出。"""
+    if scope is None:
+        return scope
+    if not scope or any(entry.models == [] for entry in scope):
         raise ValueError("至少选一个模型")
+    if len({entry.alias for entry in scope}) != len(scope):
+        raise ValueError("同一供应商只能出现一次")
     return scope
 
 
-class GatewayKeyCreate(gateway_keys.GatewayPolicy):
+class GatewayKeyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     token: str | None = Field(default=None, min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$", repr=False)
     role: Literal["member", "admin"] = "member"
     name: Annotated[str, Field(min_length=1, max_length=40)]
+    quota: gateway_keys.GatewayQuota | None = None
+    scope: list[ScopeEntryInput] | None = Field(default=None, max_length=200)
 
-    _scope_not_empty = field_validator("scope")(_no_new_empty_scope)
+    _scope_ok = field_validator("scope")(_check_new_scope)
 
 
 class GatewayKeyPatch(BaseModel):
@@ -52,9 +66,9 @@ class GatewayKeyPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=40)
     quota: gateway_keys.GatewayQuota | None = None
-    scope: list[gateway_keys.ScopeEntry] | None = Field(default=None, max_length=200)
+    scope: list[ScopeEntryInput] | None = Field(default=None, max_length=200)
 
-    _scope_not_empty = field_validator("scope")(_no_new_empty_scope)
+    _scope_ok = field_validator("scope")(_check_new_scope)
 
 
 def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:

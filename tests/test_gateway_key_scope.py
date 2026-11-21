@@ -229,7 +229,8 @@ def test_conversion_is_written_back_once():
     path = _write_legacy(allowed_models=["gpt-image-2"], allowed_aliases=["A"])
     gateway_keys.read_config()
     saved = json.loads(path.read_text(encoding="utf-8"))["keys"][0]
-    assert "allowed_models" not in saved and "allowed_aliases" not in saved
+    # 有范围的密钥另写 allowed_models=[]：回滚到旧版时它一个模型都用不了（只严不宽，R1）。
+    assert saved["allowed_models"] == [] and "allowed_aliases" not in saved
     assert saved["scope"] == [{"alias": "A", "models": ["gpt-image-2"]}]
     before = path.read_bytes()
     gateway_keys.read_config()

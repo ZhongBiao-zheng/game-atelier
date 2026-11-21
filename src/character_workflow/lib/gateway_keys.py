@@ -6,15 +6,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from character_workflow.lib import data_root, gateway_audit
 from character_workflow.lib.corrupt_files import parse_reason
@@ -25,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 5180
 TOKEN_PREFIX = "atg_"
-_MAX_FILE_BYTES = 256 * 1024
+# 读写同一个上限：范围按「供应商 × 模型」逐条列，30 把密钥 × 5 个供应商 × 100 个模型也远在上限内。
+_MAX_FILE_BYTES = 2 * 1024 * 1024
 
 
 QuotaPeriod = Literal["day", "week", "month", "none"]
@@ -47,10 +49,12 @@ class GatewayQuota(BaseModel):
 
 
 class ScopeEntry(BaseModel):
-    """范围里的一个供应商：models 为 None 时是它的全部模型（含以后新增），否则是它的这些模型（供应商自己的 model id）。"""
-    model_config = ConfigDict(extra="forbid")
-    alias: str = Field(min_length=1, max_length=120)
-    models: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(default=None, max_length=500)
+    """范围里的一个供应商：models 为 None 时是它的全部模型（含以后新增），否则是它的这些模型（供应商自己的 model id）。
+
+    持久化模型不加长度、条数与唯一性校验（读盘也会执行，转换出的条目超限会让整份配置报损坏）；
+    这些规则在接口写入边界查（viewer_server.gateway_routes.ScopeEntryInput）。"""
+    alias: str
+    models: list[str] | None = None
 
 
 class GatewayPolicy(BaseModel):
@@ -59,27 +63,33 @@ class GatewayPolicy(BaseModel):
     scope 为 None 是全部模型（所有供应商，含以后新增）；否则按供应商列出——模型挂在供应商下面，
     表达不出「选了模型但供应商没开」。判定只有一处：gateway_access.member_in_scope。
     """
-    model_config = ConfigDict(extra="forbid")
     quota: GatewayQuota | None = None
-    scope: list[ScopeEntry] | None = Field(default=None, max_length=200)
-
-    @model_validator(mode="after")
-    def unique_aliases(self):
-        if self.scope is not None and len({entry.alias for entry in self.scope}) != len(self.scope):
-            raise ValueError("同一供应商只能出现一次")
-        return self
+    scope: list[ScopeEntry] | None = None
 
 
-def _legacy_limits_to_quota(limits: list) -> dict | None:
-    """旧的多条 limits → 一条 quota。一条原样转；多条取周期最长的一条并记日志。读不出的条目跳过。"""
-    usable = [item for item in limits if isinstance(item, dict)
-              and item.get("period") in _PERIOD_LENGTH and isinstance(item.get("cap_cny"), int | float)]
-    if not usable:
+class _LegacyLimit(BaseModel):
+    """5e029d16 的 GatewayLimit 原样（宽松模式：数字字符串照样读成金额）。只用来转换旧 limits。"""
+    model_config = ConfigDict(extra="forbid")
+    period: Literal["day", "week", "month"]
+    cap_cny: float = Field(gt=0, le=1_000_000)
+
+
+_LEGACY_LIMITS = TypeAdapter(list[_LegacyLimit])
+
+
+def _legacy_limits_to_quota(limits, name) -> dict | None:
+    """旧的多条 limits → 一条 quota。旧版能读的值都转；旧版也读不懂的照旧报配置损坏（抛 ValueError），不放开。
+
+    一条原样转；多条取周期最长的一条并记日志（带密钥名）。"""
+    parsed = _LEGACY_LIMITS.validate_python(limits)
+    if len(parsed) > 3 or len({item.period for item in parsed}) != len(parsed):
+        raise ValueError("旧额度条数或周期不对")  # 与旧版 GatewayPolicy 的校验一致
+    if not parsed:
         return None
-    chosen = max(usable, key=lambda item: _PERIOD_LENGTH[item["period"]])
-    if len(usable) > 1:
-        logger.warning("网关密钥有 %d 条旧额度，按周期最长的一条（%s）转换", len(usable), chosen["period"])
-    return {"cap_cny": chosen["cap_cny"], "period": chosen["period"], "since": _now()}
+    chosen = max(parsed, key=lambda item: _PERIOD_LENGTH[item.period])
+    if len(parsed) > 1:
+        logger.warning("网关密钥「%s」有 %d 条旧额度，按周期最长的一条（%s）转换", name, len(parsed), chosen.period)
+    return {"cap_cny": chosen.cap_cny, "period": chosen.period, "since": _now()}
 
 
 def _legacy_pattern_matches(pattern: str, route_id: str) -> bool:
@@ -108,13 +118,15 @@ def legacy_scope(allowed_models, allowed_aliases, members) -> tuple[list[dict] |
     - models=[…]、aliases=[] → 按「供应商不限」转（变宽，飙哥 2026-11-20 定：「直接可用」）。
     - 带 * 前缀的条目展开成当时命中的具体模型，不升级成「该供应商全部」（变严）。
     """
-    aliases = None if allowed_aliases is None else list(dict.fromkeys(
-        alias for alias in allowed_aliases if isinstance(alias, str) and 0 < len(alias) <= 120))
+    for value in (allowed_models, allowed_aliases):
+        if value is not None and (not isinstance(value, list) or not all(isinstance(v, str) for v in value)):
+            raise _LegacyScopeCorrupt("旧范围格式不对")  # 旧版同样读不出：照旧报配置损坏
+    aliases = None if allowed_aliases is None else list(dict.fromkeys(allowed_aliases))
     if allowed_models is None:
         if aliases is None:
             return None, "equal"
         return [{"alias": alias, "models": None} for alias in aliases], "equal"
-    patterns = [item for item in allowed_models if isinstance(item, str)]
+    patterns = allowed_models
     widened = aliases == []
     allowed = None if aliases is None or widened else set(aliases)
     by_alias: dict[str, list[str]] = {}
@@ -132,7 +144,14 @@ def _convert_legacy_scopes(raw: dict) -> bool:
 
     读不出供应商列表时这几把密钥按空范围处理（宁可暂时不可用，也不放开），且不写回，下次读时重试。
     """
-    legacy = [item for item in raw.get("keys") or [] if isinstance(item, dict)
+    items = raw.get("keys")
+    if not isinstance(items, list):
+        return False  # 形状不对交给后面的校验报损坏
+    for item in items:
+        if isinstance(item, dict) and "scope" in item:
+            item.pop("allowed_models", None)  # 写给第 7 批前版本看的封锁标记，见 _dump
+            item.pop("allowed_aliases", None)
+    legacy = [item for item in items if isinstance(item, dict)
               and ("allowed_models" in item or "allowed_aliases" in item)]
     if not legacy:
         return False
@@ -147,8 +166,6 @@ def _convert_legacy_scopes(raw: dict) -> bool:
         raise _LegacyScopeDeferred from None
     for item in legacy:
         models, aliases = item.pop("allowed_models", None), item.pop("allowed_aliases", None)
-        if "scope" in item:
-            continue
         item["scope"], kind = legacy_scope(models, aliases, members)
         level = logging.WARNING if kind != "equal" else logging.INFO
         logger.log(level, "网关密钥「%s」旧范围转换（%s）：allowed_models=%s allowed_aliases=%s → scope=%s",
@@ -158,6 +175,10 @@ def _convert_legacy_scopes(raw: dict) -> bool:
 
 class _LegacyScopeDeferred(Exception):
     """旧范围这次没能转换（供应商列表读不出）：已按空范围读入，不写回。"""
+
+
+class _LegacyScopeCorrupt(ValueError):
+    """旧范围字段的类型旧版也读不出：按配置损坏处理。"""
 
 
 class GatewayKeyRecord(GatewayPolicy):
@@ -171,8 +192,8 @@ class GatewayKeyRecord(GatewayPolicy):
         if isinstance(data, dict) and "limits" in data:
             data = dict(data)
             limits = data.pop("limits")
-            if data.get("quota") is None and isinstance(limits, list):
-                data["quota"] = _legacy_limits_to_quota(limits)
+            if data.get("quota") is None:
+                data["quota"] = _legacy_limits_to_quota(limits, data.get("name"))
         return data
     id: str
     name: str = Field(min_length=1, max_length=40)
@@ -209,6 +230,14 @@ class GatewayConfigCorruptError(RuntimeError):
 
 class CustomGatewayTokenError(ValueError):
     pass
+
+
+class GatewayConfigTooLargeError(ValueError):
+    """这次修改会让 gateway.json 超出读写上限：拒绝保存，文件不动。"""
+
+    def __init__(self) -> None:
+        super().__init__(f"网关配置超出 {_MAX_FILE_BYTES // (1024 * 1024)} MiB 上限，没有保存："
+                         "减少密钥范围里逐个列出的模型，或改为勾选整个供应商")
 
 
 class NoSuchGatewayKeyError(LookupError):
@@ -251,6 +280,8 @@ def _read_config_locked() -> GatewayConfig:
         changed = (_convert_legacy_scopes(raw) if isinstance(raw, dict) else False) or legacy_limits
     except _LegacyScopeDeferred:
         changed, deferred = False, True
+    except _LegacyScopeCorrupt as error:
+        raise GatewayConfigCorruptError(path, str(error)) from None
     try:
         config = GatewayConfig.model_validate(raw)
     except ValueError as error:  # 校验
@@ -261,12 +292,30 @@ def _read_config_locked() -> GatewayConfig:
             record.token_sha256 = digest(record.token)
             changed = True
     if changed and not deferred:
-        _write(config)
+        try:
+            _write(config)
+        except (OSError, GatewayConfigTooLargeError) as error:
+            # 写回失败（Windows 文件被占用、目录只读等）不能让服务起不来：本次用内存里转换好的配置，下次读时再写。
+            logger.warning("网关配置写回失败（%s），本次按转换后的配置继续，下次读取时重试", type(error).__name__)
     return config
 
 
+def _dump(config: GatewayConfig) -> dict:
+    """落盘形状。有范围或额度的密钥另写 allowed_models=[]：回滚到第 7 批前的版本（它不认识 scope / quota，
+    会按 allowed_models 判定）时这些密钥一个模型都用不了，只严不宽。新版读入时有 scope 键就忽略它。
+    删除条件：不再可能装回第 7 批前的版本时删（最迟与 /me 的 limits 兼容层一起，在下次改 PROTOCOL_VERSION 时）。ADR-0025。"""
+    data = config.model_dump(mode="json")
+    for item in data["keys"]:
+        if item["scope"] is not None or item["quota"] is not None:
+            item["allowed_models"] = []
+    return data
+
+
 def _write(config: GatewayConfig) -> None:
-    write_private_json(gateway_file(), config.model_dump(mode="json"))
+    data = _dump(config)
+    if len(json.dumps(data, ensure_ascii=False).encode("utf-8")) > _MAX_FILE_BYTES:
+        raise GatewayConfigTooLargeError()
+    write_private_json(gateway_file(), data)
 
 
 def _lock():
