@@ -281,3 +281,56 @@ async def test_search_results_identify_each_native_thumbnail(isolated_data_root,
             assert result.structured_content["attach_images"] == [ref]
             [image] = [part for part in result.content if part.type == "image"]
             assert image.mime_type == "image/jpeg" and image.data
+
+
+@pytest.mark.parametrize("entry", ["builtin", "mcp_route"])
+async def test_wait_leaves_event_loop_free_while_project_is_locked(entry, video_project, monkeypatch):
+    import json
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib.canvas_agent_schema import GetRunInput
+    from character_workflow.lib.canvas_projects import canvas_project_lock_path
+    from character_workflow.lib.file_lock import file_lock
+    from viewer_server import canvas_agent_routes as routes
+
+    pid, video, image = video_project
+    locked, reading, release = threading.Event(), threading.Event(), threading.Event()
+    read = tools.read_canvas_document
+    observed = []
+
+    def hold():
+        with file_lock(canvas_project_lock_path(pid)):
+            locked.set()
+            assert release.wait(4), "event loop stalled while the project lock was held"
+
+    def observe_read(project_id):
+        reading.set()
+        return read(project_id)
+
+    def select_images(project_id, ids):
+        observed.append(list(ids))
+        return original_filter(project_id, ids)
+
+    original_filter = tools.image_versions
+    monkeypatch.setattr(tools, "image_versions", select_images)
+    monkeypatch.setattr(tools, "read_canvas_document", observe_read)
+    monkeypatch.setattr(tools, "get_run", lambda *_: {"status": "done", "candidates": [
+        {"status": "succeeded", "version_id": vid} for vid in (video, image)]})
+    holder = asyncio.create_task(asyncio.to_thread(hold))
+    try:
+        assert await asyncio.to_thread(locked.wait, 2)
+        if entry == "builtin":
+            waiter = asyncio.create_task(runtime._wait_for_run(pid, "r"))
+        else:
+            request = SimpleNamespace(state=SimpleNamespace(connection_principal=runtime.LOCAL))
+            waiter = asyncio.create_task(routes.wait_for_run(request, GetRunInput(project_id=pid, run_id="r")))
+        assert await asyncio.to_thread(reading.wait, 2)
+        await asyncio.sleep(0)
+        assert not holder.done() and not waiter.done()
+        assert observed == [[video, image]]
+    finally:
+        release.set()
+        await holder
+    result = await waiter
+    if entry == "builtin":
+        result = json.loads(result)
+    assert result["status"] == "done" and result["attach_images"] == [image]

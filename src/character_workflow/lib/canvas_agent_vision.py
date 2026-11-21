@@ -53,7 +53,7 @@ def succeeded_version_ids(run_view: dict) -> list[str]:
             if candidate.get("version_id") and candidate.get("status") == "succeeded"]
 
 
-async def wait_for_run(get_run: Callable[[], dict], is_image: Callable[[str], bool]) -> dict:
+async def wait_for_run(get_run: Callable[[], dict], image_versions: Callable[[list[str]], list[str]]) -> dict:
     """Poll a run until it reaches a terminal status or WAIT_SECONDS pass."""
     deadline = time.monotonic() + WAIT_SECONDS
     view = await asyncio.to_thread(get_run)
@@ -62,7 +62,8 @@ async def wait_for_run(get_run: Callable[[], dict], is_image: Callable[[str], bo
         view = await asyncio.to_thread(get_run)
     if view.get("status") not in TERMINAL_STATUSES:
         view = {**view, "note": "还在生成，稍后可再次调用 wait_for_run"}
-    images = [vid for vid in succeeded_version_ids(view) if is_image(vid)][:MAX_ATTACH_IMAGES]
+    ids = succeeded_version_ids(view)
+    images = (await asyncio.to_thread(image_versions, ids))[:MAX_ATTACH_IMAGES] if ids else []
     return {**view, ATTACH_KEY: images} if images else view
 
 
