@@ -743,7 +743,11 @@ def _run_once(
     try:
         if not job.alias:
             raise JobRunnerError("job requires an alias to route to an image provider")
-        _raise_if_canceled(should_cancel)
+        if not comfyui_resume:
+            _raise_if_canceled(should_cancel)
+            if job.provider == "comfyui" and studio_stop:
+                _raise_if_canceled(studio_stop)
+        # A resumed workflow must deliver user cancellation to its original prompt.
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
             def on_params_changed() -> None:
                 # Callers own provider-specific params; the runner only persists their mutation.

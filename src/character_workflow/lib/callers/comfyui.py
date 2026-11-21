@@ -112,10 +112,15 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
     prefix = "atelier/" + (job_id or uuid4().hex)
     outputs = []
     with ComfyUIClient(key.base_url) as client:
+        def cancel_active(prompt_id):
+            # Submissions are sequential. Only the last registered prompt can still be queued.
+            active = resume_prompt_ids[-1] if resume_prompt_ids else prompt_id
+            if active:
+                _cancel(client, active)
+
         def check_cancel(prompt_id=None):
             if should_cancel and should_cancel():
-                if prompt_id:
-                    _cancel(client, prompt_id)
+                cancel_active(prompt_id)
                 raise JobCanceled("任务已取消")
             if studio_should_stop and studio_should_stop():
                 if client.execution_started:
@@ -128,7 +133,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                 if on_phase:
                     on_phase(phase)
             except JobCanceled:
-                _cancel(client, prompt_id)
+                cancel_active(prompt_id)
                 raise
 
         if resume_prompt_ids is not None:
