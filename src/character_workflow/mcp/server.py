@@ -37,8 +37,8 @@ def _error_result(error: AdapterError) -> CallToolResult:
 def _success_result(operation: str, result: dict) -> CallToolResult:
     content = []
     metadata = dict(result)
-    preview = metadata.pop("preview", None) if operation in ("canvas-read-media", "ps-preview") else None
-    previews = metadata.pop("previews", []) if operation in ("canvas-search-library", "canvas-search-team") else []
+    preview = metadata.pop("preview", None) if operation in ("canvas-read-media", "canvas-read-video-frames", "ps-preview") else None
+    previews = metadata.pop("previews", []) if operation in ("canvas-search-library", "canvas-search-team", "canvas-wait-for-run") else []
     if preview is not None:
         previews.append(preview)
     for preview in previews:

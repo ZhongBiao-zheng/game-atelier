@@ -1,6 +1,7 @@
 """Authenticated typed canvas tool endpoints; a run schedules the same canvas job worker as the Web."""
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 from fastapi.responses import JSONResponse
 from character_workflow.lib.canvas_tool_common import CanvasToolError
@@ -12,7 +13,7 @@ from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
     CanvasSearchLibraryInput, CanvasSearchTeamInput, CanvasReadSpecInput,
-    CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
+    CanvasReadVideoFramesInput, CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
 )
 
 router = APIRouter(prefix="/api/canvas-agent")
@@ -32,18 +33,31 @@ def get_document(request: Request, payload: CanvasProjectInput):
     return tools.get_document(principal(request), payload)
 
 
+def _attach_previews(result, images):
+    from character_workflow.lib.canvas_agent_vision import MAX_ATTACH_IMAGES
+    from character_workflow.mcp.client import MAX_RESPONSE_BYTES
+
+    # Leave room for metadata in the adapter's 1 MiB HTTP envelope.
+    remaining = MAX_RESPONSE_BYTES * 3 // 4
+    refs, previews = [], []
+    for ref, preview in images:
+        if preview and len(preview["data_base64"]) <= remaining:
+            remaining -= len(preview["data_base64"])
+            refs.append(ref)
+            previews.append(preview)
+            if len(refs) == MAX_ATTACH_IMAGES:
+                break
+    return {**result, "attach_images": refs, "previews": previews}
+
+
 def _reference_previews(project_id: str, result: dict) -> dict:
     from character_workflow.lib.canvas_agent_library import reference_preview
-    from character_workflow.lib.canvas_agent_vision import MAX_ATTACH_IMAGES
 
-    refs = result.pop("attach_images", [])
-    previews, attached = [], []
-    for ref in refs[:MAX_ATTACH_IMAGES]:
-        url = reference_preview(project_id, ref)
-        if url:
-            attached.append(ref)
-            previews.append({"mime_type": "image/jpeg", "data_base64": url.split(",", 1)[1]})
-    return {**result, "attach_images": attached, "previews": previews}
+    def images():
+        for ref in result.pop("attach_images", []):
+            if url := reference_preview(project_id, ref):
+                yield ref, {"mime_type": "image/jpeg", "data_base64": url.split(",", 1)[1]}
+    return _attach_previews(result, images())
 
 
 @router.post("/search-library")
@@ -87,6 +101,34 @@ def run(request: Request, payload: RunInput, background: BackgroundTasks):
 @router.post("/get-run")
 def get_run(request: Request, payload: GetRunInput):
     return tools.get_run(principal(request), payload)
+
+
+@router.post("/check-run")
+def check_run(request: Request, payload: GetRunInput):
+    return tools.check_run(principal(request), payload)
+
+
+@router.post("/read-video-frames")
+def read_video_frames(request: Request, payload: CanvasReadVideoFramesInput):
+    return tools.read_video_frames(principal(request), payload)
+
+
+@router.post("/wait-for-run")
+async def wait_for_run(request: Request, payload: GetRunInput):
+    current = principal(request)
+    result, video = await tools.wait_for_run(current, payload)
+
+    def images():
+        if video:
+            yield video["version_id"], video["preview"]
+        for vid in result.get("attach_images", []):
+            try:
+                media = tools.read_media(current, CanvasReadMediaInput(project_id=payload.project_id,
+                                                                       version_id=vid))
+            except CanvasToolError:
+                continue
+            yield vid, media.get("preview")
+    return await asyncio.to_thread(_attach_previews, result, images())
 
 
 @router.post("/read-media")

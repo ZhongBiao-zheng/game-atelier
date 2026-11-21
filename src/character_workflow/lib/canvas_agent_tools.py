@@ -5,6 +5,7 @@ ADR-0017 决定 4：画布是 server 持有、带修订号的活文档，Agent �
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -620,3 +621,39 @@ def check_run(principal: Any, payload: GetRunInput) -> dict:
         if candidate["status"] == "succeeded" and version is not None:
             candidate["checks"] = _candidate_checks(payload.project_id, version, job.params)
     return view
+
+
+def is_image_version(project_id: str, version_id: str) -> bool:
+    version = read_canvas_document(project_id).content_versions.get(version_id)
+    return version is not None and version.kind == "image"
+
+
+def with_run_checks(principal, payload: GetRunInput, result: dict, *, sheet: bool = True):
+    """Enrich a terminal run. Preview failures do not discard its status or output IDs."""
+    try:
+        checked = check_run(principal, payload)
+    except CanvasToolError:
+        return result, None
+    result = {**result, "candidates": checked["candidates"]}
+    if sheet:
+        versions = read_canvas_document(payload.project_id).content_versions
+        for candidate in checked["candidates"]:
+            version_id = candidate.get("version_id")
+            if candidate["status"] == "succeeded" and getattr(versions.get(version_id), "kind", None) == "video":
+                try:
+                    video = read_video_frames(principal, CanvasReadVideoFramesInput(
+                        project_id=payload.project_id, version_id=version_id))
+                    return result, video
+                except CanvasToolError:
+                    break
+    return result, None
+
+
+async def wait_for_run(principal, payload: GetRunInput):
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    result = await vision.wait_for_run(lambda: get_run(principal, payload),
+                                       lambda vid: is_image_version(payload.project_id, vid))
+    if result.get("status") in vision.TERMINAL_STATUSES:
+        return await asyncio.to_thread(with_run_checks, principal, payload, result)
+    return result, None

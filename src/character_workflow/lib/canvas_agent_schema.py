@@ -170,5 +170,8 @@ CANVAS_TOOL_INPUT_MODELS: dict[str, type[StrictInput]] = {
     "import-media": ImportMediaInput,
     "run": RunInput,
     "get-run": GetRunInput,
+    "wait-for-run": GetRunInput,
+    "check-run": GetRunInput,
+    "read-video-frames": CanvasReadVideoFramesInput,
     "read-media": CanvasReadMediaInput,
 }
