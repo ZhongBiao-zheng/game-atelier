@@ -334,3 +334,85 @@ async def test_wait_leaves_event_loop_free_while_project_is_locked(entry, video_
     if entry == "builtin":
         result = json.loads(result)
     assert result["status"] == "done" and result["attach_images"] == [image]
+
+
+@pytest.mark.parametrize("entry", ["wait_for_run", "wait_for_runs", "canvas_wait_for_run"])
+async def test_wait_observes_registered_outputs(entry, isolated_data_root, tmp_path, monkeypatch):
+    import base64
+    import json
+    from contextlib import nullcontext
+    from character_workflow.lib import canvas_agent_runtime as runtime, canvas_agent_vision as vision
+    from character_workflow.lib import canvas_runs, keys
+    from character_workflow.lib.canvas_agent_schema import GetRunInput, RunInput
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.jobs import read_job
+    from tests.fake_http_vendor import FakeVendor, png_bytes
+    from tests.test_canvas_agent_batch import IMAGE_KEY, _surfaces
+
+    pid = create_canvas_project("Finalize window").project_id
+    entered, release, polled_twice = threading.Event(), threading.Event(), threading.Event()
+    finalize = canvas_runs.finalize_canvas_run
+    get_run = tools.get_run
+    polls = 0
+
+    def pause_finalize(*args):
+        entered.set()
+        assert release.wait(10)
+        return finalize(*args)
+
+    def observe_poll(*args):
+        nonlocal polls
+        view = get_run(*args)
+        polls += 1
+        if polls >= 2:
+            polled_twice.set()
+        return view
+
+    monkeypatch.setenv("no_proxy", "*")
+    monkeypatch.setattr(canvas_runs, "finalize_canvas_run", pause_finalize)
+    monkeypatch.setattr(vision, "POLL_SECONDS", 0.01)
+    mcp = entry == "canvas_wait_for_run"
+    async with adapter_session(isolated_data_root, tmp_path) if mcp else nullcontext() as client:
+        with FakeVendor() as vendor:
+            keys.write_keys_db(keys.KeysDB(keys=[IMAGE_KEY.model_copy(update={"base_url": vendor.url + "/v1"})]))
+            _surfaces(pid, {"one": "gpt-image-2"})
+            path = "/v1/images/generations"
+            vendor.on("POST", path, {"data": [{"b64_json": base64.b64encode(png_bytes()).decode()}]})
+            result, job = tools.run(runtime.LOCAL, RunInput(project_id=pid, surface_node_id="one",
+                                    expected_revision=read_canvas_document(pid).revision))
+            rid = result["run_id"]
+            query = GetRunInput(project_id=pid, run_id=rid)
+            worker = asyncio.create_task(asyncio.to_thread(canvas_runs.run_canvas_job, job.job_id))
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                assert read_job(job.job_id).status.value == "done"
+                assert get_run(runtime.LOCAL, query)["status"] == tools.check_run(runtime.LOCAL, query)["status"] == "pending"
+                with monkeypatch.context() as short:
+                    short.setattr(vision, "WAIT_SECONDS", 0)
+                    expired = await tools.wait_for_run(runtime.LOCAL, query)
+                    assert expired["status"] == "pending" and "还在生成" in expired["note"]
+                monkeypatch.setattr(tools, "get_run", observe_poll)
+                if mcp:
+                    call = client.call_tool(entry, {"payload": query.model_dump()})
+                elif entry == "wait_for_runs":
+                    call = runtime._wait_for_runs(pid, [rid])
+                else:
+                    call = runtime._wait_for_run(pid, rid)
+                waiter = asyncio.create_task(call)
+                assert await asyncio.to_thread(polled_twice.wait, 4)
+                assert not waiter.done()
+            finally:
+                release.set()
+                await worker
+            response = await asyncio.wait_for(waiter, 5)
+            if mcp:
+                assert not response.is_error and any(part.type == "image" for part in response.content)
+                result = response.structured_content
+            else:
+                result = json.loads(response)
+            view = result["runs"][0] if entry == "wait_for_runs" else result
+            [candidate] = view["candidates"]
+            assert view["status"] == "done" and candidate["status"] == "succeeded"
+            assert candidate["version_id"] and candidate["checks"]
+            assert result["attach_images"] == [candidate["version_id"]]
+            assert len(vendor.calls("POST", path)) == 1

@@ -30,6 +30,7 @@ from character_workflow.lib.canvas_agent_schema import (
     CanvasReadSpecInput, CanvasSearchLibraryInput, CanvasSearchTeamInput,
     CanvasReadMediaInput, CanvasReadVideoFramesInput, GetRunInput, ImportMediaInput, RunInput,
 )
+from character_workflow.lib.canvas_agent_vision import TERMINAL_STATUSES
 from character_workflow.lib.jobs import list_jobs
 from character_workflow.lib.schemas import (
     CanvasAudioNode, CanvasConnection, CanvasContentNodeData, CanvasDocument,
@@ -452,6 +453,10 @@ _GATEWAY_QUOTA_ERROR = re.compile(
 
 def _job_view(job: Job, *, agent: bool) -> dict:
     run = job.canvas_run
+    status = job.status.value
+    # The runner can finish before finalize_canvas_run registers outputs or closes failed candidates.
+    if status in TERMINAL_STATUSES and run and any(c.status == "pending" for c in run.candidates):
+        status = "pending"
 
     def visible_error(error, fallback):
         if not error or not agent:
@@ -460,7 +465,7 @@ def _job_view(job: Job, *, agent: bool) -> dict:
             return error
         return fallback
     return {
-        "job_id": job.job_id, "run_id": run.run_id if run else None, "status": job.status.value,
+        "job_id": job.job_id, "run_id": run.run_id if run else None, "status": status,
         "error": visible_error(job.error, "生成失败，请在画布查看详情；不要自动重试"),
         "result_node_id": run.result_node_id if run else None,
         "candidates": [
