@@ -5,6 +5,7 @@ import {
 } from '@/lib/accentTheme';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { setTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
+import { setBrandIconMode, useBrandIconMode, type BrandIconMode } from '@/lib/brandIconMode';
 import { ACCENT_PRESETS, type AccentColors, type AccentPreset } from '@/lib/accentPresets';
 import { ACCENT_USER_THEME_MAX, type AccentThemesBody } from '@/schema/accentThemes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -16,6 +17,9 @@ import { ThemeGrid } from './ThemeGrid';
 import { ThemeEditor } from './ThemeEditor';
 import { ThemeDialog } from './ThemeDialog';
 
+const BRAND_ICON_MODES: { value: BrandIconMode; label: string }[] = [
+  { value: 'mono', label: '黑白' }, { value: 'color', label: '彩色' },
+];
 const MODES: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: '深色' }, { value: 'light', label: '浅色' }, { value: 'system', label: '跟随系统' },
 ];
@@ -25,6 +29,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 export function AppearanceSection() {
   const doc = useAccent();
   const preference = useThemePreference();
+  const brandIcons = useBrandIconMode();
   const themes = accentThemes(doc);
   const theme = activeTheme(doc);
   const [editing, setEditing] = useState(false);
@@ -65,6 +70,13 @@ export function AppearanceSection() {
         <ToggleGroup type="single" variant="outline" aria-label="外观模式" value={preference}
           onValueChange={value => { if (value) setTheme(value as typeof preference); }}>
           {MODES.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
+        </ToggleGroup>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
+        <span className="text-sm">品牌图标</span>
+        <ToggleGroup type="single" variant="outline" aria-label="品牌图标" value={brandIcons}
+          onValueChange={value => { if (value) setBrandIconMode(value as BrandIconMode); }}>
+          {BRAND_ICON_MODES.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
         </ToggleGroup>
       </div>
       <div className="space-y-3 px-4.5 py-3.5">

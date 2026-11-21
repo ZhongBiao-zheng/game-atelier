@@ -25,6 +25,7 @@ import type { ReactNode } from 'react';
 import { ICON_PX, type IconSize } from '@/components/ui/icons';
 import type { ModelBrand } from '@/lib/modelCatalog';
 import { ModelBrandIcon } from './ModelBrandIcon';
+import { useColorBrandSource } from './brandColors';
 
 // 不在模型品牌里的供应商品牌（单色，currentColor）；模型品牌的路径在 ModelBrandIcon。
 const paths = {
@@ -87,7 +88,9 @@ export function brandOfIcon(icon: string | null | undefined): ProviderBrand | nu
 }
 
 export function BrandGlyph({ brand, size = 'lg' }: { brand: ProviderBrand; size?: IconSize }) {
+  const color = useColorBrandSource(brand in paths ? brand : undefined);
   if (!(brand in paths)) return <ModelBrandIcon brand={brand as ModelBrand} size={size} />;
   const px = ICON_PX[size];
+  if (color) return <img src={color} alt="" aria-hidden="true" width={px} height={px} draggable={false} className="shrink-0" />;
   return <svg viewBox="0 0 24 24" width={px} height={px} fill="currentColor" fillRule="evenodd" className="shrink-0" aria-hidden="true">{paths[brand as keyof typeof paths]}</svg>;
 }

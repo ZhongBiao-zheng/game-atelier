@@ -17,3 +17,7 @@ volcengine, openrouter, google, doubao, baidu, tencent, runway, xai, mistral, az
 newapi, replicate, fal, plus the model brands in ModelBrandIcon. Only path data is copied; no color.
 Fetched 2026-11-20. These marks are trademarks of their respective owners and are shown only to identify
 the provider the user configured.
+
+Color variants (`assets/brands-color/*.svg`) are the unmodified `*-color.svg` files from the same package
+(`@lobehub/icons-static-svg` 1.104.0, MIT; license text in `components/brandColors.ts`), used only when the
+Appearance setting "品牌图标" is set to 彩色. Fetched 2026-11-21.

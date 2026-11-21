@@ -189,3 +189,15 @@ it('跟随系统响应系统变化，手动切换后停止跟随', () => {
   expect(screen.getByRole('radio', { name: '深色' })).toHaveAttribute('aria-checked', 'true');
   stop();
 });
+
+// 品牌图标「黑白 / 彩色」：只存本机浏览器，缺省黑白；不写进主题文件。
+it('品牌图标默认黑白，切到彩色只记在本机，不保存主题文件', async () => {
+  serve();
+  await renderSection();
+  const group = screen.getByLabelText('品牌图标');
+  expect(within(group).getByRole('radio', { name: '黑白' })).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(within(group).getByRole('radio', { name: '彩色' }));
+  expect(localStorage.getItem('atelier:brand-icons')).toBe('color');
+  expect(within(group).getByRole('radio', { name: '彩色' })).toHaveAttribute('aria-checked', 'true');
+  expect(api.saveAccentThemes).not.toHaveBeenCalled();
+});
