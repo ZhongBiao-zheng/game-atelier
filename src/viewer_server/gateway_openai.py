@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from character_workflow.lib import gateway_access, gateway_tasks, model_routes
 from character_workflow.lib.callers.openai_compat import key_api_root
+from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini
 from character_workflow.lib.gateway_text import (
     CALL_TAG_HEADER, TextCall, input_tokens_estimate, valid_call_tag,
 )
@@ -169,12 +170,21 @@ async def _relay(request, owner, endpoint):
             stack = AsyncExitStack()
             try:
                 client = await stack.enter_async_context(_client())
+                body = {**payload, "model": model.id}
+                adapter = {ANTHROPIC_MESSAGES: anthropic, GEMINI_GENERATE_CONTENT: gemini}.get(model.protocol)
+                if adapter is anthropic:
+                    url, auth = anthropic.messages_url(key.base_url), anthropic.headers(key.base_url, key.access_key)
+                elif adapter is gemini:
+                    url = gemini.generate_url(key.base_url, model.id, stream=streaming)
+                    auth = gemini.headers(key.access_key)
+                else:
+                    url, auth = f"{key_api_root(key)}/{endpoint}", {"Authorization": f"Bearer {key.access_key}"}
+                if adapter:
+                    body = adapter.to_upstream(body)
                 response = await stack.enter_async_context(client.stream(
-                    "POST", f"{key_api_root(key)}/{endpoint}",
-                    headers={"Authorization": f"Bearer {key.access_key}",
-                             "Content-Type": "application/json",
-                             "Accept": "text/event-stream" if streaming else "application/json"},
-                    json={**payload, "model": model.id},
+                    "POST", url, headers={**auth, "Content-Type": "application/json",
+                                         "Accept": "text/event-stream" if streaming else "application/json"},
+                    json=body,
                 ))
                 if not 200 <= response.status_code < 300:
                     detail = bytearray()
@@ -182,12 +192,24 @@ async def _relay(request, owner, endpoint):
                         detail.extend(chunk[:65536 - len(detail)])
                         if len(detail) >= 65536:
                             break
+                    if adapter:
+                        # Preserve upstream diagnostics inside the gateway envelope. Only the host
+                        # may emit a top-level updating code (the member would resend the request).
+                        message = await asyncio.to_thread(gateway_tasks._safe_error, RuntimeError(
+                            detail.decode("utf-8", errors="replace")))
+                        await stack.aclose()
+                        return JSONResponse({"error": {"message": message, "type": "gateway_upstream_error",
+                                                       "code": response.status_code}}, status_code=response.status_code)
                     raise RuntimeError(f"text api {response.status_code}: "
                                        + detail.decode("utf-8", errors="replace"))
                 call.accepted = True
                 if not streaming:
                     raw = await response.aread()
                     result = json.loads(raw)
+                    if adapter is anthropic:
+                        result = anthropic.from_upstream(result)
+                    elif adapter is gemini:
+                        result = gemini.from_upstream(result, model.id)
                     if not isinstance(result, dict):
                         raise ValueError("上游响应格式不对")
                     call.usage(result)
@@ -205,7 +227,9 @@ async def _relay(request, owner, endpoint):
                     raise ValueError("上游返回空流")
             except Exception as error:
                 await stack.aclose()
-                reason = _reason(error)
+                if isinstance(error, ProtocolError) and not call.accepted:
+                    raise gateway_tasks.GatewayRequestError(422, str(error)) from error
+                reason = None if call.accepted else _reason(error)
                 if reason is None:
                     raise _UpstreamFailure(
                         503, gateway_tasks._safe_error(error),
