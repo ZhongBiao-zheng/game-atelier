@@ -546,3 +546,29 @@ def test_studio_shutdown_preserves_registered_prompt(host, monkeypatch, stop):
     assert done.status.value == "done"
     assert len(host.prompts) == len(done.output_paths) == 1
     assert Path(done.output_paths[0]).read_bytes() == host.png
+
+
+def test_studio_resume_with_invalid_stored_address_is_unconfirmed(host, monkeypatch):
+    from character_workflow.lib import jobs
+    from character_workflow.lib.comfyui_client import ComfyUIUnavailableError
+    from character_workflow.lib.job_runner import JobRunnerError, run_job
+    from viewer_server.routes import _StudioJobCreate, _create_user_job
+
+    workflow = imported()
+    body = _StudioJobCreate(prompt="cat", model=workflow.id, alias="local", params={})
+    job = _create_user_job(body, namespace="studio")
+    _stop_local_job(monkeypatch, run_job, job.job_id)
+    db = keys.read_keys_db()
+    next(key for key in db.keys if key.alias == "local").base_url = "http://localhost:bad-port"
+    keys.write_keys_db(db)
+    polls = host.polls
+
+    with pytest.raises(JobRunnerError, match="ComfyUI 任务结果未确认") as caught:
+        run_job(job.job_id)
+    assert isinstance(caught.value.__cause__, ComfyUIUnavailableError)
+    assert caught.value.__cause__.execution_started
+    saved = jobs.read_job(job.job_id)
+    assert saved.status.value == "failed" and "未确认" in saved.error
+    assert saved.params.provider_task_ids == ["prompt-1"]
+    assert saved.params.actual_cost_cny == 0
+    assert len(host.prompts) == 1 and host.polls == polls
