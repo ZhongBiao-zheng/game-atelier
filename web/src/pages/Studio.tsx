@@ -11,6 +11,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
+import { StudioSessionPicker, StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import { PromptInput } from '@/components/studio/PromptInput';
 import {
@@ -880,28 +881,9 @@ function StudioFull() {
     );
   };
 
-  return (
-    <div
-      className="relative h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] overflow-hidden px-3 sm:px-6"
-      aria-label="生图沙箱"
-    >
-      {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[1024px] justify-end">
-          <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
-        </div>
-      </div>
-      {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
-          pt 让出查询条空间，pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
-      <div
-        ref={scrollRef}
-        onScroll={handleHistoryScroll}
-        data-studio-history-scroll
-        data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-52.5"
-      >
+  const renderRounds = (items: RoundState[], embedded = false) => (
         <RoundList
-          rounds={reversedRounds}
+          rounds={items} embedded={embedded}
           focusJobId={targetJobId ?? undefined}
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
@@ -909,7 +891,7 @@ function StudioFull() {
           onToggleHidden={toggleHidden}
           onDeleteFailed={deleteFailedRound}
           onCancel={cancelRound}
-          onReEdit={reEdit}
+          onReEdit={(config, id) => { if (embedded) composer.switchMode('creation'); return reEdit(config, id); }}
           reuseParameter={reuseParameter}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
@@ -934,6 +916,32 @@ function StudioFull() {
           onSaveResultAsset={saveResultAsset}
           onSetPromptPreview={setPromptPreviewRequest}
         />
+  );
+
+  return (
+    <div
+      className="relative h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] overflow-hidden px-3 sm:px-6"
+      aria-label="生图沙箱"
+    >
+      {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-[1024px] justify-end">
+          {composer.mode === 'agent' && <StudioSessionPicker agent={composer.agent} clearDraft={composer.clearDraft} />}
+          <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
+        </div>
+      </div>
+      {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
+          pt 让出查询条空间，pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
+      <div
+        ref={scrollRef}
+        onScroll={handleHistoryScroll}
+        data-studio-history-scroll
+        data-testid="studio-history-scroll"
+        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-52.5"
+      >
+        {composer.mode === 'agent' ? <StudioAgentTimeline agent={composer.agent} jobs={persistedJobs}
+          renderJob={job => renderRounds(reversedRounds.filter(r => r.jobId === job.job_id), true)} />
+          : renderRounds(reversedRounds)}
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { AgentProcessToggle } from '@/components/agent/AgentProcessToggle';
 import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
-import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
+import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -62,16 +63,7 @@ function ProcessGroup({ projectId, messages, steps }: {
     ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
   return (
     <div className="flex flex-col gap-2">
-      <Button variant="bare"
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
-        className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ToolIcon size="sm" />
-        处理过程 · {steps} 步
-        <ChevronRightIcon size="sm" className={cn('transition-transform', open && 'rotate-90')} />
-      </Button>
+      <AgentProcessToggle label={`处理过程 · ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
       {open ? (
         <div className="flex flex-col gap-3 border-l border-border pl-3">
           {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}

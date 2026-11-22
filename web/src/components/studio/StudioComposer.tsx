@@ -58,7 +58,7 @@ function ImageTile({ file, remove }: { file: File; remove: () => void }) {
     setUrl(preview);
     return () => URL.revokeObjectURL(preview);
   }, [file]);
-  return <Button variant="bare" type="button" aria-label={`移除 ${file.name}`} onClick={remove}
+  return <Button variant="ghost" size="icon" type="button" aria-label={`移除 ${file.name}`} onClick={remove}
     className="group relative size-14 shrink-0 overflow-hidden rounded-lg">
     {url && <img src={url} alt={file.name} className="size-full object-cover" />}
     <CloseIcon size="sm" className="absolute right-0 top-0 rounded-full bg-card opacity-0 group-hover:opacity-100" />
@@ -124,7 +124,7 @@ function AgentInput({ state }: { state: StudioComposerState }) {
 
   return <div className="bg-glass shell-glow relative z-20 rounded-xl border border-input px-4 py-3 backdrop-blur-glass">
     <div className="flex items-start gap-3">
-      <Button variant="bare" type="button" aria-label="上传参考图" onClick={() => fileInput.current?.click()}
+      <Button variant="outline" size="icon" type="button" aria-label="上传参考图" onClick={() => fileInput.current?.click()}
         disabled={busy || files.length >= 16}
         className="grid size-14 shrink-0 place-items-center rounded-lg border border-dashed border-input text-muted-foreground hover:bg-secondary">
         <AddImageIcon />
@@ -136,9 +136,9 @@ function AgentInput({ state }: { state: StudioComposerState }) {
       <div className="min-w-0 flex-1">
         {!!files.length && <div className="mb-2 flex flex-wrap gap-1">{files.map((file, i) =>
           <ImageTile key={i} file={file} remove={() => setFiles(current => current.filter((_, n) => n !== i))} />)}</div>}
-        <Textarea ref={textarea} variant="bare" rows={2} value={text}
+        <Textarea ref={textarea} rows={2} value={text}
           placeholder="输入想法或上传参考，和 Agent 一起创作"
-          className="min-h-16 w-full resize-none bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground"
+          className="min-h-16 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none placeholder:text-muted-foreground"
           onChange={event => { setText(event.target.value); if (event.target.value.endsWith('@')) setMention(true); }}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {

@@ -211,6 +211,7 @@ function shownMjMetadata(config: RoundConfig): string {
 }
 
 export function RoundList({
+  embedded = false,
   rounds,
   focusJobId,
   favorites,
@@ -230,6 +231,7 @@ export function RoundList({
   onShareResult,
   onSetPromptPreview,
 }: {
+  embedded?: boolean;
   rounds: RoundState[];
   focusJobId?: string;
   favorites?: string[];
@@ -347,7 +349,7 @@ export function RoundList({
     <>
       <div
         data-testid="studio-round-list"
-        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
+        className={embedded ? "w-full text-left" : "mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"}
       >
         {hasEarlierHistory && (
           <div
@@ -368,7 +370,7 @@ export function RoundList({
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
             <Fragment key={stableKey}>
             {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
-            {startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
+            {!embedded && startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
             <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
               <>
