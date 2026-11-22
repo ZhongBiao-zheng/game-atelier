@@ -1138,6 +1138,9 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         raise CanvasToolError("MODEL_UNAVAILABLE", SOCKS_PROXY_MESSAGE, 422) from None
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
+    # SDK 只为 OpenAI 官方地址默认请求流式用量；兼容地址也必须显式请求末尾的 usage 块。
+    if protocol in (None, llm_protocols.OPENAI_CHAT):
+        settings.include_usage = True
     return Agent(
         name="canvas-agent",
         instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
