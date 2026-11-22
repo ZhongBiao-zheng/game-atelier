@@ -310,8 +310,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
     setDetected(remote.detected ?? null);
     setFetchError(null);
-    // 上游本次未列出的已选模型仍保留，包括尚未点「启用所选」的勾选。
-    setModels(selected);
+    // 未分类的勾选只属于当前列表，不能进入可保存的模型行。
+    setModels(selected.filter(model => model.modality));
     setPickerFilter('all');
     setPickerQuery('');
     setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
@@ -382,7 +382,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         const stored = editing ? initial?.models?.find(model => model.id === m.id) : undefined;
         return stored ? { ...stored, _locked: true, modality: modelModality(stored, initial),
           protocol: preview.protocolId ? stored.protocol : m.protocol, input_modalities: stored.input_modalities ?? m.input_modalities }
-          : { name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality,
+          : { name: m.name, id: m.id, modality: resolvedModality(m),
             protocol: m.protocol, input_modalities: m.input_modalities, ...discoveredBinding(resolvedModality(m)) };
       });
     return [...kept, ...added];

@@ -136,3 +136,21 @@ it('opens manual entry after a failed connection without adding a second error',
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(screen.getByText('手动添加模型').closest('details')).toHaveAttribute('open');
 });
+
+it('does not save an unclassified selection as an image when a refresh hides it', async () => {
+  const filtered = { ...remote, total: 3, excluded: 1 };
+  vi.mocked(previewModels).mockResolvedValueOnce(filtered).mockResolvedValueOnce({
+    ...filtered, models: [...remote.models, { id: 'embed', name: 'Embed', category: 'excluded',
+      modality: null, protocol: null, input_modalities: [] }],
+  }).mockResolvedValueOnce(filtered);
+  open();
+  fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+  fireEvent.click(await screen.findByRole('button', { name: '显示全部' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Embed embed' }));
+  expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '只看可生成模型' }));
+  await screen.findByRole('button', { name: '显示全部' });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(createKey).toHaveBeenCalledOnce());
+  expect(vi.mocked(createKey).mock.calls[0][0].models?.map(m => m.id)).toEqual(['chat-demo']);
+});
