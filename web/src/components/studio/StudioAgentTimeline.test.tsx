@@ -12,6 +12,7 @@ const makeMessage = (role: CanvasAgentMessage['role'], text: string, sequence: n
 function makeAgent(status: StudioAgentTurn['status']) {
   const turn: StudioAgentTurn = { turn_id: 't1', status, client_message_id: 'm', attachment_ids: [], asset_ids: [],
     steps: [{ step_id: 'call-1', tool: 'list_models', summary: '列出可用模型', status: 'completed' }] };
+  if (status === 'awaiting_approval') turn.steps.push({ step_id: 'call-2', tool: 'run_generation', summary: '预计 12 元', status: 'running' });
   const session: StudioAgentSession = { session_id: 's1', status, turns: [turn], title: '第一轮',
     model: null, model_alias: null, schema_version: 1, revision: 4, sequence: 4, error: null,
     effort: null, permission_mode: 'auto', creation_mode: 'all', auto_models: true, preferred_models: [],
@@ -55,6 +56,8 @@ it('运行时可收起，待确认强制展开，停止后能查看步骤', () =
   tree.rerender(view('awaiting_approval'));
   fireEvent.click(screen.getByRole('button', { name: '任务响应中…' }));
   expect(screen.getByRole('group', { name: '待确认的操作' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '生成 · 待确认' })).toBeVisible();
+  expect(screen.queryByText('已执行 2 条命令')).toBeNull();
   tree.rerender(view('interrupted'));
   fireEvent.click(screen.getByRole('button', { name: '已停止' }));
   fireEvent.click(screen.getByRole('button', { name: '查看可用模型' }));

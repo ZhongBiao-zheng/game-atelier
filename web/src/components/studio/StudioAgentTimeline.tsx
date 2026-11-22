@@ -34,13 +34,13 @@ export function StudioSessionPicker({ agent, clearDraft }: { agent: Controller; 
   </PopoverContent></Popover>;
 }
 
-function StepGroup({ steps }: { steps: StudioAgentStep[] }) {
+function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: boolean }) {
   const first = steps[0];
   const [expanded, setExpanded] = useState(false);
   const problem = steps.find(s => s.status === 'failed' || s.status === 'interrupted' || s.status === 'rejected');
   const label = first.tool === 'load_skill' ? `已加载技能：${first.summary}`
     : steps.length === 1 ? TOOL_LABELS[first.tool] ?? first.tool : `已执行 ${steps.length} 条命令`;
-  const suffix = problem?.status === 'failed' ? ' · 出错了' : problem?.status === 'interrupted' ? ' · 已停止' : problem ? ' · 已拒绝' : '';
+  const suffix = awaiting && first.status === 'running' ? ' · 待确认' : problem?.status === 'failed' ? ' · 出错了' : problem?.status === 'interrupted' ? ' · 已停止' : problem ? ' · 已拒绝' : '';
   return <div className="space-y-1">
     <AgentProcessToggle label={label + suffix} open={expanded} onToggle={() => setExpanded(value => !value)} />
     {expanded && steps.map(step => <p key={step.step_id} className="whitespace-pre-wrap pl-5">
@@ -53,7 +53,8 @@ function groupSteps(steps: StudioAgentStep[]) {
   const groups: StudioAgentStep[][] = [];
   for (const step of steps) {
     const last = groups.at(-1);
-    if (last && step.tool !== 'load_skill' && last[0].tool !== 'load_skill') last.push(step);
+    if (last && step.status === 'completed' && last[0].status === 'completed'
+        && step.tool !== 'load_skill' && last[0].tool !== 'load_skill') last.push(step);
     else groups.push([step]);
   }
   return groups;
@@ -102,7 +103,8 @@ function Turn({ turn, session, agent, jobs, renderJob }: {
     </Button>
     {open && <div className="space-y-2 border-l border-border pl-3 text-xs text-muted-foreground">
       {user?.title && <p>已加载技能：{user.title}</p>}
-      {groupSteps(turn.steps).map(group => <StepGroup key={group[0].step_id} steps={group} />)}
+      {groupSteps(turn.steps).map(group => <StepGroup key={group[0].step_id} steps={group}
+        awaiting={awaiting && session.pending_approvals.some(item => item.call_id === group[0].step_id)} />)}
       {errors.map(m => <p key={m.message_id} className="whitespace-pre-wrap text-destructive">{m.text}</p>)}
       {awaiting && <CanvasAgentApprovalCard unit="份" key={session.pending_approvals.map(a => a.call_id).join()} approvals={session.pending_approvals} labels={TOOL_LABELS}
         disabled={agent.pending} onDecide={agent.decide}
