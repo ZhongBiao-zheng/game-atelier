@@ -15,6 +15,7 @@
   },
   "runtime": "host",
   "contributes": {
+    "nodes": [],
     "server": {
       "module": "server",
       "routes": [
@@ -43,5 +44,5 @@
   },
   "files": [],
   "source": "bundled",
-  "digest": "sha256:367785817533a22a27e0587e46bb965f81e6446e03346a3643d4af8013beb474"
+  "digest": "sha256:4887793c708b39a680a5fd2485babd03db5310284aea09dba7a919076a5d8526"
 }

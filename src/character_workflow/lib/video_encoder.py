@@ -58,32 +58,48 @@ def resolve_encoder() -> Encoder:
     return Encoder(folder / names[0], folder / names[1], windows)
 
 
-async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        if os.name == "nt":
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/PID", str(process.pid), "/T", "/F",
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            await killer.wait()
-        else:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+async def _spawn(args):
+    # CREATE_SUSPENDED makes job membership atomic with respect to the child's first instruction.
+    options = {"creationflags": 0x00000004} if os.name == "nt" else {"start_new_session": True}
+    process = await asyncio.create_subprocess_exec(
+        *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, **options,
+    )
+    if os.name == "nt":
+        from . import video_windows_job
+
+        try:
+            return process, await asyncio.to_thread(video_windows_job.attach, process.pid)
+        except BaseException:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+            await process.wait()
+            raise
+    return process, None
+
+
+async def _terminate(process, job) -> None:
+    if job is not None:
+        from . import video_windows_job
+
+        video_windows_job.close_handle(job)
+    elif process.returncode is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     await process.wait()
 
 
 async def command(args: list, *, progress: Callable[[int], None] | None = None) -> bytes:
-    options = {"creationflags": 0x00000200} if os.name == "nt" else {"start_new_session": True}
-    spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-        *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, **options,
-    ))
+    spawn = asyncio.create_task(_spawn(args))
     try:
-        process = await asyncio.shield(spawn)
+        process, job = await asyncio.shield(spawn)
     except asyncio.CancelledError:
-        await _terminate(await spawn)
+        await _terminate(*await spawn)
         raise
     except OSError as exc:
         raise VideoError("binary_launch", "视频程序无法启动，请检查运行包及执行权限") from exc
@@ -114,7 +130,7 @@ async def command(args: list, *, progress: Callable[[int], None] | None = None) 
             raise VideoError("codec_failed", "视频编解码失败")
         return output
     finally:
-        await _terminate(process)
+        await _terminate(process, job)
 
 
 async def metadata(encoder: Encoder, path: Path) -> dict:

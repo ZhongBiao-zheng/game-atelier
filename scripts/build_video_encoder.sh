@@ -73,5 +73,9 @@ cp "$script_dir/video-encoder-NOTICES.txt" "$root/bin/"
 "$root/bin/ffmpeg$suffix" -L > "$root/bin/license.txt" 2>&1
 cd "$root/bin"
 rm -f SHA256SUMS
-"${hash[@]}" * > "$root/sums.tmp"
+# GNU SHA on Windows marks binary names with '*'. Emit one platform-independent format.
+for name in *; do
+    line=$("${hash[@]}" -b "$name")
+    printf '%s  %s\n' "${line%% *}" "$name"
+done > "$root/sums.tmp"
 mv "$root/sums.tmp" SHA256SUMS
