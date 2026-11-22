@@ -201,14 +201,14 @@ def test_switching_away_and_back_replays_old_signatures_and_leaves_other_calls_a
 
 # ── 3. 占位值的三种情况 ─────────────────────────────────────────────────────────────
 
-def test_model_name_without_gemini_gets_the_placeholder_within_the_turn():
+def test_model_name_without_gemini_replays_the_real_signature_within_the_turn():
     with FakeVendor() as vendor:
         vendor.on("POST", _gem_path("relay-pro"), _gem_tool(), _gem_text())
         pid, sid = _setup(vendor)
         assert _turn(pid, sid, "relay-pro").status == "idle"
         second = _bodies(vendor, _gem_path("relay-pro"))[1]
     [part] = _function_calls(second)
-    assert part["thoughtSignature"] == gemini.PLACEHOLDER_SIGNATURE
+    assert part["thoughtSignature"] == SIG
 
 
 def test_switching_to_gemini_while_awaiting_approval_fills_the_placeholder():
