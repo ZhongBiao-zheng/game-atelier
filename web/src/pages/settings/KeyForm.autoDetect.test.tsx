@@ -123,3 +123,15 @@ it('does nothing automatically outside the guide', async () => {
   expect(previewModels).not.toHaveBeenCalled();
   expect(probeKey).not.toHaveBeenCalled();
 });
+
+it('keeps the manual connection result when the onboarding timer fires afterwards', async () => {
+  vi.mocked(previewModels).mockResolvedValue({ models: [remote('chat-demo', 'text')], total: 1, excluded: 0 });
+  open();
+  paste();
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  await screen.findByRole('button', { name: /chat-demo/ });
+  // The separate key probe runs from the same timer, even when its list request is superseded.
+  await waitFor(() => expect(probeKey).toHaveBeenCalledOnce());
+  expect(previewModels).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox', { name: '搜索模型' })).toBeInTheDocument();
+});

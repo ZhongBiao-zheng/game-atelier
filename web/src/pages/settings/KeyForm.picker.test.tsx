@@ -154,3 +154,22 @@ it('does not save an unclassified selection as an image when a refresh hides it'
   await waitFor(() => expect(createKey).toHaveBeenCalledOnce());
   expect(vi.mocked(createKey).mock.calls[0][0].models?.map(m => m.id)).toEqual(['chat-demo']);
 });
+
+it('blocks list requests while the connection test owns the refresh', async () => {
+  const filtered = { ...remote, total: 3, excluded: 1 };
+  vi.mocked(previewModels).mockResolvedValueOnce(filtered);
+  open();
+  fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+  const showAll = await screen.findByRole('button', { name: '显示全部' });
+  let finish!: (value: ModelsPreview) => void;
+  vi.mocked(previewModels).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  const all = within(screen.getByRole('radiogroup', { name: '模型范围' })).getByRole('radio', { name: '全部' });
+  expect(all).toBeDisabled();
+  expect(showAll).toBeDisabled();
+  fireEvent.click(showAll);
+  expect(previewModels).toHaveBeenCalledTimes(2);
+  finish(filtered);
+  await waitFor(() => expect(showAll).toBeEnabled());
+  expect(all).toBeEnabled();
+});

@@ -132,7 +132,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [manualId, setManualId] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualType, setManualType] = useState<ModelModality>(defaultManualType(initialPreset));
-  const [testing, setTesting] = useState(false);
+  const [pendingRequest, setPendingRequest] = useState<'list' | 'test' | null>(null);
+  const testing = pendingRequest === 'test';
+  const fetching = pendingRequest === 'list';
+  const listRun = useRef(0);
   const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [alias, setAlias] = useState(initial?.alias ?? initialPreset.label);
   const [provider, setProvider] = useState(initial?.provider ?? initialPreset.value);
@@ -161,7 +164,6 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [fetchedChecked, setFetchedChecked] = useState<Set<string>>(new Set());
   // 上游没判出分类的行（unknown / excluded）在 picker 里的显式二选一结果，按模型 id 存。
   const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
-  const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   useEffect(() => { if (fetchError) setManualOpen(true); }, [fetchError]);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
@@ -230,38 +232,45 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const isLocked = (model: EditableModel) => model._locked === true;
 
   const [probe, setProbe] = useState<KeyProbeResult | null>(null);
-  const detectRun = useRef(0);
+  // 切换凭证、地址或目录后，旧请求的结果和 finally 都不能改变当前表单。
+  useEffect(() => {
+    setPendingRequest(null);
+    return () => { listRun.current++; };
+  }, [accessKey, baseUrl, activePresetId, textProtocol, catalogProtocolId]);
   useEffect(() => {
     if (!autoDetect || editing) return;
     const key = accessKey.trim();
     setProbe(null);
     if (key.length < MIN_KEY_LENGTH) return;
-    const run = ++detectRun.current;
+    const run = listRun.current;
+    let active = true;
     const timer = setTimeout(() => {
-      const defaultIds = new Set(preset.defaultModels.map(model => model.id));
-      setFetching(true);
-      setFetchError(null);
-      previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl || null, access_key: key, include_all: false })
-        .then(remote => {
-          if (run !== detectRun.current) return;
-          setDetected(remote.detected ?? null);
-          const picked = remote.models.filter(m => (m.modality === 'image' || m.modality === 'video')
-            && (modelCatalog(m.id) !== undefined || defaultIds.has(m.id)));
-          if (picked.length > 0) {
-            setModels(picked.map((m): EditableModel => ({ name: m.name, id: m.id, modality: m.modality, protocol: m.protocol, input_modalities: m.input_modalities })));
-          }
-          setPreview(null);
-          void recordOnboardingEvent({ event: 'models_detected', count: picked.length });
-        })
-        .catch(e => { if (run === detectRun.current) setFetchError(e instanceof Error ? e.message : String(e)); })
-        .finally(() => { if (run === detectRun.current) setFetching(false); });
+      if (run === listRun.current) {
+        const defaultIds = new Set(preset.defaultModels.map(model => model.id));
+        setPendingRequest('list');
+        setFetchError(null);
+        previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl || null, access_key: key, include_all: false })
+          .then(remote => {
+            if (run !== listRun.current) return;
+            setDetected(remote.detected ?? null);
+            const picked = remote.models.filter(m => (m.modality === 'image' || m.modality === 'video')
+              && (modelCatalog(m.id) !== undefined || defaultIds.has(m.id)));
+            if (picked.length > 0) {
+              setModels(picked.map((m): EditableModel => ({ name: m.name, id: m.id, modality: m.modality, protocol: m.protocol, input_modalities: m.input_modalities })));
+            }
+            setPreview(null);
+            void recordOnboardingEvent({ event: 'models_detected', count: picked.length });
+          })
+          .catch(e => { if (run === listRun.current) setFetchError(e instanceof Error ? e.message : String(e)); })
+          .finally(() => { if (run === listRun.current) setPendingRequest(null); });
+      }
       void probeKey(activePresetId, key).then(result => {
-        if (run !== detectRun.current) return;
+        if (!active) return;
         setProbe(result);
         void recordOnboardingEvent({ event: 'key_probed', result });
       });
     }, AUTO_DETECT_DELAY_MS);
-    return () => clearTimeout(timer);
+    return () => { active = false; clearTimeout(timer); };
   }, [accessKey, autoDetect]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 只有用户自己填地址的自定义供应商要选接口；预置的接口是确定的。
@@ -320,8 +329,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       .map(m => [m.id.trim(), m.modality as ModelModality])));
   };
   /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
-  const fetchModels = async (includeAll = false) => {
-    setFetching(true);
+  const fetchModels = async (includeAll = false, run = ++listRun.current) => {
+    setPendingRequest('list');
     setFetchError(null);
     try {
       // 编辑态密钥框是掩码回显，未改动就不当真实密钥发，改由服务端按 alias 取存储密钥。
@@ -335,11 +344,11 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         protocol_id: catalogProtocolId,
         text_protocol: textProtocol,
       });
-      acceptPreview(remote, includeAll);
+      if (run === listRun.current) acceptPreview(remote, includeAll);
     } catch (e) {
-      setFetchError(e instanceof Error ? e.message : String(e));
+      if (run === listRun.current) setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
-      setFetching(false);
+      if (run === listRun.current) setPendingRequest(null);
     }
   };
 
@@ -542,7 +551,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   };
 
   const testConnection = async () => {
-    setTesting(true);
+    const run = ++listRun.current;
+    setPendingRequest('test');
     setConnectionTest(null);
     const started = performance.now();
     try {
@@ -552,6 +562,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       } catch { throw new Error('请输入完整的 HTTP(S) API 请求地址'); }
       if (isComfy) {
         const result = await checkComfyUI(baseUrl);
+        if (run !== listRun.current) return;
         setConnectionTest({ ok: true, message: result.devices.map(device => `${device.name} · ${(device.vram_total / 1024 ** 3).toFixed(1)} GB`).join('、') || '已连接' });
         return;
       }
@@ -559,15 +570,17 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       const remote = await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
         base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: false, text_protocol: textProtocol });
+      if (run !== listRun.current) return;
       setDetected(remote.detected ?? null);
       setConnectionTest({ ok: true, message: `可用 · ${Math.round(performance.now() - started)} ms` });
       // 普通目录复用连接检测已经拿到的列表；自定义目录仍走其免费 catalog 请求。
-      if (catalogProtocolId) await fetchModels();
+      if (catalogProtocolId) await fetchModels(false, run);
       else acceptPreview(remote, false);
     } catch (error) {
+      if (run !== listRun.current) return;
       setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
       setManualOpen(true);
-    } finally { setTesting(false); }
+    } finally { if (run === listRun.current) setPendingRequest(null); }
   };
   const typeDot = (modality?: ModelModality | null) => ({ image: 'bg-brand-2', video: 'bg-brand-3', text: 'bg-brand-4', audio: 'bg-muted-foreground' }[modality ?? 'image']);
   const title = editing ? `编辑 ${usesNamedAlias(provider) ? alias : (PROVIDER_PRESETS.find(p => p.value === provider)?.label ?? alias)}` : preset.label;
@@ -658,7 +671,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   <ToggleGroup type="single" size="sm" variant="outline" aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
                     onValueChange={value => { if (value === 'selected') applyFetchedSelection(); else if (value === 'all') void fetchModels(); }}>
                     <ToggleGroupItem value="selected" disabled={unresolvedChecked.length > 0}>已选 {mergedModels().filter(m => m.id.trim()).length}</ToggleGroupItem>
-                    <ToggleGroupItem value="all">全部</ToggleGroupItem>
+                    <ToggleGroupItem value="all" disabled={fetching || testing}>全部</ToggleGroupItem>
                   </ToggleGroup>
                   {!preview && <Input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className="min-w-0 flex-1 basis-28" />}
                   {catalogInterfaces.length > 0 && <Select value={catalogProtocolId ?? DEFAULT_CATALOG} onValueChange={value => setCatalogSource(value === DEFAULT_CATALOG ? '' : value)}>
@@ -677,7 +690,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     {preview.discovered && <span>已发现不代表可用</span>}
                     {(preview.excluded > 0 || preview.includeAll) && <>
                       <span>{preview.includeAll ? '已显示全部，含不可生成模型' : `已过滤 ${preview.excluded} 个不可生成模型`}</span>
-                      <Button variant="link" size="sm" type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">{preview.includeAll ? '只看可生成模型' : '显示全部'}</Button>
+                      <Button variant="link" size="sm" type="button" disabled={fetching || testing} onClick={() => fetchModels(!preview.includeAll)} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">{preview.includeAll ? '只看可生成模型' : '显示全部'}</Button>
                     </>}
                   </div>
                   <Input aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} />
