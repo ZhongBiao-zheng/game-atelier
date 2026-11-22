@@ -135,6 +135,7 @@ it('includes a manually added upstream model while the all segment is open', asy
   render(<KeyForm presetId="custom" initial={{ alias: 'test', base_url: 'https://example.com', access_key: 'test', models: [] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
   await screen.findByRole('button', { name: /remote/ });
+  fireEvent.click(screen.getByText('手动添加模型'));
   fireEvent.change(screen.getByLabelText('添加模型 ID'), { target: { value: 'remote' } });
   await chooseOption(screen.getByLabelText('新增模型类型'), '视频');
   fireEvent.click(screen.getByRole('button', { name: '添加' }));
