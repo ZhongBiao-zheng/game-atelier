@@ -32,6 +32,21 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.139.0', date: '2026-11-22', headline: '桌面版、更稳的团队网关、更能干的 Agent', changes: [
+    { kind: 'feat', text: '桌面版：macOS 与 Windows 有了独立窗口的安装包，首次启动自动下载运行内容，之后在应用内更新。安装包暂未签名，系统会提示来源未知。' },
+    { kind: 'feat', text: '团队网关更稳：主机重启后接着查没跑完的任务；成员断线或关掉页面后能接回原来的任务，不重复下单；点停止会送到主机。' },
+    { kind: 'feat', text: '网关密钥：可用模型按供应商分组勾选；额度改成一个金额加周期（每天、每周、每月或不重置）。旧密钥的范围升级后自动转换。' },
+    { kind: 'feat', text: '网关计费：文本与 Agent 按 token 计费；没有价格的模型可以手设单价；任务失败时只在确认上游已收费的情况下扣额度。' },
+    { kind: 'feat', text: '对话模型：自定义供应商支持 Anthropic 与 Gemini 格式并自动识别；新增 Google Gemini、DeepSeek、Kimi、智谱、通义、硅基流动预置；团队成员经网关也能用。' },
+    { kind: 'feat', text: 'Agent：一次发起最多 20 个节点的生成，确认卡逐项勾选并显示估价；能看视频、核对出图尺寸；面板显示会话花费与待办。' },
+    { kind: 'feat', text: '外部 Agent：Codex、Cursor、Claude Desktop 等一键接入，可搜参考库、等待并核对生成结果、批量出图。' },
+    { kind: 'feat', text: 'PS 联动插件：把 Photoshop 里的内容取到画布，把结果发回 Photoshop。' },
+    { kind: 'feat', text: '供应商图标：可选品牌图标、上传图片或按网址获取；外观设置里可选彩色或黑白。主题色可以保存、编辑和新增。' },
+    { kind: 'feat', text: '供应商表单：选中的模型有选中标记，点「测试连接」同时刷新模型列表。' },
+    { kind: 'feat', text: '本机 ComfyUI 的工作流在重启后能取回结果。' },
+    { kind: 'fix', text: '对话请求遇到连接没建立或上游限流时自动重发，已经发出的请求不重发，避免重复计费；支持 SOCKS5 代理。' },
+    { kind: 'fix', text: '远程管理成员密钥要求本机与主机是同一版本，不一致时会提示更新。' },
+  ] },
   { version: '5.138.0', date: '2026-11-16', headline: '插件、自定义接口与语音音乐', changes: [
     { kind: 'feat', text: '新增插件：在「设置 → 插件」里启用或关闭，关闭后完全不加载。首批官方插件有精灵表调整、序列帧（视频抽帧与补间）、像素化和分镜。' },
     { kind: 'feat', text: '分镜插件：把剧本拆成镜头，逐镜出图、出视频。' },
