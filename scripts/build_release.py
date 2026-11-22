@@ -111,6 +111,13 @@ def build(output: Path, platform: str) -> Path:
     for name in ("src", "web/dist", "scripts", "skills", ".claude-plugin", "plugins"):
         shutil.copytree(REPO / name, app / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    if platform != "linux-x64":
+        encoder = REPO / ".scratch/encoder/bin"
+        suffix = ".exe" if platform == "windows-x64" else ""
+        for name in ("ffmpeg" + suffix, "ffprobe" + suffix, "SHA256SUMS", "COPYING.LGPLv2.1"):
+            if not (encoder / name).is_file():
+                raise ValueError(f"Build native video encoder first: missing {name}")
+        shutil.copytree(encoder, app / "video-encoder" / platform)
     for name in ("pyproject.toml", "uv.lock", ".python-version"):
         shutil.copy2(REPO / name, app / name)
     (payload / "VERSION").write_text(version + "\n", encoding="utf-8")

@@ -1,0 +1,18 @@
+name: Build signed FFmpeg source
+description: Prepare the native video binaries and their corresponding source for the runtime
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'macOS'
+      shell: bash
+      run: bash scripts/build_video_encoder.sh .scratch/encoder
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install nasm --yes --no-progress
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $env:MSYSTEM = 'MINGW64'
+        $env:CHERE_INVOKING = '1'
+        $env:MSYS2_PATH_TYPE = 'inherit'
+        & C:\msys64\usr\bin\bash.exe -lc 'set -e; cd "$(cygpath -u "$GITHUB_WORKSPACE")"; export PATH="/usr/bin:/mingw64/bin:/c/mingw64/bin:/c/Strawberry/c/bin:/c/Program Files/NASM:$PATH"; nasm -v; bash scripts/build_video_encoder.sh .scratch/encoder'
+        exit $LASTEXITCODE

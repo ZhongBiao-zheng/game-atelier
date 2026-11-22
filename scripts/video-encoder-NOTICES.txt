@@ -1,0 +1,9 @@
+Atelier distributes FFmpeg and ffprobe 8.1.3 as independent, replaceable command-line programs.
+Copyright the FFmpeg developers. Licensed under LGPL 2.1 or later. See COPYING.LGPLv2.1
+and upstream LICENSE.md. The complete unmodified corresponding source archive and original
+signature accompany these binaries. Official source: https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz
+Run build_video_encoder.sh on the corresponding platform to rebuild. configuration.txt records
+the actual toolchain and configure invocation. No external codec libraries or zlib are linked.
+Apple VideoToolbox and Windows Media Foundation are provided by the operating system.
+Windows uses MinGW-w64 CRT (https://www.mingw-w64.org/license/) and GCC runtime libraries
+under GPLv3 with GCC Runtime Library Exception (https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html).

@@ -72,6 +72,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/video-encoder
+        if: runner.os != 'Linux'
       - name: Build from locked dependencies and committed UI
         run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
       - name: Smoke relocated archive without system tools

@@ -71,7 +71,7 @@ def app_id() -> str:
 
 def stage_runtime(runtime: Path, version: str) -> Path:
     """What the shell needs to know about the runtime that goes with this build: the download is
-    checked against `sha256`, an unpacked version directory against `build`."""
+    checked against `sha256`, an unpacked version directory (including its native video tools) against `build`."""
     markers = runtime_markers(runtime, version)
     contract = int(markers.get("DESKTOP_CONTRACT", "0") or 0)
     if contract != required_contract():

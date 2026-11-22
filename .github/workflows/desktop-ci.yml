@@ -9,6 +9,9 @@ on:
       - 'scripts/smoke_desktop.py'
       - 'scripts/desktop_icon_check.ps1'
       - 'scripts/desktop_installer_screens.ps1'
+      - '.github/actions/video-encoder/**'
+      - 'scripts/build_video_encoder.sh'
+      - 'scripts/video-encoder-NOTICES.txt'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -20,6 +23,9 @@ on:
       - 'scripts/smoke_desktop.py'
       - 'scripts/desktop_icon_check.ps1'
       - 'scripts/desktop_installer_screens.ps1'
+      - '.github/actions/video-encoder/**'
+      - 'scripts/build_video_encoder.sh'
+      - 'scripts/video-encoder-NOTICES.txt'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -76,6 +82,8 @@ jobs:
           cargo test --release
       # The runtime this build goes with: the installer records its sha256 and BUILD_ID, the app
       # downloads it on first start (here from a local stand-in, the smoke's feed).
+      - uses: ./.github/actions/video-encoder
+        if: runner.os != 'Linux'
       - name: Build the runtime bundle the app downloads
         run: |
           uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
