@@ -69,7 +69,7 @@ describe('供应商弹窗', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
     expect(await screen.findByRole('status')).toHaveTextContent(/可用 · \d+ ms/);
     expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({ alias: 'Tuzi', access_key: null }));
-    expect(screen.queryByRole('button', { name: /remote/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remote/ })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(patchKey).toHaveBeenCalledWith('Tuzi', expect.objectContaining({ models: [expect.objectContaining({ id: 'gpt-image-2', name: 'My model' })] })));
   });
