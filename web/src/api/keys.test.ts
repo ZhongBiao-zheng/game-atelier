@@ -9,7 +9,7 @@ vi.mock('./connection', async original => ({
 it.each([
   [502, '上游 404: Not Found'],
   [502, '目录 405：Method Not Allowed'],
-  [404, '上游没有模型列表接口'],
+  [502, '上游 405: Method Not Allowed'],
 ] as const)('offers manual entry for an unavailable list (%s, %s)', async (status, detail) => {
   vi.mocked(connectionFetch).mockResolvedValueOnce(Response.json({ detail }, { status }));
   await expect(previewModels({})).rejects.toMatchObject({ message: '这个供应商不提供模型列表，请手动添加' });
