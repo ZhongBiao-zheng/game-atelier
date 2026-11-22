@@ -49,3 +49,58 @@ it('keeps selected chips pressed across search and category changes, and toggles
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({ models: [expect.objectContaining({ id: 'image-demo' })] })));
 });
+
+it.each(['create', 'edit'] as const)('refreshes the list once after a successful connection in %s without selecting new models', async mode => {
+  open(mode);
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('可用');
+  expect(await screen.findByRole('button', { name: 'Chat chat-demo' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Image image-demo' })).toHaveAttribute('aria-pressed', 'false');
+  expect(previewModels).toHaveBeenCalledOnce();
+  expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({ access_key: mode === 'edit' ? null : 'test-only' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(mode === 'edit' ? patchKey : createKey).toHaveBeenCalledOnce());
+  const payload = mode === 'edit' ? vi.mocked(patchKey).mock.calls[0][1] : vi.mocked(createKey).mock.calls[0][0];
+  expect(payload.models).toEqual([expect.objectContaining({ id: 'chat-demo' })]);
+});
+
+it('keeps a loaded list and pending selections when connection fails without another refresh', async () => {
+  open();
+  fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Image image-demo' }));
+  vi.mocked(previewModels).mockRejectedValue(new Error('连接失败'));
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('连接失败');
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(previewModels).toHaveBeenCalledTimes(2); // 首次列表 + 连接探测，没有后续刷新。
+  expect(screen.getByRole('button', { name: 'Image image-demo' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('preserves pending selections made during refresh even when the new list omits the model', async () => {
+  open();
+  fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+  await screen.findByRole('button', { name: 'Image image-demo' });
+  let finish!: (result: ModelsPreview) => void;
+  vi.mocked(previewModels).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Image image-demo' }));
+  finish({ ...remote, models: remote.models.slice(0, 1), total: 1 });
+  await screen.findByRole('status');
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(createKey).toHaveBeenCalledOnce());
+  expect(vi.mocked(createKey).mock.calls[0][0].models?.map(m => m.id)).toEqual(['chat-demo', 'image-demo']);
+});
+
+it('retains connection success and selections if a custom catalog cannot be loaded', async () => {
+  vi.mocked(listHttpProtocols).mockResolvedValue({ protocols: [{ id: 'hp-aaaaaaaaaaaa', name: '目录', kind: 'image', available: true, error: null, declared: null, catalog: true, used_by: [] }] });
+  const { chooseOption } = await import('@/test/select');
+  open();
+  await chooseOption(await screen.findByLabelText('模型目录'), '目录');
+  vi.mocked(previewModels).mockResolvedValueOnce(remote).mockRejectedValueOnce(new Error('目录不可用'));
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('可用');
+  expect(await screen.findByRole('alert')).toHaveTextContent('目录不可用');
+  expect(previewModels).toHaveBeenCalledTimes(2);
+  expect(previewModels).toHaveBeenLastCalledWith(expect.objectContaining({ protocol_id: 'hp-aaaaaaaaaaaa' }));
+  expect(screen.getByRole('button', { name: 'chat-demo' })).toHaveAttribute('aria-pressed', 'true');
+});

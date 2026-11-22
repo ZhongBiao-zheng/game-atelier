@@ -298,6 +298,24 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
   const fetchModelsBaseUrl = baseUrl.trim() || preset.defaultBaseUrl || '';
+  // 请求完成时读取最新勾选；重拉期间继续点选，也不能被旧闭包覆盖。
+  const currentSelection = useRef(() => models);
+  const acceptPreview = (remote: ModelsPreview, includeAll: boolean) => {
+    const selected = currentSelection.current();
+    const enabledIds = new Set(selected.map(m => m.id.trim()).filter(Boolean));
+    const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
+    const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
+    setDetected(remote.detected ?? null);
+    setFetchError(null);
+    // 上游本次未列出的已选模型仍保留，包括尚未点「启用所选」的勾选。
+    setModels(selected);
+    setPickerFilter('all');
+    setPickerQuery('');
+    setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
+    setFetchedChecked(new Set(sorted.filter(m => enabledIds.has(m.id)).map(m => m.id)));
+    setModalityPick(Object.fromEntries(selected.filter(m => m.id.trim() && m.modality)
+      .map(m => [m.id.trim(), m.modality as ModelModality])));
+  };
   /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
   const fetchModels = async (includeAll = false) => {
     setFetching(true);
@@ -314,23 +332,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         protocol_id: catalogProtocolId,
         text_protocol: textProtocol,
       });
-      setDetected(remote.detected ?? null);
-      const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
-      const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
-      const enabledIds = new Set(models.map((m) => m.id.trim()).filter(Boolean));
-      // 逃生舱重拉发生在 picker 内部：已勾选的和已指定的分类都要留着，否则「看一眼全量」
-      // 的代价是把刚点完的十几个勾全清掉。首次打开（preview 为 null）只按已启用模型预勾。
-      const carried = preview ? [...fetchedChecked] : [];
-      const enabledPicks = Object.fromEntries(
-        models.filter((m) => m.id.trim() && m.modality).map((m) => [m.id.trim(), m.modality as ModelModality]),
-      );
-      setPickerFilter('all');
-      setPickerQuery('');
-      setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
-      setFetchedChecked(new Set(
-        sorted.filter((m) => preview ? carried.includes(m.id) : enabledIds.has(m.id)).map((m) => m.id),
-      ));
-      setModalityPick({ ...enabledPicks, ...(preview ? modalityPick : {}) });
+      acceptPreview(remote, includeAll);
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -382,6 +384,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       });
     return [...kept, ...added];
   };
+
+  useEffect(() => { currentSelection.current = mergedModels; });
 
   const applyFetchedSelection = () => {
     if (unresolvedChecked.length) return;
@@ -554,6 +558,9 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         include_all: false, text_protocol: textProtocol });
       setDetected(remote.detected ?? null);
       setConnectionTest({ ok: true, message: `可用 · ${Math.round(performance.now() - started)} ms` });
+      // 普通目录复用连接检测已经拿到的列表；自定义目录仍走其免费 catalog 请求。
+      if (catalogProtocolId) await fetchModels();
+      else acceptPreview(remote, false);
     } catch (error) {
       setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
     } finally { setTesting(false); }
@@ -657,7 +664,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                       {catalogInterfaces.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
                     </SelectContent>
                   </Select>}
-                  <Button variant="ghost" size="sm" type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()}>{fetching ? '获取中...' : '重新获取'}</Button>
+                  <Button variant="ghost" size="sm" type="button" disabled={fetching || testing || !fetchModelsBaseUrl} onClick={() => void fetchModels()}>{fetching ? '获取中...' : '重新获取'}</Button>
                 </div>
                 {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
                 {preview ? <div className="min-w-0 space-y-3">
@@ -874,7 +881,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             {!isGateway && !isSubscription && !isComfy && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中...' : '测试连接'}</Button>
+                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中...' : '测试连接'}</Button>
                 {connectionTest && <span role={connectionTest.ok ? 'status' : 'alert'} className={`text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
               </div>
               <details className="col-span-full border-t border-border pt-3">
