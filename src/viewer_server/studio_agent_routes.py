@@ -13,7 +13,6 @@ from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, File, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
 from character_workflow.lib import (
@@ -359,6 +358,8 @@ async def upload(session_id: CanvasAgentSessionId, file: UploadFile = File(...))
     aid = secrets.token_hex(16) + ext
 
     def store(current, now):
+        from PIL import Image
+
         try:
             with Image.open(io.BytesIO(body)) as image:
                 if image.width * image.height > 40_000_000:

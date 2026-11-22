@@ -17,7 +17,6 @@ from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_library as library
 from character_workflow.lib import canvas_agent_runtime as runtime
 from character_workflow.lib import canvas_agent_skills as skills
-from character_workflow.lib import canvas_agent_video as video
 from character_workflow.lib import canvas_agent_vision as vision
 from character_workflow.lib import studio_agent_sessions as sessions
 from character_workflow.lib.atomic_io import atomic_write_json
@@ -195,6 +194,8 @@ def result_view(sid, job_id, check=False):
             try:
                 path = Path(output)
                 if job.kind == "video":
+                    from character_workflow.lib import canvas_agent_video as video
+
                     info = video.probe(path)
                     checks = _size_checks(job.params, info["width"], info["height"])
                     if job.params.duration:
@@ -372,6 +373,8 @@ class StudioWorkspace:
     def media(self, ref):
         try:
             if ref.startswith("frames:"):
+                from character_workflow.lib import canvas_agent_video as video
+
                 payload = json.loads(ref[7:])
                 path, kind = media_path(self.session_id, payload["media_ref"])
                 if kind != "video":
@@ -529,14 +532,20 @@ class StudioWorkspace:
             return result_view(sid, args["job_id"], name == "check_run")
         if name in {"read_media", "read_video_frames"}:
             path, kind = media_path(sid, args["media_ref"])
-            if name == "read_video_frames":
-                if kind != "video" or not 1 <= args.get("count", 6) <= 9:
-                    raise ValueError("需要视频素材与 1–9 帧")
+            if kind == "video":
+                from character_workflow.lib import canvas_agent_video as video
+
                 info = video.probe(path)
+                if name == "read_media":
+                    return {"kind": kind, **info}
+                if not 1 <= args.get("count", 6) <= 9:
+                    raise ValueError("需要视频素材与 1–9 帧")
                 frames = video.sample_indices(
                     info, args.get("count", 6), args.get("start_ms"), args.get("end_ms")
                 )
                 return {**info, "frames": frames, "attach_images": ["frames:" + json.dumps(args)]}
+            if name == "read_video_frames":
+                raise ValueError("需要视频素材与 1–9 帧")
             if kind == "image":
                 _, width, height = library.image_preview(path)
                 return {
@@ -545,7 +554,7 @@ class StudioWorkspace:
                     "height": height,
                     "attach_images": [args["media_ref"]],
                 }
-            return {"kind": kind, **(video.probe(path) if kind == "video" else {})}
+            return {"kind": kind}
         raise ValueError("这个工具不属于创作台")
 
     async def wait(self, ids):
