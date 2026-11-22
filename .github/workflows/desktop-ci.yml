@@ -31,10 +31,53 @@ on:
       - 'src/viewer_server/shell_control.py'
       - '.github/workflows/desktop-ci.yml'
   workflow_dispatch:
+    inputs:
+      runtime_only:
+        description: Build and measure the two native runtime archives
+        type: boolean
+        default: false
 
 # 不设 continue-on-error：失败就是红的。发版不依赖本 workflow，release.yml 的 desktop job 会自己构建并冒烟。
 jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: windows-latest
+            platform: windows-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/video-encoder
+        if: runner.os != 'Linux'
+      - name: Build the runtime bundle the app downloads
+        run: |
+          uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
+          echo "RUNTIME=$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
+      - name: Measure compressed runtime increment
+        run: uv run --no-project python scripts/measure_video_runtime.py release-build "$RUNTIME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-runtime-${{ matrix.platform }}
+          path: |
+            release-build/*.zip
+            release-build/*.tar.gz
+            release-build/*.sha256
+          if-no-files-found: error
+          retention-days: 14
   shell:
+    needs: runtime
+    if: ${{ !inputs.runtime_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,14 +123,12 @@ jobs:
           cargo fmt --check
           cargo clippy --release -- -D warnings
           cargo test --release
-      # The runtime this build goes with: the installer records its sha256 and BUILD_ID, the app
-      # downloads it on first start (here from a local stand-in, the smoke's feed).
-      - uses: ./.github/actions/video-encoder
-        if: runner.os != 'Linux'
-      - name: Build the runtime bundle the app downloads
-        run: |
-          uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
-          echo "RUNTIME=$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-runtime-${{ matrix.platform }}
+          path: release-build
+      - name: Select runtime
+        run: echo "RUNTIME=$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
       - name: Build installer
         run: uv run --no-project python scripts/build_desktop.py --runtime "$RUNTIME" --output desktop-build --platform ${{ matrix.platform }}
       - name: Install, open and quit the app; runtime download, resume and replacement
@@ -124,18 +165,6 @@ jobs:
             desktop-build/*.dmg.sha256
             desktop-build/*-setup.exe
             desktop-build/*-setup.exe.sha256
-          if-no-files-found: ignore
-          retention-days: 14
-      # An unreleased build's runtime is not on any release: trying the installer means importing
-      # this archive on the first-start page (「从文件导入」).
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: desktop-runtime-${{ matrix.platform }}
-          path: |
-            release-build/*.zip
-            release-build/*.tar.gz
-            release-build/*.sha256
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
