@@ -130,6 +130,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
   const [manualId, setManualId] = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
   const [manualType, setManualType] = useState<ModelModality>(defaultManualType(initialPreset));
   const [testing, setTesting] = useState(false);
   const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
@@ -162,6 +163,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  useEffect(() => { if (fetchError) setManualOpen(true); }, [fetchError]);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
   const [pickerQuery, setPickerQuery] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -285,6 +287,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     setHomepage(nextPreset.homepageUrl ?? '');
     setTextProtocol(nextPreset.textProtocol ?? null);
     setManualType(defaultManualType(nextPreset));
+    setManualOpen(false);
     setModels(nextPreset.defaultModels);
     setUrlTest(null);
     setPreview(null);
@@ -563,6 +566,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       else acceptPreview(remote, false);
     } catch (error) {
       setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
+      setManualOpen(true);
     } finally { setTesting(false); }
   };
   const typeDot = (modality?: ModelModality | null) => ({ image: 'bg-brand-2', video: 'bg-brand-3', text: 'bg-brand-4', audio: 'bg-muted-foreground' }[modality ?? 'image']);
@@ -710,14 +714,17 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     <CheckIcon size="sm" aria-hidden /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
                   </Button>)}
                 </div>}
-                {provider === 'custom' && <div className="flex flex-wrap gap-2">
+                {provider === 'custom' && <details open={manualOpen} onToggle={e => setManualOpen(e.currentTarget.open)}>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">手动添加模型</summary>
+                  <div className="mt-3 flex flex-wrap gap-2">
                   <Input aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className="min-w-0 flex-1 basis-28 font-mono" />
                   <Select value={manualType} onValueChange={value => setManualType(value as ModelModality)}>
                     <SelectTrigger aria-label="新增模型类型" className="w-auto"><SelectValue /></SelectTrigger>
                     <SelectContent>{GENERATION_MODALITIES.map(type => <SelectItem key={type} value={type}>{CATEGORY_LABELS[type]}</SelectItem>)}</SelectContent>
                   </Select>
                   <Button variant="ghost" size="sm" type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel}>添加</Button>
-                </div>}
+                  </div>
+                </details>}
                 <details open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
                   <summary className="cursor-pointer text-xs text-muted-foreground">模型详情</summary>
                   <div className="mt-3 space-y-3">
