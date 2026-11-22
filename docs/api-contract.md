@@ -1630,3 +1630,9 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 - `GET /onboarding/metrics`：`first_seen_at`、`data_root_set_at`、`skipped_at`、`paths_tried`（`key:tuzi` 形式）、`completed_path`、`last_event`、`first_generation`（`.runtime/jobs/` 里 `completed_at ≥ data_root_set_at` 的第一条 DONE）、`seconds_to_first_generation`、`event_count`。
 - 存储：`<data_root>/.runtime/onboarding.json`，事件最多 500 条，只存本机、不上报。`first_seen_at` 为服务进程首次回 `needs_data_root` 的时间，选定数据目录时落盘，复用旧目录不覆盖。
 - `POST /onboarding/key-probe {preset, access_key}` → `{result: ok | invalid | unknown}`：只对服务端写死的厂商账户接口发一次请求（tuzi / openai-hk：`/v1/dashboard/billing/subscription`；openrouter：`/api/v1/key`；tokendance：`/portal/api/v1/user/balance`；seedream：Ark `/models`），不计费。401/403 或响应体带 `error` 为 invalid，网络失败与其他状态为 unknown。密钥只用于这一次请求，不落盘。结果只用于提示，不拦保存。
+
+### 本地视频处理（ADR-0045）
+
+启用宿主插件 `video-tools` 后，Web 使用 `POST /api/plugins/video-tools/routes/{probe|submit|get|cancel}`。
+四条路由均要求本机会话与项目号。请求、状态、错误与压缩档位见 [视频处理插件](plugins/video-tools.md)。
+成功产物在画布文档中以 `origin.kind=local_tool`、`operation.kind=video_trim|video_compress` 和源版本号记录。

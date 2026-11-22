@@ -20,7 +20,10 @@ class VideoRenderer:
         async with self._probe_lock:
             if self._encoder is None:
                 native = await asyncio.to_thread(resolve_encoder)
-                await asyncio.wait_for(smoke(native, directory), timeout=45)
+                try:
+                    await asyncio.wait_for(smoke(native, directory), timeout=45)
+                except TimeoutError as exc:
+                    raise VideoError("probe_timeout", "视频编码器检测超时") from exc
                 self._encoder = native
         return self._encoder
 

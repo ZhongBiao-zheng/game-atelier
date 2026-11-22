@@ -344,6 +344,9 @@ async def normal_lifespan(app: FastAPI):
     start_announcement_sync()
     from character_workflow.lib import gateway_cancel_outbox
 
+    from character_workflow.lib.video_service import service, stop_service
+
+    await service().queue.initialize()
     if gateway_cancel_outbox.pending_job_ids():
         gateway_cancel_outbox.wake()  # 上次没送到主机的停止请求，启动后补发
     try:
@@ -351,6 +354,7 @@ async def normal_lifespan(app: FastAPI):
     finally:
         from viewer_server.routes import _stop_studio_recovery_workers
 
+        await stop_service()
         gateway_cancel_outbox.stop()
 
         heartbeat_task.cancel()

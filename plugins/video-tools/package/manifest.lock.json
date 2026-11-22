@@ -1,0 +1,47 @@
+{
+  "manifest_version": 1,
+  "id": "video-tools",
+  "name": "视频处理",
+  "version": "0.1.0",
+  "description": "在本机裁剪与压缩视频",
+  "icon": "video",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.138.0"
+  },
+  "runtime": "host",
+  "contributes": {
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/probe",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/submit",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/get",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/cancel",
+          "access": "edit"
+        }
+      ]
+    }
+  },
+  "files": [],
+  "source": "bundled",
+  "digest": "sha256:367785817533a22a27e0587e46bb965f81e6446e03346a3643d4af8013beb474"
+}

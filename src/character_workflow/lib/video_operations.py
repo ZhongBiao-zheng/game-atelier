@@ -60,7 +60,7 @@ class Record:
 
     @property
     def root(self):
-        return canvas_project_dir(self.project) / ".runtime" / "video-operations"
+        return self.owned(".runtime", "video-operations")
 
     @property
     def file(self):
@@ -72,7 +72,13 @@ class Record:
 
     @property
     def output(self):
-        return canvas_project_dir(self.project) / "derived" / self.id
+        return self.owned("derived", self.id)
+
+    def owned(self, *parts):
+        path = canvas_project_dir(self.project).joinpath(*parts)
+        if path != path.resolve():
+            raise PermissionError("视频操作目录不能经过符号链接")
+        return path
 
     def prepare(self):
         self.stage.mkdir(exist_ok=False)
@@ -188,8 +194,12 @@ def recover():
         project = path.parents[2].name
         if ID.fullmatch(path.stem) and (path.parents[2] / "project.json").is_file():
             record = Record(project, path.stem)
-            if record.file == path and not path.is_symlink():
-                record.reconcile()
+            try:
+                if record.file == path and not path.is_symlink():
+                    if record.stage.exists() or record.read()["status"] not in TERMINAL:
+                        record.reconcile()
+            except (ValueError, KeyError, OSError):
+                logging.getLogger(__name__).warning("Skipping unreadable video record %s", path.stem)
 
 
 Render = Callable[[str, Submit, Path, Callable[[int], None]], Awaitable[dict]]
@@ -205,6 +215,7 @@ class VideoQueue:
         self.render_task = None
         self.progress_ms = 0
         self.ready = False
+        self.closing = False
 
     async def initialize(self):
         async with self.submit_lock:
@@ -217,6 +228,8 @@ class VideoQueue:
         key = hashlib.sha256((project + "\0" + body.request_id).encode()).hexdigest()[:32]
         ref = Record(project, "video-" + key)
         async with self.submit_lock:
+            if self.closing:
+                raise VideoError("interrupted", "服务正在停止")
             row, new = await asyncio.to_thread(ref.register, body)
             if new:
                 self.pending.append((ref, body))
@@ -243,6 +256,16 @@ class VideoQueue:
                 await asyncio.to_thread(ref.reconcile)
             return row
 
+    async def close(self):
+        async with self.submit_lock:
+            self.closing = True
+            self.pending.clear()
+            if self.render_task:
+                self.render_task.cancel()
+        if self.worker:
+            await self.worker
+        await asyncio.to_thread(recover)
+
     def _progress(self, ms):
         self.progress_ms = ms
 
@@ -252,6 +275,8 @@ class VideoQueue:
             self.active, self.progress_ms = ref, 0
             try:
                 async with self.submit_lock:
+                    if self.closing:
+                        continue
                     row = await asyncio.to_thread(ref.transition, "running")
                     if row["status"] != "running":
                         continue

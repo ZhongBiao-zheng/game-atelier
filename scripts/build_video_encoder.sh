@@ -72,5 +72,6 @@ cp "$script_dir/video-encoder-NOTICES.txt" "$root/bin/"
 "$root/bin/ffmpeg$suffix" -version > "$root/bin/configuration.txt"
 "$root/bin/ffmpeg$suffix" -L > "$root/bin/license.txt" 2>&1
 cd "$root/bin"
-"${hash[@]}" * > SHA256SUMS.tmp
-mv SHA256SUMS.tmp SHA256SUMS
+rm -f SHA256SUMS
+"${hash[@]}" * > "$root/sums.tmp"
+mv "$root/sums.tmp" SHA256SUMS

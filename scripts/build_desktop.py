@@ -63,6 +63,42 @@ def runtime_markers(runtime: Path, version: str) -> dict[str, str]:
     return found
 
 
+def verify_video_payload(runtime: Path, version: str) -> None:
+    """Validate the native payload inside the exact archive recorded by the installer."""
+    windows = runtime.suffix == ".zip"
+    target = "windows-x64" if windows else "macos-arm64"
+    prefix = f"GameAtelier/versions/{version}/app/video-encoder/{target}/"
+    hashes = {}
+    manifest = {}
+
+    def inspect(name, stream):
+        if name == "SHA256SUMS":
+            for line in stream.read().decode("utf-8").splitlines():
+                digest, filename = line.split(maxsplit=1)
+                manifest[filename] = digest
+        else:
+            digest = hashlib.sha256()
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+            hashes[name] = digest.hexdigest()
+
+    if windows:
+        with zipfile.ZipFile(runtime) as archive:
+            for entry in archive.infolist():
+                if entry.filename.startswith(prefix) and not entry.is_dir():
+                    with archive.open(entry) as stream:
+                        inspect(entry.filename[len(prefix):], stream)
+    else:
+        with tarfile.open(runtime, "r|gz") as archive:
+            for entry in archive:
+                if entry.name.startswith(prefix) and entry.isfile():
+                    with archive.extractfile(entry) as stream:
+                        inspect(entry.name[len(prefix):], stream)
+    binaries = {name + (".exe" if windows else "") for name in ("ffmpeg", "ffprobe")}
+    if hashes != manifest or not binaries.union({"COPYING.LGPLv2.1", "configuration.txt"}) <= hashes.keys():
+        raise ValueError("Runtime video encoder files or SHA256SUMS are incomplete")
+
+
 def app_id() -> str:
     """The AppUserModelID / bundle id: `appId` in desktop/electron-builder.yml, the only place."""
     text = (DESKTOP / "electron-builder.yml").read_text(encoding="utf-8")
@@ -72,6 +108,7 @@ def app_id() -> str:
 def stage_runtime(runtime: Path, version: str) -> Path:
     """What the shell needs to know about the runtime that goes with this build: the download is
     checked against `sha256`, an unpacked version directory (including its native video tools) against `build`."""
+    verify_video_payload(runtime, version)
     markers = runtime_markers(runtime, version)
     contract = int(markers.get("DESKTOP_CONTRACT", "0") or 0)
     if contract != required_contract():

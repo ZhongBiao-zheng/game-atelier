@@ -5,9 +5,13 @@ import tempfile
 from pathlib import Path
 
 
+from build_desktop import verify_video_payload
+
+
 def main(folder: Path, archive: Path) -> None:
     bundle = folder / "GameAtelier"
     version = (bundle / "current").read_text().strip()
+    verify_video_payload(archive, version)
     encoder = bundle / "versions" / version / "app" / "video-encoder"
     with tempfile.TemporaryDirectory(dir=folder) as temp:
         saved = Path(temp) / encoder.name

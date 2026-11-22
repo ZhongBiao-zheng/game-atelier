@@ -64,6 +64,10 @@ jobs:
         run: |
           uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
           echo "RUNTIME=$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
+      - name: Exercise the packaged encoder using timestamped synthetic clips
+        run: |
+          export ATELIER_VIDEO_ENCODER_DIR="$(python -c 'from pathlib import Path; print(next(Path("release-build/GameAtelier/versions").glob("*/app/video-encoder/*")).resolve())')"
+          uv run --locked pytest -q tests/test_video_encoder.py tests/test_video_render.py tests/test_video_operations.py tests/test_video_plugin_routes.py
       - name: Measure compressed runtime increment
         run: uv run --no-project python scripts/measure_video_runtime.py release-build "$RUNTIME"
       - uses: actions/upload-artifact@v4
