@@ -1,4 +1,4 @@
-import { request, requestJson } from './http';
+import { ApiError, request, requestJson } from './http';
 import type { ModelRouteMember } from './models';
 import type { ModelDeclared } from '@/schema/httpProtocols';
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
@@ -182,12 +182,22 @@ export async function previewModels(payload: {
   /** 表单上当前选的对话接口：Anthropic 按它的鉴权头列模型。 */
   text_protocol?: string | null;
 }): Promise<ModelsPreview> {
-  // 这条报错直接贴在密钥表单里给画师看，detail 已是中文（routes.py 的 502/422 分支）。
-  return requestJson<ModelsPreview>('/api/keys/models-preview', '拉取模型列表', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  try {
+    return await requestJson<ModelsPreview>('/api/keys/models-preview', '拉取模型列表', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    // 代理用 502 转述上游状态；本机找不到供应商别名也会返回 404，要保留它自己的原因。
+    if (error instanceof ApiError && (
+      (error.status === 502 && /^(?:上游|目录) (?:404|405)[:：]/.test(error.reason ?? '')) ||
+      (error.status === 404 && error.reason === '上游没有模型列表接口')
+    )) {
+      throw new ApiError('这个供应商不提供模型列表，请手动添加', error);
+    }
+    throw error;
+  }
 }
 
 export interface ChatGPTSubscriptionStatus {
