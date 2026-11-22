@@ -3,7 +3,7 @@ import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderIconPicker } from '@/components/keys/ProviderIconPicker';
 import { defaultIconUrl } from '@/api/providerIcons';
 import { useEffect, useRef, useState } from 'react';
-import { CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
+import { CheckIcon, CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
@@ -680,8 +680,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         const next = new Set(fetchedChecked);
                         if (next.has(model.id)) next.delete(model.id); else next.add(model.id);
                         setFetchedChecked(next);
-                      }} className="max-w-full rounded-full px-3 font-mono font-normal data-[state=on]:border-primary/40">
-                        <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(resolvedModality(model))}`} /><span className="truncate">{model.id}</span>
+                      }} className="max-w-full rounded-full px-3 font-mono font-normal aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-foreground">
+                        {fetchedChecked.has(model.id) ? <CheckIcon size="sm" aria-hidden /> : <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(resolvedModality(model))}`} />}<span className="truncate">{model.id}</span>
                       </Toggle></Hint>
                       {!model.modality && fetchedChecked.has(model.id) && <ToggleGroup type="single" size="sm" aria-label={`分类 ${model.id}`} className="flex-wrap"
                         value={modalityPick[model.id] ?? ''}
@@ -699,8 +699,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     {unresolvedChecked.length > 0 && <span className="text-destructive">{unresolvedChecked.length} 个未识别模型待指定分类</span>}
                   </div>
                 </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
-                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-secondary px-3 py-1.5 font-mono text-xs">
-                    <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
+                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-xs">
+                    <CheckIcon size="sm" aria-hidden /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
                   </Button>)}
                 </div>}
                 {provider === 'custom' && <div className="flex flex-wrap gap-2">
