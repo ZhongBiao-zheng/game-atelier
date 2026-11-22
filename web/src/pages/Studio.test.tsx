@@ -1245,8 +1245,8 @@ describe('Studio', () => {
   it('sizes batch actions to their labels and opens the more menu to the right', async () => {
     renderStudioWithCompletedBatch();
 
-    expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-8', 'px-2');
-    expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-8', 'px-2');
+    expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-8', 'px-3', 'bg-secondary');
+    expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-8', 'px-3', 'bg-secondary');
     expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-8', 'w-8');
 
     fireEvent.keyDown(screen.getByRole('button', { name: '更多操作' }), { key: 'Enter' });

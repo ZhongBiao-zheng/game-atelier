@@ -119,7 +119,7 @@ const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
 // 参考图只占提示词这一行的左侧——标签行与操作行始终从最左缘开始，有没有参考图都一样。
 const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-3';
 const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
-const ROUND_ACTIONS_CLASS = '-ml-2 flex flex-wrap items-center gap-0.5';
+const ROUND_ACTIONS_CLASS = 'flex flex-wrap items-center gap-2';
 const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 text-xs tabular-nums text-muted-foreground';
 
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
@@ -1215,7 +1215,10 @@ const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButt
       <Button variant="bare"
         ref={ref}
         type="button"
-        className={`inline-flex items-center justify-center ${compact ? 'h-8 w-8 px-0' : 'h-8 px-2'} rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+        // 文字操作是实心底的按钮；「…」这类图标按钮保持无底。
+        className={`inline-flex items-center justify-center h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${compact
+          ? 'w-8 px-0 rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          : 'px-3 rounded-md bg-secondary text-foreground hover:bg-secondary/70 disabled:opacity-50'} ${className}`}
         {...props}
       />
     );
