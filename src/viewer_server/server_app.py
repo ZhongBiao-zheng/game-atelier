@@ -480,6 +480,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     from viewer_server.canvas_chat_routes import register_canvas_chat_routes
 
     register_canvas_chat_routes(app)
+    from viewer_server.studio_agent_routes import router as studio_agent_router
+    app.include_router(studio_agent_router)
 
     if dist_dir is None:
         dist_dir = Path(__file__).resolve().parents[2] / "web" / "dist"

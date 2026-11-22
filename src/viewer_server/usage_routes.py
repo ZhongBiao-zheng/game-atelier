@@ -103,6 +103,9 @@ def _agent_records(projects, names: dict[str, str], now: datetime) -> list[dict]
         return []
     titles = {(item.project_id, item.session_id): item.title for project in projects
               for item in list_canvas_agent_sessions(project.project_id).sessions}
+    if any(row.get("workspace") == "studio" for row in rows):
+        from character_workflow.lib.studio_agent_sessions import summaries
+        titles.update({(None, row["session_id"]): row["title"] for row in summaries()})
     return agent_usage.usage_records(rows, titles, names, now)
 
 

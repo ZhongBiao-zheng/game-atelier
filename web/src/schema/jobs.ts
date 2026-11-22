@@ -230,6 +230,8 @@ export interface Job {
   error: string | null;
   kind?: JobKind;
   namespace?: Namespace;
+  studio_agent_session_id?: string | null;
+  studio_agent_turn_id?: string | null;
   source_image?: string | null;
   alias?: string | null;
   provider?: string | null;

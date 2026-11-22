@@ -74,6 +74,8 @@ def work_request(path: str, method: str) -> bool:
         return True
     if re.fullmatch(r"/api/jobs/[^/]+/confirm", path):
         return True
+    if re.fullmatch(r"/api/studio/agent/sessions(?:/[^/]+/(?:messages|approvals))?", path):
+        return True
     if path.startswith("/api/canvas/projects/"):
         return bool(re.search(
             r"/(runs(?:/[^/]+)?|agent/sessions(?:/[^/]+/messages)?|"

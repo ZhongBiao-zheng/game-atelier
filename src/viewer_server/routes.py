@@ -1989,6 +1989,9 @@ def _create_user_job(
     body: _StudioJobCreate,
     *,
     namespace: Literal["studio"],
+    job_id: str | None = None,
+    studio_agent_session_id: str | None = None,
+    studio_agent_turn_id: str | None = None,
 ) -> Job:
     """Build and persist one Web-confirmed Studio job."""
     from character_workflow.lib.prompt_variables import resolve_prompt_variables
@@ -2086,7 +2089,9 @@ def _create_user_job(
         params.n = image_count
 
     job = Job(
-        job_id=new_job_id(),
+        job_id=job_id or new_job_id(),
+        studio_agent_session_id=studio_agent_session_id,
+        studio_agent_turn_id=studio_agent_turn_id,
         character_id=alias,
         prompt=prompt,
         submitted_at=datetime.now(timezone.utc).isoformat(),

@@ -393,6 +393,8 @@ class Job(BaseModel):
     kind: JobKind = JobKind.IMAGE
     namespace: Namespace = "studio"
     source_image: str | None = None  # 参考素材的绝对路径
+    studio_agent_session_id: str | None = Field(default=None, pattern=r"^session-[a-z0-9-]{8,64}$")
+    studio_agent_turn_id: str | None = Field(default=None, pattern=r"^turn-[a-z0-9-]{1,64}$")
     # Canvas 生成任务归属项目与运行快照。
     canvas_project_id: str | None = None
     canvas_run: CanvasJobContext | None = None
@@ -436,6 +438,10 @@ class Job(BaseModel):
                 raise ValueError("canvas job requires canvas_project_id and canvas_run")
         elif self.canvas_project_id is not None or self.canvas_run is not None:
             raise ValueError("canvas_project_id and canvas_run are only valid for namespace=canvas")
+        if self.studio_agent_session_id is not None and self.namespace != "studio":
+            raise ValueError("studio_agent_session_id requires a studio job")
+        if self.studio_agent_turn_id is not None and self.studio_agent_session_id is None:
+            raise ValueError("studio_agent_turn_id requires a studio agent session")
         if self.namespace != "canvas" and self.runner_started_at is not None:
             raise ValueError("runner_started_at is only valid for namespace=canvas")
         return self
@@ -1936,13 +1942,12 @@ class CanvasAgentApproval(BaseModel):
     summary: str = Field(max_length=4000)
 
 
-class CanvasAgentSession(BaseModel):
+class AgentSession(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[1] = 1
     revision: int = Field(default=0, ge=0)
     sequence: int = Field(default=0, ge=0)
     session_id: CanvasAgentSessionId
-    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
     title: CanvasProjectName
     status: CanvasAgentStatus = "idle"
     model: str | None = Field(default=None, min_length=1, max_length=160)
@@ -1961,14 +1966,12 @@ class CanvasAgentSession(BaseModel):
     # 发给模型的上下文（OpenAI Agents SDK 的 input items）；图片只存 atelier-media 引用。
     history: list[dict[str, Any]] = Field(default_factory=list, max_length=20_000)
     pending_approvals: list[CanvasAgentApproval] = Field(default_factory=list, max_length=50)
-    # 本会话新建的节点：Auto 模式下改它们算「新增」，不打断用户。
-    created_node_ids: list[str] = Field(default_factory=list, max_length=5000)
     error: str | None = Field(default=None, max_length=4000)
     created_at: str
     updated_at: str
 
     @model_validator(mode="after")
-    def validate_message_sequence(self) -> "CanvasAgentSession":
+    def validate_message_sequence(self) -> "AgentSession":
         _reject_canvas_agent_private_text(self.title, self.model, self.model_alias)
         if _CANVAS_AGENT_DATA_URL.search(json.dumps(self.history, ensure_ascii=False)):
             raise ValueError("canvas agent history cannot persist data URLs")
@@ -1981,6 +1984,26 @@ class CanvasAgentSession(BaseModel):
         if sequences and sequences[-1] > self.sequence:
             raise ValueError("canvas agent session sequence is behind its messages")
         return self
+
+
+class CanvasAgentSession(AgentSession):
+    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
+    # 本会话新建的节点：Auto 模式下改它们算「新增」，不打断用户。
+    created_node_ids: list[str] = Field(default_factory=list, max_length=5000)
+
+
+class StudioAgentTurn(BaseModel):
+    turn_id: str
+    client_message_id: str
+    status: CanvasAgentStatus = "running"
+    attachment_ids: list[str] = Field(default_factory=list)
+    asset_ids: list[str] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
+
+
+class StudioAgentSession(AgentSession):
+    turns: list[StudioAgentTurn] = Field(default_factory=list)
+    uploads: dict[str, str] = Field(default_factory=dict)
 
 
 class CanvasAgentSessionCreate(BaseModel):

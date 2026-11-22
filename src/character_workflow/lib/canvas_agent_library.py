@@ -44,9 +44,12 @@ def project_image(project_id: str, asset_id: str):
 
 
 def preview(project_id: str, asset_id: str) -> tuple[str, int, int]:
+    project_image(project_id, asset_id)
+    return image_preview(creation_asset_media_path(asset_id))
+
+
+def image_preview(path) -> tuple[str, int, int]:
     from PIL import Image, ImageOps
-    _asset, media = project_image(project_id, asset_id)
-    path = creation_asset_media_path(asset_id)
     if path.stat().st_size > 25 * 1024 * 1024:
         raise ValueError("图片超过安全预览大小")
     with Image.open(path) as opened:
@@ -60,14 +63,14 @@ def preview(project_id: str, asset_id: str) -> tuple[str, int, int]:
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode(), width, height
 
 
-def search_library(project_id: str, category: str | None, limit: int) -> dict:
+def search_library(project_id: str | None, category: str | None, limit: int) -> dict:
     rows = []
     for asset in list_creation_assets(project_id=project_id, has_category=True).assets:
         media = asset_media_content(asset)
         if not media or not media.mime_type.startswith("image/") or (category and asset.category != category):
             continue
         try:
-            _url, width, height = preview(project_id, asset.asset_id)
+            _url, width, height = image_preview(creation_asset_media_path(asset.asset_id))
         except (OSError, ValueError):
             width = height = None
         rows.append({"asset_id": asset.asset_id, "title": asset.title, "category": asset.category,

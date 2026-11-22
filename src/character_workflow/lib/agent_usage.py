@@ -52,14 +52,14 @@ def request_cost(key: Any, model_id: str, input_tokens: int, output_tokens: int,
                                   cached_tokens=cached_tokens, cache_write_tokens=cache_write_tokens)
 
 
-def record_request(*, project_id: str, session_id: str, key: Any, alias: str, model: str,
+def record_request(*, project_id: str | None, session_id: str, key: Any, alias: str, model: str,
                    input_tokens: int, output_tokens: int, cached_tokens: int,
                    cache_write_tokens: int = 0, at: datetime | None = None) -> dict:
     moment = (at or datetime.now(timezone.utc)).astimezone()
     provider = getattr(key, "provider", None)
     cost = request_cost(key, model, input_tokens, output_tokens, cached_tokens, cache_write_tokens)
     row = {
-        "time": moment.isoformat(), "project_id": project_id, "session_id": session_id,
+        "time": moment.isoformat(), **({"workspace": "studio"} if project_id is None else {}), "project_id": project_id, "session_id": session_id,
         "alias": alias, "model": model, "provider": provider,
         "source": "lan" if provider == GATEWAY_PROVIDER else "local",
         "input_tokens": input_tokens, "output_tokens": output_tokens,
@@ -148,12 +148,12 @@ def _write_pending(items: list[dict]) -> None:
     atomic_write_text(_pending_file(), json.dumps({"items": items}, ensure_ascii=False) + "\n")
 
 
-def add_pending(*, project_id: str, session_id: str, call_tag: str, alias: str, model: str) -> None:
+def add_pending(*, project_id: str | None, session_id: str, call_tag: str, alias: str, model: str) -> None:
     path = _pending_file()
     usage_dir().mkdir(parents=True, exist_ok=True)
     with file_lock(path.with_suffix(".lock")):
         items = [item for item in _read_pending() if item.get("call_tag") != call_tag]
-        items.append({"project_id": project_id, "session_id": session_id, "call_tag": call_tag,
+        items.append({**({"workspace": "studio"} if project_id is None else {}), "project_id": project_id, "session_id": session_id, "call_tag": call_tag,
                       "alias": alias, "model": model,
                       "at": datetime.now(timezone.utc).astimezone().isoformat()})
         _write_pending(items)
@@ -186,7 +186,7 @@ def fetch_host_call_tag(alias: str, call_tag: str) -> dict | None:
 
 def _settlement_row(item: dict, charged: float) -> dict:
     return {"time": datetime.now(timezone.utc).astimezone().isoformat(),
-            "project_id": item["project_id"], "session_id": item["session_id"],
+            **({"workspace": "studio"} if item.get("workspace") == "studio" else {}), "project_id": item["project_id"], "session_id": item["session_id"],
             "alias": item.get("alias"), "model": item.get("model"), "provider": GATEWAY_PROVIDER,
             "source": "lan", "kind": HOST_SETTLEMENT, "call_tag": item["call_tag"],
             "input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
@@ -236,7 +236,7 @@ def _number(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
-def session_totals(project_id: str, session_id: str, since: datetime) -> dict:
+def session_totals(project_id: str | None, session_id: str, since: datetime) -> dict:
     """一个会话的累计用量。cost_cny 合计有价格的请求与主机结算行；unpriced 是没有价格的请求数
     （经网关的请求也算在这里：它们的金额只在主机结算行上）。"""
     found = [row for row in read_rows(since)
@@ -276,14 +276,14 @@ def usage_records(rows: list[dict], session_titles: dict[tuple[str, str], str],
             cost = (round(sum(costs), 6)
                     if costs and all(isinstance(value, (int, float)) for value in costs) else None)
         title = session_titles.get((project_id, session_id), "已删除的对话")
-        label = canvas_names.get(project_id, "已删除的项目")
+        label = canvas_names.get(project_id, "已删除的项目") if project_id else "创作台"
         records.append({
             "id": f"agent:{project_id}:{session_id}:{day}:{alias}:{model}",
             "cost_cny": cost, "at": max(item["time"] for item in items), "alias": alias,
             "status": "done", "duration_s": None, "project_label": label, "member_label": None,
-            "kind": "text", "model": model or "", "label": label, "project": f"canvas:{project_id}",
+            "kind": "text", "model": model or "", "label": label, "project": f"canvas:{project_id}" if project_id else "studio",
             "source": "lan" if items[0].get("source") == "lan" else "local",
             "failed": False, "prompt": f"Agent 对话：{title}"[:120], "thumb_url": None,
-            "href": f"/canvas/{project_id}" if project_id else None,
+            "href": f"/canvas/{project_id}" if project_id else f"/studio?session={session_id}",
         })
     return records

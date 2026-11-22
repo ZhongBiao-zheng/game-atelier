@@ -1630,3 +1630,11 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 - `GET /onboarding/metrics`：`first_seen_at`、`data_root_set_at`、`skipped_at`、`paths_tried`（`key:tuzi` 形式）、`completed_path`、`last_event`、`first_generation`（`.runtime/jobs/` 里 `completed_at ≥ data_root_set_at` 的第一条 DONE）、`seconds_to_first_generation`、`event_count`。
 - 存储：`<data_root>/.runtime/onboarding.json`，事件最多 500 条，只存本机、不上报。`first_seen_at` 为服务进程首次回 `needs_data_root` 的时间，选定数据目录时落盘，复用旧目录不覆盖。
 - `POST /onboarding/key-probe {preset, access_key}` → `{result: ok | invalid | unknown}`：只对服务端写死的厂商账户接口发一次请求（tuzi / openai-hk：`/v1/dashboard/billing/subscription`；openrouter：`/api/v1/key`；tokendance：`/portal/api/v1/user/balance`；seedream：Ark `/models`），不计费。401/403 或响应体带 `error` 为 invalid，网络失败与其他状态为 unknown。密钥只用于这一次请求，不落盘。结果只用于提示，不拦保存。
+
+### Studio Agent
+
+本机页面在 `/api/studio/agent/sessions` GET 列出按最近使用排序的会话，POST 创建会话（201，可同时提交模型和创作设置）。详情端点 `/api/studio/agent/sessions/{session_id}` 支持 GET、PATCH 和带 If-Match revision 的 DELETE。会话、计划、上传图片分别位于 data root 的 studio-agent/sessions、plans、uploads/{session_id}。移除会话一起删除计划和附件，保留普通 Studio 记录。公开会话包含 turns、messages、pending_approvals 与设置，SDK history 和上传索引留在本机文件中。
+
+以下路径接在会话详情端点后。POST /attachments 接收单个 multipart 图片并返回 attachment_id。GET /attachments/{attachment_id} 只返回本会话已登记的图片。POST /messages 接收 {client_message_id,text,skill?,attachment_ids?,asset_ids?}，锁内认领用户轮次并返回 202；重放同一消息 ID 不重复执行。POST /approvals 沿用画布的 decisions 与逐项勾选，GET /approvals/{call_id}/items 返回估价明细，POST /cancel 停止或拒绝待执行项。GET /plan、/usage 和 /jobs 返回当前会话计划、对话用量和关联的 Studio 任务。模型、技能、生成模型、确认金额共用已有 /api/canvas/agent 全局端点。studio-agent SSE 携带 session_id、turn_id 和 kind（delta、tool、session、plan）。
+
+Studio Agent 创建的 Job 包含可选只读字段 studio_agent_session_id、studio_agent_turn_id，后者依赖前者，只有 studio 命名空间可有会话关联。生成用的参考媒体复制到 .runtime/uploads 后登记在普通 JobParams 中。一个生成项一个 Job，count 存入 n；批次 1–20 项，每项 1–4 份，部分成功保留已有任务。普通重编和再次生成使用普通创作入口。对话模型用量沿用 agent-usage 月账本，创作台行带 workspace=studio，画布沿用原格式，缺少 workspace 的行属于画布。

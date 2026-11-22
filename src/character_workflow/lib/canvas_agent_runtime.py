@@ -1019,7 +1019,7 @@ def summarize_call(tool: str, arguments: dict) -> str:
     return json.dumps(arguments, ensure_ascii=False)[:500]
 
 
-def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessageCreate]:
+def display_messages(items: list[dict], turn_id: str, *, describe=summarize_call, canvas_references=True) -> list[CanvasAgentMessageCreate]:
     """Model-side items (this run's new ones) → messages the panel shows.
 
     待确认的调用（还没有 output）不在这里出现：面板用确认卡展示它，裁决后由 resolve_approvals
@@ -1045,11 +1045,11 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
         elif kind == "function_call" and item.get("call_id") in outputs:
             name = str(item.get("name"))
             output = outputs[item.get("call_id")]
-            text = summarize_call(name, _arguments(item.get("arguments")))
+            text = describe(name, _arguments(item.get("arguments")))
             if is_tool_error(output):
                 text = f"{tool_error_label(output)}\n{text}"
             # 附给模型看的图同时作为引用显示在对话里（面板按 version_id 出缩略图）。
-            images = vision.attached_ids(item_by_call.get(item.get("call_id"), {}))
+            images = vision.attached_ids(item_by_call.get(item.get("call_id"), {})) if canvas_references else []
             messages.append(CanvasAgentMessageCreate(
                 role="tool", turn_id=turn_id, title=name, text=redact(text),
                 references=[CanvasAgentReference(reference_id=vid, kind="content", version_id=vid,
@@ -1073,10 +1073,10 @@ def start_host_settlement(session: CanvasAgentSession) -> None:
 
     def work() -> None:
         try:
-            agent_usage.add_pending(project_id=session.project_id, session_id=session.session_id,
+            agent_usage.add_pending(project_id=getattr(session, "project_id", None), session_id=session.session_id,
                                     call_tag=call_tag_for(session), alias=key.alias,
                                     model=session.model or "")
-            agent_usage.settle_pending(session.project_id, session.session_id)
+            agent_usage.settle_pending(getattr(session, "project_id", None), session.session_id)
         except Exception:  # noqa: BLE001 — 结算只是显示用，失败下次补查
             logger.warning("canvas agent host settlement failed", exc_info=True)
 
@@ -1243,6 +1243,8 @@ class CanvasWorkspace:
     def media(self, ref):
         return _media_data_url(self.project_id, ref)
 
+    messages = staticmethod(display_messages)
+
     def hydrate(self, history):
         return hydrate(self.project_id, history)
 
@@ -1318,8 +1320,8 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     from character_workflow.lib.gateway_text_wait import WAITING_LABEL
     agent = build_agent(session, on_gateway_wait=lambda: buffer.tool(WAITING_LABEL),
                         call_tag=call_tag_for(session), workspace=buffer.workspace)
-    context = TurnContext(session.project_id, session.permission_mode,
-                          set(session.created_node_ids), ModelScope.of(session),
+    context = TurnContext(buffer.workspace.project_id, session.permission_mode,
+                          set(getattr(session, "created_node_ids", ())), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "",
                           buffer.notify)
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
@@ -1331,7 +1333,10 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
             buffer.add(data.delta)
         elif getattr(event, "type", "") == "run_item_stream_event" \
                 and getattr(event, "name", "") == "tool_called":
-            buffer.tool(str(getattr(getattr(event.item, "raw_item", None), "name", "")))
+            name = str(getattr(getattr(event.item, "raw_item", None), "name", ""))
+            if record_step := getattr(buffer.workspace, "record_step", None):
+                await asyncio.to_thread(record_step, name)
+            buffer.tool(name)
     buffer.flush()
     return result, context
 
@@ -1380,9 +1385,9 @@ async def run_workspace_turn(workspace, notify):
     session = await asyncio.to_thread(workspace.read)
     turn_id = workspace.turn_id(session)
     base = list(session.history)
-    hydrated, reverse = await asyncio.to_thread(workspace.hydrate, base)
     buffer = DeltaBuffer(notify, workspace)
     try:
+        hydrated, reverse = await asyncio.to_thread(workspace.hydrate, base)
         result, context = await run_model(session, hydrated, buffer)
     except asyncio.CancelledError:
         await asyncio.to_thread(finish_failed, workspace, turn_id,
@@ -1431,7 +1436,7 @@ async def run_workspace_turn(workspace, notify):
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         return {
-            **with_appended_messages(current, [*display_messages(new_items, turn_id), *notes], now),
+            **with_appended_messages(current, [*workspace.messages(new_items, turn_id), *notes], now),
             "history": items,
             "pending_approvals": pending,
             "status": status,
