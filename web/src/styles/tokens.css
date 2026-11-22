@@ -201,7 +201,16 @@
 }
 
 @layer utilities {
-  /* 首页波点已迁移到 canvas 组件 HomeDottedBackground.tsx（复刻 tapnow） */
+  /* 首页波点底层：22px 网格、1px 半径、前景色 7%，铺满整页并跟内容一起滚动。
+     光标高斯光斑由 HomeDottedBackground.tsx 的 canvas 叠加，两者网格对齐（点心在 11 + 22k）。 */
+  .home-dots {
+    background-image: radial-gradient(
+      circle at 11px 11px,
+      color-mix(in srgb, var(--foreground) 7%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 22px 22px;
+  }
 
   /* 隐藏滚动条但保留可滚动（窄屏 swipe 兜底）。导航横向容器专用：
      设计纪律是「导航栏不出现滚动条」，而 overflow-x:auto 会连带把 overflow-y

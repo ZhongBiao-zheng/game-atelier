@@ -63,11 +63,12 @@ export function Home() {
   }, [isFavorited, toggleFavorite]);
 
   return (
-    <div className="px-8 pb-12" aria-label="作品集首页">
+    <div className="relative isolate px-8 pb-12" aria-label="作品集首页">
+      {/* 波点铺满整页（含作品墙），垫在所有内容下面 */}
+      <HomeDottedBackground className="-z-10" />
 
-      {/* ========== Studio 区域 - canvas 波点（复刻 tapnow，光标高斯冷蓝发光）========== */}
+      {/* ========== Studio 区域 ========== */}
       <section className="relative min-h-[520px] flex items-center justify-center">
-        <HomeDottedBackground />
         <div className="relative z-10 w-full">
           <Studio compact />
         </div>

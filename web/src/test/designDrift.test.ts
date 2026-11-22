@@ -40,11 +40,6 @@ const ALLOWLIST: AllowEntry[] = [
   },
   {
     file: 'components/HomeDottedBackground.tsx',
-    pattern: 'linear-gradient(to bottom',
-    reason: 'canvas 波点的纵向淡出遮罩 —— 复刻 tapnow 的 hero mask，字面量是 canvas/mask 的固有媒介，非主题色',
-  },
-  {
-    file: 'components/HomeDottedBackground.tsx',
     pattern: 'ctx.fillStyle',
     reason: 'canvas 逐点填充色由 rgb 数值动态拼成，无法走 class token —— 基础色已读 --foreground 跟随主题',
   },
