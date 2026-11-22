@@ -74,6 +74,7 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
         self._protocol = protocol
         self._base_url = base_url
         self._access_key = access_key
+        self._gemini_signatures: dict[str, dict[str, str]] = {}
         root = anthropic.api_root(base_url) if protocol == ANTHROPIC_MESSAGES else gemini.api_root(base_url)
         self._inner = inner or direct_or_proxied(root)
 
@@ -90,8 +91,10 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
         payload = json.loads(await request.aread())
         adapter = anthropic if self._protocol == ANTHROPIC_MESSAGES else gemini
         model = str(payload.get("model") or "")
+        signatures = self._gemini_signatures.setdefault(model, {}) if adapter is gemini else None
         try:
-            upstream = adapter.to_upstream(payload)
+            upstream = (gemini.to_upstream(payload, signatures=signatures) if adapter is gemini
+                        else anthropic.to_upstream(payload))
         except ProtocolError as error:
             return httpx.Response(400, request=request, json={
                 "error": {"message": str(error), "type": "invalid_request_error"}})
@@ -123,14 +126,15 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
             try:
                 body = json.loads(body)
                 converted = (anthropic.from_upstream(body) if adapter is anthropic
-                             else gemini.from_upstream(body, model))
+                             else gemini.from_upstream(body, model, signatures=signatures))
             except (ValueError, ProtocolError) as error:
                 # 上游已经按 200 收下（已计费）：不让 SDK 按 5xx 重发。
                 return httpx.Response(502, request=request, headers={"x-should-retry": "false"}, json={
                     "error": {"message": f"{_LABELS[self._protocol]} 响应无法解析：{error}",
                               "type": "api_error"}})
             return httpx.Response(200, request=request, json=converted)
-        translator = adapter.StreamTranslator(model=model)
+        translator = (gemini.StreamTranslator(model=model, signatures=signatures) if adapter is gemini
+                      else anthropic.StreamTranslator(model=model))
         return httpx.Response(200, request=request,
                               headers={"Content-Type": "text/event-stream"},
                               stream=_TranslatedStream(response, translator))

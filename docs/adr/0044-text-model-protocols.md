@@ -63,9 +63,9 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   - **缺签名**：只校验「当前轮」（最后一条 user 消息之后）的每一步第一个 functionCall。只在三种情况填官方占位值
     `skip_thought_signature_validator`：模型名不含 gemini（SDK 不回放）、不是 Gemini 产生的调用（等确认时换成了
     Gemini）、签名超过 256 KB 没进会话（只记长度的日志）。其余缺签名报错，不静默填占位值。更早的轮次不填也不报错。
-    注意「当前轮」从最后一条 user 消息算起，而看图时 Agent 在工具结果后插入的图片消息（`canvas_agent_vision.
-    with_attached_images`）也是 user 消息：它之前的调用都算更早的轮次，即使模型名不含 gemini 也既不带签名、也不填
-    占位值（与官方「最近一条带普通内容的 user 消息开始当前轮」的规则一致；Gemini 3 是否接受以计费实测为准）。
+    模型别名不含 gemini 时，转换层按模型和短调用 id 在当前客户端内暂存最近 128 条真实签名，优先回放；
+    未命中时对标记为已签名或签名过长的 Gemini 调用填占位值，包括读图插入 user 消息之前的调用。
+    图片消息不能让这些调用漏签名。模型名含 gemini 的路径仍由 SDK 回放，保持原有当前轮校验。
   - **签名不出本机**：会话接口的响应（`canvas_agent_sessions.public_session`）与项目导出包去掉签名，落盘的会话文件保留。
     导出包同时把 id 的签名状态 s 改成 x（`gemini.mark_signatures_dropped`）：在等确认时导出、导入后批准续跑，按
     「签名没保留」填占位值，不因「签名丢失」让已执行的工具白跑。

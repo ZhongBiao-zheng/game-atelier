@@ -219,7 +219,8 @@ def _response_value(content: Any) -> dict:
     return value if isinstance(value, dict) else {"result": value}
 
 
-def _signature_for(call: dict, *, current_turn: bool, model: str) -> str | None:
+def _signature_for(call: dict, *, current_turn: bool, model: str,
+                   signatures: dict[str, str] | None = None) -> str | None:
     """一步里第一个 functionCall 发回上游时带的签名。
 
     有签名就带原值。当前轮缺签名时只在三种情况填官方占位值，其余报错（掩盖转换的 bug 比 400 更糟）：
@@ -227,12 +228,16 @@ def _signature_for(call: dict, *, current_turn: bool, model: str) -> str | None:
     2. 签名超过上限没进会话（OVERSIZED）；
     3. 不是 Gemini 产生的调用（等确认时换成了 Gemini）。
     Gemini 本来就没给签名的调用（UNSIGNED，如不思考的模型）原样不带。更早的轮次不校验，缺了也不填。
-    看图时插入的图片消息也算 user 消息：它之前的调用算更早的轮次，上面三种情况也不填（见 `to_upstream`）。"""
+    模型被改名时，原生 Gemini 调用按短 id 优先取转换器保留的签名；取不到则填占位值。
+    这一步不依赖 user 消息位置，因为工具附图会插入一条 user 消息。含 gemini 的模型仍由 SDK 回放。"""
     if signature := signature_of(call):
         return signature
+    call_id = str(call.get("id") or "")
+    state, _ = _parse_call_id(call_id)
+    if "gemini" not in model.lower() and state in (SIGNED, OVERSIZED):
+        return (signatures or {}).get(call_id) or PLACEHOLDER_SIGNATURE
     if not current_turn:
         return None
-    state, _ = _parse_call_id(str(call.get("id") or ""))
     if state == UNSIGNED:
         return None
     if state in (OVERSIZED, None):
@@ -242,7 +247,7 @@ def _signature_for(call: dict, *, current_turn: bool, model: str) -> str | None:
     raise ProtocolError("Gemini 工具调用的签名丢失，无法继续这一轮")
 
 
-def to_upstream(payload: dict) -> dict:
+def to_upstream(payload: dict, *, signatures: dict[str, str] | None = None) -> dict:
     """Chat Completions 请求 → Gemini generateContent 请求体（模型名与是否流式在 URL 里）。"""
     system: list[str] = []
     contents: list[dict] = []
@@ -286,7 +291,7 @@ def to_upstream(payload: dict) -> dict:
                     upstream_ids[str(call.get("id"))] = upstream_id
                 # 并行调用只有第一个带签名（官方规则）。
                 if index == 0 and (signature := _signature_for(
-                        call, current_turn=position > turn_start, model=model)):
+                        call, current_turn=position > turn_start, model=model, signatures=signatures)):
                     part["thoughtSignature"] = signature
                 parts.append(part)
                 pending.append(str(call.get("id")))
@@ -367,7 +372,7 @@ def _empty_finish(candidate: dict) -> ProtocolError:
     return ProtocolError(f"Gemini 没有生成内容（{reason}）" + (f"：{detail}" if detail else ""))
 
 
-def from_upstream(body: Any, model: str = "") -> dict:
+def from_upstream(body: Any, model: str = "", *, signatures: dict[str, str] | None = None) -> dict:
     """generateContent 非流式响应 → Chat Completions 响应（用量已按含缓存的总输入归一）。"""
     if not isinstance(body, dict):
         raise ProtocolError("Gemini 接口返回的不是 JSON 对象")
@@ -380,7 +385,7 @@ def from_upstream(body: Any, model: str = "") -> dict:
     parts = (candidate.get("content") or {}).get("parts") or []
     text = "".join(str(part.get("text") or "") for part in parts
                    if isinstance(part, dict) and "text" in part and not part.get("thought"))
-    calls = _function_calls([part for part in parts if isinstance(part, dict)])
+    calls = _function_calls([part for part in parts if isinstance(part, dict)], signatures)
     if not text and not calls and candidate.get("finishReason") not in (None, "STOP"):
         raise _empty_finish(candidate)
     message: dict[str, Any] = {"role": "assistant", "content": text or None}
@@ -415,7 +420,7 @@ def _tool_call(function_call: dict, index: int, signature: str | None) -> dict:
     return with_signature({**call, "id": _new_call_id(SIGNED, function_call.get("id"))}, signature)
 
 
-def _function_calls(parts: list[dict]) -> list[dict]:
+def _function_calls(parts: list[dict], signatures: dict[str, str] | None = None) -> list[dict]:
     """一步里的 functionCall → tool_calls。签名取第一个调用自己的；没有时取它之后某个非调用 part 上的
     （流式时签名可能单独出现在一个空文本 part 里）。后面的调用一律不带签名。"""
     calls: list[dict] = []
@@ -427,8 +432,16 @@ def _function_calls(parts: list[dict]) -> list[dict]:
                 signature = _part_signature(part)
         elif calls and signature is None and not part.get("text"):
             signature = _part_signature(part)  # 只认空文本 part 上的；有文本的签名属于那段文本
-    return [_tool_call(call, index, signature if index == 0 else None)
-            for index, call in enumerate(calls)]
+    converted = [_tool_call(call, index, signature if index == 0 else None)
+                 for index, call in enumerate(calls)]
+    if signatures is not None:
+        for call in converted:
+            if value := signature_of(call):
+                signatures[call["id"]] = value
+        # 缓存只活在一个 SDK 客户端里，不跨会话、供应商或模型；过期条目走占位值。
+        while len(signatures) > 128:
+            signatures.pop(next(iter(signatures)))
+    return converted
 
 
 class StreamTranslator:
@@ -441,8 +454,9 @@ class StreamTranslator:
       就断了按错误处理；`{"error": …}` 数据块转成错误块。
     """
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, *, signatures: dict[str, str] | None = None) -> None:
         self._model = model
+        self._signatures = signatures
         self._id = ""
         self._created = int(time.time())
         self._buffer = b""
@@ -536,7 +550,7 @@ class StreamTranslator:
                 self._text = True
                 out.append(self._chunk({"content": part["text"]}))
         if reason := candidate.get("finishReason"):
-            calls = _function_calls(self._parts)
+            calls = _function_calls(self._parts, self._signatures)
             self._parts = []
             if not calls and not self._text and reason != "STOP":
                 self.finished = True
