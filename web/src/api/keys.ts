@@ -190,10 +190,7 @@ export async function previewModels(payload: {
     });
   } catch (error) {
     // 代理用 502 转述上游状态；本机找不到供应商别名也会返回 404，要保留它自己的原因。
-    if (error instanceof ApiError && (
-      (error.status === 502 && /^(?:上游|目录) (?:404|405)[:：]/.test(error.reason ?? '')) ||
-      (error.status === 404 && error.reason === '上游没有模型列表接口')
-    )) {
+    if (error instanceof ApiError && error.status === 502 && /^(?:上游|目录) (?:404|405)[:：]/.test(error.reason ?? '')) {
       throw new ApiError('这个供应商不提供模型列表，请手动添加', error);
     }
     throw error;

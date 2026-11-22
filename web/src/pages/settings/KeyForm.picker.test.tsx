@@ -173,3 +173,61 @@ it('blocks list requests while the connection test owns the refresh', async () =
   await waitFor(() => expect(showAll).toBeEnabled());
   expect(all).toBeEnabled();
 });
+
+it.each([
+  { refresh: '重新获取', listed: false },
+  { refresh: '测试连接', listed: true },
+  { refresh: '重新获取', listed: true },
+])('preserves the default-image detail row after $refresh (listed=$listed)', async ({ refresh, listed }) => {
+  open();
+  fireEvent.click(screen.getByText('模型详情'));
+  fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
+  fireEvent.change(screen.getByLabelText('模型 ID 2'), { target: { value: 'my-model' } });
+  fireEvent.change(screen.getByLabelText('模型名称 2'), { target: { value: '我的图片模型' } });
+  if (listed) {
+    const classified = refresh === '测试连接';
+    vi.mocked(previewModels).mockResolvedValueOnce({ ...remote, total: 3, models: [...remote.models,
+      { id: 'my-model', name: '上游名称', category: classified ? 'image' : 'unknown', modality: classified ? 'image' : null, protocol: null, input_modalities: [] },
+    ] });
+  }
+  fireEvent.click(screen.getByRole('button', { name: refresh }));
+  await screen.findByRole('textbox', { name: '搜索模型' });
+  expect(screen.getByLabelText('模型名称 2')).toHaveValue('我的图片模型');
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(createKey).toHaveBeenCalledOnce());
+  expect(vi.mocked(createKey).mock.calls[0][0].models).toContainEqual(expect.objectContaining({
+    id: 'my-model', name: '我的图片模型', modality: 'image',
+  }));
+});
+
+it('keeps an edited name and unsaved price when the upstream lists the same image model', async () => {
+  render(<KeyForm presetId="custom" mode="edit" initial={{ ...initial, models: [{
+    id: 'image-demo', name: '原名', unpriced: true, per_call_cny: 1,
+  }] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
+  fireEvent.click(screen.getByText('模型详情'));
+  fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: '改过的名称' } });
+  fireEvent.change(screen.getByLabelText('单价 1'), { target: { value: '0.35' } });
+  fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
+  await screen.findByRole('textbox', { name: '搜索模型' });
+  expect(screen.getByLabelText('单价 1')).toHaveValue('0.35');
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(patchKey).toHaveBeenCalledOnce());
+  expect(vi.mocked(patchKey).mock.calls[0][1].models).toEqual([
+    expect.objectContaining({ id: 'image-demo', name: '改过的名称', per_call_cny: 0.35, modality: 'image' }),
+  ]);
+});
+
+it('keeps the connection test busy through the custom catalog request', async () => {
+  vi.mocked(listHttpProtocols).mockResolvedValue({ protocols: [{ id: 'hp-aaaaaaaaaaaa', name: '目录', kind: 'image', available: true, error: null, declared: null, catalog: true, used_by: [] }] });
+  const { chooseOption } = await import('@/test/select');
+  let finish!: (result: ModelsPreview) => void;
+  vi.mocked(previewModels).mockResolvedValueOnce(remote).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  open();
+  await chooseOption(await screen.findByLabelText('模型目录'), '目录');
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  await waitFor(() => expect(previewModels).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button', { name: /^测试中/ })).toBeDisabled();
+  finish(remote);
+  await screen.findByRole('button', { name: 'Chat chat-demo' });
+  expect(screen.getByRole('button', { name: '测试连接' })).toBeEnabled();
+});

@@ -319,18 +319,20 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
     setDetected(remote.detected ?? null);
     setFetchError(null);
-    // 未分类的勾选只属于当前列表，不能进入可保存的模型行。
-    setModels(selected.filter(model => model.modality));
+    // 手填行和预置行省略分类时默认为图片；选择器用 null 标记待分类的勾选。
+    const rows = selected.filter(model => model.modality !== null);
+    setModels(rows);
     setPickerFilter('all');
     setPickerQuery('');
     setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
     setFetchedChecked(new Set(sorted.filter(m => enabledIds.has(m.id)).map(m => m.id)));
-    setModalityPick(Object.fromEntries(selected.filter(m => m.id.trim() && m.modality)
-      .map(m => [m.id.trim(), m.modality as ModelModality])));
+    setModalityPick(Object.fromEntries(rows.filter(m => m.id.trim())
+      .map(m => [m.id.trim(), m.modality ?? 'image'])));
   };
   /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
-  const fetchModels = async (includeAll = false, run = ++listRun.current) => {
-    setPendingRequest('list');
+  const fetchModels = async (includeAll = false, connectionRun?: number) => {
+    const run = connectionRun ?? ++listRun.current;
+    if (connectionRun === undefined) setPendingRequest('list');
     setFetchError(null);
     try {
       // 编辑态密钥框是掩码回显，未改动就不当真实密钥发，改由服务端按 alias 取存储密钥。
@@ -348,7 +350,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     } catch (e) {
       if (run === listRun.current) setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (run === listRun.current) setPendingRequest(null);
+      if (connectionRun === undefined && run === listRun.current) setPendingRequest(null);
     }
   };
 
@@ -901,7 +903,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             {!isGateway && !isSubscription && !isComfy && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中...' : '测试连接'}</Button>
+                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中…' : '测试连接'}</Button>
                 {connectionTest && <span role={connectionTest.ok ? 'status' : 'alert'} className={`text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
               </div>
               <details className="col-span-full border-t border-border pt-3">

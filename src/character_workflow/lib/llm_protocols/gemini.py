@@ -44,7 +44,7 @@ SIGNED, UNSIGNED, OVERSIZED = "s", "n", "x"
 _CALL_ID = re.compile(r"^g([snx])([ur])_([A-Za-z0-9_-]{1,36})$")
 # 单个签名超过上限不进会话（会话文件每次读改写都是整份；出图模型有 1.4 MB 的报告），按缺签名处理。
 MAX_SIGNATURE_CHARS = 256 * 1024
-# 官方给的占位值：不是 Gemini 产生的历史可用它跳过签名校验。只用于三种情况（见 `_signature_for`）。
+# Gemini 官方的缺签名占位值；跨轮回放和使用条件统一由 _signature_for 判定。
 PLACEHOLDER_SIGNATURE = "skip_thought_signature_validator"
 
 
