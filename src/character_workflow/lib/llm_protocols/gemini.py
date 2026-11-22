@@ -221,15 +221,11 @@ def _response_value(content: Any) -> dict:
 
 def _signature_for(call: dict, *, current_turn: bool, model: str,
                    signatures: dict[str, str] | None = None) -> str | None:
-    """一步里第一个 functionCall 发回上游时带的签名。
-
-    有签名就带原值。当前轮缺签名时只在三种情况填官方占位值，其余报错（掩盖转换的 bug 比 400 更糟）：
-    1. 模型名不含 "gemini"：openai-agents 不往回放签名；
-    2. 签名超过上限没进会话（OVERSIZED）；
-    3. 不是 Gemini 产生的调用（等确认时换成了 Gemini）。
-    Gemini 本来就没给签名的调用（UNSIGNED，如不思考的模型）原样不带。更早的轮次不校验，缺了也不填。
-    模型被改名时，原生 Gemini 调用按短 id 优先取转换器保留的签名；取不到则填占位值。
-    这一步不依赖 user 消息位置，因为工具附图会插入一条 user 消息。含 gemini 的模型仍由 SDK 回放。"""
+    """为每步的首个 functionCall 回放签名。消息携带的真实签名优先。
+    改名模型的 SIGNED / OVERSIZED 调用跨轮查客户端缓存，未命中时填官方占位值。
+    其余调用仅处理当前轮：UNSIGNED 保持无签名，超长或来自其他协议时填占位值，
+    应由 SDK 回放的 SIGNED 调用缺签名时报错。
+    """
     if signature := signature_of(call):
         return signature
     call_id = str(call.get("id") or "")
@@ -241,8 +237,6 @@ def _signature_for(call: dict, *, current_turn: bool, model: str,
     if state == UNSIGNED:
         return None
     if state in (OVERSIZED, None):
-        return PLACEHOLDER_SIGNATURE
-    if "gemini" not in model.lower():
         return PLACEHOLDER_SIGNATURE
     raise ProtocolError("Gemini 工具调用的签名丢失，无法继续这一轮")
 
@@ -266,9 +260,8 @@ def to_upstream(payload: dict, *, signatures: dict[str, str] | None = None) -> d
         results.clear()
     messages = payload.get("messages") or []
     model = str(payload.get("model") or "")
-    # 当前轮：最后一条 user 消息（带文本或图片的那种；工具结果是 role:tool）之后的部分。看图时 Agent 在工具结果后
-    # 插入的图片消息也是 user 消息，所以那之前的调用都算更早的轮次（与官方「最近一条带普通内容的 user 消息开始
-    # 当前轮」一致）。
+    # 最后一条 user 消息划分当前轮，包括工具结果后插入的图片消息。
+    # 改名模型的签名回放可跨过这条边界，见 _signature_for。
     turn_start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     for position, message in enumerate(messages):
         role = message.get("role")

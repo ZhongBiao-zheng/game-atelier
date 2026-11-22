@@ -60,12 +60,11 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
     `functionResponse.id`。签名走 openai-agents 0.23 自带的通道：tool_call 的 `extra_content.google.thought_signature`
     → 会话条目的 `provider_data.thought_signature`，模型名含 "gemini" 时 SDK 原样放回；对它的依赖只在
     `gemini.signature_of` / `with_signature` 两个函数里，升级 openai-agents 先跑 `test_llm_protocols_gemini_agent.py`。
-  - **缺签名**：只校验「当前轮」（最后一条 user 消息之后）的每一步第一个 functionCall。只在三种情况填官方占位值
-    `skip_thought_signature_validator`：模型名不含 gemini（SDK 不回放）、不是 Gemini 产生的调用（等确认时换成了
-    Gemini）、签名超过 256 KB 没进会话（只记长度的日志）。其余缺签名报错，不静默填占位值。更早的轮次不填也不报错。
-    模型别名不含 gemini 时，转换层按模型和短调用 id 在当前客户端内暂存最近 128 条真实签名，优先回放；
-    未命中时对标记为已签名或签名过长的 Gemini 调用填占位值，包括读图插入 user 消息之前的调用。
-    图片消息不能让这些调用漏签名。模型名含 gemini 的路径仍由 SDK 回放，保持原有当前轮校验。
+  - **缺签名**：每步的首个 functionCall 优先带回消息中的真实签名。模型别名不含 gemini 时，SDK 会省略签名。
+    对已签名或签名过长的 Gemini 调用，转换层按模型和短调用 id 在当前客户端暂存最近 128 条真实签名。
+    这两类调用即使位于读图插入的 user 消息之前，也先查缓存；未命中则填官方占位值 `skip_thought_signature_validator`。
+    其余缺签名的调用仅校验当前轮（最后一条 user 消息之后）：原生无签名的调用保持原样，
+    超过 256 KB 的签名和来自其他协议的调用使用占位值，应由 SDK 回放的签名丢失则报错。
   - **签名不出本机**：会话接口的响应（`canvas_agent_sessions.public_session`）与项目导出包去掉签名，落盘的会话文件保留。
     导出包同时把 id 的签名状态 s 改成 x（`gemini.mark_signatures_dropped`）：在等确认时导出、导入后批准续跑，按
     「签名没保留」填占位值，不因「签名丢失」让已执行的工具白跑。
@@ -129,5 +128,6 @@ Chat 入口只要有一个授权成员通过工具调用筛选，混合路由就
 Agent 对 OpenAI Chat（包括兼容地址）显式设置 `stream_options.include_usage=true`。
 openai-agents 0.23.1 只为 OpenAI 官方地址默认请求用量，兼容地址默认省略该参数，导致成功调用也可能只记到零 token。
 [Google 官方兼容接口示例](https://aistudio.google.com/docs/openai) 同样显式启用此参数读取末尾 usage。
+局域网网关主机已对所有 Chat 流式请求默认启用相同选项（`gateway_openai.py`），调用方显式传入的值优先。兼容供应商不识别 `stream_options` 时的表现尚未验证。
 本地假上游覆盖 Google 路径与普通兼容路径的请求参数、末尾空 choices 用量块及最终落盘统计；没有调用真实供应商。
 这不能保证每家兼容供应商都支持用量；未返回 usage 的情况仍无法据此推算 token，当前用量记录没有独立的「未计量」字段。
