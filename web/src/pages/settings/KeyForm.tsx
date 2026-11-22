@@ -235,7 +235,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   // 切换凭证、地址或目录后，旧请求的结果和 finally 都不能改变当前表单。
   useEffect(() => {
     setPendingRequest(null);
-    return () => { listRun.current++; };
+    return () => { listRun.current += 1; };
   }, [accessKey, baseUrl, activePresetId, textProtocol, catalogProtocolId]);
   useEffect(() => {
     if (!autoDetect || editing) return;
