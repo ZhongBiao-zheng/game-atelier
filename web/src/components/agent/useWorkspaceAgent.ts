@@ -89,6 +89,7 @@ function carriedSettings(session: CanvasAgentSession | StudioAgentSession): Canv
 export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false) {
   const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
   const [selecting, setSelecting] = useState(false);
+  const [restoring, setRestoring] = useState(() => projectId === null && !home && Boolean(readStudioView().activeSessionId));
   const [session, setSession] = useState<CanvasAgentSession | StudioAgentSession | null>(null);
   const [streaming, setStreaming] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
@@ -156,7 +157,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     } catch (loadError) {
       if (sessionIdRef.current === sessionId) setError(messageOf(loadError));
     } finally {
-      if (sessionIdRef.current === sessionId) setSelecting(false);
+      if (sessionIdRef.current === sessionId) { setSelecting(false); setRestoring(false); }
     }
   }, [loadSession, projectId]);
 
@@ -172,6 +173,10 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         if (projectId === null && home) return;
         const target = list.find(item => item.session_id === last) ?? (projectId === null ? undefined : list[0]);
         if (target) await selectSession(target.session_id);
+        else if (projectId === null) {
+          updateStudioView({ activeSessionId: null });
+          setRestoring(false);
+        }
       } catch (loadError) {
         if (!cancelled) setError(messageOf(loadError));
       }
@@ -207,6 +212,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const onAgentEvent = (event: CanvasAgentEventPayload) => {
       if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;
       if (event.session_id !== sessionIdRef.current) return;
+      if (projectId === null && ['delta', 'tool'].includes(event.kind ?? '') &&
+          (!session || !('turns' in session) || session.status !== 'running' || event.turn_id !== session.turns.at(-1)?.turn_id)) return;
       if (event.kind === 'delta' && event.text) { setStreaming(current => current + event.text); setActiveTool(null); }
       if (event.kind === 'tool' && event.text) setActiveTool(event.text);
       if (event.kind === 'plan') loadPlan(event.session_id);
@@ -275,6 +282,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const newSession = useCallback(() => {
     if (session) setDraft(carriedSettings(session));
     if (projectId === null) updateStudioView({ activeSessionId: null });
+    setRestoring(false);
     setSelecting(false);
     sessionIdRef.current = null;
     setSession(null);
@@ -320,7 +328,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return updated;
   }), [acceptSession, createSession, projectId, refreshList, run, session]);
 
+  const waitingForSession = restoring || (projectId === null && sessionIdRef.current !== null && !session);
   const sendStudio = (text: string, files: File[], assets: string[], skill: string | null, clientId: string) => run(async () => {
+    if (waitingForSession) throw new Error('请先载入对话或选择新对话');
     const target = session ?? await createSession();
     const attachmentIds = await Promise.all(files.map(async file =>
       (await uploadStudioAgentAttachment(target.session_id, file)).attachment_id));
@@ -381,7 +391,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   return {
     sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending: pending || selecting,
     usage, confirmAbove, plan,
-    reloadSkills, sendStudio, removeSession,
+    reloadSkills, sendStudio, removeSession, waitingForSession,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }

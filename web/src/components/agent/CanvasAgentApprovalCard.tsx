@@ -92,15 +92,18 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
       loader.current?.(callId).then(data => {
         if (!alive) return;
         setDetails(current => new Map(current).set(callId, data));
-        setPicked(current => new Map(current).set(callId, new Set(data.items.map(item => item.index))));
       }).catch(() => undefined);  // 拿不到就保持整段摘要
     }
     return () => { alive = false; };
   }, [batchIds]);
 
-  const multiple = approvals.length > 1 || picked.size > 0;
+  // 明细到达前用户可能已拒绝整条调用；逐项选择第一次编辑前沿用当前整条选择。
+  function selectedItems(callId: string) {
+    return picked.get(callId) ?? new Set(approved.has(callId) ? details.get(callId)?.items.map(item => item.index) : []);
+  }
+  const multiple = approvals.length > 1 || details.size > 0;
   const units = (item: CanvasAgentApproval) => details.has(item.call_id)
-    ? [details.get(item.call_id)!.items.length, picked.get(item.call_id)?.size ?? 0]
+    ? [details.get(item.call_id)!.items.length, selectedItems(item.call_id).size]
     : [1, approved.has(item.call_id) ? 1 : 0];
   const total = approvals.reduce((sum, item) => sum + units(item)[0], 0);
   const chosen = approvals.reduce((sum, item) => sum + units(item)[1], 0);
@@ -108,7 +111,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
   function togglePick(callId: string, index: number, checked: boolean) {
     setPicked(current => {
       const next = new Map(current);
-      const items = new Set(next.get(callId));
+      const items = new Set(next.get(callId) ?? selectedItems(callId));
       if (checked) items.add(index); else items.delete(index);
       next.set(callId, items);
       return next;
@@ -116,10 +119,10 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
   }
 
   function decide() {
-    const calls = new Set([...approved].filter(id => !picked.has(id)));
+    const calls = new Set([...approved].filter(id => !details.has(id)));
     const items = new Map<string, number[]>();
     for (const item of approvals) {
-      const chosenItems = picked.get(item.call_id);
+      const chosenItems = selectedItems(item.call_id);
       const data = details.get(item.call_id);
       if (!chosenItems || !data || chosenItems.size === 0) continue;
       calls.add(item.call_id);
@@ -143,7 +146,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
         if (data) {
           return <div key={item.call_id} className="text-xs">
             <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>
-            <BatchItems unit={unit} data={data} selected={picked.get(item.call_id) ?? new Set()} disabled={disabled}
+            <BatchItems unit={unit} data={data} selected={selectedItems(item.call_id)} disabled={disabled}
               onToggle={(index, checked) => togglePick(item.call_id, index, checked)} />
           </div>;
         }

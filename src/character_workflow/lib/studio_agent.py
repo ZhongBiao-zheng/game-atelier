@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import re
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Literal
 
@@ -279,6 +280,15 @@ class StudioWorkspace:
         self.schedule = schedule
         self.notify = notify
         self.active_turn = None
+        self.response_times: dict[str, deque[str]] = defaultdict(deque)
+
+    def observe_response(self, response):
+        # SDK 等 on_llm_end 返回才执行本次响应里的工具。重复的正文按出现顺序匹配。
+        received_at = sessions.now()
+        for item in response.output:
+            if item.type == "message" and item.role == "assistant":
+                text = runtime.redact(runtime._output_text(item.model_dump()).strip())
+                self.response_times[text].append(received_at)
 
     def read(self):
         session = sessions.read(self.session_id)
@@ -296,6 +306,10 @@ class StudioWorkspace:
                 for message in fields["messages"][len(current.messages) :]:
                     if message.turn_id is None:
                         message.turn_id = self.active_turn
+                    if message.role == "assistant" and (
+                        times := self.response_times.get(message.text)
+                    ):
+                        message.created_at = times.popleft()
             if current.turns and "status" in fields:
                 turns = list(current.turns)
                 steps = list(turns[-1].steps)

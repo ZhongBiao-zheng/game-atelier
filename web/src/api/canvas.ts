@@ -696,3 +696,7 @@ export function sendStudioAgentMessage(sessionId: string, message: {
 }) {
   return sendAgentJson<StudioAgentSession>(agentSessionPath(null, sessionId) + '/messages', '发送消息', message);
 }
+
+export function listStudioAgentJobs(sessionId: string) {
+  return requestJson<{ jobs: Job[] }>(agentSessionPath(null, sessionId) + '/jobs', '读取对话结果');
+}

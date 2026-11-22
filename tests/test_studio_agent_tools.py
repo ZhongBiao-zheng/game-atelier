@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import threading
+from datetime import datetime
 
 import pytest
 
@@ -9,7 +10,7 @@ from character_workflow.lib import canvas_agent_cost as cost, keys, studio_agent
 from character_workflow.lib.jobs import list_jobs
 from tests.fake_http_vendor import FakeVendor, png_bytes
 from tests.local_client import LocalTestClient
-from tests.test_llm_protocols_gemini_agent import _chat_text, _chat_tool
+from tests.test_llm_protocols_gemini_agent import _chat, _chat_text, _chat_tool
 from tests.test_studio_agent import BASE, settle
 from viewer_server import routes, studio_agent_routes
 from viewer_server.server_app import build_app
@@ -261,4 +262,62 @@ def test_real_studio_runner_returns_image_to_followup_model(studio, monkeypatch)
     )
     assert "data:image/" not in json.dumps(
         studio_agent.sessions.read(job.studio_agent_session_id).history
+    )
+
+
+@pytest.mark.parametrize("review", [False, True])
+def test_reply_timestamps_follow_each_model_response_and_submission(studio, review):
+    api, url, vendor, _ = studio
+    if review:
+        api.patch(url, json={"permission_mode": "review"})
+    # 同一 SDK 响应可以同时包含工具前的说明和调用。第二次响应重复相同正文，
+    # 验证时间跟随实际回复，重载及审批续跑都不会把两条消息混为同一条。
+    text = "这是当前进度"
+    delta = {
+        "role": "assistant",
+        "content": text,
+        "tool_calls": [
+            {
+                "index": 0,
+                "id": "call-create",
+                "type": "function",
+                "function": {"name": "run_generation", "arguments": json.dumps(IMAGE)},
+            }
+        ],
+    }
+    first = _chat(
+        {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "gpt-test",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": "tool_calls"}],
+        }
+    )
+    vendor.on("POST", CHAT, first, _chat_text(text))
+    response = api.post(
+        url + "/messages", json={"client_message_id": "first", "text": "生成一张图"}
+    )
+    assert response.status_code == 202
+    row = settle(api, url)
+    if review:
+        [approval] = row["pending_approvals"]
+        assert (
+            api.post(
+                url + "/approvals",
+                json={"decisions": [{"call_id": approval["call_id"], "approve": True}]},
+            ).status_code
+            == 202
+        )
+        row = settle(api, url)
+    assert row["status"] == "idle"
+    row = api.get(url).json()
+    [before, after] = [m for m in row["messages"] if m["role"] == "assistant"]
+    [job] = list_jobs()
+    assert before["text"] == after["text"] == text
+    assert before["turn_id"] == job.studio_agent_turn_id == after["turn_id"]
+    assert (
+        datetime.fromisoformat(before["created_at"])
+        < datetime.fromisoformat(job.submitted_at)
+        < datetime.fromisoformat(after["created_at"])
     )

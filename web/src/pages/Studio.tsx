@@ -11,6 +11,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
+import { listStudioAgentJobs } from '@/api/canvas';
 import { StudioSessionPicker, StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import { PromptInput } from '@/components/studio/PromptInput';
@@ -451,6 +452,33 @@ function StudioFull() {
     setPersistedJobs(jobs);
     return jobs;
   }, []);
+
+  const selectedSession = composer.mode === 'agent' ? composer.agent.session : null;
+  const scopedId = selectedSession?.session_id;
+  const scopedRevision = selectedSession?.revision;
+  const latestJobs = useRef(persistedJobs);
+  latestJobs.current = persistedJobs;
+  useEffect(() => {
+    if (!scopedId) return;
+    let active = true;
+    const atStart = new Map(latestJobs.current.map(job => [job.job_id, job]));
+    void listStudioAgentJobs(scopedId).then(({ jobs }) => {
+      if (!active) return;
+      setPersistedJobs(current => {
+        const incoming = new Map(jobs.map(job => [job.job_id, job]));
+        const merged = current.flatMap(job => {
+          if (job.studio_agent_session_id !== scopedId) return [job];
+          const fetched = incoming.get(job.job_id);
+          incoming.delete(job.job_id);
+          // 请求途中收到的逐 Job SSE 更新优先，迟到的快照不能把完成卡退回运行中。
+          if (atStart.get(job.job_id) !== job) return [job];
+          return fetched ? [fetched] : [];
+        });
+        return [...merged, ...[...incoming.values()].filter(job => !atStart.has(job.job_id))];
+      });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [scopedId, scopedRevision]);
 
   // SSE 定向更新：watcher 广播的 {job_id, status} 直接按 job_id 拉单条，
   // 替代旧的「有活跃 job 时每 2s 全量 refetch + 每次提交各自轮询」三路放大。

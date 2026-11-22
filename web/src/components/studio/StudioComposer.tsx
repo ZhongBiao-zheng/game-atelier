@@ -13,11 +13,13 @@ import { AddImageIcon, ArrowUpIcon, CloseIcon, ParamsIcon, StopIcon } from '@/co
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { Textarea } from '@/components/ui/textarea';
-import { canonicalMentionLabel } from '@/lib/mentionTokens';
+import { renumberMentions, serializeMentions } from './PromptInput';
+import { canonicalMentionLabel, createMentionTokenRegex, mentionLabelForKind, type MentionKind } from '@/lib/mentionTokens';
 import { readStudioView, updateStudioView, type StudioMode } from '@/pages/studioDraft';
 import { assetMediaContent, type CreationAsset } from '@/schema/creationAssets';
 
 export function useStudioComposer(home = false) {
+  const [location, navigate] = useLocation();
   const search = useSearch();
   const query = new URLSearchParams(search);
   const link = home ? null : query.get('session');
@@ -36,7 +38,10 @@ export function useStudioComposer(home = false) {
     setMode('agent');
     updateStudioView({ mode: 'agent', activeSessionId: link });
     void selectSession(link);
-  }, [link, selectSession]);
+    const rest = new URLSearchParams(search);
+    rest.delete('session');
+    navigate(rest.size ? `${location}?${rest}` : location, { replace: true });
+  }, [link, location, navigate, search, selectSession]);
   function switchMode(next: StudioMode) {
     setMode(next);
     updateStudioView({ mode: next });
@@ -76,13 +81,15 @@ function AgentInput({ state }: { state: StudioComposerState }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const sending = useRef(false);
+  const caret = useRef(0);
+  const restoreCaret = useRef<number | null>(null);
   const settings = agent.session ?? agent.draft;
   const running = agent.session?.status === 'running';
   const busy = agent.pending || running || agent.session?.status === 'awaiting_approval';
   const creation = settings.creation_mode ?? 'all';
   const ready = settings.model && settings.model_alias && agent.models?.models.some(
     m => m.model === settings.model && m.alias === settings.model_alias);
-  const canSend = !busy && ready && Boolean(text.trim() || files.length || assets.length);
+  const canSend = !agent.waitingForSession && !busy && ready && Boolean(text.trim() || files.length || assets.length);
 
   useEffect(() => {
     if (!mention) return;
@@ -98,7 +105,7 @@ function AgentInput({ state }: { state: StudioComposerState }) {
     sending.current = true;
     try {
       messageId.current ??= crypto.randomUUID();
-      const sent = await agent.sendStudio(text.trim(), files, assets.map(a => a.asset_id), skill, messageId.current);
+      const sent = await agent.sendStudio(serializeMentions(text.trim()), files, assets.map(a => a.asset_id), skill, messageId.current);
       if (!sent) return;
       state.clearDraft();
       if (home) {
@@ -108,18 +115,32 @@ function AgentInput({ state }: { state: StudioComposerState }) {
     } finally { sending.current = false; }
   }
 
+  function mentionFor(asset: CreationAsset, items: CreationAsset[]) {
+    const media = assetMediaContent(asset)?.mime_type.split('/')[0] as MentionKind | undefined;
+    if (!media) return { label: asset.title, index: 0, token: asset.title };
+    const index = (media === 'image' ? files.length : 0) + 1 + items.filter(item =>
+      assetMediaContent(item)?.mime_type.split('/')[0] === media).findIndex(item => item.asset_id === asset.asset_id);
+    const label = mentionLabelForKind(media);
+    return { label, index, token: canonicalMentionLabel(label, index) };
+  }
+
   function chooseAsset(asset: CreationAsset) {
     const picked = assets.some(item => item.asset_id === asset.asset_id) ? assets : [...assets, asset];
     if (picked.length > 16) return;
-    const media = assetMediaContent(asset)?.mime_type.split('/')[0];
-    const kind = ({ image: '图', video: '视频', audio: '音频' } as Record<string, string>)[media ?? ''];
-    const index = picked.filter(item => assetMediaContent(item)?.mime_type.split('/')[0] === media)
-      .findIndex(item => item.asset_id === asset.asset_id) + 1;
-    const token = kind ? canonicalMentionLabel(kind, String(index)) : asset.title;
+    const { token } = mentionFor(asset, picked);
+    const before = text.slice(0, caret.current).replace(/@[^\s@]*$/, '');
+    const after = text.slice(caret.current);
+    const insert = (before && !/\s$/.test(before) ? ' @' : '@') + token + ' ';
+    setText(before + insert + after);
     setAssets(picked);
-    setText(current => current.replace(/@[^\s@]*$/, '').trimEnd() + ' @' + token + ' ');
     setMention(false);
-    textarea.current?.focus();
+    restoreCaret.current = (before + insert).length;
+  }
+
+  function removeAsset(asset: CreationAsset) {
+    const { label, index } = mentionFor(asset, assets);
+    setText(current => index ? renumberMentions(current, label, index) : current.replaceAll('@' + label + ' ', ''));
+    setAssets(current => current.filter(a => a.asset_id !== asset.asset_id));
   }
 
   return <div className="bg-glass shell-glow relative z-20 rounded-xl border border-input px-4 py-3 backdrop-blur-glass">
@@ -131,15 +152,28 @@ function AgentInput({ state }: { state: StudioComposerState }) {
       </Button>
       <FileInput ref={fileInput} aria-label="选择参考图" multiple accept="image/*" onChange={event => {
         const next = Array.from(event.target.files ?? []);
-        setFiles(current => [...current, ...next].slice(0, 16)); event.target.value = '';
+        const added = next.slice(0, 16 - files.length);
+        setText(current => current.replace(createMentionTokenRegex(), (match, kind: string, number: string) =>
+          ['图片', '图'].includes(kind) && Number(number) > files.length ? '@图' + (Number(number) + added.length) : match));
+        setFiles(current => [...current, ...added]); event.target.value = '';
       }} />
       <div className="min-w-0 flex-1">
         {!!files.length && <div className="mb-2 flex flex-wrap gap-1">{files.map((file, i) =>
-          <ImageTile key={i} file={file} remove={() => setFiles(current => current.filter((_, n) => n !== i))} />)}</div>}
-        <Textarea ref={textarea} rows={2} value={text}
+          <ImageTile key={i} file={file} remove={() => {
+            if (!agent.pending) {
+              setText(current => renumberMentions(current, '图', i + 1));
+              setFiles(current => current.filter((_, n) => n !== i));
+            }
+          }} />)}</div>}
+        <Textarea ref={textarea} disabled={agent.pending} rows={2} value={text}
           placeholder="输入想法或上传参考，和 Agent 一起创作"
           className="min-h-16 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none placeholder:text-muted-foreground"
-          onChange={event => { setText(event.target.value); if (event.target.value.endsWith('@')) setMention(true); }}
+          onSelect={event => { caret.current = event.currentTarget.selectionStart; }}
+          onChange={event => {
+            caret.current = event.target.selectionStart;
+            setText(event.target.value);
+            if (event.target.value.slice(0, caret.current).endsWith('@')) setMention(true);
+          }}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault(); void send();
@@ -149,7 +183,7 @@ function AgentInput({ state }: { state: StudioComposerState }) {
     </div>
     {!!assets.length && <div className="flex flex-wrap gap-1">{assets.map(asset =>
       <Button key={asset.asset_id} variant="secondary" size="sm"
-        aria-label={`移除引用 ${asset.title}`} onClick={() => setAssets(current => current.filter(a => a !== asset))}>
+        disabled={agent.pending} aria-label={`移除引用 ${asset.title}`} onClick={() => removeAsset(asset)}>
         {asset.title}<CloseIcon size="sm" /></Button>)}</div>}
     {(agent.error || libraryError) && <p role="alert" className="mt-2 text-xs text-destructive">{agent.error || libraryError}</p>}
     {settingsOpen && <div aria-label="创作设置" className="flex flex-wrap items-center gap-1 border-b border-border py-2">
@@ -166,8 +200,15 @@ function AgentInput({ state }: { state: StudioComposerState }) {
       <CanvasAgentSkillPicker label={skill ?? '技能'} skills={agent.skills} selected={skill}
         onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
       <Popover open={mention} onOpenChange={setMention}><PopoverTrigger asChild>
-        <Button size="sm" variant="ghost" aria-label="引用资产">@</Button>
-      </PopoverTrigger><PopoverContent align="start" className="max-h-64 overflow-auto p-1">
+        <Button size="sm" variant="ghost" disabled={agent.pending} aria-label="引用资产">@</Button>
+      </PopoverTrigger><PopoverContent align="start" className="max-h-64 overflow-auto p-1"
+        onCloseAutoFocus={event => {
+          if (restoreCaret.current === null) return;
+          event.preventDefault();
+          textarea.current?.focus();
+          textarea.current?.setSelectionRange(restoreCaret.current, restoreCaret.current);
+          restoreCaret.current = null;
+        }}>
         {library.map(asset => <Button key={asset.asset_id} size="sm" variant="ghost" className="w-full justify-start"
           onClick={() => chooseAsset(asset)}>{asset.title}</Button>)}
         {!library.length && <p className="p-2 text-xs text-muted-foreground">暂无可引用资产</p>}
@@ -188,7 +229,7 @@ export function StudioComposer({ state, children }: { state: StudioComposerState
   return <div className="pointer-events-auto mx-auto w-full max-w-[780px]">
     {state.mode === 'creation' ? children : <AgentInput state={state} />}
     <div className="relative -mt-3 rounded-b-xl border border-t-0 border-input bg-panel px-3 pb-1.5 pt-4">
-      <Segmented aria-label="输入模式" className="inline-grid grid-cols-2">
+      <Segmented disabled={state.agent.pending} aria-label="输入模式" className="inline-grid grid-cols-2">
         <SegmentedItem value="creation" selected={state.mode === 'creation'} onSelect={() => state.switchMode('creation')} className="h-7 px-3 text-xs">创作</SegmentedItem>
         <SegmentedItem value="agent" selected={state.mode === 'agent'} onSelect={() => state.switchMode('agent')} className="h-7 px-3 text-xs">Agent</SegmentedItem>
       </Segmented>

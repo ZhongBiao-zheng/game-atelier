@@ -90,13 +90,13 @@ def begin(sid, payload):
             raise CanvasToolError("INVALID_PARAMETERS", "请输入想法或添加参考", 422)
         text = runtime.redact(payload.text)
         content = [{"type": "input_text", "text": text}] if text else []
-        for aid in payload.attachment_ids:
+        for index, aid in enumerate(payload.attachment_ids, 1):
             if aid not in session.uploads:
                 raise CanvasToolError("INVALID_TARGET", "附件不属于当前对话", 422)
             ref = "upload:" + aid
             content.extend(
                 [
-                    {"type": "input_text", "text": ref},
+                    {"type": "input_text", "text": f"图{index} {ref}"},
                     {
                         "type": "input_image",
                         "detail": "auto",
@@ -104,14 +104,20 @@ def begin(sid, payload):
                     },
                 ]
             )
+        counts = {"image": len(payload.attachment_ids), "video": 0, "audio": 0}
         for asset_id in payload.asset_ids:
             try:
                 asset = get_creation_asset(asset_id)
             except (OSError, ValueError, KeyError):
                 raise CanvasToolError("INVALID_TARGET", "找不到引用的本机资产", 422) from None
             ref = "asset:" + asset_id
-            content.append({"type": "input_text", "text": f"{ref} {asset.title}"})
             media = asset_media_content(asset)
+            kind = media.mime_type.split("/")[0] if media else None
+            label = ""
+            if kind in counts:
+                counts[kind] += 1
+                label = {"image": "图", "video": "视频", "audio": "音频"}[kind] + str(counts[kind])
+            content.append({"type": "input_text", "text": f"{label} {ref} {asset.title}".strip()})
             if media and media.mime_type.startswith("image/"):
                 content.append(
                     {

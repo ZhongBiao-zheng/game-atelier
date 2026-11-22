@@ -26,7 +26,7 @@ export function StudioSessionPicker({ agent, clearDraft }: { agent: Controller; 
       onClick={() => { clearDraft(); agent.newSession(); setOpen(false); }}><NewChatIcon size="sm" />新对话</Button>
     {agent.sessions.map(item => <div key={item.session_id} className="flex items-center">
       <Button variant={agent.session?.session_id === item.session_id ? 'secondary' : 'ghost'} size="sm"
-        className="min-w-0 flex-1 justify-start" onClick={() => { clearDraft(); void agent.selectSession(item.session_id); setOpen(false); }}>
+        className="min-w-0 flex-1 justify-start" disabled={agent.pending} onClick={() => { clearDraft(); void agent.selectSession(item.session_id); setOpen(false); }}>
         <span className="truncate">{item.title}</span></Button>
       <Button variant="ghost" size="icon" aria-label={`删除对话 ${item.title}`} disabled={agent.pending}
         onClick={() => void agent.removeSession(item.session_id, item.revision)}><DeleteIcon size="sm" /></Button>
@@ -59,6 +59,14 @@ function groupSteps(steps: StudioAgentStep[]) {
   return groups;
 }
 
+// JS Date 只保留毫秒，而同一次本地工具调用前后的消息与 Job 可能只相差数十微秒。
+function compareTime(a: string, b: string) {
+  const millis = Date.parse(a) - Date.parse(b);
+  if (millis) return millis;
+  const fraction = (iso: string) => (iso.match(/\.(\d+)/)?.[1] ?? '').padEnd(6, '0');
+  return fraction(a).localeCompare(fraction(b));
+}
+
 function Turn({ turn, session, agent, jobs, renderJob }: {
   turn: StudioAgentTurn; session: StudioAgentSession; agent: Controller; jobs: Job[]; renderJob: (job: Job) => ReactNode;
 }) {
@@ -66,7 +74,7 @@ function Turn({ turn, session, agent, jobs, renderJob }: {
   const awaiting = turn.status === 'awaiting_approval';
   const [override, setOverride] = useState<{ status: string; open: boolean } | null>(null);
   const open = awaiting || (override?.status === turn.status ? override.open : running);
-  const title = running ? '任务响应中…' : awaiting ? '待确认' : turn.status === 'idle' ? '已完成'
+  const title = running || awaiting ? '任务响应中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
   const messages = session.messages.filter(m => m.turn_id === turn.turn_id);
   const user = messages.find(m => m.role === 'user');
@@ -74,7 +82,7 @@ function Turn({ turn, session, agent, jobs, renderJob }: {
   const events = [
     ...replies.map(message => ({ time: message.created_at, id: message.message_id, message, job: null as Job | null })),
     ...jobs.map(job => ({ time: job.submitted_at, id: job.job_id, message: null as CanvasAgentMessage | null, job })),
-  ].sort((a, b) => Date.parse(a.time) - Date.parse(b.time) || (a.message?.sequence ?? Infinity) - (b.message?.sequence ?? Infinity) || a.id.localeCompare(b.id));
+  ].sort((a, b) => compareTime(a.time, b.time) || (a.message?.sequence ?? Infinity) - (b.message?.sequence ?? Infinity) || a.id.localeCompare(b.id));
   const errors = messages.filter(m => m.role === 'error');
   return <section className="space-y-3">
     <div className="ml-auto flex max-w-[60%] flex-col items-end gap-2">
@@ -89,7 +97,7 @@ function Turn({ turn, session, agent, jobs, renderJob }: {
     </div>
     <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" aria-expanded={open}
       aria-disabled={awaiting} onClick={() => { if (!awaiting) setOverride({ status: turn.status, open: !open }); }}>
-      {running && <LoadingIcon size="sm" className="animate-spin" />}{title}
+      {(running || awaiting) && <LoadingIcon size="sm" className="animate-spin" />}{title}
       {open ? <ChevronDownIcon size="sm" /> : <ChevronRightIcon size="sm" />}
     </Button>
     {open && <div className="space-y-2 border-l border-border pl-3 text-xs text-muted-foreground">

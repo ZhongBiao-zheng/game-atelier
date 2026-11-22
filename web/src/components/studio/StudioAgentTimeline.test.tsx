@@ -35,6 +35,16 @@ it('已完成一轮默认折叠，按提交时间混排同一会话的记录', (
   expect(screen.getByText('列出可用模型')).toBeInTheDocument();
 });
 
+it('同一毫秒内按服务端微秒区分准备说明、提交和总结', () => {
+  const agent = makeAgent('idle');
+  const session = agent.session!;
+  session.messages[1].created_at = '2026-11-22T10:00:03.010001Z';
+  session.messages[2].created_at = '2026-11-22T10:00:03.010003Z';
+  const job = { ...jobs[0], submitted_at: '2026-11-22T10:00:03.010002Z' };
+  const { container } = render(<StudioAgentTimeline agent={agent} jobs={[job]} renderJob={j => j.job_id} />);
+  expect(container.textContent).toMatch(/准备草图.*job-0.*成片已就绪/);
+});
+
 it('运行时可收起，待确认强制展开，停止后能查看步骤', () => {
   const view = (status: StudioAgentTurn['status']) => <StudioAgentTimeline agent={makeAgent(status)} jobs={[]} renderJob={() => null} />;
   const tree = render(view('running'));
@@ -43,7 +53,7 @@ it('运行时可收起，待确认强制展开，停止后能查看步骤', () =
   fireEvent.click(running);
   expect(screen.queryByText('准备草图')).toBeNull();
   tree.rerender(view('awaiting_approval'));
-  fireEvent.click(screen.getByRole('button', { name: '待确认' }));
+  fireEvent.click(screen.getByRole('button', { name: '任务响应中…' }));
   expect(screen.getByRole('group', { name: '待确认的操作' })).toBeVisible();
   tree.rerender(view('interrupted'));
   fireEvent.click(screen.getByRole('button', { name: '已停止' }));

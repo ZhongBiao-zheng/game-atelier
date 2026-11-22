@@ -1326,7 +1326,8 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
                           session.session_id, session.model_alias or "", session.model or "",
                           buffer.notify)
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
-                                 hooks=usage_hooks(), run_config=_run_config(buffer.workspace.media))
+                                 hooks=usage_hooks(getattr(buffer.workspace, "observe_response", None)),
+                                 run_config=_run_config(buffer.workspace.media))
     async for event in result.stream_events():
         data = getattr(event, "data", None)
         if getattr(event, "type", "") == "raw_response_event" \
@@ -1339,12 +1340,14 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     return result, context
 
 
-def usage_hooks():
+def usage_hooks(observe_response=None):
     """每次对话模型请求结束就记一行用量：中途失败、被停止的轮次，已经发生的请求也记得上。"""
     from agents import RunHooks
 
     class UsageHooks(RunHooks):
         async def on_llm_end(self, context, agent, response) -> None:
+            if observe_response is not None:
+                observe_response(response)
             await asyncio.to_thread(record_usage, context.context, response.usage)
 
     return UsageHooks()

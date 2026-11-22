@@ -1635,7 +1635,7 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 
 本机页面通过 `GET /api/studio/agent/sessions` 按最近使用时间列出会话，通过 POST 创建会话（201，可同时提交模型和创作设置）。详情端点 `/api/studio/agent/sessions/{session_id}` 支持 GET、PATCH 和 DELETE。删除请求的 `If-Match` 是客户端看到的 revision，缺失返回 428。服务端在会话锁内核对版本，并发更新已写入时返回 409，原轮次继续运行。删除成功返回 204，一并清理计划和附件，保留 Studio Job、产物及用量。文件分别位于数据目录的 `studio-agent/sessions`、`studio-agent/plans`、`studio-agent/uploads/{session_id}`。
 
-公开会话返回 `turns`、`messages`、`pending_approvals` 与设置。每个轮次的 `steps` 记录稳定的 `step_id`、`tool`、面板可见的 `summary` 和 `status`（running / completed / failed / interrupted / rejected）。待确认项返回 `call_id`、`tool` 与摘要。原始工具参数、SDK history 和上传索引仅在服务端读取。`studio-agent` SSE 事件携带 `session_id`、`turn_id` 与 `kind`，包括 delta、tool、step、session、plan。step 携带同形步骤，按 `step_id` 更新。重连后可从详情读取完整轮次。
+公开会话返回 `turns`、`messages`、`pending_approvals` 与设置。每个轮次的 `steps` 记录稳定的 `step_id`、`tool`、面板可见的 `summary` 和 `status`（running / completed / failed / interrupted / rejected）。Studio 的助手正文以服务端收到该次模型回复的时间写入 `messages[].created_at`。同轮内工具调用前的说明、Job 的 `submitted_at`、工具调用后的总结依此排序，审批续跑沿用该轮。待确认项返回 `call_id`、`tool` 与摘要。原始工具参数、SDK history 和上传索引仅在服务端读取。`studio-agent` SSE 事件携带 `session_id`、`turn_id` 与 `kind`，包括 delta、tool、step、session、plan。step 携带同形步骤，按 `step_id` 更新。重连后可从详情读取完整轮次。
 
 以下路径均接在会话详情端点后。
 

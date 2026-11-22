@@ -77,6 +77,19 @@ describe('CanvasAgentApprovalCard · 批量生成', () => {
     ],
   };
 
+  it('加载明细之前拒绝整批，迟到的报价保留拒绝选择', async () => {
+    const onDecide = vi.fn();
+    let resolve!: (value: CanvasAgentBatchItems) => void;
+    const loading = new Promise<CanvasAgentBatchItems>(done => { resolve = done; });
+    render(<CanvasAgentApprovalCard labels={labels} onDecide={onDecide} loadBatchItems={() => loading}
+      approvals={[batch, approval('keep', 'run_generation', '保留单项')]} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '执行：批量生成' }));
+    resolve(DATA);
+    expect(await screen.findByRole('checkbox', { name: '执行第 1 项' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '执行 1 项' }));
+    expect([...onDecide.mock.calls[0][0]]).toEqual(['keep']);
+  });
+
   it('按勾选重算合计、未计价数与是否超过确认金额，去掉的项按拒绝', async () => {
     const onDecide = vi.fn();
     const load = vi.fn().mockResolvedValue(DATA);
