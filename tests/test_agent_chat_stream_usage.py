@@ -6,8 +6,11 @@ from tests.fake_http_vendor import FakeVendor
 from tests.test_llm_protocols_gemini_agent import _chat, _setup, _turn
 
 
-@pytest.mark.parametrize('base_path', ['/v1beta/openai', '/v1'])
-def test_compatible_stream_requests_and_records_usage(base_path):
+@pytest.mark.parametrize(('base_path', 'protocol'), [
+    ('/v1beta/openai', 'openai-chat'), ('/v1', 'openai-chat'),
+    ('/v1', 'openai'), ('/v1', 'chat-completions'),
+])
+def test_compatible_stream_requests_and_records_usage(base_path, protocol):
     chunk = {'id': 'c', 'object': 'chat.completion.chunk', 'created': 0, 'model': 'gpt-test'}
     with FakeVendor() as vendor:
         path = base_path + '/chat/completions'
@@ -19,6 +22,7 @@ def test_compatible_stream_requests_and_records_usage(base_path):
         pid, sid = _setup(vendor)
         db = keys.read_keys_db()
         db.keys[0].base_url = vendor.url + base_path
+        next(model for model in db.keys[0].models if model.id == 'gpt-test').protocol = protocol
         keys.write_keys_db(db)
         result = _turn(pid, sid, 'gpt-test', '你好')
         assert result.status == 'idle', result.error
