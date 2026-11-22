@@ -82,3 +82,16 @@ async def test_trim_native(native, tmp_path, name):
         for time, loud in ((0.1, False), (0.3, True), (0.7, False)):
             segment = pcm[int(time*48000):int(time*48000)+960].astype(float)
             assert (np.sqrt(np.mean(segment**2)) > 700) == loud
+
+
+@pytest.mark.parametrize("name,quality", [("rotation", "high"), ("silent", "small"),
+                                           ("vfr", "standard"), ("wide", "small")])
+async def test_compress_native(native, tmp_path, name, quality):
+    from character_workflow.lib.schemas import VideoCompress
+
+    path = await sample(native, tmp_path, name)
+    output = tmp_path / "压缩.mp4"
+    operation = VideoCompress(kind="video_compress", max_long_edge=160, quality=quality)
+    await encode(native, path, output, await metadata(native, path), operation, lambda ms: None)
+    await check_output(native, output, 3, name != "silent", (96, 160) if name == "rotation" else (160, 96))
+    assert output.stat().st_size < path.stat().st_size

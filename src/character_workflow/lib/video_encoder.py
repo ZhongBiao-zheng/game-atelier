@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from fractions import Fraction
 import hashlib
 import json
 import os
@@ -132,11 +133,14 @@ async def metadata(encoder: Encoder, path: Path) -> dict:
         rotation = next((int(d["rotation"]) for d in video.get("side_data_list", [])
                          if "rotation" in d), 0)
         w, h = int(video["width"]), int(video["height"])
+        sar = video.get("sample_aspect_ratio", "1:1")
+        if sar not in {"N/A", "0:1", None}:
+            w = max(1, round(w * Fraction(sar.replace(":", "/"))))
         if rotation % 180:
             w, h = h, w
         return {"width": w, "height": h, "duration_ms": round(float(info["format"]["duration"]) * 1000),
                 "audio_tracks": len(audio), "codec": video["codec_name"], "pix_fmt": video["pix_fmt"],
-                "fps": video.get("avg_frame_rate")}
+                "fps": video.get("avg_frame_rate"), "nominal_fps": video.get("r_frame_rate")}
     except (KeyError, StopIteration, TypeError, ValueError, OverflowError) as exc:
         if isinstance(exc, VideoError):
             raise
