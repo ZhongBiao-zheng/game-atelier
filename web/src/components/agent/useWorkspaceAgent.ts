@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   cancelCanvasAgentTurn,
+  deleteCanvasAgentSession,
+  sendStudioAgentMessage,
+  uploadStudioAgentAttachment,
   createCanvasAgentSession,
   decideCanvasAgentApprovals,
   getCanvasAgentSession,
@@ -15,12 +18,14 @@ import {
   updateCanvasAgentSession,
   updateCanvasAgentSettings,
 } from '@/api/canvas';
+import { readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import type {
   CanvasAgentChatModelList,
   CanvasAgentGenerationModel,
   CanvasAgentSession,
-  CanvasAgentSessionSummary,
+  StudioAgentSession,
+  StudioAgentSessionSummary,
   CanvasAgentSessionUpdate,
   CanvasAgentPlan,
   CanvasAgentSessionUsage,
@@ -69,7 +74,7 @@ function messageOf(error: unknown): string {
 }
 
 /** 新会话沿用的设置：模型、思考、权限、创作模式、模型偏好。 */
-function carriedSettings(session: CanvasAgentSession): CanvasAgentSessionUpdate {
+function carriedSettings(session: CanvasAgentSession | StudioAgentSession): CanvasAgentSessionUpdate {
   return {
     ...(session.model && session.model_alias
       ? { model: session.model, model_alias: session.model_alias } : {}),
@@ -81,9 +86,10 @@ function carriedSettings(session: CanvasAgentSession): CanvasAgentSessionUpdate 
   };
 }
 
-export function useCanvasAgent(projectId: string, open: boolean) {
-  const [sessions, setSessions] = useState<CanvasAgentSessionSummary[]>([]);
-  const [session, setSession] = useState<CanvasAgentSession | null>(null);
+export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false) {
+  const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
+  const [selecting, setSelecting] = useState(false);
+  const [session, setSession] = useState<CanvasAgentSession | StudioAgentSession | null>(null);
   const [streaming, setStreaming] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [models, setModels] = useState<CanvasAgentChatModelList | null>(null);
@@ -103,6 +109,11 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   // 否则读取途中任何一次重渲染都会把它冲回 null，读到的会话被当成过期结果丢掉。
   const sessionIdRef = useRef<string | null>(null);
 
+  const acceptSession = useCallback((updated: CanvasAgentSession | StudioAgentSession) => {
+    if (sessionIdRef.current !== updated.session_id) return;
+    setSession(current => current?.session_id === updated.session_id && current.revision > updated.revision ? current : updated);
+  }, []);
+
   const refreshList = useCallback(async () => {
     const list = await listCanvasAgentSessions(projectId);
     setSessions(list.sessions);
@@ -120,7 +131,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const loadSession = useCallback(async (sessionId: string) => {
     const loaded = await getCanvasAgentSession(projectId, sessionId);
     if (sessionIdRef.current !== sessionId) return;  // 期间切到了别的会话
-    setSession(loaded);
+    acceptSession(loaded);
     if (loaded.status !== 'running') { setStreaming(''); setActiveTool(null); }
     // 用量只用于显示：读不到不报错，下次会话刷新再读。
     getCanvasAgentSessionUsage(projectId, sessionId).then(
@@ -128,7 +139,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
       () => undefined,
     );
     loadPlan(sessionId);
-  }, [loadPlan, projectId]);
+  }, [acceptSession, loadPlan, projectId]);
 
   const selectSession = useCallback(async (sessionId: string) => {
     setError(null);
@@ -136,11 +147,16 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     setUsage(null);
     setPlan(null);
     sessionIdRef.current = sessionId;
-    writeStorage(sessionStorageKey(projectId), sessionId);
+    setSession(null);
+    setSelecting(true);
+    if (projectId === null) updateStudioView({ activeSessionId: sessionId });
+    else writeStorage(sessionStorageKey(projectId), sessionId);
     try {
       await loadSession(sessionId);
     } catch (loadError) {
-      setError(messageOf(loadError));
+      if (sessionIdRef.current === sessionId) setError(messageOf(loadError));
+    } finally {
+      if (sessionIdRef.current === sessionId) setSelecting(false);
     }
   }, [loadSession, projectId]);
 
@@ -152,15 +168,16 @@ export function useCanvasAgent(projectId: string, open: boolean) {
       try {
         const list = await refreshList();
         if (cancelled || sessionIdRef.current) return;
-        const last = readStorage(sessionStorageKey(projectId));
-        const target = list.find(item => item.session_id === last) ?? list[0];
+        const last = projectId === null ? readStudioView().activeSessionId : readStorage(sessionStorageKey(projectId));
+        if (projectId === null && home) return;
+        const target = list.find(item => item.session_id === last) ?? (projectId === null ? undefined : list[0]);
         if (target) await selectSession(target.session_id);
       } catch (loadError) {
         if (!cancelled) setError(messageOf(loadError));
       }
     })();
     return () => { cancelled = true; };
-  }, [open, projectId, refreshList, selectSession]);
+  }, [home, open, projectId, refreshList, selectSession]);
 
   // 模型列表要实时拉各 Key 的 /models，只在首次打开时拉一次。
   useEffect(() => {
@@ -187,20 +204,33 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     );
   }, [open, confirmAbove]);
 
-  useSSE({
-    enabled: open,
-    onCanvasAgent: (event: CanvasAgentEventPayload) => {
-      if (event.project_id !== projectId || !event.session_id) return;
+  const onAgentEvent = (event: CanvasAgentEventPayload) => {
+      if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;
       if (event.session_id !== sessionIdRef.current) return;
       if (event.kind === 'delta' && event.text) { setStreaming(current => current + event.text); setActiveTool(null); }
       if (event.kind === 'tool' && event.text) setActiveTool(event.text);
       if (event.kind === 'plan') loadPlan(event.session_id);
+      if (event.kind === 'step' && event.step) {
+        const step = event.step;
+        setSession(current => {
+          if (!current || !('turns' in current) || current.session_id !== event.session_id) return current;
+          const turns = current.turns.map(turn => {
+            if (turn.turn_id !== event.turn_id || turn.status !== 'running') return turn;
+            const steps = new Map(turn.steps.map(item => [item.step_id, item]));
+            steps.set(step.step_id, step);
+            return { ...turn, steps: [...steps.values()] };
+          });
+          return { ...current, turns };
+        });
+      }
       if (event.kind === 'session') {
         void loadSession(event.session_id).catch(() => undefined);
         void refreshList().catch(() => undefined);
       }
-    },
-  });
+    };
+  useSSE({ enabled: open, onConnect: () => {
+    if (projectId === null && sessionIdRef.current) void loadSession(sessionIdRef.current).catch(() => undefined);
+  }, ...(projectId === null ? { onStudioAgent: onAgentEvent } : { onCanvasAgent: onAgentEvent }) });
 
   const runningSessionId = session?.status === 'running' ? session.session_id : null;
   useEffect(() => {
@@ -225,14 +255,16 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   }, []);
 
   /** 新会话沿用当前会话的模型 / 思考 / 权限；没有当前会话时用上次选过的模型。 */
-  const createSession = useCallback(async (): Promise<CanvasAgentSession> => {
-    let created = await createCanvasAgentSession(projectId, '新对话');
+  const createSession = useCallback(async () => {
     const settings: CanvasAgentSessionUpdate = session ? carriedSettings(session) : draft;
-    if (Object.keys(settings).length) {
+    let created = projectId === null ? await createCanvasAgentSession(null, '新对话', settings)
+      : await createCanvasAgentSession(projectId, '新对话');
+    if (projectId !== null && Object.keys(settings).length) {
       created = await updateCanvasAgentSession(projectId, created.session_id, settings);
     }
     sessionIdRef.current = created.session_id;
-    writeStorage(sessionStorageKey(projectId), created.session_id);
+    if (projectId === null) updateStudioView({ activeSessionId: created.session_id });
+    else writeStorage(sessionStorageKey(projectId), created.session_id);
     setSession(created);
     setStreaming('');
     await refreshList();
@@ -242,6 +274,8 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   /** 新对话只清空面板，设置沿用当前会话；真正的会话在发第一条消息时才建。 */
   const newSession = useCallback(() => {
     if (session) setDraft(carriedSettings(session));
+    if (projectId === null) updateStudioView({ activeSessionId: null });
+    setSelecting(false);
     sessionIdRef.current = null;
     setSession(null);
     setUsage(null);
@@ -249,7 +283,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     setStreaming('');
     setActiveTool(null);
     setError(null);
-  }, [session]);
+  }, [projectId, session]);
 
   const updateSettings = useCallback((update: CanvasAgentSessionUpdate) => {
     if (update.model && update.model_alias) {
@@ -269,21 +303,48 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     }
     return run(async () => {
       const updated = await updateCanvasAgentSession(projectId, session.session_id, update);
-      setSession(updated);
+      acceptSession(updated);
       return updated;
     });
-  }, [projectId, run, session]);
+  }, [acceptSession, projectId, run, session]);
 
   const send = useCallback((text: string, nodeIds: string[], skill: string | null) => run(async () => {
     const target = session ?? await createSession();
     setStreaming('');
+    if (projectId === null) throw new Error('需要画布项目');
     const updated = await sendCanvasAgentMessage(projectId, target.session_id, {
       text, node_ids: nodeIds, ...(skill ? { skill } : {}),
     });
-    setSession(updated);
+    acceptSession(updated);
     void refreshList().catch(() => undefined);
     return updated;
-  }), [createSession, projectId, refreshList, run, session]);
+  }), [acceptSession, createSession, projectId, refreshList, run, session]);
+
+  const sendStudio = (text: string, files: File[], assets: string[], skill: string | null, clientId: string) => run(async () => {
+    const target = session ?? await createSession();
+    const attachmentIds = await Promise.all(files.map(async file =>
+      (await uploadStudioAgentAttachment(target.session_id, file)).attachment_id));
+    setStreaming('');
+    let updated: StudioAgentSession;
+    try {
+      updated = await sendStudioAgentMessage(target.session_id, { text, skill, asset_ids: assets,
+        attachment_ids: attachmentIds, client_message_id: clientId });
+    } catch (error) {
+      // 连接断开时服务端可能已收件，以会话中的幂等标识确认结果。
+      const saved = await getCanvasAgentSession(null, target.session_id).catch(() => null);
+      if (!saved?.turns.some(turn => turn.client_message_id === clientId)) throw error;
+      updated = saved;
+    }
+    acceptSession(updated);
+    void refreshList().catch(() => undefined);
+    return updated;
+  });
+
+  const removeSession = (id: string, revision: number) => run(async () => {
+    await deleteCanvasAgentSession(projectId, id, revision);
+    if (sessionIdRef.current === id) newSession();
+    await refreshList();
+  });
 
   /** approved：每个待确认调用是否执行；没列出的按拒绝。items：批量生成里勾选执行的项（没给就是全部）。 */
   const decide = useCallback((
@@ -297,17 +358,17 @@ export function useCanvasAgent(projectId: string, open: boolean) {
       return { call_id: item.call_id, approve: approved.has(item.call_id), ...(chosen ? { items: [...chosen] } : {}) };
     });
     const updated = await decideCanvasAgentApprovals(projectId, session.session_id, decisions);
-    setSession(updated);
+    acceptSession(updated);
     return updated;
-  }), [projectId, run, session]);
+  }), [acceptSession, projectId, run, session]);
 
   const stop = useCallback(() => run(async () => {
     if (!session) return undefined;
     const updated = await cancelCanvasAgentTurn(projectId, session.session_id);
-    setSession(updated);
+    acceptSession(updated);
     setStreaming('');
     return updated;
-  }), [projectId, run, session]);
+  }), [acceptSession, projectId, run, session]);
 
   const updateConfirmAbove = useCallback((value: number) => run(async () => {
     const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
@@ -318,11 +379,13 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const clearError = useCallback(() => setError(null), []);
 
   return {
-    sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending,
+    sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending: pending || selecting,
     usage, confirmAbove, plan,
-    reloadSkills,
+    reloadSkills, sendStudio, removeSession,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }
 
-export type CanvasAgentController = ReturnType<typeof useCanvasAgent>;
+export function useCanvasAgent(projectId: string, open: boolean) {
+  return useWorkspaceAgent(projectId, open);
+}

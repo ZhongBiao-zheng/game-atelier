@@ -9,7 +9,8 @@ const COLLAPSED_LINES = 12;
 const BATCH_TOOL = 'run_generations';
 
 /** 批量生成的逐项勾选；合计、未计价数、是否超过确认金额都按勾上的项重算。 */
-function BatchItems({ data, selected, disabled, onToggle }: {
+function BatchItems({ data, selected, disabled, onToggle, unit }: {
+  unit: string;
   data: CanvasAgentBatchItems;
   selected: ReadonlySet<number>;
   disabled?: boolean;
@@ -24,7 +25,7 @@ function BatchItems({ data, selected, disabled, onToggle }: {
     : `合计预计 ${formatGenerationCost(total)}${unpriced ? `（${unpriced} 项未计价）` : ''}`;
   return <>
     <p className="mt-0.5 text-muted-foreground">
-      {`批量生成 ${data.items.length} 项，共 ${data.items.reduce((sum, item) => sum + item.count, 0)} 张`}
+      {`批量生成 ${data.items.length} 项，共 ${data.items.reduce((sum, item) => sum + item.count, 0)} ${unit}`}
     </p>
     <div className="mt-1 flex flex-col gap-1">
       {data.items.map(item => (
@@ -37,7 +38,7 @@ function BatchItems({ data, selected, disabled, onToggle }: {
             className="mt-0.5"
           />
           <span className="min-w-0 flex-1 break-words text-muted-foreground">
-            {[item.title, item.model ?? '读不到生成配置', `${item.count} 张`,
+            {[item.title, item.model ?? '读不到生成配置', `${item.count} ${unit}`,
               item.estimate_cny === null ? '未计价' : `预计 ${formatGenerationCost(item.estimate_cny)}`].join(' · ')}
           </span>
         </Label>
@@ -71,7 +72,8 @@ function ApprovalSummary({ text }: { text: string }) {
  * 批量生成：loadBatchItems 拿到逐项数据后按项勾选（一项都不勾等于拒绝这次调用）、按勾选重算合计；
  * 拿不到时整段显示服务端摘要，只能整条执行或拒绝。onDecide 的 items：批量生成里没全选时，勾上的项下标。
  */
-export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide, loadBatchItems }: {
+export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide, loadBatchItems, unit = '张' }: {
+  unit?: string;
   approvals: CanvasAgentApproval[];
   labels: Record<string, string>;
   disabled?: boolean;
@@ -141,7 +143,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
         if (data) {
           return <div key={item.call_id} className="text-xs">
             <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>
-            <BatchItems data={data} selected={picked.get(item.call_id) ?? new Set()} disabled={disabled}
+            <BatchItems unit={unit} data={data} selected={picked.get(item.call_id) ?? new Set()} disabled={disabled}
               onToggle={(index, checked) => togglePick(item.call_id, index, checked)} />
           </div>;
         }

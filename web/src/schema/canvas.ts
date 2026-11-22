@@ -466,7 +466,7 @@ export type CanvasAgentEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export interface CanvasAgentApproval {
   call_id: string;
   tool: string;
-  arguments: string;
+  arguments?: string;
   summary: string;
 }
 
@@ -665,4 +665,26 @@ export interface CanvasPluginState {
   plugin_id: string;
   plugin_version: string;
   data: JsonValue;
+}
+
+export type StudioAgentSessionSummary = Pick<CanvasAgentSessionSummary, 'session_id' | 'title' | 'updated_at' | 'status' | 'revision'>;
+
+export interface StudioAgentStep {
+  step_id: string;
+  tool: string;
+  summary: string;
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'rejected';
+}
+
+export interface StudioAgentTurn {
+  turn_id: string;
+  client_message_id: string;
+  status: CanvasAgentStatus;
+  attachment_ids: string[];
+  asset_ids: string[];
+  steps: StudioAgentStep[];
+}
+
+export interface StudioAgentSession extends Omit<CanvasAgentSession, 'project_id' | 'history' | 'created_node_ids'> {
+  turns: StudioAgentTurn[];
 }

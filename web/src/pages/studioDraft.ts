@@ -50,3 +50,19 @@ export function writeStudioDraft(next: StudioDraft): void {
 export function clearStudioDraft(): void {
   draft = null;
 }
+
+export type StudioMode = 'creation' | 'agent';
+type StudioView = { mode: StudioMode; activeSessionId: string | null };
+
+export function readStudioView(): StudioView {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('studio:view') ?? '{}');
+    return { mode: saved.mode === 'agent' ? 'agent' : 'creation',
+      activeSessionId: typeof saved.activeSessionId === 'string' ? saved.activeSessionId : null };
+  } catch { return { mode: 'creation', activeSessionId: null }; }
+}
+
+export function updateStudioView(change: Partial<StudioView>) {
+  try { sessionStorage.setItem('studio:view', JSON.stringify({ ...readStudioView(), ...change })); }
+  catch { /* 当前页面仍可继续对话。 */ }
+}

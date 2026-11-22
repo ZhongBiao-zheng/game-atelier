@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { connectionFetch, useConnectionState } from '@/api/connection';
 import { readServerEvents } from '@/api/sse';
+import type { StudioAgentStep } from '@/schema/canvas';
 import type { GatewayTask } from '@/api/gateway';
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 
@@ -18,7 +19,9 @@ export interface CanvasDocumentChangedPayload {
 export interface CanvasAgentEventPayload {
   project_id?: string;
   session_id?: string;
-  kind?: 'delta' | 'tool' | 'session' | 'plan';
+  turn_id?: string;
+  step?: StudioAgentStep;
+  kind?: 'delta' | 'tool' | 'session' | 'plan' | 'step';
   text?: string;
 }
 
@@ -33,6 +36,7 @@ interface UseSSEOptions {
   /** 团队库索引有条目增删改（watcher 重扫后按 diff 逐条广播）；只发回调，不触发全局刷新信号。 */
   onTeamLibraryChanged?: (event: TeamLibraryChangeEvent) => void;
   /** 画布 Agent 会话的流式文字与落盘通知；只发回调，不触发全局刷新信号。 */
+  onStudioAgent?: (data: CanvasAgentEventPayload) => void;
   onCanvasAgent?: (data: CanvasAgentEventPayload) => void;
   /** 连接（含重连）成功时回调 —— 全量刷新兜底，覆盖断连期间丢失的事件。 */
   onConnect?: () => void;
@@ -49,6 +53,8 @@ export function useSSE(options?: UseSSEOptions): number {
   onCanvasDocumentChangedRef.current = options?.onCanvasDocumentChanged;
   const onTeamLibraryChangedRef = useRef(options?.onTeamLibraryChanged);
   onTeamLibraryChangedRef.current = options?.onTeamLibraryChanged;
+  const onStudioAgentRef = useRef(options?.onStudioAgent);
+  onStudioAgentRef.current = options?.onStudioAgent;
   const onCanvasAgentRef = useRef(options?.onCanvasAgent);
   onCanvasAgentRef.current = options?.onCanvasAgent;
   const onGatewayTaskRef = useRef(options?.onGatewayTask);
@@ -86,6 +92,9 @@ export function useSSE(options?: UseSSEOptions): number {
           }
           if (event === 'canvas-document-changed') {
             try { onCanvasDocumentChangedRef.current?.(JSON.parse(data) as CanvasDocumentChangedPayload); } catch { /* Malformed payload: the next save or reload resyncs. */ }
+          }
+          if (event === 'studio-agent') {
+            try { onStudioAgentRef.current?.(JSON.parse(data)); } catch { /* Polling resyncs. */ }
           }
           if (event === 'canvas-agent') {
             try { onCanvasAgentRef.current?.(JSON.parse(data) as CanvasAgentEventPayload); } catch { /* Malformed payload: polling while running resyncs. */ }

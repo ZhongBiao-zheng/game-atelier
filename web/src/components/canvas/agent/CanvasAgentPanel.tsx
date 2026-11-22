@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { buildCanvasAgentTimeline } from '@/components/agent/canvasAgentTimeline
 import { canvasAgentSetupNotice } from '@/components/agent/canvasAgentSetupNotice';
 import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from '@/components/agent/CanvasAgentSkillPicker';
-import { useCanvasAgent } from './useCanvasAgent';
+import { useCanvasAgent } from '@/components/agent/useWorkspaceAgent';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 
@@ -33,51 +33,12 @@ export interface CanvasAgentNodeRef {
   versionId?: string | null;
 }
 
-// 与服务端 canvas_agent_runtime.READ_LABELS 同名同字：只读工具的消息正文就是这个标签，相同则不重复显示。
-const TOOL_LABELS: Record<string, string> = {
-  get_canvas: '读取画布',
-  list_models: '查看可用模型',
-  apply_changes: '修改画布',
-  run_generation: '生成',
-  run_generations: '批量生成',
-  update_plan: '更新待办',
-  get_run: '查询生成进度',
-  read_media: '读取媒体信息',
-  read_video_frames: '查看视频画面',
-  check_run: '核对生成结果',
-  wait_for_run: '等待生成结果',
-  wait_for_runs: '等待多个生成结果',
-  load_skill: '读取 Skill',
-  read_skill_file: '读取 Skill 文件',
-};
-
 const ICON_BUTTON = 'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40';
 
 function NodeIcon({ type }: { type: string }) {
   if (type === 'image') return <ImageFileIcon size="sm" className="shrink-0" />;
   if (type === 'video') return <VideoFileIcon size="sm" className="shrink-0" />;
   return <TextFileIcon size="sm" className="shrink-0" />;
-}
-
-/** 模型回复常带 Markdown：标题压到正文字号，面板里只用 sm / xs 两档。 */
-function AgentMarkdown({ text }: { text: string }) {
-  return (
-    <div className="break-words text-sm">
-      <ReactMarkdown
-        components={{
-          h1: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
-          h2: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
-          h3: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
-          p: ({ node: _node, ...props }) => <p className="my-2 first:mt-0 last:mb-0" {...props} />,
-          ul: ({ node: _node, ...props }) => <ul className="my-2 list-disc space-y-0.5 pl-4" {...props} />,
-          ol: ({ node: _node, ...props }) => <ol className="my-2 list-decimal space-y-0.5 pl-4" {...props} />,
-          code: ({ node: _node, ...props }) => <code className="rounded bg-secondary px-1 text-xs" {...props} />,
-          pre: ({ node: _node, ...props }) => <pre className="my-2 overflow-x-auto rounded-md bg-secondary p-2 text-xs" {...props} />,
-          a: ({ node: _node, ...props }) => <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...props} />,
-        }}
-      >{text}</ReactMarkdown>
-    </div>
-  );
 }
 
 /** 空对话里的示例需求：点一下填进输入框（不直接发送，生成要花钱）。 */

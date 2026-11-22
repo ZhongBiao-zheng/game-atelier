@@ -11,6 +11,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
+import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import { PromptInput } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
@@ -113,6 +114,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 }
 
 function StudioFull() {
+  const composer = useStudioComposer();
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
   const [rounds, setRounds] = useState<RoundState[]>([]);
@@ -982,6 +984,7 @@ function StudioFull() {
             </span>
           )}
         </div>
+        <StudioComposer state={composer}>
         <PromptInput
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
@@ -1048,6 +1051,7 @@ function StudioFull() {
           videoFrames={videoFrames}
           onVideoFramesChange={setVideoFrames}
         />
+      </StudioComposer>
           </div>
           <Button variant="bare"
             type="button"

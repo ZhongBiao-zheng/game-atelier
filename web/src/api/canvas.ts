@@ -8,6 +8,8 @@ import type {
   CanvasAgentPlan,
   CanvasAgentSession,
   CanvasAgentSessionList,
+  StudioAgentSession,
+  StudioAgentSessionSummary,
   CanvasAgentSessionUpdate,
   CanvasAgentSessionUsage,
   CanvasAgentSettings,
@@ -62,52 +64,61 @@ export function renameCanvasProject(projectId: string, name: string): Promise<Ca
   });
 }
 
-export function listCanvasAgentSessions(projectId: string): Promise<CanvasAgentSessionList> {
-  return requestJson<CanvasAgentSessionList>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions`,
+export type WorkspaceSession<P extends string | null> = P extends null ? StudioAgentSession : CanvasAgentSession;
+
+function agentSessionsPath(projectId: string | null) {
+  return projectId === null ? '/api/studio/agent/sessions' : `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions`;
+}
+
+type WorkspaceSessionList<P extends string | null> = P extends null ? { sessions: StudioAgentSessionSummary[] } : CanvasAgentSessionList;
+
+export function listCanvasAgentSessions<P extends string | null>(projectId: P): Promise<WorkspaceSessionList<P>> {
+  return requestJson<WorkspaceSessionList<P>>(
+    agentSessionsPath(projectId),
     '读取画布 Agent 会话',
   );
 }
 
-export function createCanvasAgentSession(
-  projectId: string,
+export function createCanvasAgentSession<P extends string | null>(
+  projectId: P,
   title: string,
-): Promise<CanvasAgentSession> {
-  return requestJson<CanvasAgentSession>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions`,
+  settings?: CanvasAgentSessionUpdate,
+): Promise<WorkspaceSession<P>> {
+  return requestJson<WorkspaceSession<P>>(
+    agentSessionsPath(projectId),
     '创建画布 Agent 会话',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, ...settings }),
     },
   );
 }
 
-export function getCanvasAgentSession(
-  projectId: string,
+export function getCanvasAgentSession<P extends string | null>(
+  projectId: P,
   sessionId: string,
-): Promise<CanvasAgentSession> {
-  return requestJson<CanvasAgentSession>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`,
+): Promise<WorkspaceSession<P>> {
+  return requestJson<WorkspaceSession<P>>(
+    `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`,
     '读取画布 Agent 会话',
   );
 }
 
 export function deleteCanvasAgentSession(
-  projectId: string,
+  projectId: string | null,
   sessionId: string,
   revision: number,
 ): Promise<void> {
   return request(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`,
+    `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`,
     '删除画布 Agent 会话',
     { method: 'DELETE', headers: { 'If-Match': String(revision) } },
   ).then(() => undefined);
 }
 
-function agentSessionPath(projectId: string, sessionId: string): string {
-  return `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`;
+export function agentSessionPath(projectId: string | null, sessionId: string): string {
+  return `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`;
 }
 
 function sendAgentJson<T>(path: string, label: string, body: unknown, method = 'POST'): Promise<T> {
@@ -118,32 +129,32 @@ function sendAgentJson<T>(path: string, label: string, body: unknown, method = '
   });
 }
 
-export function updateCanvasAgentSession(
-  projectId: string,
+export function updateCanvasAgentSession<P extends string | null>(
+  projectId: P,
   sessionId: string,
   update: CanvasAgentSessionUpdate,
-): Promise<CanvasAgentSession> {
+): Promise<WorkspaceSession<P>> {
   return sendAgentJson(agentSessionPath(projectId, sessionId), '修改 Agent 会话设置', update, 'PATCH');
 }
 
 export function sendCanvasAgentMessage(
-  projectId: string,
+  projectId: string | null,
   sessionId: string,
   turn: CanvasAgentTurnCreate,
 ): Promise<CanvasAgentSession> {
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/messages`, '发送消息', turn);
 }
 
-export function decideCanvasAgentApprovals(
-  projectId: string,
+export function decideCanvasAgentApprovals<P extends string | null>(
+  projectId: P,
   sessionId: string,
   decisions: CanvasAgentApprovalDecision[],
-): Promise<CanvasAgentSession> {
+): Promise<WorkspaceSession<P>> {
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/approvals`, '确认 Agent 操作', { decisions });
 }
 
 export function getCanvasAgentBatchItems(
-  projectId: string,
+  projectId: string | null,
   sessionId: string,
   callId: string,
 ): Promise<CanvasAgentBatchItems> {
@@ -152,11 +163,11 @@ export function getCanvasAgentBatchItems(
 }
 
 /** 没写过待办或文件读不出时为 null。 */
-export function getCanvasAgentPlan(projectId: string, sessionId: string): Promise<CanvasAgentPlan | null> {
+export function getCanvasAgentPlan(projectId: string | null, sessionId: string): Promise<CanvasAgentPlan | null> {
   return requestJson<CanvasAgentPlan | null>(`${agentSessionPath(projectId, sessionId)}/plan`, '读取 Agent 待办');
 }
 
-export function getCanvasAgentSessionUsage(projectId: string, sessionId: string): Promise<CanvasAgentSessionUsage> {
+export function getCanvasAgentSessionUsage(projectId: string | null, sessionId: string): Promise<CanvasAgentSessionUsage> {
   return requestJson<CanvasAgentSessionUsage>(`${agentSessionPath(projectId, sessionId)}/usage`, '读取 Agent 用量');
 }
 
@@ -168,7 +179,7 @@ export function updateCanvasAgentSettings(settings: CanvasAgentSettings): Promis
   return sendAgentJson('/api/canvas/agent/settings', '修改 Agent 设置', settings, 'PUT');
 }
 
-export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Promise<CanvasAgentSession> {
+export function cancelCanvasAgentTurn<P extends string | null>(projectId: P, sessionId: string): Promise<WorkspaceSession<P>> {
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/cancel`, '停止 Agent', {});
 }
 
@@ -671,4 +682,17 @@ export function reviewCanvasLesson(projectId: string, index: number, adopt: bool
   return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/lessons/${index}${adopt ? '/adopt' : ''}`, '处理项目经验', {
     method: adopt ? 'POST' : 'DELETE',
   });
+}
+
+export function uploadStudioAgentAttachment(sessionId: string, file: File) {
+  const form = new FormData();
+  form.append('file', file);
+  return requestJson<{ attachment_id: string }>(agentSessionPath(null, sessionId) + '/attachments',
+    '上传对话参考图', { method: 'POST', body: form });
+}
+
+export function sendStudioAgentMessage(sessionId: string, message: {
+  text: string; skill: string | null; asset_ids: string[]; attachment_ids: string[]; client_message_id: string;
+}) {
+  return sendAgentJson<StudioAgentSession>(agentSessionPath(null, sessionId) + '/messages', '发送消息', message);
 }

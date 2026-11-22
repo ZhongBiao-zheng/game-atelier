@@ -6,6 +6,7 @@ import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } fro
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
+import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
@@ -56,6 +57,7 @@ function saveSelection(sel: SavedSelection): void {
 }
 
 export function StudioCompact() {
+  const composer = useStudioComposer(true);
   const [, setLocation] = useLocation();
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
@@ -396,7 +398,8 @@ export function StudioCompact() {
       <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
         描述你想生成的图片
       </h1>
-      <PromptInput
+      <StudioComposer state={composer}>
+        <PromptInput
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
         value={promptText}
@@ -449,6 +452,7 @@ export function StudioCompact() {
         videoFrames={videoFrames}
         onVideoFramesChange={setVideoFrames}
       />
+      </StudioComposer>
       {compactError && (
         <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
           {compactError}

@@ -3,7 +3,7 @@ import { AiIcon, UploadIcon } from '@/components/ui/icons';
 import { classifyCreationAssets, listCreationAssets, updateCreationAssetCategory, uploadMediaCreationAsset } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { MediaPreview } from './CreationAssetCards';
-import { rememberedModel } from '@/components/canvas/agent/useCanvasAgent';
+import { rememberedModel } from '@/components/agent/useWorkspaceAgent';
 import { Button } from '@/components/ui/button';
 import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
 import { FileInput } from '@/components/ui/file-input';
