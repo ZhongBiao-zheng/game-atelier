@@ -393,8 +393,12 @@ class Job(BaseModel):
     kind: JobKind = JobKind.IMAGE
     namespace: Namespace = "studio"
     source_image: str | None = None  # 参考素材的绝对路径
-    studio_agent_session_id: str | None = Field(default=None, pattern=r"^session-[a-z0-9-]{8,64}$")
-    studio_agent_turn_id: str | None = Field(default=None, pattern=r"^turn-[a-z0-9-]{1,64}$")
+    studio_agent_session_id: str | None = Field(
+        default=None, pattern=r"^session-[a-z0-9-]{8,64}$", exclude_if=lambda value: value is None,
+    )
+    studio_agent_turn_id: str | None = Field(
+        default=None, pattern=r"^turn-[a-z0-9-]{1,64}$", exclude_if=lambda value: value is None,
+    )
     # Canvas 生成任务归属项目与运行快照。
     canvas_project_id: str | None = None
     canvas_run: CanvasJobContext | None = None
@@ -1992,13 +1996,20 @@ class CanvasAgentSession(AgentSession):
     created_node_ids: list[str] = Field(default_factory=list, max_length=5000)
 
 
+class StudioAgentStep(BaseModel):
+    step_id: str
+    tool: str
+    summary: str
+    status: Literal["running", "completed", "failed", "interrupted", "rejected"]
+
+
 class StudioAgentTurn(BaseModel):
     turn_id: str
     client_message_id: str
     status: CanvasAgentStatus = "running"
     attachment_ids: list[str] = Field(default_factory=list)
     asset_ids: list[str] = Field(default_factory=list)
-    steps: list[str] = Field(default_factory=list)
+    steps: list[StudioAgentStep] = Field(default_factory=list)
 
 
 class StudioAgentSession(AgentSession):

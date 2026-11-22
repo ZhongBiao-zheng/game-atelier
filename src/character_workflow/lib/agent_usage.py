@@ -52,6 +52,15 @@ def request_cost(key: Any, model_id: str, input_tokens: int, output_tokens: int,
                                   cached_tokens=cached_tokens, cache_write_tokens=cache_write_tokens)
 
 
+def _workspace_fields(project_id: str | None) -> dict:
+    return {"workspace": "studio", "project_id": None} if project_id is None else {"project_id": project_id}
+
+
+def _in_workspace(row: dict, project_id: str | None) -> bool:
+    workspace = "studio" if project_id is None else "canvas"
+    return row.get("workspace", "canvas") == workspace and row.get("project_id") == project_id
+
+
 def record_request(*, project_id: str | None, session_id: str, key: Any, alias: str, model: str,
                    input_tokens: int, output_tokens: int, cached_tokens: int,
                    cache_write_tokens: int = 0, at: datetime | None = None) -> dict:
@@ -59,7 +68,7 @@ def record_request(*, project_id: str | None, session_id: str, key: Any, alias: 
     provider = getattr(key, "provider", None)
     cost = request_cost(key, model, input_tokens, output_tokens, cached_tokens, cache_write_tokens)
     row = {
-        "time": moment.isoformat(), **({"workspace": "studio"} if project_id is None else {}), "project_id": project_id, "session_id": session_id,
+        "time": moment.isoformat(), **_workspace_fields(project_id), "session_id": session_id,
         "alias": alias, "model": model, "provider": provider,
         "source": "lan" if provider == GATEWAY_PROVIDER else "local",
         "input_tokens": input_tokens, "output_tokens": output_tokens,
@@ -153,7 +162,7 @@ def add_pending(*, project_id: str | None, session_id: str, call_tag: str, alias
     usage_dir().mkdir(parents=True, exist_ok=True)
     with file_lock(path.with_suffix(".lock")):
         items = [item for item in _read_pending() if item.get("call_tag") != call_tag]
-        items.append({**({"workspace": "studio"} if project_id is None else {}), "project_id": project_id, "session_id": session_id, "call_tag": call_tag,
+        items.append({**_workspace_fields(project_id), "session_id": session_id, "call_tag": call_tag,
                       "alias": alias, "model": model,
                       "at": datetime.now(timezone.utc).astimezone().isoformat()})
         _write_pending(items)
@@ -186,7 +195,8 @@ def fetch_host_call_tag(alias: str, call_tag: str) -> dict | None:
 
 def _settlement_row(item: dict, charged: float) -> dict:
     return {"time": datetime.now(timezone.utc).astimezone().isoformat(),
-            **({"workspace": "studio"} if item.get("workspace") == "studio" else {}), "project_id": item["project_id"], "session_id": item["session_id"],
+            **{key: item[key] for key in ("workspace", "project_id") if key in item},
+            "session_id": item["session_id"],
             "alias": item.get("alias"), "model": item.get("model"), "provider": GATEWAY_PROVIDER,
             "source": "lan", "kind": HOST_SETTLEMENT, "call_tag": item["call_tag"],
             "input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
@@ -195,7 +205,7 @@ def _settlement_row(item: dict, charged: float) -> dict:
 
 def settle_pending(project_id: str | None = None, session_id: str | None = None,
                    fetch=fetch_host_call_tag) -> int:
-    """补查待结算的标记（只查给定画布 / 会话的，不给则全部）。返回这次写入的结算行数。"""
+    """无参数结算全部；指定会话时，空 project_id 只指 Studio，非空只指该画布。"""
     path = _pending_file()
     if not path.is_file():
         return 0
@@ -204,8 +214,10 @@ def settle_pending(project_id: str | None = None, session_id: str | None = None,
     with file_lock(path.with_suffix(".lock")):
         keep = []
         for item in _read_pending():
-            wanted = ((project_id is None or item.get("project_id") == project_id)
-                      and (session_id is None or item.get("session_id") == session_id))
+            wanted = (project_id is None and session_id is None) or (
+                _in_workspace(item, project_id)
+                and (session_id is None or item.get("session_id") == session_id)
+            )
             if not wanted or not item.get("call_tag"):
                 keep.append(item)
                 continue
@@ -240,7 +252,7 @@ def session_totals(project_id: str | None, session_id: str, since: datetime) -> 
     """一个会话的累计用量。cost_cny 合计有价格的请求与主机结算行；unpriced 是没有价格的请求数
     （经网关的请求也算在这里：它们的金额只在主机结算行上）。"""
     found = [row for row in read_rows(since)
-             if row.get("project_id") == project_id and row.get("session_id") == session_id]
+             if _in_workspace(row, project_id) and row.get("session_id") == session_id]
     rows = [row for row in found if row.get("kind") != HOST_SETTLEMENT]
     priced = [row["cost_cny"] for row in found if isinstance(row.get("cost_cny"), (int, float))]
     sources = {row.get("source") for row in found}
@@ -254,7 +266,7 @@ def session_totals(project_id: str | None, session_id: str, since: datetime) -> 
     }
 
 
-def usage_records(rows: list[dict], session_titles: dict[tuple[str, str], str],
+def usage_records(rows: list[dict], session_titles: dict[tuple[str | None, str], str],
                   canvas_names: dict[str, str], now: datetime) -> list[dict]:
     """用量页「我的」记录：同一会话、同一天、同一模型的请求合成一条，避免一轮几十次请求刷满任务表。"""
     groups: dict[tuple, list[dict]] = defaultdict(list)
@@ -263,10 +275,10 @@ def usage_records(rows: list[dict], session_titles: dict[tuple[str, str], str],
             day = datetime.fromisoformat(row["time"]).astimezone(now.tzinfo).date().isoformat()
         except ValueError:
             continue
-        groups[(row.get("project_id"), row.get("session_id"), day,
+        groups[(row.get("workspace", "canvas"), row.get("project_id"), row.get("session_id"), day,
                 row.get("alias"), row.get("model"))].append(row)
     records = []
-    for (project_id, session_id, day, alias, model), items in groups.items():
+    for (workspace, project_id, session_id, day, alias, model), items in groups.items():
         settlements = [item["cost_cny"] for item in items if item.get("kind") == HOST_SETTLEMENT
                        and isinstance(item.get("cost_cny"), (int, float))]
         costs = [item.get("cost_cny") for item in items if item.get("kind") != HOST_SETTLEMENT]
@@ -276,14 +288,16 @@ def usage_records(rows: list[dict], session_titles: dict[tuple[str, str], str],
             cost = (round(sum(costs), 6)
                     if costs and all(isinstance(value, (int, float)) for value in costs) else None)
         title = session_titles.get((project_id, session_id), "已删除的对话")
-        label = canvas_names.get(project_id, "已删除的项目") if project_id else "创作台"
+        studio = workspace == "studio"
+        label = "创作台" if studio else canvas_names.get(project_id, "已删除的项目")
         records.append({
             "id": f"agent:{project_id}:{session_id}:{day}:{alias}:{model}",
             "cost_cny": cost, "at": max(item["time"] for item in items), "alias": alias,
             "status": "done", "duration_s": None, "project_label": label, "member_label": None,
-            "kind": "text", "model": model or "", "label": label, "project": f"canvas:{project_id}" if project_id else "studio",
+            "kind": "text", "model": model or "", "label": label,
+            "project": "studio" if studio else f"canvas:{project_id}",
             "source": "lan" if items[0].get("source") == "lan" else "local",
             "failed": False, "prompt": f"Agent 对话：{title}"[:120], "thumb_url": None,
-            "href": f"/canvas/{project_id}" if project_id else f"/studio?session={session_id}",
+            "href": f"/studio?session={session_id}" if studio else f"/canvas/{project_id}",
         })
     return records

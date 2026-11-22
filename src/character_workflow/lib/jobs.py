@@ -68,7 +68,13 @@ def new_job_id() -> str:
 
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
-    atomic_write_text(p, job.model_dump_json(indent=2))
+    # 旧版 Job 顶层拒绝未知字段，params 允许扩展。归属只由提交入口写入。
+    fields = {"studio_agent_session_id", "studio_agent_turn_id"}
+    payload = job.model_dump(mode="json", exclude=fields)
+    payload["params"].pop("_studio_agent", None)
+    if job.studio_agent_session_id:
+        payload["params"]["_studio_agent"] = job.model_dump(include=fields, exclude_none=True)
+    atomic_write_text(p, json.dumps(payload, ensure_ascii=False, indent=2))
     return job
 
 
@@ -111,6 +117,13 @@ def _load_job(data: Any) -> Job:
     抛 ValidationError → 上层 except 走「跳过 + 留日志」；绝不在 `.pop` 阶段抛
     Type/AttributeError 逃逸容错网，否则整个 /api/jobs 列表会 500（角色页全空）。"""
     if isinstance(data, dict):
+        params = data.get("params")
+        if isinstance(params, dict):
+            owner = params.pop("_studio_agent", None)
+            if isinstance(owner, dict):
+                for key in ("studio_agent_session_id", "studio_agent_turn_id"):
+                    if key in owner:
+                        data[key] = owner[key]
         for field in _RETIRED_FIELDS:
             data.pop(field, None)
     return Job.model_validate(data)
@@ -310,6 +323,8 @@ def clone_job_for_retry(job_id: str) -> Job:
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
+        "studio_agent_session_id": None,
+        "studio_agent_turn_id": None,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
         "params": params,
         "output_paths": [],

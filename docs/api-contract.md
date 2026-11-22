@@ -1633,8 +1633,17 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 
 ### Studio Agent
 
-本机页面在 `/api/studio/agent/sessions` GET 列出按最近使用排序的会话，POST 创建会话（201，可同时提交模型和创作设置）。详情端点 `/api/studio/agent/sessions/{session_id}` 支持 GET、PATCH 和带 If-Match revision 的 DELETE。会话、计划、上传图片分别位于 data root 的 studio-agent/sessions、plans、uploads/{session_id}。移除会话一起删除计划和附件，保留普通 Studio 记录。公开会话包含 turns、messages、pending_approvals 与设置，SDK history 和上传索引留在本机文件中。
+本机页面通过 `GET /api/studio/agent/sessions` 按最近使用时间列出会话，通过 POST 创建会话（201，可同时提交模型和创作设置）。详情端点 `/api/studio/agent/sessions/{session_id}` 支持 GET、PATCH 和 DELETE。删除请求的 `If-Match` 是客户端看到的 revision，缺失返回 428。服务端在会话锁内核对版本，并发更新已写入时返回 409，原轮次继续运行。删除成功返回 204，一并清理计划和附件，保留 Studio Job、产物及用量。文件分别位于数据目录的 `studio-agent/sessions`、`studio-agent/plans`、`studio-agent/uploads/{session_id}`。
 
-以下路径接在会话详情端点后。POST /attachments 接收单个 multipart 图片并返回 attachment_id。GET /attachments/{attachment_id} 只返回本会话已登记的图片。POST /messages 接收 {client_message_id,text,skill?,attachment_ids?,asset_ids?}，锁内认领用户轮次并返回 202；重放同一消息 ID 不重复执行。POST /approvals 沿用画布的 decisions 与逐项勾选，GET /approvals/{call_id}/items 返回估价明细，POST /cancel 停止或拒绝待执行项。GET /plan、/usage 和 /jobs 返回当前会话计划、对话用量和关联的 Studio 任务。模型、技能、生成模型、确认金额共用已有 /api/canvas/agent 全局端点。studio-agent SSE 携带 session_id、turn_id 和 kind（delta、tool、session、plan）。
+公开会话返回 `turns`、`messages`、`pending_approvals` 与设置。每个轮次的 `steps` 记录稳定的 `step_id`、`tool`、面板可见的 `summary` 和 `status`（running / completed / failed / interrupted / rejected）。待确认项返回 `call_id`、`tool` 与摘要。原始工具参数、SDK history 和上传索引仅在服务端读取。`studio-agent` SSE 事件携带 `session_id`、`turn_id` 与 `kind`，包括 delta、tool、step、session、plan。step 携带同形步骤，按 `step_id` 更新。重连后可从详情读取完整轮次。
 
-Studio Agent 创建的 Job 包含可选只读字段 studio_agent_session_id、studio_agent_turn_id，后者依赖前者，只有 studio 命名空间可有会话关联。生成用的参考媒体复制到 .runtime/uploads 后登记在普通 JobParams 中。一个生成项一个 Job，count 存入 n；批次 1–20 项，每项 1–4 份，部分成功保留已有任务。普通重编和再次生成使用普通创作入口。对话模型用量沿用 agent-usage 月账本，创作台行带 workspace=studio，画布沿用原格式，缺少 workspace 的行属于画布。
+以下路径均接在会话详情端点后。
+
+- `POST /attachments` 接收单个 multipart 图片并返回 attachment_id。`GET /attachments/{attachment_id}` 读取本会话已登记的图片。
+- `POST /messages` 接收 `{client_message_id,text,skill?,attachment_ids?,asset_ids?}`，锁内认领轮次并返回 202。同一消息 ID 重放只执行一次。
+- `POST /approvals` 沿用画布的 decisions 与逐项勾选。`GET /approvals/{call_id}/items` 返回批次估价明细。`POST /cancel` 停止当前轮次。更新维护期间禁发新消息，已接入轮次仍可审批或停止。更新等待同时统计 Studio 的运行中和待审批会话。服务重启时将遗留的运行中轮次记为 interrupted，保留待审批轮次。
+- `GET /plan`、`GET /usage` 和 `GET /jobs` 分别返回当前会话计划、累计对话用量和关联的 Studio 任务。模型、技能、生成模型、确认金额共用已有 `/api/canvas/agent` 全局端点。
+
+Studio Job 的 API 投影提供可选只读字段 `studio_agent_session_id` 与 `studio_agent_turn_id`。只有 studio 命名空间可有会话关联，turn_id 必须随 session_id。关联保存在 Job 文件的 `params._studio_agent` 扩展中，旧版可读取和回写同一任务文件。普通 Job 省略此扩展，手动重编或再次生成产生普通创作记录。生成用的参考媒体复制到 `.runtime/uploads` 后登记在普通 JobParams 中。每个生成项创建一个 Job，count 存入 n。批次 1–20 项，每项 1–4 份。批次按规范化后的参考和控制参数估价，超过阈值先确认。提交期间部分成功的任务保留。
+
+对话模型用量沿用 `.runtime/agent-usage/YYYY-MM.jsonl`。Studio 请求、待结算项和主机结算行都标记 `workspace=studio`、`project_id=null`，网关调用标记为 `studio:<session_id>:<revision>`。缺少 workspace 的旧行属于画布。读取单个 Studio 会话只结算该工作区、该会话的用量。

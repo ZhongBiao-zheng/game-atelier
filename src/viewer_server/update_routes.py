@@ -74,7 +74,7 @@ def work_request(path: str, method: str) -> bool:
         return True
     if re.fullmatch(r"/api/jobs/[^/]+/confirm", path):
         return True
-    if re.fullmatch(r"/api/studio/agent/sessions(?:/[^/]+/(?:messages|approvals))?", path):
+    if re.fullmatch(r"/api/studio/agent/sessions(?:/[^/]+/messages)?", path):
         return True
     if path.startswith("/api/canvas/projects/"):
         return bool(re.search(
@@ -149,14 +149,16 @@ def active_work() -> dict[str, int]:
     from character_workflow.lib.jobs import list_jobs
     from character_workflow.lib.canvas_projects import list_canvas_projects
     from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
+    from character_workflow.lib.studio_agent_sessions import summaries as studio_sessions
     # Read producers before their jobs: an agent may schedule a job and become idle
     # between reads. The inverse order can miss both sides of that handoff.
     sessions = [s for p in list_canvas_projects()
                 for s in list_canvas_agent_sessions(p.project_id).sessions]
+    statuses = [s.status for s in sessions] + [s["status"] for s in studio_sessions()]
     gateway = gateway_work(update_drain=True)
     jobs = sum(j.status.value in {"pending", "running"} for j in list_jobs())
-    return {"jobs": jobs, "agents": sum(s.status == "running" for s in sessions),
-            "approvals": sum(s.status == "awaiting_approval" for s in sessions),
+    return {"jobs": jobs, "agents": statuses.count("running"),
+            "approvals": statuses.count("awaiting_approval"),
             "gateway": gateway}
 
 

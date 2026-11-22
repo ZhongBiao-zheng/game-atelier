@@ -1062,7 +1062,8 @@ def display_messages(items: list[dict], turn_id: str, *, describe=summarize_call
 
 def call_tag_for(session: CanvasAgentSession) -> str:
     """经网关时每轮带的关联标记：会话 id + 会话 revision（每次写会话都 +1，同一轮内不变）。"""
-    return f"{session.session_id}:{session.revision}"
+    prefix = "" if hasattr(session, "project_id") else "studio:"
+    return f"{prefix}{session.session_id}:{session.revision}"
 
 
 def start_host_settlement(session: CanvasAgentSession) -> None:
@@ -1333,10 +1334,7 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
             buffer.add(data.delta)
         elif getattr(event, "type", "") == "run_item_stream_event" \
                 and getattr(event, "name", "") == "tool_called":
-            name = str(getattr(getattr(event.item, "raw_item", None), "name", ""))
-            if record_step := getattr(buffer.workspace, "record_step", None):
-                await asyncio.to_thread(record_step, name)
-            buffer.tool(name)
+            buffer.tool(str(getattr(getattr(event.item, "raw_item", None), "name", "")))
     buffer.flush()
     return result, context
 
@@ -1595,6 +1593,8 @@ def resolve_workspace_approvals(workspace, decisions, items=None):
                 label = "已执行"
         else:
             text, label = "用户拒绝了这个操作。", "已拒绝"
+        if record_decision := getattr(workspace, "record_decision", None):
+            record_decision(approval, decisions[approval.call_id], text)
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,
                         "output": text})
         results.append(CanvasAgentMessageCreate(role="tool", title=approval.tool, text=redact(

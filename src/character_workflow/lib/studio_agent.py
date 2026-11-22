@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_library as library
@@ -29,12 +29,24 @@ from character_workflow.lib.creation_assets import (
     get_creation_asset,
 )
 from character_workflow.lib.jobs import read_job
-from character_workflow.lib.schemas import CANVAS_DRAFT_PARAM_FIELDS, CanvasAgentPlan, JobParams
+from character_workflow.lib.schemas import (
+    CANVAS_DRAFT_PARAM_FIELDS,
+    CanvasAgentPlan,
+    JobParams,
+    StudioAgentStep,
+)
 
 INSTRUCTIONS = """你是 Atelier 创作台的创作助手。仅在用户明确要求生成时提交付费任务。
 先 list_models 选择允许的 alias、model 与参数。参考素材只用用户的附件、资产或本会话结果的 media_ref。
 用 run_generation / run_generations 提交，再用 wait_for_run(s) 等待；看图或视频联系表后核对并汇报。
 部分成功或提交状态不明时不要自动重新生成。多步骤任务用 update_plan。使用技能前读取说明。用中文简短回答。"""
+
+
+REFERENCE_FIELDS = {
+    "image": "reference_images",
+    "video": "reference_videos",
+    "audio": "reference_audios",
+}
 
 
 class Reference(BaseModel):
@@ -53,7 +65,7 @@ class Generation(BaseModel):
     references: list[Reference] = Field(default_factory=list, max_length=16)
     count: int = Field(default=1, ge=1, le=4)
 
-    def parameters(self):
+    def parameters(self, sid):
         allowed = CANVAS_DRAFT_PARAM_FIELDS[self.kind] - {
             "workflow_inputs",
             "creation_asset_source_title",
@@ -62,7 +74,33 @@ class Generation(BaseModel):
         }
         if self.params.keys() - allowed:
             raise ValueError("生成参数包含未开放的字段")
-        return JobParams.model_validate({**self.params, "n": self.count})
+        params = JobParams.model_validate({**self.params, "n": self.count}).model_dump(
+            exclude_none=True
+        )
+        refs = sorted(
+            self.references,
+            key=lambda ref: {"first_frame": 0, "reference": 1, "last_frame": 2}[ref.slot],
+        )
+        frame_slots = [ref.slot for ref in refs if ref.slot != "reference"]
+        if frame_slots:
+            if (
+                self.kind != "video"
+                or len(frame_slots) != len(refs)
+                or len(set(frame_slots)) != len(frame_slots)
+            ):
+                raise ValueError("首尾帧只适用于视频且每个位置只能指定一张图")
+            params["frame_mode"] = (
+                "firstlast" if len(frame_slots) == 2 else frame_slots[0].split("_")[0]
+            )
+        for ref in refs:
+            path, kind = media_path(sid, ref.media_ref)
+            if (frame_slots or self.kind == "image") and kind != "image":
+                raise ValueError("这个参考位置需要图片")
+            if not path.is_file():
+                raise ValueError("参考素材文件不存在")
+            field = REFERENCE_FIELDS[kind]
+            params.setdefault(field, []).append(str(path))
+        return params
 
 
 class Batch(BaseModel):
@@ -78,15 +116,30 @@ def items_for(tool, args):
     )
 
 
-def estimate_rows(items):
+def check_models(items, scope):
+    by_kind = {}
+    for item in items:
+        if item.kind not in by_kind:
+            by_kind[item.kind] = {(row["alias"], row["model"]) for row in scope.models(item.kind)}
+        if (item.alias, item.model) not in by_kind[item.kind]:
+            raise ValueError("当前创作设置不允许使用这个类型或模型")
+
+
+def estimate_rows(items, sid, scope=None):
+    if scope is not None:
+        check_models(items, scope)
     rows = []
     for index, item in enumerate(items):
-        params = item.parameters().model_dump(exclude_none=True)
+        params = item.parameters(sid)
+        if item.kind == "video":
+            params["n"] = 1
         amount = cost._estimate(item.kind, item.alias, item.model, params)
+        if item.kind == "video" and amount is not None:
+            amount *= item.count
         rows.append(
             {
                 "index": index,
-                "title": item.prompt[:80],
+                "title": runtime.redact(item.prompt)[:80],
                 "model": item.model,
                 "count": item.count,
                 "estimate_cny": amount,
@@ -171,13 +224,9 @@ def result_view(sid, job_id, check=False):
     }
 
 
-def submit(workspace, item, scope, call_id, index):
+def submit(workspace, item, params, call_id, index):
     from viewer_server.routes import _StudioJobCreate, _create_user_job, _store_runtime_upload
 
-    if not any(
-        row["alias"] == item.alias and row["model"] == item.model for row in scope.models(item.kind)
-    ):
-        raise ValueError("当前创作设置不允许使用这个类型或模型")
     if not call_id:
         raise ValueError("生成调用缺少唯一标识")
     identity = json.dumps([workspace.session_id, workspace.active_turn, call_id, index])
@@ -193,27 +242,12 @@ def submit(workspace, item, scope, call_id, index):
             existing = None
         if existing:
             return jid
-        params = item.parameters().model_dump(exclude_none=True)
-        refs = sorted(
-            item.references,
-            key=lambda r: {"first_frame": 0, "reference": 1, "last_frame": 2}[r.slot],
-        )
-        slots = [ref.slot for ref in refs if ref.slot != "reference"]
-        if slots:
-            if item.kind != "video" or len(slots) != len(refs) or len(set(slots)) != len(slots):
-                raise ValueError("首尾帧只适用于视频且每个位置只能指定一张图")
-            params["frame_mode"] = "firstlast" if len(slots) == 2 else slots[0].split("_")[0]
-        for ref in refs:
-            path, kind = media_path(workspace.session_id, ref.media_ref)
-            if (slots or item.kind == "image") and kind != "image":
-                raise ValueError("这个参考位置需要图片")
-            stored = _store_runtime_upload(path.suffix.lower(), path.read_bytes())
-            field = {
-                "image": "reference_images",
-                "video": "reference_videos",
-                "audio": "reference_audios",
-            }[kind]
-            params.setdefault(field, []).append(str(stored.resolve()))
+        for field in REFERENCE_FIELDS.values():
+            if paths := params.get(field):
+                params[field] = [
+                    str(_store_runtime_upload(path.suffix.lower(), path.read_bytes()).resolve())
+                    for path in map(Path, paths)
+                ]
         body = _StudioJobCreate(
             prompt=item.prompt, alias=item.alias, model=item.model, kind=item.kind, params=params
         )
@@ -228,13 +262,22 @@ def submit(workspace, item, scope, call_id, index):
     return jid
 
 
+def tool_error(error):
+    if isinstance(error, ValidationError):
+        return "参数错误：生成工具参数不符合要求"
+    if isinstance(error, OSError):
+        return "错误：无法访问本机素材或任务文件"
+    return "错误：" + runtime.redact(str(getattr(error, "detail", error)))[:800]
+
+
 class StudioWorkspace:
     event = "studio-agent"
     project_id = None
 
-    def __init__(self, sid, schedule):
+    def __init__(self, sid, schedule, notify=None):
         self.session_id = sid
         self.schedule = schedule
+        self.notify = notify
         self.active_turn = None
 
     def read(self):
@@ -243,21 +286,62 @@ class StudioWorkspace:
         return session
 
     def mutate(self, update):
+        step_events = []
+
         def scoped(current, now):
             if self.active_turn and current.turns[-1].turn_id != self.active_turn:
                 raise CanvasToolError("SESSION_BUSY", "对话已切换轮次", 409)
             fields = update(current, now)
             if "messages" in fields:
-                for message in fields["messages"][len(current.messages):]:
+                for message in fields["messages"][len(current.messages) :]:
                     if message.turn_id is None:
                         message.turn_id = self.active_turn
             if current.turns and "status" in fields:
                 turns = list(current.turns)
-                turns[-1] = turns[-1].model_copy(update={"status": fields["status"]})
+                steps = list(turns[-1].steps)
+                for approval in fields.get("pending_approvals", []):
+                    if not any(step.step_id == approval.call_id for step in steps):
+                        steps.append(
+                            StudioAgentStep(
+                                step_id=approval.call_id,
+                                tool=approval.tool,
+                                status="running",
+                                summary=approval.summary,
+                            )
+                        )
+                if fields["status"] in {"failed", "interrupted"}:
+                    terminal = fields["status"]
+                    if any(step.status == "running" for step in steps):
+                        steps = [
+                            step.model_copy(update={"status": terminal})
+                            if step.status == "running"
+                            else step
+                            for step in steps
+                        ]
+                    else:
+                        steps.append(
+                            StudioAgentStep(
+                                step_id=f"model-{turns[-1].turn_id}",
+                                tool="model",
+                                status=terminal,
+                                summary=runtime.redact(fields.get("error") or ""),
+                            )
+                        )
+                turns[-1] = turns[-1].model_copy(
+                    update={"status": fields["status"], "steps": steps}
+                )
                 fields["turns"] = turns
+            if self.notify and "turns" in fields:
+                previous = {step.step_id: step for step in current.turns[-1].steps}
+                step_events.extend(
+                    step for step in fields["turns"][-1].steps if previous.get(step.step_id) != step
+                )
             return fields
 
-        return sessions.mutate(self.session_id, scoped)
+        session = sessions.mutate(self.session_id, scoped)
+        for step in step_events:
+            self.notify(self.event, {**self.address(), "kind": "step", "step": step.model_dump()})
+        return session
 
     def turn_id(self, session):
         return session.turns[-1].turn_id
@@ -287,34 +371,70 @@ class StudioWorkspace:
         except (KeyError, OSError, ValueError):
             return None
 
-    def record_step(self, name):
+    def record_decision(self, approval, approved, output):
+        if approved:
+            self.finish_step(approval.call_id, approval.tool, output)
+        else:
+            self.record_step(approval.call_id, approval.tool, "rejected", approval.summary)
+
+    def finish_step(self, call_id, tool, output):
+        status, summary = "completed", ""
+        if runtime.is_tool_error(output):
+            status, summary = "failed", runtime.tool_error_label(output)
+        elif tool == "run_generations":
+            result = json.loads(output)
+            summary = runtime.generations_outcome(output) or ""
+            if result.get("failed"):
+                status = "failed"
+        self.record_step(call_id, tool, status, summary)
+
+    def record_step(self, call_id, tool, status, summary):
         def update(current, now):
+            if current.status != "running":
+                return {}
             turns = list(current.turns)
-            steps = [*turns[-1].steps, name]
-            turns[-1] = turns[-1].model_copy(update={"steps": steps})
+            steps = {step.step_id: step for step in turns[-1].steps}
+            old = steps.get(call_id)
+            steps[call_id] = StudioAgentStep(
+                step_id=call_id,
+                tool=tool,
+                status=status,
+                summary=runtime.redact(summary)[:800] or (old.summary if old else ""),
+            )
+            turns[-1] = turns[-1].model_copy(update={"steps": list(steps.values())})
             return {"turns": turns}
+
         self.mutate(update)
 
     def messages(self, items, turn_id):
-        def describe(tool, args):
-            if tool == "run_generation":
-                return f"生成 {args.get('count', 1)} 份结果 · {args.get('model', '')}"
-            return runtime.summarize_call(tool, args)
-        return runtime.display_messages(items, turn_id, describe=describe, canvas_references=False)
+        return runtime.display_messages(
+            items, turn_id, describe=self.describe_tool, canvas_references=False
+        )
+
+    @staticmethod
+    def describe_tool(tool, args):
+        if tool == "run_generation":
+            return "提交生成任务"
+        if tool == "run_generations":
+            return "批量提交生成任务"
+        return runtime.summarize_call(tool, args)
 
     def created_fields(self, current, created):
         return {}
 
     def summary(self, tool, args, changes):
         if tool in {"run_generation", "run_generations"}:
-            rows = estimate_rows(items_for(tool, args))
+            try:
+                rows = estimate_rows(items_for(tool, args), self.session_id)
+            except (OSError, ValueError, TypeError, LookupError):
+                return "生成参数或参考素材无效，无法估价"
             amount = sum(row["estimate_cny"] or 0 for row in rows)
             priced = sum(row["estimate_cny"] is not None for row in rows)
             label = f"预计 {amount:g} 元" if priced else "未计价"
             return f"{len(rows)} 项生成，{label}" + (
                 f"（{len(rows) - priced} 项未计价）" if 0 < priced < len(rows) else ""
             )
-        return runtime.summarize_call(tool, args)
+        return self.describe_tool(tool, args)
 
     def execute_approved(self, session, approval, created, rejected):
         return (
@@ -335,28 +455,39 @@ class StudioWorkspace:
                 self.execute(name, args, scope, call_id, rejected), ensure_ascii=False
             )
         except Exception as error:
-            return "错误：" + runtime.redact(str(getattr(error, "detail", error)))[:800]
+            return tool_error(error)
 
     def execute(self, name, args, scope, call_id, rejected):
         sid = self.session_id
         if name in {"run_generation", "run_generations"}:
             items = items_for(name, args)
+            chosen = {index: item for index, item in enumerate(items) if index not in rejected}
+            check_models(chosen.values(), scope)
+            prepared = {index: item.parameters(sid) for index, item in chosen.items()}
             rows = []
             for index, item in enumerate(items):
                 row = {"index": index, "status": "rejected"}
                 if index not in rejected:
                     try:
-                        jid = submit(self, item, scope, call_id, index)
+                        jid = submit(self, item, prepared[index], call_id, index)
                         row.update(status="submitted", job_id=jid)
                     except Exception as error:
                         if name == "run_generation":
                             raise
                         row.update(
                             status="failed",
-                            error=runtime.redact(str(getattr(error, "detail", error)))[:800],
+                            error=tool_error(error),
                         )
                 rows.append(row)
-            return rows[0] if name == "run_generation" else {"items": rows}
+            if name == "run_generation":
+                return rows[0]
+            return {
+                "items": rows,
+                **{
+                    state: sum(row["status"] == state for row in rows)
+                    for state in ("submitted", "failed", "rejected")
+                },
+            }
         if name == "list_models":
             kinds = [args["mode"]] if args.get("mode") else scope.kinds()
             return {"models": [row for kind in kinds for row in scope.models(kind)]}
@@ -447,6 +578,8 @@ class StudioWorkspace:
         )
 
         def build(name):
+            # SDK 继续派发无需确认的工具；估价失败的这一次调用只能返回错误，不能执行任何生成。
+            invalid_calls = {}
             description, schema = runtime.TOOL_SPECS[name]
             if name in {"run_generation", "run_generations"}:
                 schema = runtime._inline_refs(
@@ -465,26 +598,36 @@ class StudioWorkspace:
                 description = description.replace("本项目", "本机").replace("run_id", "job_id")
 
             async def invoke(ctx, raw):
+                call_id = ctx.tool_call_id
                 try:
                     args = json.loads(raw or "{}")
-                    if name.startswith("wait_for_"):
-                        ids = args["job_ids"] if name == "wait_for_runs" else [args["job_id"]]
-                        return json.dumps(await self.wait(ids), ensure_ascii=False)
-                    text = await asyncio.to_thread(
-                        self.invoke_sync, name, args, ctx.context.scope, ctx.tool_call_id
+                    await asyncio.to_thread(
+                        self.record_step, call_id, name, "running", self.describe_tool(name, args)
                     )
-                    if name == "update_plan":
-                        ctx.context.notify(self.event, {**self.address(), "kind": "plan"})
-                    return text
-                except (ValueError, KeyError, TypeError) as error:
-                    return "错误：" + runtime.redact(str(error))
+                    if call_id in invalid_calls:
+                        output = invalid_calls.pop(call_id)
+                    elif name.startswith("wait_for_"):
+                        ids = args["job_ids"] if name == "wait_for_runs" else [args["job_id"]]
+                        output = json.dumps(await self.wait(ids), ensure_ascii=False)
+                    else:
+                        output = await asyncio.to_thread(
+                            self.invoke_sync, name, args, ctx.context.scope, call_id
+                        )
+                        if name == "update_plan" and not runtime.is_tool_error(output):
+                            ctx.context.notify(self.event, {**self.address(), "kind": "plan"})
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    output = tool_error(error)
+                await asyncio.to_thread(self.finish_step, call_id, name, output)
+                return output
 
             async def approval(ctx, args, call_id):
                 try:
-                    rows = await asyncio.to_thread(estimate_rows, items_for(name, args))
-                except (ValueError, TypeError, LookupError):
-                    # 无效参数由实际执行路径返回错误；估价异常时审查模式仍需确认。
-                    return ctx.context.permission_mode != "auto"
+                    rows = await asyncio.to_thread(
+                        estimate_rows, items_for(name, args), self.session_id, ctx.context.scope
+                    )
+                except (OSError, ValueError, TypeError, LookupError) as error:
+                    invalid_calls[call_id] = tool_error(error)
+                    return False
                 return ctx.context.permission_mode != "auto" or cost.needs_cost_confirmation(
                     sum(row["estimate_cny"] or 0 for row in rows)
                 )

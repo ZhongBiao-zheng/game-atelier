@@ -108,12 +108,18 @@ def delete(sid, revision):
         session = read(sid)
         if session.revision != revision:
             raise CanvasToolError("REVISION_CONFLICT", "对话已更新", 409)
-        session_path(sid).unlink()
-        plan_path(sid).unlink(missing_ok=True)
         directory = upload_dir(sid)
-        if directory.exists():
-            shutil.rmtree(directory)
+        try:
+            if directory.exists():
+                shutil.rmtree(directory)
+            plan_path(sid).unlink(missing_ok=True)
+            session_path(sid).unlink()
+        except PermissionError:
+            # Windows 可能仍有附件正在读取。保留会话入口让用户能重试清理。
+            raise CanvasToolError("SESSION_BUSY", "附件正在使用，请稍后重试", 409) from None
 
 
 def public(session):
-    return session.model_dump(exclude={"history", "uploads"})
+    return session.model_dump(
+        exclude={"history": True, "uploads": True, "pending_approvals": {"__all__": {"arguments"}}}
+    )

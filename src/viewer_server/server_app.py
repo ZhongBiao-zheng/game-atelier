@@ -233,8 +233,10 @@ async def normal_lifespan(app: FastAPI):
         hub.broadcast("gateway_task", snapshot)
     gateway_live.listeners.append(gateway_listener)
     from viewer_server.routes import _reset_studio_recovery_workers
+    from viewer_server.studio_agent_routes import recover_abandoned_turns
 
     _reset_studio_recovery_workers()
+    await recover_abandoned_turns()
     from character_workflow.lib.creation_assets_migration import (
         migrate_creation_assets_to_v4,
         migrate_creation_assets_to_single_content,

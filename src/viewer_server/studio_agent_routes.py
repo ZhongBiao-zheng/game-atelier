@@ -72,7 +72,7 @@ def workspace(sid):
     def schedule(job_id):
         asyncio.run_coroutine_threadsafe(_start_studio_job_task(job_id), loop).result()
 
-    return StudioWorkspace(sid, schedule)
+    return StudioWorkspace(sid, schedule, hub.broadcast)
 
 
 def begin(sid, payload):
@@ -185,13 +185,22 @@ def interrupt(ws, reason):
     return session
 
 
+async def recover_abandoned_turns():
+    for row in await asyncio.to_thread(sessions.summaries):
+        if row["status"] == "running":
+            ws = workspace(row["session_id"])
+            await asyncio.to_thread(interrupt, ws, "服务重启，这一轮已中断")
+
+
 def launch(ws):
     async def run():
         try:
             await runtime.run_workspace_turn(ws, hub.broadcast)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
+            if isinstance(error, CanvasToolError) and error.code == "NOT_FOUND":
+                return  # DELETE 已在会话锁内移除了这轮的持久状态。
             logger.exception("Studio Agent 回合中断")
             await asyncio.to_thread(interrupt, ws, "这一轮已中断")
         finally:
@@ -273,7 +282,7 @@ def batch(session_id: CanvasAgentSessionId, call_id: str):
     if not item:
         raise HTTPException(404, detail="没有这个待确认操作")
     return {
-        "items": estimate_rows(items_for(item.tool, runtime._arguments(item.arguments))),
+        "items": estimate_rows(items_for(item.tool, runtime._arguments(item.arguments)), session_id),
         "confirm_above_cny": cost.confirm_above_cny(),
     }
 
@@ -301,12 +310,8 @@ async def delete(
 ):
     revision = _canvas_if_match(if_match, "对话")
     async with guard(session_id):
-        row = await asyncio.to_thread(sessions.read, session_id)
-        if row.revision != revision:
-            raise HTTPException(409, detail="对话已更新")
+        await asyncio.to_thread(sessions.delete, session_id, revision)
         await stop_task(session_id)
-        row = await asyncio.to_thread(sessions.read, session_id)
-        await asyncio.to_thread(sessions.delete, session_id, row.revision)
         return Response(status_code=204)
 
 
