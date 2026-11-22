@@ -790,6 +790,11 @@ def _media_data_url(project_id: str, version_id: str) -> str | None:
 
 def hydrate(project_id: str, history: list[dict]) -> tuple[list[dict], dict[str, str]]:
     """Replace atelier-media refs with data URLs; returns (items, data_url → ref)."""
+    return hydrate_refs(history, lambda ref: _media_data_url(project_id, ref),
+                        "（引用的图片已不在画布上）")
+
+
+def hydrate_refs(history, resolve, missing):
     reverse: dict[str, str] = {}
 
     def convert(value: Any) -> Any:
@@ -797,9 +802,9 @@ def hydrate(project_id: str, history: list[dict]) -> tuple[list[dict], dict[str,
             url = value.get("image_url")
             if value.get("type") == "input_image" and isinstance(url, str) \
                     and url.startswith(MEDIA_SCHEME):
-                data_url = _media_data_url(project_id, url.removeprefix(MEDIA_SCHEME))
+                data_url = resolve(url.removeprefix(MEDIA_SCHEME))
                 if data_url is None:
-                    return {"type": "input_text", "text": "（引用的图片已不在画布上）"}
+                    return {"type": "input_text", "text": missing}
                 reverse[data_url] = url
                 return {**value, "image_url": data_url}
             return {key: convert(item) for key, item in value.items()}
@@ -1107,7 +1112,9 @@ def _agent_client(key: keys.KeySpec, protocol: str | None,
 
 
 def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None,
-                call_tag: str | None = None):
+                call_tag: str | None = None, *, workspace=None):
+    if workspace is None:
+        workspace = CanvasWorkspace(session.project_id, getattr(session, "session_id", ""))
     from agents import (
         Agent, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, set_tracing_disabled,
     )
@@ -1142,10 +1149,9 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
     if llm_protocols.speaks_openai(protocol) and protocol != llm_protocols.OPENAI_RESPONSES:
         settings.include_usage = True
     return Agent(
-        name="canvas-agent",
-        instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
-        + skills.skills_prompt() + team_library_specs.agent_instructions(session.project_id),
-        tools=build_tools(),
+        name=workspace.event,
+        instructions=workspace.instructions(session),
+        tools=workspace.tools(),
         model=(OpenAIResponsesModel if protocol == llm_protocols.OPENAI_RESPONSES
                else OpenAIChatCompletionsModel)(model=session.model, openai_client=client),
         model_settings=settings,
@@ -1215,9 +1221,60 @@ def friendly_error(error: BaseException) -> str:
     return "对话出错，详情见服务日志"
 
 
+@dataclass
+class CanvasWorkspace:
+    project_id: str
+    session_id: str
+    event = "canvas-agent"
+
+    def read(self):
+        return read_canvas_agent_session(self.project_id, self.session_id)
+
+    def mutate(self, update):
+        return mutate_canvas_agent_session(self.project_id, self.session_id, update)
+
+    def instructions(self, session):
+        return (INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
+                + skills.skills_prompt() + team_library_specs.agent_instructions(self.project_id))
+
+    def tools(self):
+        return build_tools()
+
+    def media(self, ref):
+        return _media_data_url(self.project_id, ref)
+
+    def hydrate(self, history):
+        return hydrate(self.project_id, history)
+
+    def turn_id(self, session):
+        return f"turn-{int(time.time() * 1000)}"
+
+    def address(self):
+        return {"project_id": self.project_id, "session_id": self.session_id}
+
+    def summary(self, tool, arguments, changes):
+        if tool == "run_generation":
+            return generation_summary(self.project_id, arguments, changes)
+        if tool == "run_generations":
+            return generations_summary(self.project_id, arguments, changes)
+        return summarize_call(tool, arguments)
+
+    def created_fields(self, current, created):
+        return {"created_node_ids": sorted(set(current.created_node_ids) | created)}
+
+    def execute_approved(self, session, approval, created, rejected):
+        arguments = _arguments(approval.arguments)
+        rows = generation_rows(self.project_id, arguments, []) if approval.tool == "run_generations" else []
+        text, nodes = run_tool_safely(self.project_id, approval.tool, arguments, ModelScope.of(session),
+                                      frozenset(session.created_node_ids) | created, rejected)
+        record = generations_record(rows, text) if rows and not is_tool_error(text) else None
+        return text, nodes, record
+
+
 class DeltaBuffer:
-    def __init__(self, notify: Notify, project_id: str, session_id: str) -> None:
-        self.notify, self.project_id, self.session_id = notify, project_id, session_id
+    def __init__(self, notify: Notify, workspace):
+        self.notify = notify
+        self.workspace = workspace
         self.pending = ""
         self.last = 0.0
 
@@ -1229,19 +1286,18 @@ class DeltaBuffer:
     def tool(self, name: str) -> None:
         """模型开始调用工具：先把已有文字推出去，再告诉面板正在做哪一步。"""
         self.flush()
-        self.notify("canvas-agent", {"project_id": self.project_id, "session_id": self.session_id,
-                                     "kind": "tool", "text": name})
+        self.notify(self.workspace.event, {**self.workspace.address(),
+                                          "kind": "tool", "text": name})
 
     def flush(self) -> None:
         if self.pending:
-            self.notify("canvas-agent", {"project_id": self.project_id,
-                                         "session_id": self.session_id,
-                                         "kind": "delta", "text": self.pending})
+            self.notify(self.workspace.event, {**self.workspace.address(),
+                                               "kind": "delta", "text": self.pending})
             self.pending = ""
         self.last = time.monotonic()
 
 
-def _run_config(project_id: str):
+def _run_config(resolve):
     """每次调模型前把最近的结果图附上（只影响这次请求，不进历史）。"""
     from agents import RunConfig
     from agents.run_config import ModelInputData
@@ -1249,7 +1305,7 @@ def _run_config(project_id: str):
     async def attach(data) -> ModelInputData:
         items = await asyncio.to_thread(
             vision.with_attached_images, list(data.model_data.input),
-            lambda version_id: _media_data_url(project_id, version_id),
+            resolve,
         )
         return ModelInputData(input=items, instructions=data.model_data.instructions)
 
@@ -1261,13 +1317,13 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
 
     from character_workflow.lib.gateway_text_wait import WAITING_LABEL
     agent = build_agent(session, on_gateway_wait=lambda: buffer.tool(WAITING_LABEL),
-                        call_tag=call_tag_for(session))
+                        call_tag=call_tag_for(session), workspace=buffer.workspace)
     context = TurnContext(session.project_id, session.permission_mode,
                           set(session.created_node_ids), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "",
                           buffer.notify)
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
-                                 hooks=usage_hooks(), run_config=_run_config(session.project_id))
+                                 hooks=usage_hooks(), run_config=_run_config(buffer.workspace.media))
     async for event in result.stream_events():
         data = getattr(event, "data", None)
         if getattr(event, "type", "") == "raw_response_event" \
@@ -1317,23 +1373,27 @@ def notify_session(notify: Notify, project_id: str, session_id: str) -> None:
 
 async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
     """Continue the session from its stored history until done or awaiting approval."""
-    session = await asyncio.to_thread(read_canvas_agent_session, project_id, session_id)
-    turn_id = f"turn-{int(time.time() * 1000)}"
+    await run_workspace_turn(CanvasWorkspace(project_id, session_id), notify)
+
+
+async def run_workspace_turn(workspace, notify):
+    session = await asyncio.to_thread(workspace.read)
+    turn_id = workspace.turn_id(session)
     base = list(session.history)
-    hydrated, reverse = await asyncio.to_thread(hydrate, project_id, base)
-    buffer = DeltaBuffer(notify, project_id, session_id)
+    hydrated, reverse = await asyncio.to_thread(workspace.hydrate, base)
+    buffer = DeltaBuffer(notify, workspace)
     try:
         result, context = await run_model(session, hydrated, buffer)
     except asyncio.CancelledError:
-        await asyncio.to_thread(_finish_failed, project_id, session_id, turn_id,
+        await asyncio.to_thread(finish_failed, workspace, turn_id,
                                 "interrupted", "已停止")
-        notify_session(notify, project_id, session_id)
+        notify(workspace.event, {**workspace.address(), "kind": "session"})
         raise
     except Exception as error:  # noqa: BLE001 — 任何失败都要落到会话里，面板才看得到
         logger.warning("canvas agent turn failed: %s", type(error).__name__, exc_info=True)
-        await asyncio.to_thread(_finish_failed, project_id, session_id, turn_id,
+        await asyncio.to_thread(finish_failed, workspace, turn_id,
                                 "failed", friendly_error(error))
-        notify_session(notify, project_id, session_id)
+        notify(workspace.event, {**workspace.address(), "kind": "session"})
         return
     finally:
         # 成功、失败、被停止都查：已经发生的请求主机都结算了。
@@ -1347,12 +1407,7 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
                      for change in _arguments(call.arguments).get("changes") or []]
     for call in calls:
         arguments = _arguments(call.arguments)
-        if call.name == "run_generation":
-            summary = await asyncio.to_thread(generation_summary, project_id, arguments, batch_changes)
-        elif call.name == "run_generations":
-            summary = await asyncio.to_thread(generations_summary, project_id, arguments, batch_changes)
-        else:
-            summary = summarize_call(call.name, arguments)
+        summary = await asyncio.to_thread(workspace.summary, call.name, arguments, batch_changes)
         pending.append(CanvasAgentApproval(
             call_id=call.call_id, tool=call.name, arguments=call.arguments or "{}",
             summary=redact(summary)[:4000],
@@ -1381,15 +1436,15 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
             "pending_approvals": pending,
             "status": status,
             "error": error,
-            "created_node_ids": sorted(set(current.created_node_ids) | context.created_node_ids),
+            **workspace.created_fields(current, context.created_node_ids),
             "token_usage": {
                 "input_tokens": current.token_usage.input_tokens + usage.input_tokens,
                 "output_tokens": current.token_usage.output_tokens + usage.output_tokens,
             },
         }
 
-    await asyncio.to_thread(mutate_canvas_agent_session, project_id, session_id, update)
-    notify_session(notify, project_id, session_id)
+    await asyncio.to_thread(workspace.mutate, update)
+    notify(workspace.event, {**workspace.address(), "kind": "session"})
 
 
 NO_SUMMARY_NOTE = "模型没有补充说明"
@@ -1447,14 +1502,18 @@ def _empty_reply_message(session: CanvasAgentSession, result: Any) -> str:
     return f"模型没有返回内容，可以重试或换个模型（{session.model_alias} / {session.model} · {tokens}）"
 
 
-def _finish_failed(project_id: str, session_id: str, turn_id: str, status: str,
+def _finish_failed(project_id, session_id, turn_id, status, message):
+    finish_failed(CanvasWorkspace(project_id, session_id), turn_id, status, message)
+
+
+def finish_failed(workspace, turn_id: str, status: str,
                    message: str) -> None:
     def update(current: CanvasAgentSession, now: str) -> dict:
         error = CanvasAgentMessageCreate(role="error", turn_id=turn_id, text=message)
         return {**with_appended_messages(current, [error], now), "status": status,
                 "error": message, "pending_approvals": []}
 
-    mutate_canvas_agent_session(project_id, session_id, update)
+    workspace.mutate(update)
 
 
 # ── 会话入口（路由在线程里调用；之后由路由调度 run_turn）────────────────────────
@@ -1496,6 +1555,10 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
     先认领再执行：在会话锁里把 awaiting_approval 改成 running、清空待确认，之后才执行。执行过的调用
     不能再执行（任务已建、改动已提交），所以并发的第二个裁决拿到 409；执行中出现任何异常都变成
     那个调用的错误输出，会话照常 running 让模型继续。认领后进程退出的，mark_interrupted 补输出。"""
+    return resolve_workspace_approvals(CanvasWorkspace(project_id, session_id), decisions, items)
+
+
+def resolve_workspace_approvals(workspace, decisions, items=None):
     items = items or {}
     claimed: dict = {}
 
@@ -1508,7 +1571,7 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
         claimed["session"] = current
         return {"status": "running", "pending_approvals": []}
 
-    mutate_canvas_agent_session(project_id, session_id, claim)
+    workspace.mutate(claim)
     session: CanvasAgentSession = claimed["session"]
     rejected_items: dict[str, frozenset[int]] = claimed["rejected"]
     outputs: list[dict] = []
@@ -1518,20 +1581,13 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
         record = None
         if decisions[approval.call_id]:
             # 执行记录的估价取执行这一刻的（等待确认期间 draft 可能改过），不复用卡片上的数。
-            rows = (generation_rows(project_id, _arguments(approval.arguments), [])
-                    if approval.tool == "run_generations" else [])
-            text, new_nodes = run_tool_safely(project_id, approval.tool,
-                                              _arguments(approval.arguments),
-                                              ModelScope.of(session),
-                                              frozenset(session.created_node_ids) | created,
-                                              rejected_items.get(approval.call_id, frozenset()))
+            text, new_nodes, record = workspace.execute_approved(
+                session, approval, created, rejected_items.get(approval.call_id, frozenset()))
             created.update(new_nodes)
             if is_tool_error(text):
                 label = tool_error_label(text)
             else:
                 label = "已执行"
-                if approval.tool == "run_generations":
-                    record = generations_record(rows, text)
         else:
             text, label = "用户拒绝了这个操作。", "已拒绝"
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,
@@ -1545,9 +1601,9 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
         return {**with_appended_messages(current, results, now),
                 "history": [*current.history,
                             *(item for item in outputs if item["call_id"] not in answered)],
-                "created_node_ids": sorted(set(current.created_node_ids) | created)}
+                **workspace.created_fields(current, created)}
 
-    return mutate_canvas_agent_session(project_id, session_id, update)
+    return workspace.mutate(update)
 
 
 def _rejected_items(approvals: list, items: dict[str, list[int]]) -> dict[str, frozenset[int]]:
