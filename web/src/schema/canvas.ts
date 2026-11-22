@@ -355,7 +355,9 @@ export type CanvasContentOrigin =
         | { kind: 'crop'; rect: { x: number; y: number; width: number; height: number } }
         | { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[]; row: number; column: number }
         | { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' }
-        | { kind: 'remove_background'; model: string };
+        | { kind: 'remove_background'; model: string }
+        | { kind: 'video_trim'; start_ms: number; end_ms: number }
+        | { kind: 'video_compress'; max_long_edge: number; quality: 'small' | 'standard' | 'high' };
     }
   | { kind: 'import'; package_id: string }
   | { kind: 'creation_asset_snapshot'; title: string; asset_id?: string | null };

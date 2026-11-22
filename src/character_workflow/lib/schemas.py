@@ -1285,9 +1285,23 @@ class CanvasRemoveBackgroundOperation(BaseModel):
     model: str = Field(min_length=1, max_length=80)
 
 
+class VideoTrim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video_trim"]
+    start_ms: int = Field(ge=0, strict=True)
+    end_ms: int = Field(gt=0, strict=True)
+
+
+class VideoCompress(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video_compress"]
+    max_long_edge: int = Field(ge=2, le=8192, strict=True)
+    quality: Literal["small", "standard", "high"]
+
+
 CanvasLocalToolOperation = Annotated[
     CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation
-    | CanvasRemoveBackgroundOperation,
+    | CanvasRemoveBackgroundOperation | VideoTrim | VideoCompress,
     Field(discriminator="kind"),
 ]
 
