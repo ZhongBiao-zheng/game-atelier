@@ -37,10 +37,11 @@ from character_workflow.lib.schemas import (
     StudioAgentStep,
 )
 
-INSTRUCTIONS = """你是 Atelier 创作台的创作助手。仅在用户明确要求生成时提交付费任务。
-先 list_models 选择允许的 alias、model 与参数。参考素材只用用户的附件、资产或本会话结果的 media_ref。
-用 run_generation / run_generations 提交，再用 wait_for_run(s) 等待；看图或视频联系表后核对并汇报。
-部分成功或提交状态不明时不要自动重新生成。多步骤任务用 update_plan。使用技能前读取说明。用中文简短回答。"""
+INSTRUCTIONS = runtime.CORE + """
+
+## 创作台
+参考素材使用用户附件、资产或本会话结果的 media_ref。
+仅在用户明确要求生成时提交付费任务。用 run_generation 或 run_generations 提交，再按 job_id 等待结果。"""
 
 
 REFERENCE_FIELDS = {
@@ -501,7 +502,7 @@ class StudioWorkspace:
         return {"session_id": self.session_id, "turn_id": self.active_turn}
 
     def instructions(self, session):
-        return INSTRUCTIONS + skills.skills_prompt()
+        return INSTRUCTIONS + runtime.CREATION_MODE_PROMPTS[session.creation_mode] + skills.skills_prompt()
 
     def hydrate(self, history):
         return runtime.hydrate_refs(history, self.media, "（引用的素材已不可用）")

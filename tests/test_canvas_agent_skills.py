@@ -125,3 +125,16 @@ def test_builtin_skills_are_readonly_and_load_independently(isolated_data_root, 
         skills.delete_skill("model-fixture")
     with pytest.raises(CanvasToolError, match="改名"):
         skills.install_skill({"SKILL.md": SKILL_MD.replace(b"Three_View", b"model-fixture")}, replace=True)
+
+
+@pytest.mark.parametrize("studio", [False, True])
+def test_workspace_prompt_includes_core_mode_and_skills(isolated_data_root, monkeypatch, studio):
+    from types import SimpleNamespace
+    from character_workflow.lib import canvas_agent_runtime as runtime, studio_agent
+    skills.install_skill({"SKILL.md": SKILL_MD})
+    monkeypatch.setattr(runtime.team_library_specs, "agent_instructions", lambda _: "")
+    workspace = studio_agent.StudioWorkspace("test", None) if studio else runtime.CanvasWorkspace("p", "s")
+    prompt = workspace.instructions(SimpleNamespace(creation_mode="image"))
+    assert runtime.CORE in prompt
+    assert ("## 创作台" if studio else "## 画布操作") in prompt
+    assert "three-view" in prompt and "图像创作" in prompt

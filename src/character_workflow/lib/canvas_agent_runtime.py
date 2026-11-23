@@ -19,6 +19,7 @@ from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
+from character_workflow.lib.agent_instructions import CORE
 from character_workflow.lib import agent_usage
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_layout as layout
@@ -60,52 +61,12 @@ READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "re
                         "search_library", "update_plan",
                         "search_team"})
 
-INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
+INSTRUCTIONS = CORE + """
 
-工作方式：
-- 先用 get_canvas 看清画布现状，再动手；节点 id、版本 id 都以读到的为准，不要编。
-- 生成一张图或一段视频的标准步骤：apply_changes 里 add_surface 建一个空的图片/视频节点 →
-  set_draft 写提示词、模型（alias 与 model 是两个独立的字段，都必须来自 list_models；alias 为 null 的那行是「自动」，
-  按设定顺序选供应商，优先用它）、参数 → 需要参考图时 connect
-  把参考节点连到它 → run_generation 发起生成。一次要出多个节点时，配好全部 draft 后用
-  run_generations 一次发起（最多 20 项）；结果逐项返回，部分成功不回滚。之后用 wait_for_runs
-  一起等这些 run_id，每个 run 的状态、checks 与失败原因逐项给出。
-- 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
-  set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
-- 用画布上已有的图当参考（用户带进来的节点、上一次出的图）：直接 connect 那个节点到新的生成节点，
-  不要 add_media_node 把它复制成新节点再连。
-- 需求涉及画布上多个已有角色或元素时（如「他们俩的儿子」「把 A 和 B 放进同一场景」），把相关的
-  节点都 connect 到生成节点，每个都作为参考图；数量不超过 list_models 里该模型的 reference_limits.image。
-  只连一张会丢掉另一个角色的特征。
-- 新节点的位置由系统自动排在上一次出图的右侧、不和其他节点重叠；add_* 的 position 填 {x: 0, y: 0}
-  即可，不用自己计算。
-- 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看（视频附一张联系表），并带上
-  checks：尺寸 / 比例、视频时长是否符合配置，有没有透明通道、格式。ok=false 的要向用户指出；之后想再核对用 check_run。看完向用户简短汇报：
-  画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
-- 想看画布上已有的某张图，用 read_media，图片同样会附给你。想看视频的画面，用 read_video_frames：
-  等间隔取帧拼成一张带时间码的联系表附给你（默认 6 帧，最多 9 帧，可限定时间范围）。
-- 图片尺寸：要固定像素写 size（如 1024x1536），按比例写 ratio（可加 resolution），二选一；
-  不要同时写，界面按你写的那种显示。
-- 对比节点（type=compare）只接两张图：connect 时 slot 填 before 或 after；不填则先 before 后 after，
-  指定的一路已有图会被替换。
-- list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
-- 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
-- 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
-- 用户提出出图需求时：判断类别 → read_spec(类别) → 同时调 search_library(类别) 与 search_team(类别)，
-  按需再搜相关类别（例如弹窗需要按钮和底图）；search_team 还可以用 query 按标题关键词找。
-  两边结果放在一起挑：优先 3–5 张同类、0–2 张相关类，总数不超过 list_models 中该模型的
-  reference_limits.image。两边都为空或无匹配时直说，按项目和类别规范继续。
-- search_team 返回的 asset_id 形如 team:…，直接用在 add_asset_node 上；放上画布即采用成本机资产，
-  返回的 team_assets 给出对应的本机资产 ID。
-- 选好参考后，在回复里列出每张参考的标题、类别（团队资产注明来自哪个团队库）与一句选择理由。一次 apply_changes 完成：
-  add_asset_node 各参考 → add_surface → set_draft → connect 每个参考到生成节点。
-  每个参考必须成为可见节点和 input 连线，不得隐藏输入。add_asset_node 返回 asset_nodes 与
-  node_aliases；已有同一资产时复用原节点及其冻结版本，同批连线会自动改用真实节点 ID。
-  不要为已有参考创建重复节点；只有用户明确要求生成时才 run_generation。
-- 要三步以上才能做完的任务（例如批量出多张图、查参考 → 生成 → 核对），开始时用 update_plan 列出待办，
-  每完成一步就整份更新一次状态；一两步就能做完的不用写。
-- 用户纠正了规律性问题时，用 append_lesson 记下经验，等用户采纳。
-- 回复用中文，简短直接。"""
+## 画布操作
+先读 get_canvas 看清已有内容。出图前读类别规范并搜索项目库和团队库。
+用 apply_changes 建节点、写草稿、连接参考，用户明确要求生成时才提交。
+多个节点用 run_generations 一次提交，再用 wait_for_runs 一起等待并查看 checks。"""
 
 
 @dataclass(frozen=True)
@@ -515,28 +476,28 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                            "category": {"type": "string"},
                            "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
     "search_team": ("搜索本画布挂载的团队库里的图片，按类别或标题关键词，返回资产 ID（team:…）、标题、类别、"
-                    "标签、作者和团队库名，并附缩略图。",
+                    "标签、作者和团队库名，并附缩略图。合并两库结果优先选 3–5 张同类、0–2 张相关类，总数不超过模型参考图上限。无匹配时说明并按规范继续。回复列出各图标题、类别、团队库来源与选择理由。",
                     {"type": "object", "properties": {
                         "query": {"type": "string", "maxLength": 60},
                         "category": {"type": "string"},
                         "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
-    "read_spec": ("读取类别规范全文：项目规范与本画布团队库的同名类别规范，冲突以项目为准；不存在返回空文本。",
+    "read_spec": ("读取类别规范全文：项目规范与本画布团队库的同名类别规范，冲突以项目为准；不存在返回空文本。出图前先读类别规范，同时用 search_library 和 search_team 搜素材，按需再搜相关类别。",
                   {"type": "object", "required": ["category"],
                    "properties": {"category": {"type": "string"}}}),
-    "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
+    "append_lesson": ("用户纠正规律性问题时记录一条待审项目经验，用户采纳后才生效。",
                       {"type": "object", "required": ["text"],
                        "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 300}}}),
-    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。不传 node_ids 读整张画布"
+    "get_canvas": ("节点 id、版本 id 以读到的为准。读取当前画布：节点、文本、生成配置、连线、媒体版本。不传 node_ids 读整张画布"
                    "（画布较大时返回概览）；node_ids 只能填画布上已有节点的 id，用来读概览里的具体节点。",
                    {"type": "object", "properties": {
                        "node_ids": {"type": "array", "items": {"type": "string"},
                                     "minItems": 1, "maxItems": 20}}}),
-    "list_models": ("列出可用于生成配置的图片 / 视频模型（alias + model + 参数能力）。",
+    "list_models": ("列出可用于生成配置的图片 / 视频模型（alias + model + 参数能力）。两字段取自同一行，优先 alias 为 null 的自动路由。列表为空时提示用户到「模型偏好」选择模型，停止创建生成节点。",
                     {"type": "object", "properties": {
                         "mode": {"type": "string", "enum": ["image", "video"]}}}),
     "apply_changes": (
         "在当前画布上批量改动：add_text / add_media_node / add_asset_node / add_surface / set_text / set_draft / "
-        "connect / disconnect / move / remove_node。整批原子提交。", {}),
+        "connect / disconnect / move / remove_node。整批原子提交。同一次调用 add_surface 指定 node_id，后续 set_draft / connect 引用这个 id，不能用标题。新节点 position 填 {x: 0, y: 0}，系统排位。尺寸选固定像素 size 或 ratio（可带 resolution），二选一。已有图直接连线，不复制。多个已有角色或元素都连上，总数不超过 reference_limits.image。库中参考逐个 add_asset_node（team:… 可直接用），复用已有节点和冻结版本，每张都要有可见节点和 input 连线。对比节点只接 before / after 两槽，默认依次填充，指定已占槽会替换。", {}),
     "run_generation": ("在已写好生成配置的图片 / 视频节点上发起生成（付费）。",
                        {"type": "object", "required": ["surface_node_id"], "properties": {
                            "surface_node_id": {"type": "string"},
@@ -575,7 +536,7 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                       {"type": "object", "required": ["run_ids"], "properties": {
                           "run_ids": {"type": "array", "minItems": 1, "maxItems": 20,
                                       "items": {"type": "string"}}}}),
-    "update_plan": ("写下或更新这次任务的待办清单，面板顶部显示给用户：最多 12 条，每条 title + status"
+    "update_plan": ("三步以上的任务开工时列计划，每完成一步整份更新。写下或更新这次任务的待办清单，面板顶部显示给用户：最多 12 条，每条 title + status"
                     "（pending / in_progress / completed），每次整份替换。不改画布，不需要确认。",
                     {"type": "object", "required": ["items"], "properties": {
                         "items": {"type": "array", "maxItems": 12, "items": {
