@@ -84,7 +84,9 @@ def run(args):
                         usage = row["usage"]
                         spent += Decimal(str(usage.get("total_cost_cny") or 0))
                         rows.append(api.scrub(row))
-                        if budget is not None:
+                        if row.get("reason") == "interrupted":
+                            stop_reason = "评测被中断，已保存当前需求的部分结果"
+                        elif budget is not None:
                             if spent > budget or row.get("reason") == "budget_exceeded":
                                 stop_reason = "已超过预算"
                             elif not usage.get("cost_complete"):
@@ -102,7 +104,7 @@ def run(args):
     )
     if stop_reason:
         print(stop_reason)
-    return 0
+    return 130 if rows and rows[-1].get("reason") == "interrupted" else 0
 
 
 def main(argv=None):
@@ -132,6 +134,8 @@ def main(argv=None):
             print(compare(options.before, options.after, output))
             return 0
         return run(options)
+    except KeyboardInterrupt:
+        return 130
     except (ValueError, OSError, yaml.YAMLError, subprocess.CalledProcessError) as exc:
         # Parser/OS exceptions may echo arbitrary YAML, keys-file contents or URLs.
         message = str(exc) if type(exc) is ValueError else type(exc).__name__
