@@ -7,7 +7,7 @@
 //! wrote, so an install over it takes it over in place.
 
 use crate::{
-    payload::{Manifest, Payload},
+    payload::{self, Manifest, Payload},
     system,
 };
 use std::{
@@ -27,6 +27,11 @@ const NSIS_PUBLISHER_KEY: &str = r"Software\atelier";
 const RUNTIME_PARENT: &str = r"game-atelier\runtime";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const QUIT_WAIT: Duration = Duration::from_secs(90);
+/// After the app's processes are gone, how long its files may stay held (an exe image Windows has
+/// not let go of yet, a scanner reading it) before the install gives up without changing anything.
+const RELEASE_WAIT: Duration = Duration::from_secs(30);
+/// Windows error 145: the folder is not empty (the user put something there).
+const ERROR_DIR_NOT_EMPTY: i32 = 145;
 const UNINSTALLER: &str = "uninstall.exe";
 
 pub fn log(line: &str) {
@@ -109,6 +114,33 @@ pub fn quit_app(dir: &Path, main: &str) -> bool {
     true
 }
 
+/// Wait until no other process holds any of `files`. Fails, naming the file, after RELEASE_WAIT.
+fn wait_until_released(dir: &Path, files: &[PathBuf]) -> Result<(), String> {
+    let started = Instant::now();
+    let mut delay = Duration::from_millis(100);
+    loop {
+        let Some(held) = files.iter().find(|f| system::held_elsewhere(f)) else {
+            if started.elapsed() >= Duration::from_millis(100) {
+                log(&format!(
+                    "files released after {} ms",
+                    started.elapsed().as_millis()
+                ));
+            }
+            return Ok(());
+        };
+        if started.elapsed() > RELEASE_WAIT {
+            let name = held.strip_prefix(dir).unwrap_or(held).display();
+            log(&format!(
+                "still held after {} s: {name}",
+                RELEASE_WAIT.as_secs()
+            ));
+            return Err(format!("{name} 仍在被其他程序使用，稍等片刻后点「重试」"));
+        }
+        thread::sleep(delay);
+        delay = (delay * 2).min(Duration::from_secs(2));
+    }
+}
+
 fn remove_dir_with_retry(path: &Path) -> Result<(), String> {
     let mut attempt = 0;
     loop {
@@ -151,22 +183,25 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
         return Err(format!("{product} 没有退出，请从任务栏通知区域退出后重试"));
     }
 
-    // 1. Files: the app as built, then the uninstaller that remembers them all. The runtime is
-    // the app's own business: it downloads it on first start (contract).
-    let total = payload.app_files().map(|f| f.size).sum::<u64>().max(1) as f64;
-    let mut copied = 0u64;
-    let mut progress = |n: u64| {
-        copied += n;
-        report(0.98 * copied as f64 / total);
-    };
     if !payload.app_files().any(|f| f.path == manifest.main) {
         return Err("安装程序里缺少应用".into());
     }
-    let mut installed = Vec::new();
-    for entry in payload.app_files() {
-        payload.extract(entry, &dir.join(&entry.path), &mut progress)?;
-        installed.push(entry.path.clone());
+    // 1. Files: the app as built, then the uninstaller that remembers them all. The runtime is
+    // the app's own business: it downloads it on first start (contract). Nothing in the folder
+    // changes until every file it replaces is free and every new file is written next to it.
+    let mut targets: Vec<PathBuf> = payload.app_files().map(|f| dir.join(&f.path)).collect();
+    targets.push(dir.join(UNINSTALLER));
+    wait_until_released(dir, &targets)?;
+    let partials = unpack_all(payload, dir, report)?;
+    for (done, (partial, dest)) in partials.iter().enumerate() {
+        if let Err(e) = payload::replace(partial, dest) {
+            for (left, _) in &partials[done..] {
+                let _ = fs::remove_file(left);
+            }
+            return Err(e);
+        }
     }
+    let mut installed: Vec<String> = payload.app_files().map(|f| f.path.clone()).collect();
     installed.push(UNINSTALLER.to_string());
     payload.write_uninstaller(&dir.join(UNINSTALLER), installed)?;
 
@@ -188,6 +223,36 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     report(1.0);
     log("install finished");
     Ok(())
+}
+
+/// Every app file written as its `.partial` next to where it goes: `(partial, destination)`.
+/// On failure the partials written so far are removed and the install is left as it was.
+fn unpack_all(
+    payload: &Payload,
+    dir: &Path,
+    report: &mut dyn FnMut(f64),
+) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+    let total = payload.app_files().map(|f| f.size).sum::<u64>().max(1) as f64;
+    let mut copied = 0u64;
+    let mut progress = |n: u64| {
+        copied += n;
+        report(0.95 * copied as f64 / total);
+    };
+    let mut partials = Vec::new();
+    for entry in payload.app_files() {
+        let dest = dir.join(&entry.path);
+        match payload.unpack(entry, &dest, &mut progress) {
+            Ok(partial) => partials.push((partial, dest)),
+            Err(e) => {
+                let _ = fs::remove_file(payload::partial_path(&dest));
+                for (partial, _) in &partials {
+                    let _ = fs::remove_file(partial);
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(partials)
 }
 
 fn dir_size_kb(dir: &Path) -> u32 {
@@ -272,6 +337,7 @@ pub fn uninstall(
     report(0.85);
     // Only what the installer put there, then the folders that left empty.
     remove_installed(dir, &manifest.installed);
+    remove_install_folder(dir);
     report(1.0);
     log("uninstall finished");
     Ok(())
@@ -293,6 +359,26 @@ fn remove_installed(dir: &Path, installed: &[String]) {
     parents.dedup();
     for folder in parents {
         let _ = fs::remove_dir(folder);
+    }
+}
+
+/// The install folder itself, once empty. Another process's handle on it (a scanner, a process
+/// started from it) can hold it for a moment; what still holds it is removed when this process
+/// exits (`cleanup` in main.rs). A folder with the user's own files in it stays.
+fn remove_install_folder(dir: &Path) {
+    for _ in 0..10 {
+        match fs::remove_dir(dir) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if e.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY) => {
+                log(&format!("kept {}: not empty", dir.display()));
+                return;
+            }
+            Err(e) => {
+                log(&format!("{} still in use ({e})", dir.display()));
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
     }
 }
 
@@ -338,6 +424,35 @@ mod tests {
         fs::remove_file(dir.join("notes.txt")).unwrap();
         remove_installed(&dir, &[]);
         let _ = fs::remove_dir(&dir);
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_file_open_in_another_handle_counts_as_held() {
+        let file = std::env::temp_dir().join(format!("atelier-held-{}.exe", std::process::id()));
+        fs::write(&file, b"x").unwrap();
+        let open = fs::File::open(&file).unwrap();
+        assert!(system::held_elsewhere(&file));
+        drop(open);
+        assert!(!system::held_elsewhere(&file));
+        assert_eq!(fs::read(&file).unwrap(), b"x", "the probe writes nothing");
+        fs::remove_file(&file).unwrap();
+        assert!(
+            !system::held_elsewhere(&file),
+            "a missing file is held by no one"
+        );
+    }
+
+    #[test]
+    fn the_install_folder_goes_only_when_empty() {
+        let dir = std::env::temp_dir().join(format!("atelier-folder-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.txt"), b"mine").unwrap();
+        remove_install_folder(&dir);
+        assert!(dir.join("notes.txt").is_file());
+        fs::remove_file(dir.join("notes.txt")).unwrap();
+        remove_install_folder(&dir);
         assert!(!dir.exists());
     }
 

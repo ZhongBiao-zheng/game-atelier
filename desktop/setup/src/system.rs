@@ -97,6 +97,21 @@ fn process_path(pid: u32) -> Option<PathBuf> {
     }
 }
 
+/// Whether another process still holds `path`: an exclusive open for writing is refused while an
+/// exe's image is still mapped (it has not fully exited) or any other handle is open on it. The
+/// open writes nothing. A file that does not exist is held by no one.
+pub fn held_elsewhere(path: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .share_mode(0)
+        .open(path)
+    {
+        Ok(_) => false,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 pub fn terminate(pid: u32) {
     unsafe {
         if let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) {

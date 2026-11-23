@@ -551,7 +551,9 @@ def smoke_windows_setup(setup: Path, runtime: Path, timeout: int) -> int:
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
     # The uninstaller copies itself to %TEMP% and returns at once; wait for the folder to go.
-    subprocess.run([str(install_dir / "uninstall.exe"), "--silent"], env=quiet, check=True, timeout=300)
+    # Started from inside the install folder, as Explorer starts it: the folder must still go.
+    subprocess.run([str(install_dir / "uninstall.exe"), "--silent"], env=quiet, check=True,
+                   timeout=300, cwd=install_dir)
     if not _wait_gone(install_dir, 120):
         problems.append("uninstall left the install folder")
     if not _wait_gone(runtime_parent, 60):

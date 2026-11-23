@@ -15,7 +15,7 @@
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志（含每个来源的下载结果、用时与速度） | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
-本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包父目录（下载残留一并删除），数据目录不动。
+本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包父目录（下载残留一并删除），数据目录不动；卸载程序从 `%TEMP%` 运行且工作目录也设在 `%TEMP%`，安装目录在空了之后删除（暂时被占用时在卸载程序退出后再删一次，里面有用户自己的文件则保留）。
 
 ## 运行包替换
 
@@ -99,7 +99,7 @@ Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入�
 | `uninstall.exe [--silent]` | 先把自己复制到 `%TEMP%` 再运行；停止安装目录与运行包根下的进程，删除快捷方式、「设置 → 应用」条目、运行包父目录（`<本地应用数据>\game-atelier\runtime`），以及安装时记下的文件和因此变空的文件夹。数据目录与 WebView 本地存储不动 |
 | `--preview <界面>`、`--auto` | 只供 CI 截图：渲染某个界面不做任何事；自动点主按钮 |
 
-覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出再复制；不碰运行包，是否需要另一份运行包由外壳下次启动时决定（见「运行包替换」）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
+覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出，再等要替换的文件都不被其他程序占用（最多 30 秒，超时报出被占用的文件，安装目录不变，可直接重试）；新文件先全部写成同目录的 `.partial`，最后逐个替换，替换遇到占用时退避重试约 15 秒；不碰运行包，是否需要另一份运行包由外壳下次启动时决定（见「运行包替换」）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
 
 ## 服务记录（`<数据目录>/.runtime/`）
 

@@ -132,7 +132,7 @@ mod windows_main {
             auto: args.auto,
             payload,
         });
-        cleanup(None);
+        cleanup(None, None);
         code
     }
 
@@ -189,14 +189,14 @@ mod windows_main {
             }
         } else {
             ui::run(ui::Context {
-                dir,
+                dir: dir.clone(),
                 existing_version: None,
                 preview: None,
                 auto: args.auto,
                 payload,
             })
         };
-        cleanup(std::env::current_exe().ok());
+        cleanup(std::env::current_exe().ok(), Some(&dir));
         code
     }
 
@@ -209,6 +209,9 @@ mod windows_main {
                 std::env::temp_dir().join(format!("atelier-uninstall-{}.exe", std::process::id()));
             std::fs::copy(&exe, &copy).map_err(|e| e.to_string())?;
             let mut command = Command::new(&copy);
+            // Not the inherited working folder: started from the install folder (Explorer does
+            // that), the copy and its WebView2 processes would hold it open and it could not go.
+            command.current_dir(std::env::temp_dir());
             command.arg("--relocated").arg(&dir);
             if args.silent {
                 command.arg("--silent");
@@ -222,14 +225,18 @@ mod windows_main {
     }
 
     /// Remove the WebView2 profile, and this exe when it is the relocated uninstaller, once
-    /// this process has gone (a running exe cannot delete itself).
-    fn cleanup(own_exe: Option<PathBuf>) {
+    /// this process has gone (a running exe cannot delete itself). After an uninstall, also the
+    /// install folder if it is empty by then (plain `rmdir` never removes a folder with files).
+    fn cleanup(own_exe: Option<PathBuf>, install_dir: Option<&std::path::Path>) {
         let mut script = format!(
             "ping 127.0.0.1 -n 4 > nul & rmdir /s /q \"{}\"",
             ui::webview_data_dir().display()
         );
         if let Some(exe) = own_exe {
             script.push_str(&format!(" & del /f /q \"{}\"", exe.display()));
+        }
+        if let Some(dir) = install_dir {
+            script.push_str(&format!(" & rmdir \"{}\" 2> nul", dir.display()));
         }
         let _ = Command::new("cmd")
             .args(["/d", "/c"])

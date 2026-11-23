@@ -12,6 +12,8 @@ use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 const MAGIC: &[u8; 8] = b"ATELPAY1";
@@ -88,9 +90,34 @@ pub struct Payload {
 const INCOMPLETE: &str = "安装程序不完整，请重新下载";
 
 /// Next to `dest`, hidden, with a suffix nothing else uses: a half-written file is never taken for the real one.
-fn partial_path(dest: &Path) -> PathBuf {
+pub fn partial_path(dest: &Path) -> PathBuf {
     let name = dest.file_name().unwrap_or_default().to_string_lossy();
     dest.with_file_name(format!(".{name}.partial"))
+}
+
+/// Attempts at putting a file in place while Windows still reports it in use.
+const REPLACE_ATTEMPTS: u64 = 12;
+
+/// Access denied (5), sharing violation (32), lock violation (33): someone still holds the file.
+fn in_use(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::PermissionDenied || matches!(error.raw_os_error(), Some(32 | 33))
+}
+
+/// Move `partial` over `dest`. An exe that has just exited, or one a scanner is reading, stays
+/// locked for a moment, so a refusal is retried with backoff (about 15 s in all) before failing.
+pub fn replace(partial: &Path, dest: &Path) -> Result<(), String> {
+    let mut attempt = 1;
+    loop {
+        match std::fs::rename(partial, dest) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < REPLACE_ATTEMPTS && in_use(&e) => {
+                crate::install::log(&format!("{} in use ({e}); retry {attempt}", dest.display()));
+                thread::sleep(Duration::from_millis((250 * attempt).min(2000)));
+                attempt += 1;
+            }
+            Err(e) => return Err(format!("无法替换 {}：{e}", dest.display())),
+        }
+    }
 }
 
 impl Payload {
@@ -141,6 +168,17 @@ impl Payload {
         dest: &Path,
         report: &mut dyn FnMut(u64),
     ) -> Result<(), String> {
+        let partial = self.unpack(entry, dest, report)?;
+        replace(&partial, dest)
+    }
+
+    /// Write one entry next to `dest` as its `.partial` file, leaving `dest` untouched.
+    pub fn unpack(
+        &self,
+        entry: &Entry,
+        dest: &Path,
+        report: &mut dyn FnMut(u64),
+    ) -> Result<PathBuf, String> {
         let mut source = File::open(&self.source).map_err(|e| e.to_string())?;
         source
             .seek(SeekFrom::Start(entry.offset))
@@ -161,8 +199,7 @@ impl Payload {
         };
         copied.map_err(|e| format!("写入 {} 失败：{e}", dest.display()))?;
         out.sync_all().map_err(|e| e.to_string())?;
-        drop(out);
-        std::fs::rename(&partial, dest).map_err(|e| format!("无法替换 {}：{e}", dest.display()))
+        Ok(partial)
     }
 
     /// The uninstaller: this exe without payload, carrying an empty uninstall manifest.
@@ -184,6 +221,37 @@ impl Payload {
             .and_then(|_| out.sync_all())
             .map_err(|e| e.to_string())?;
         drop(out);
-        std::fs::rename(&partial, dest).map_err(|e| format!("无法写入卸载程序：{e}"))
+        replace(&partial, dest)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn replace_waits_for_a_file_held_open_elsewhere() {
+        let dir = std::env::temp_dir().join(format!("atelier-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (dest, partial) = (dir.join("Atelier.exe"), dir.join(".Atelier.exe.partial"));
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::write(&partial, b"new").unwrap();
+        // Held without any sharing, as an exe that is still exiting would be.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&dest)
+            .unwrap();
+        let holder = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(800));
+            drop(held);
+        });
+        replace(&partial, &dest).unwrap();
+        holder.join().unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert!(!partial.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
