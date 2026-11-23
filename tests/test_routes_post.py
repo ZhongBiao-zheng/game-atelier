@@ -268,14 +268,19 @@ def test_post_job_cancel_fresh_pending_requests_stop(client, runtime):
         "params": {}, "seed": None, "output_paths": [],
         "status": "pending", "error": None, "namespace": "studio", "kind": "image",
     }))
-    r = client.post("/api/jobs/j1/cancel")
+    from character_workflow.lib.jobs import job_execution_lock
+
+    with job_execution_lock("j1") as acquired:  # 正在出图 = 有线程持着执行锁
+        assert acquired
+        r = client.post("/api/jobs/j1/cancel")
     assert r.status_code == 200
     assert r.json() == {"ok": True, "job_id": "j1", "status": "pending", "cancel_requested": True}
     saved = json.loads((runtime / "jobs" / "j1.json").read_text())
     assert saved["status"] == "pending"
     first = saved["cancel_requested_at"]
     assert first
-    assert client.post("/api/jobs/j1/cancel").status_code == 200
+    with job_execution_lock("j1"):
+        assert client.post("/api/jobs/j1/cancel").status_code == 200
     assert json.loads((runtime / "jobs" / "j1.json").read_text())["cancel_requested_at"] == first
 
 
@@ -338,3 +343,70 @@ def test_delete_failed_job_rejects_done_job(client, runtime):
 
     assert r.status_code == 409
     assert (runtime / "jobs" / "j1.json").exists()
+
+
+# ---- 排队中、从没发出的任务点停止立即取消（Windows 实测 W5）----
+
+
+def _queued_studio_job(runtime, **params):
+    from datetime import datetime, timezone
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": datetime.now(timezone.utc).isoformat(), "model": "gpt-image-2",
+        "params": params, "seed": None, "output_paths": [], "alias": "Hub", "provider": "atelier",
+        "status": "pending", "error": None, "namespace": "studio", "kind": "image",
+    }))
+
+
+def test_queued_unsent_studio_job_is_canceled_at_once_and_the_worker_exits_quietly(client, runtime, monkeypatch):
+    from character_workflow.lib import job_runner
+    from viewer_server import routes
+
+    _queued_studio_job(runtime)
+    response = client.post("/api/jobs/j1/cancel")
+    assert response.json() == {"ok": True, "job_id": "j1", "status": "canceled"}
+    saved = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert (saved["status"], saved["error"]) == ("canceled", "已停止")
+    assert saved["completed_at"] and saved["cancel_requested_at"]
+
+    def must_not_run(*_args, **_kwargs):
+        raise AssertionError("排队时已停止的任务不能再提交")
+    monkeypatch.setattr(job_runner, "run_job", must_not_run)
+    assert routes._run_studio_job_once("j1") is False  # 线程池轮到它：安静退出
+    after = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert after == saved  # 状态、文案、时间都不动
+
+
+@pytest.mark.parametrize("params", [
+    {"gateway_idempotency_key": "k1"},          # 已经用网关幂等键发过（结局未知或在等网关）
+    {"provider_task_ids": ["paid-task-1"], "provider_task_protocol": "tuzi_images"},  # 上游已有任务
+])
+def test_job_that_was_ever_sent_keeps_the_old_stop_path(client, runtime, params):
+    _queued_studio_job(runtime, **params)
+    response = client.post("/api/jobs/j1/cancel")
+    assert response.json()["status"] == "pending"
+    saved = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert saved["status"] == "pending" and saved["cancel_requested_at"]
+
+
+def test_stop_and_a_starting_runner_never_overlap(client, runtime, monkeypatch):
+    """停止持着执行锁判定并落终态：这期间 runner 抢不到锁，起不来；之后读到的是 CANCELED，不会提交。"""
+    from character_workflow.lib import jobs
+    from character_workflow.lib.job_runner import JobExecutionBusy, JobRunnerError, run_job
+
+    _queued_studio_job(runtime)
+    original = jobs.cancel_queued_unsent
+    seen = []
+
+    def racing(job_id):
+        try:
+            run_job(job_id)  # 线程池恰好在这一刻轮到它
+        except JobExecutionBusy:
+            seen.append("busy")
+        return original(job_id)
+    monkeypatch.setattr(jobs, "cancel_queued_unsent", racing)
+    assert client.post("/api/jobs/j1/cancel").json()["status"] == "canceled"
+    assert seen == ["busy"]
+    with pytest.raises(JobRunnerError, match="not in a runnable status"):
+        run_job("j1")  # 锁放开后再来：状态已是 CANCELED，不提交
+

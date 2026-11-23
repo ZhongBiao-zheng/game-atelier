@@ -614,6 +614,14 @@ def post_job_cancel(job_id: str) -> dict:
                 error=f"cancelled: pending 超过 {STALE_PENDING_MINUTES} 分钟，疑似进程中断",
             )
             return {"ok": True, "job_id": job_id, "status": JobStatus.FAILED.value}
+        if job.namespace == "studio":
+            # 排队中、从没发出的任务（创作台线程池满时排在后面的）：没有线程在跑它就直接停（Windows 实测 W5）。
+            # 持着执行锁再判定并落终态：run_job 要先抢到这把锁才会读状态、提交，停止与提交不会同时发生。
+            from character_workflow.lib.jobs import cancel_queued_unsent, job_execution_lock
+
+            with job_execution_lock(job_id) as idle:
+                if idle and cancel_queued_unsent(job_id) is not None:
+                    return {"ok": True, "job_id": job_id, "status": JobStatus.CANCELED.value}
         request_job_cancel(job_id)
         return {"ok": True, "job_id": job_id, "status": JobStatus.PENDING.value, "cancel_requested": True}
     raise HTTPException(
@@ -3755,6 +3763,9 @@ def _run_studio_job_once(
         return False
     except (OSError, ValueError):
         current = None
+    # 排队时已被停止（或已到终态）：轮到它时安静退出，不改状态、不发请求（Windows 实测 W5）。
+    if current is not None and current.status not in (JobStatus.PENDING, JobStatus.PENDING_CONFIRM):
+        return False
     # 等待网关：先用 3 秒的健康检查探一下，连不上就不跑（不占执行线程），下一轮再看。
     if current is not None and is_waiting_gateway_job(current) and not gateway_reachable(current.alias):
         return True

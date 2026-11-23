@@ -246,6 +246,23 @@ def request_job_cancel(job_id: str) -> Job:
         }))
 
 
+def cancel_queued_unsent(job_id: str) -> Job | None:
+    """排队中、从没发出的任务直接落 CANCELED（Windows 实测 W5）；不满足条件返回 None、不改文件。
+
+    调用方必须已持有 job_execution_lock 且拿到了（没有线程在跑它，runner 也起不来：run_job 先抢这把锁
+    再读状态）。「从没发出」= 状态 PENDING、没有网关幂等键、没有上游任务号；判定与落终态在同一把 job_lock 里。"""
+    with job_lock(job_id):
+        job = read_job(job_id)
+        if (job.status != JobStatus.PENDING or job.params.gateway_idempotency_key
+                or job.params.provider_task_ids):
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        return _write(job.model_copy(update={
+            "status": JobStatus.CANCELED, "error": "已停止", "progress_phase": None,
+            "completed_at": now, "cancel_requested_at": job.cancel_requested_at or now,
+        }))
+
+
 def update_job_phase(job_id: str, phase: str) -> Job:
     """视频 caller 回写进度卡点（sent / downloading）。终态 job 不回写。"""
     with job_lock(job_id):
