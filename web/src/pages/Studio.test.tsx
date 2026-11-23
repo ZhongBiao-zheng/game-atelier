@@ -2285,6 +2285,31 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
   });
 
+  it('HEIC 参考在后台换成 JPEG 后来源标题还在；再移除才清空', async () => {
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/uploads') return Promise.resolve({ ok: true, json: async () => ({ path: '/tmp/up/photo.jpg' }) } as any);
+      if (href.startsWith('/api/raw?')) return Promise.resolve({ ok: true, blob: async () => new Blob(['jpg'], { type: 'image/jpeg' }) } as any);
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('Volcengine Ark');
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
+    const heic = new File(['heic'], 'photo.heic', { type: 'image/heic' });
+    act(() => { assetPanelProps.current!.onUseTeamMedia(heic, { title: '窗边的猫', mime_type: 'image/heic' } as never, 'lib:e3'); });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/raw?'))).toBe(true));
+    await waitFor(() => expect(readStudioDraft()?.referenceImages?.[0]?.name).toBe('photo.jpg'));  // 已换成 JPEG
+    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗边的猫');
+
+    const [item] = screen.getAllByTestId('reference-stack-item');
+    const buttons = within(item).getAllByRole('button');
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
+  });
+
   it('来自提示词资产的来源标题：移除参考图不受影响', async () => {
     mockPanelEndpoints();
     renderStudio();

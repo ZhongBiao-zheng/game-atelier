@@ -38,11 +38,13 @@ function replaceFiles<T extends FileSlots>(value: T, converted: ReadonlyMap<File
   ])) as T;
 }
 
-/** 状态里一出现 HEIC 就在后台换成 JPEG，按 File 身份原位替换；不管它是从哪个入口进来的。 */
+/** 状态里一出现 HEIC 就在后台换成 JPEG，按 File 身份原位替换；不管它是从哪个入口进来的。
+ *  onReplaced：替换前告诉调用方「哪个原文件换成了哪个 JPEG」，按 File 身份跟踪某张参考的调用方据此跟上。 */
 export function useHeicAsJpeg<T extends FileSlots>(
   value: T,
   setValue: Dispatch<SetStateAction<T>>,
   onError: (message: string) => void,
+  onReplaced?: (converted: ReadonlyMap<File, File>) => void,
 ) {
   const seen = useRef(new WeakSet<File>());
   useEffect(() => {
@@ -50,7 +52,11 @@ export function useHeicAsJpeg<T extends FileSlots>(
     if (!pending.length) return;
     pending.forEach(file => seen.current.add(file));
     void Promise.all(pending.map(async file => [file, await heicFileAsJpeg(file)] as const))
-      .then(pairs => setValue(current => replaceFiles(current, new Map(pairs))))
+      .then(pairs => {
+        const converted = new Map(pairs);
+        onReplaced?.(converted);
+        setValue(current => replaceFiles(current, converted));
+      })
       .catch(error => onError(error instanceof Error ? error.message : 'HEIC 照片转换失败'));
-  }, [value, setValue, onError]);
+  }, [value, setValue, onError, onReplaced]);
 }

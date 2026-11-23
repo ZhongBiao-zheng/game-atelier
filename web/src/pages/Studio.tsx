@@ -212,11 +212,16 @@ function StudioFull() {
   const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
   const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
-  // iPhone 的 HEIC 照片 Chrome 预览不了：无论从哪个入口进来，都在后台换成 JPEG。
-  useHeicAsJpeg(referenceImages, setReferenceImages, setAssetNotice);
   // 来源标题跟着它的来源对象走：来自参考图的，那张参考被移除时一起清空（Windows 实测 W3）。
   // 来自提示词资产或复用配置的不记文件，保持原行为。
   const sourceTitleFile = useRef<File | null>(null);
+  // HEIC 参考在后台换成 JPEG 时，跟踪的文件跟着换，标题不会被当成「参考已移除」清掉。
+  const followHeicReplacement = useCallback((converted: ReadonlyMap<File, File>) => {
+    const next = sourceTitleFile.current && converted.get(sourceTitleFile.current);
+    if (next) sourceTitleFile.current = next;
+  }, []);
+  // iPhone 的 HEIC 照片 Chrome 预览不了：无论从哪个入口进来，都在后台换成 JPEG。
+  useHeicAsJpeg(referenceImages, setReferenceImages, setAssetNotice, followHeicReplacement);
   useEffect(() => {
     const file = sourceTitleFile.current;
     if (!file) return;
@@ -224,8 +229,8 @@ function StudioFull() {
       ...Object.values(mjRefs)].some(list => list.includes(file));
     if (!present) { sourceTitleFile.current = null; setPromptAssetSourceTitle(null); }
   }, [referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs]);
-  useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice);
-  useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice);
+  useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice, followHeicReplacement);
+  useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice, followHeicReplacement);
 
   const teamReferenceFiles = useRef(new Map<string, File>());
   const referenceSlots = useRef({ referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs });
