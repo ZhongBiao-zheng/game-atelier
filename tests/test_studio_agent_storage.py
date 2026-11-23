@@ -1,8 +1,12 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from threading import Event
 
+import pytest
+
 from character_workflow.lib import agent_usage, jobs, studio_agent_sessions as sessions
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 from character_workflow.lib.schemas import Job, JobParams
 from tests.local_client import LocalTestClient
 from viewer_server import studio_agent_routes, update_routes
@@ -118,3 +122,30 @@ def test_locked_attachment_keeps_delete_retryable(isolated_data_root, monkeypatc
             assert client.get(base).json()["revision"] == row.revision
         assert client.delete(base, headers=headers).status_code == 204
         assert not directory.exists()
+
+
+def test_delete_waits_for_turn_cleanup_before_unlink(isolated_data_root, monkeypatch):
+    started, exited = Event(), Event()
+
+    async def run_until_canceled(ws, notify):
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            assert sessions.read(ws.session_id).status == "running"
+            with pytest.raises(CanvasToolError) as blocked:
+                await asyncio.to_thread(sessions.mutate, ws.session_id, lambda row, now: {"title": "迟到"})
+            assert blocked.value.code == "SESSION_DELETING"
+            exited.set()
+
+    monkeypatch.setattr(studio_agent_routes.runtime, "run_workspace_turn", run_until_canceled)
+    app = build_app(dist_dir=isolated_data_root)
+    with LocalTestClient(base_url="http://127.0.0.1", app=app) as client:
+        row = sessions.create({"model": "fake", "model_alias": "fake"})
+        base = f"/api/studio/agent/sessions/{row.session_id}"
+        sent = client.post(base + "/messages", json={"text": "hello", "client_message_id": "first"})
+        assert sent.status_code == 202 and started.wait(5)
+        assert client.delete(base, headers={"If-Match": str(row.revision)}).status_code == 409
+        assert not exited.is_set()
+        assert client.delete(base, headers={"If-Match": str(sent.json()["revision"])}).status_code == 204
+        assert exited.is_set() and client.get(base).status_code == 404

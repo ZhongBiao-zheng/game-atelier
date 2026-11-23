@@ -12,6 +12,7 @@ from typing import Annotated
 from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, File, Header, HTTPException, Response, UploadFile
+from fastapi.concurrency import contextmanager_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -204,8 +205,8 @@ def launch(ws):
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            if isinstance(error, CanvasToolError) and error.code == "NOT_FOUND":
-                return  # DELETE 已在会话锁内移除了这轮的持久状态。
+            if isinstance(error, CanvasToolError) and error.code == "SESSION_DELETING":
+                return  # DELETE 已认领会话，负责等本轮退出并清理文件。
             logger.exception("Studio Agent 回合中断")
             await asyncio.to_thread(interrupt, ws, "这一轮已中断")
         finally:
@@ -315,8 +316,8 @@ async def delete(
 ):
     revision = _canvas_if_match(if_match, "对话")
     async with guard(session_id):
-        await asyncio.to_thread(sessions.delete, session_id, revision)
-        await stop_task(session_id)
+        async with contextmanager_in_threadpool(sessions.delete(session_id, revision)):
+            await stop_task(session_id)
         return Response(status_code=204)
 
 

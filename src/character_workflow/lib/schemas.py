@@ -394,10 +394,10 @@ class Job(BaseModel):
     namespace: Namespace = "studio"
     source_image: str | None = None  # 参考素材的绝对路径
     studio_agent_session_id: str | None = Field(
-        default=None, pattern=r"^session-[a-z0-9-]{8,64}$", exclude_if=lambda value: value is None,
+        default=None, pattern=r"^session-[a-z0-9-]{8,64}$",
     )
     studio_agent_turn_id: str | None = Field(
-        default=None, pattern=r"^turn-[a-z0-9-]{1,64}$", exclude_if=lambda value: value is None,
+        default=None, pattern=r"^turn-[a-z0-9-]{1,64}$",
     )
     # Canvas 生成任务归属项目与运行快照。
     canvas_project_id: str | None = None
@@ -420,6 +420,15 @@ class Job(BaseModel):
     # Any namespace: a stop request stays truthful even when a synchronous upstream request cannot
     # be interrupted; the runner turns it into CANCELED at the next cancellation point.
     cancel_requested_at: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_studio_ownership(self, handler):
+        data = handler(self)
+        if self.studio_agent_session_id is None:
+            data.pop("studio_agent_session_id", None)
+        if self.studio_agent_turn_id is None:
+            data.pop("studio_agent_turn_id", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod

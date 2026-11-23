@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import shutil
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.canvas_agent_sessions import _validate_session_id
 from character_workflow.lib.canvas_tool_common import CanvasToolError
-from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.schemas import StudioAgentSession
 
 
@@ -19,10 +20,23 @@ def root() -> Path:
     return data_root.resolve_data_root() / "studio-agent"
 
 
+def _lock_path(sid):
+    return data_root.runtime_dir() / "locks" / f"studio-agent-{_validate_session_id(sid)}.lock"
+
+
+@contextmanager
+def _delete_lock(path):
+    with try_file_lock(path.with_suffix(".delete.lock")) as acquired:
+        if not acquired:
+            raise CanvasToolError("SESSION_DELETING", "对话正在删除", 409)
+        yield
+
+
+@contextmanager
 def lock(sid):
-    return file_lock(
-        data_root.runtime_dir() / "locks" / f"studio-agent-{_validate_session_id(sid)}.lock"
-    )
+    path = _lock_path(sid)
+    with file_lock(path), _delete_lock(path):
+        yield
 
 
 def session_path(sid):
@@ -103,11 +117,17 @@ def mutate(sid, update):
         return updated
 
 
+@contextmanager
 def delete(sid, revision):
-    with lock(sid):
-        session = read(sid)
-        if session.revision != revision:
-            raise CanvasToolError("REVISION_CONFLICT", "对话已更新", 409)
+    # 先等已持写锁的操作退出，同时核对版本、认领删除；停任务期间新写入立即返回。
+    # 普通写锁此时必须放开，否则后台任务的取消清理会与等待它退出的 DELETE 互锁。
+    path = _lock_path(sid)
+    with ExitStack() as deleting:
+        with file_lock(path):
+            if read(sid).revision != revision:
+                raise CanvasToolError("REVISION_CONFLICT", "对话已更新", 409)
+            deleting.enter_context(_delete_lock(path))
+        yield
         directory = upload_dir(sid)
         try:
             if directory.exists():
