@@ -655,12 +655,12 @@ class StudioWorkspace:
             if not 1 <= limit <= 12:
                 raise ValueError("limit 需为 1–12")
             return library.search_library(None, args.get("category"), limit)
-        if name in {"load_skill", "read_skill_file"}:
+        if name == "load_skill":
+            return skills.load_skills(args.get("names"))
+        if name == "read_skill_file":
             return {
                 "name": args["name"],
-                "content": skills.read_skill(args["name"])
-                if name == "load_skill"
-                else skills.read_skill_file(args["name"], args["path"]),
+                "content": skills.read_skill_file(args["name"], args["path"]),
             }
         if name == "update_plan":
             plan = CanvasAgentPlan(items=args["items"], updated_at=sessions.now())

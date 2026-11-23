@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import re
 import shutil
 import stat
@@ -21,6 +22,8 @@ import yaml
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_tool_common import CanvasToolError
 
+BUILTIN_ROOT = Path(__file__).resolve().parents[1] / "agent_skills"
+PROMPT_LIMIT = 4000
 SKILL_FILE = "SKILL.md"
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 MAX_TOTAL_BYTES = 20 * 1024 * 1024
@@ -37,10 +40,11 @@ class SkillInfo:
     name: str
     description: str
     has_scripts: bool
+    builtin: bool
 
     def as_dict(self) -> dict:
         return {"name": self.name, "description": self.description,
-                "has_scripts": self.has_scripts}
+                "has_scripts": self.has_scripts, "builtin": self.builtin}
 
 
 def skills_dir() -> Path:
@@ -100,21 +104,25 @@ def _info(directory: Path) -> SkillInfo | None:
         return None
     files = [p.relative_to(directory).as_posix() for p in directory.rglob("*") if p.is_file()]
     return SkillInfo(name=directory.name, description=str(meta.get("description") or "").strip(),
-                     has_scripts=_has_scripts(files))
+                     has_scripts=_has_scripts(files), builtin=directory.parent == BUILTIN_ROOT)
 
 
 def list_skills() -> list[SkillInfo]:
-    root = skills_dir()
-    if not root.is_dir():
-        return []
-    rows = (_info(path) for path in sorted(root.iterdir())
-            if path.is_dir() and not path.name.startswith("."))
-    return [row for row in rows if row is not None]
+    rows = {}
+    for root in (BUILTIN_ROOT, skills_dir()):
+        if root.is_dir():
+            for path in sorted(root.iterdir()):
+                if NAME_PATTERN.fullmatch(path.name) and path.name not in rows:
+                    if info := _info(path):
+                        rows[path.name] = info
+    return list(rows.values())
 
 
 def _skill_path(name: str) -> Path:
     if not NAME_PATTERN.fullmatch(name or ""):
         raise CanvasToolError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
+    if (BUILTIN_ROOT / name / SKILL_FILE).is_file():
+        return BUILTIN_ROOT / name
     path = skills_dir() / name
     if not (path / SKILL_FILE).is_file():
         raise CanvasToolError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
@@ -129,7 +137,7 @@ def read_skill(name: str) -> str:
                    if p.is_file() and p.name != SKILL_FILE)
     listing = ("\n\n附带文件（用 read_skill_file 读取）：\n" + "\n".join(f"- {p}" for p in extra)
                if extra else "")
-    return (body.strip() + listing)[:MAX_READ_CHARS]
+    return body.strip()[:MAX_READ_CHARS] + listing
 
 
 def read_skill_file(name: str, relative: str) -> str:
@@ -201,6 +209,8 @@ def install_skill(files: dict[str, bytes], *, replace: bool = False) -> SkillInf
     if not str(meta.get("description") or "").strip():
         raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 缺少 description", 422)
 
+    if (BUILTIN_ROOT / name / SKILL_FILE).is_file():
+        raise CanvasToolError("BUILTIN_SKILL", f"{name} 是内置 Skill，请改名后导入", 422)
     root = skills_dir()
     root.mkdir(parents=True, exist_ok=True)
     target = root / name
@@ -225,7 +235,10 @@ def install_skill(files: dict[str, bytes], *, replace: bool = False) -> SkillInf
 
 
 def delete_skill(name: str) -> None:
-    shutil.rmtree(_skill_path(name))
+    path = _skill_path(name)
+    if path.parent == BUILTIN_ROOT:
+        raise CanvasToolError("BUILTIN_SKILL", "内置 Skill 不能删除", 403)
+    shutil.rmtree(path)
 
 
 def skills_prompt() -> str:
@@ -233,6 +246,35 @@ def skills_prompt() -> str:
     skills = list_skills()
     if not skills:
         return ""
-    lines = "\n".join(f"- {skill.name}：{skill.description}" for skill in skills)
-    return ("\n\n可用的 Skill（做法说明）。任务与某个 Skill 的描述相符时，先用 load_skill 读它再动手；"
-            "Skill 里提到的脚本不能执行，只参考文字说明：\n" + lines)
+    header = "\n\n可用的 Skill（做法说明）。用 load_skill 按名称读取，只参考文字，不执行脚本：\n"
+    remaining = PROMPT_LIMIT - len(header) - sum(len(s.name) + 4 for s in skills)
+    width = max(0, remaining // len(skills))
+    shorten = sum(len(s.description) for s in skills) > remaining
+    if shorten:
+        logging.getLogger(__name__).warning("Skill 目录过长，已缩短描述")
+    lines = [f"- {s.name}：{s.description[:width] if shorten else s.description}" for s in skills]
+    catalog = header + "\n".join(lines)
+    if len(catalog) > PROMPT_LIMIT:
+        end = catalog.rfind("\n", 0, PROMPT_LIMIT - 35)
+        catalog = catalog[:end] + f"\n（共 {len(skills)} 个 Skill，目录长度已达上限）"
+    return catalog
+
+
+def load_skills(names: list[str]) -> dict:
+    if not isinstance(names, list) or not 1 <= len(names) <= 3 or not all(
+        isinstance(name, str) for name in names
+    ):
+        raise CanvasToolError("INVALID_PARAMETERS", "names 需要 1 到 3 个 Skill 名称", 422)
+    entries = []
+    for name in names:
+        try:
+            content = read_skill(name)
+        except (CanvasToolError, UnicodeError, OSError) as error:
+            entries.append({"name": name, "error": str(error)})
+        else:
+            entries.append({"name": name, "content": f'<skill name="{name}">\n{content}\n</skill>'})
+    return {"skills": entries}
+
+
+def selected_skill_prompt(name: str) -> str:
+    return f"[本轮按 Skill「{name}」的说明来做；其中提到的脚本不能执行]\n{read_skill(name)}"

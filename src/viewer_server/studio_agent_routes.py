@@ -136,7 +136,7 @@ def begin(sid, payload):
                     }
                 )
         if payload.skill:
-            content.append({"type": "input_text", "text": skills.read_skill(payload.skill)})
+            content.append({"type": "input_text", "text": skills.selected_skill_prompt(payload.skill)})
         tid = "turn-" + secrets.token_hex(12)
         msg = CanvasAgentMessageCreate(role="user", text=text, turn_id=tid, title=payload.skill)
         turn = StudioAgentTurn(

@@ -521,6 +521,7 @@ export interface CanvasAgentSkill {
   description: string;
   /** 带脚本的 Skill 只用文字说明，脚本不执行。 */
   has_scripts: boolean;
+  builtin: boolean;
 }
 
 /** 会话调对话模型的累计用量（服务端 agent_usage.session_totals）。cost_cny 只合计有价格的请求。 */

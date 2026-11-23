@@ -1647,3 +1647,5 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 Studio Job 的 API 投影提供可选只读字段 `studio_agent_session_id` 与 `studio_agent_turn_id`。只有 studio 命名空间可有会话关联，turn_id 必须随 session_id。关联保存在 Job 文件的 `params._studio_agent` 扩展中，旧版可读取和回写同一任务文件。普通 Job 省略此扩展，手动重编或再次生成产生普通创作记录。生成用的参考媒体复制到 `.runtime/uploads` 后登记在普通 JobParams 中。每个生成项创建一个 Job，count 存入 n。批次 1–20 项，每项最多 4 份，声明式视频只支持 1 条。视频按实际提交条数乘单价估价，超出协议上限的请求在审批前退回。批次按规范化后的参考和控制参数估价，超过阈值先确认。同一轮内模型复用生成调用 ID 时，相同参数重放复用原 Job；更改生成参数产生新请求，重新估价并应用当前确认规则。提交期间部分成功的任务保留。
 
 对话模型用量沿用 `.runtime/agent-usage/YYYY-MM.jsonl`。Studio 请求、待结算项和主机结算行都标记 `workspace=studio`、`project_id=null`，网关调用标记为 `studio:<session_id>:<revision>`。缺少 workspace 的旧行属于画布。读取单个 Studio 会话只结算该工作区、该会话的用量。
+
+两个工作区共用的 Agent Skill 列表与导入结果含布尔字段 `builtin`。内置 Skill 同名导入返回 422，删除返回 403。工具 `load_skill({names})` 接受 1–3 个名称，按顺序返回 `skills`，每项含名称和带标签的正文或单项错误。

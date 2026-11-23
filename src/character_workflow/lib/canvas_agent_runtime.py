@@ -384,7 +384,7 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         result[vision.ATTACH_KEY] = [ref]
         return result, []
     if tool == "load_skill":
-        return {"name": arguments["name"], "content": skills.read_skill(arguments["name"])}, []
+        return skills.load_skills(arguments.get("names")), []
     if tool == "read_skill_file":
         return {"path": arguments["path"],
                 "content": skills.read_skill_file(arguments["name"], arguments["path"])}, []
@@ -480,7 +480,7 @@ def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelSco
         logger.exception("canvas agent tool %s failed unexpectedly", tool)
         return redact(UNEXPECTED_ERROR.format(kind=type(error).__name__)), []
     text = json.dumps(result, ensure_ascii=False)
-    if tool != "read_spec" and len(text) > TOOL_OUTPUT_LIMIT:
+    if tool not in {"read_spec", "load_skill"} and len(text) > TOOL_OUTPUT_LIMIT:
         text = text[:TOOL_OUTPUT_LIMIT] + "…（已截断）"
     return text, created
 
@@ -583,9 +583,10 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                                 "title": {"type": "string", "minLength": 1, "maxLength": 80},
                                 "status": {"type": "string",
                                            "enum": ["pending", "in_progress", "completed"]}}}}}}),
-    "load_skill": ("读取一个 Skill 的完整说明（名称见系统提示里的 Skill 列表）。",
-                   {"type": "object", "required": ["name"],
-                    "properties": {"name": {"type": "string"}}}),
+    "load_skill": ("一次读取 1 到 3 个 Skill 的说明（名称见系统提示里的 Skill 列表）。",
+                   {"type": "object", "required": ["names"], "properties": {
+                       "names": {"type": "array", "minItems": 1, "maxItems": 3,
+                                 "items": {"type": "string"}}}}),
     "read_skill_file": ("读取 Skill 附带的参考文件（路径见 load_skill 结果末尾的清单）。",
                         {"type": "object", "required": ["name", "path"],
                          "properties": {"name": {"type": "string"},
@@ -990,7 +991,7 @@ def _one_line(text: str, limit: int = 40) -> str:
 
 def summarize_call(tool: str, arguments: dict) -> str:
     if tool == "load_skill":
-        return str(arguments.get("name", ""))
+        return "、".join(str(name) for name in arguments.get("names") or [])
     if tool == "read_skill_file":
         # 只显示文件名：带目录的相对路径会被落盘前的隐私替换当成本机路径藏掉。
         return f"{arguments.get('name', '')} · {PurePosixPath(str(arguments.get('path', ''))).name}"
@@ -1535,7 +1536,7 @@ def begin_user_turn(project_id: str, session_id: str, text: str, node_ids: list[
     item, references = user_item(project_id, text, node_ids)
     if skill:
         item["content"].append({"type": "input_text", "text": (
-            f"[本轮按 Skill「{skill}」的说明来做；其中提到的脚本不能执行]\n{skills.read_skill(skill)}")})
+            skills.selected_skill_prompt(skill))})
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status in {"running", "awaiting_approval"}:

@@ -23,6 +23,11 @@ description: >
 """.encode()
 
 
+@pytest.fixture(autouse=True)
+def empty_builtin_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills, "BUILTIN_ROOT", tmp_path / "empty-builtins")
+
+
 def _zip(entries: dict[str, bytes], symlink: str | None = None) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -103,3 +108,20 @@ def test_http_import_folder_list_and_delete(isolated_data_root):
             == ["three-view"]
         assert client.delete("/api/canvas/agent/skills/three-view").status_code == 204
         assert client.get("/api/canvas/agent/skills").json() == {"skills": []}
+
+
+def test_builtin_skills_are_readonly_and_load_independently(isolated_data_root, monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr(skills, "BUILTIN_ROOT", Path(__file__).parent / "fixtures/agent_skills")
+    skills.install_skill({"SKILL.md": SKILL_MD})
+    assert [s.builtin for s in skills.list_skills()] == [True, False]
+    result = skills.load_skills(["missing", "model-fixture", "three-view"])["skills"]
+    assert "error" in result[0]
+    assert '<skill name="model-fixture">' in result[1]["content"]
+    assert "references/layout.md" in result[1]["content"]
+    assert "description:" not in result[2]["content"]
+    assert "正面" in skills.read_skill_file("model-fixture", "references/layout.md")
+    with pytest.raises(CanvasToolError, match="内置"):
+        skills.delete_skill("model-fixture")
+    with pytest.raises(CanvasToolError, match="改名"):
+        skills.install_skill({"SKILL.md": SKILL_MD.replace(b"Three_View", b"model-fixture")}, replace=True)

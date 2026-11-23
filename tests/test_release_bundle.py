@@ -60,6 +60,9 @@ def test_relocated_archive_runs_without_system_tools_and_preserves_data(tmp_path
     # Loopback remains available; outgoing HTTP is deliberately sent to an unused port.
     env.update(HTTP_PROXY="http://127.0.0.1:1", HTTPS_PROXY="http://127.0.0.1:1",
                NO_PROXY="127.0.0.1,localhost")
+    subprocess.run([str(python), "-c",
+                    "from character_workflow.lib.canvas_agent_skills import BUILTIN_ROOT, list_skills; "
+                    "assert BUILTIN_ROOT.is_dir(); list_skills()"], env=env, check=True, timeout=30)
     process = None
     try:
         started = time.perf_counter()
