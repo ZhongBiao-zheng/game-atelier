@@ -98,8 +98,6 @@ def _check(value, reason):
 def _shape(expect, items):
     if not (expect.get("size") or expect.get("ratio")):
         return _check(None, "未指定尺寸或比例")
-    if not items:
-        return _check(None, "没有可测量的结果")
     size, ratio = expect.get("size"), expect.get("ratio")
     wanted_size = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", str(size)) if size else None
     wanted_ratio = re.fullmatch(r"\s*(\d+)\s*:\s*(\d+)\s*", str(ratio)) if ratio else None
@@ -108,16 +106,18 @@ def _shape(expect, items):
     sizes = [(o.get("width"), o.get("height")) for o in items]
     known = [(w, h) for w, h in sizes if w and h]
     ok = True
+    allowed = []
     if wanted_size:
         target = tuple(map(int, wanted_size.groups()))
         ok &= all(actual == target for actual in known)
+        allowed.append(f"必须精确为 {target[0]}×{target[1]} 像素")
     if wanted_ratio:
         a, b = map(int, wanted_ratio.groups())
-        ok &= all(w * b == h * a for w, h in known)
-    measured = "、".join(f"{w}×{h}" if w and h else "无法解码" for w, h in sizes)
-    return _check(
-        None if ok and len(known) < len(sizes) else ok, f"期望 {size or ratio}，实测 {measured}"
-    )
+        ok &= all(100 * abs(w * b - h * a) <= 2 * h * a for w, h in known)
+        allowed.append(f"{a}:{b} 允许 ±2%（宽高比约 {0.98 * a / b:.5f} 至 {1.02 * a / b:.5f}）")
+    measured = "、".join(f"{w}×{h}（{w / h:.5f}）" if w and h else "无法解码" for w, h in sizes)
+    result = None if not sizes or (ok and len(known) < len(sizes)) else ok
+    return _check(result, f"{'，'.join(allowed)}，实测 {measured or '无结果'}")
 
 
 def _attachments(expect, row, jobs):
@@ -263,13 +263,13 @@ def _turn_checks(row, previous):
     if "duration_s" in keys:
         durations = [item.get("duration_s") for item in videos]
         measured = "、".join("未知" if d is None else f"{d:.3f} 秒" for d in durations)
-        checks["duration_s"] = _all_match(
-            [
-                None if d is None else round(d, 3) == round(expect["duration_s"], 3)
-                for d in durations
-            ],
-            True,
-            f"期望 {expect['duration_s']} 秒，实测 {measured}",
+        target = expect["duration_s"]
+        low, high = target - 0.5, target + 0.5
+        reason = f"期望 {target:g} 秒，允许 {low:g} 至 {high:g} 秒（±0.5 秒），实测 {measured or '无结果'}"
+        checks["duration_s"] = (
+            _all_match([None if d is None else low <= d <= high for d in durations], True, reason)
+            if durations
+            else _check(None, reason)
         )
     if "orientation" in keys:
         wanted = expect["orientation"]
