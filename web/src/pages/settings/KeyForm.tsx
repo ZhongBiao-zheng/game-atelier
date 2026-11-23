@@ -220,8 +220,6 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       });
       setGatewayModels(result.models);
       setGatewayInfo(`${result.info.name} · ${result.info.version}`);
-      // 连上了但一个模型都没有：保存仍禁用，说清原因（第 7 批前这里静默）。
-      if (!result.models.length) setGatewayError('这把网关密钥没有可用的模型，请联系主机管理员');
     } catch (e) {
       // 服务端已给出能照着做的原因，不再附带「（HTTP 502）」这类状态码。
       setGatewayError(e instanceof ApiError && e.reason ? `连接网关失败：${e.reason}` : e instanceof Error ? e.message : String(e));
@@ -529,6 +527,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     && unresolvedChecked.length === 0
     && !saving,
   );
+  // 连上了但这把密钥一个模型都没有：保存禁用，原因写在按钮旁（Windows 实测：原来只是灰着，没有说明）。
+  const blockedReason = isGateway && gatewayInfo && gatewayModels.length === 0 ? '这把密钥当前没有可用模型' : null;
 
   // chip 计数与列表同源：都先过搜索词。否则搜 "seedream" 后列表只剩 2 行、chip 还写着「全部 78」。
   const pickerSearched = (preview?.models ?? []).filter((m) => {
@@ -938,6 +938,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         <footer className="flex shrink-0 items-center gap-2 border-t border-border px-6 py-4">
           {onDelete && <Button variant="bare" type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</Button>}
           <span className="flex-1" />
+          {blockedReason && <span role="status" className="text-xs text-muted-foreground">{blockedReason}</span>}
           <Button variant="ghost" size="sm" type="button" onClick={onCancel} disabled={saving}>取消</Button>
           <Button type="button" onClick={submit} disabled={!canSubmit} className="px-5">{saving ? '保存中...' : submitLabel}</Button>
         </footer>

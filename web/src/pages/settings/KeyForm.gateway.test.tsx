@@ -48,7 +48,10 @@ describe('局域网 Atelier 供应商', () => {
     fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
     fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });
     fireEvent.click(screen.getByRole('button', { name: '连接网关' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('这把网关密钥没有可用的模型，请联系主机管理员');
+    // 原因写在禁用的保存按钮旁，一行短文案。
+    const reason = await screen.findByText('这把密钥当前没有可用模型');
+    expect(reason.closest('footer')).toContainElement(screen.getByRole('button', { name: '保存' }));
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
