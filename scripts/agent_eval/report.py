@@ -243,8 +243,9 @@ def _used_previous(expect, previous, jobs):
 def _turn_checks(row, previous):
     expect = row["expect"]
     keys = _requested(expect)
-    if row["status"] == "not_applicable":
-        return {key: _check(None, row.get("reason") or "当前轮缺少观测") for key in keys}
+    if row["status"] != "completed":
+        reason = row.get("reason") or row.get("error") or STATES.get(row["status"], row["status"])
+        return {key: _check(None, f"本轮未完成，{reason}") for key in keys}
     jobs = row.get("generations") or []
     items = [item for job in jobs for item in job.get("outputs") or []]
     images = [item for item in items if item.get("kind") == "image"]
@@ -360,7 +361,7 @@ def machine_checks(row):
             focused.update(status="not_applicable", reason=row.get("reason") or "没有本轮观测")
         for name, check in _turn_checks(focused, previous).items():
             checks[f"{number}.{name}" if multi else name] = check
-        previous = jobs if focused["status"] != "not_applicable" else None
+        previous = jobs if focused["status"] == "completed" else None
     return checks
 
 
@@ -508,19 +509,36 @@ def _source(row):
     return mode + " · " + str(row.get("server_commit") or "提交未知")
 
 
+def _incomplete(rows):
+    return sum(row["status"] != "completed" for row in rows)
+
+
+def _failure_reason(row):
+    return row.get("reason") or next(
+        (
+            outcome.get("reason") or outcome["error"]
+            for outcome in row.get("turn_outcomes", [])
+            if outcome.get("reason") or outcome.get("error")
+        ),
+        "原因未知",
+    )
+
+
 def _overview(rows):
     counts = Counter(row["status"] for row in rows)
     status = " · ".join(f"{_e(STATES.get(k, k))} {v}" for k, v in counts.items())
     sources = "、".join(dict.fromkeys(_source(row) for row in rows))
-    heading = ["运行", "总体检查通过率"] + ["平均" + label for label, _ in METRICS.values()]
-    values = [str(len(rows)), _show_rate(_rate(rows, LABELS))]
+    heading = ["运行", "未完成的运行数", "总体检查通过率"] + [
+        "平均" + label for label, _ in METRICS.values()
+    ]
+    values = [str(len(rows)), str(_incomplete(rows)), _show_rate(_rate(rows, LABELS))]
     for key, (_, places) in METRICS.items():
         value = _number(_average(rows, key), places)
         n = sum(_metric(row, key) is not None for row in rows)
         values.append(f"{value} <small>({n}/{len(rows)})</small>" if n != len(rows) else value)
     rates = _table(list(LABELS.values()), [[_show_rate(_rate(rows, [key])) for key in LABELS]])
     return (
-        f"<p>{_e(sources)} · {status}</p>"
+        f"<p>{_e(sources)} · 审查模式 · 脚本代替用户裁决 · {status}</p>"
         + _table(heading, [values])
         + "<h3>各项通过率</h3>"
         + rates
@@ -571,8 +589,9 @@ def _case_html(root, row):
         f"<span>{_e(status)}</span></header>",
         "<p>" + " · ".join(map(_e, (row["case_id"], row["surface"], row["chat_model"]))) + "</p>",
     ]
-    if row.get("reason"):
-        body.append(f"<p>{_e(row['reason'])}</p>")
+    body.append("<p>审查模式 · 脚本代替用户裁决</p>")
+    if row["status"] != "completed":
+        body.append(f'<p class="fail"><strong>未完成原因</strong>　{_e(_failure_reason(row))}</p>')
     body.extend([_usage(row), "<h3>需求</h3>"])
     for turn in row.get("turns") or []:
         body.append(f'<div class="copy">{_e(turn.get("say", ""))}</div>')
@@ -722,6 +741,8 @@ def _delta(before, after, places=2, unit=""):
 
 def _run_comparison(old, new):
     table = [["指标", "改造前", "改造后", "变化"]]
+    before, after = _incomplete(old), _incomplete(new)
+    table.append(["未完成的运行数", str(before), str(after), _delta(before, after, 0)])
     for label, keys in [("总体检查通过率", LABELS), *((v, [k]) for k, v in LABELS.items())]:
         a, b = _rate(old, keys), _rate(new, keys)
         pct_a = 100 * a[0] / a[1] if a[1] else None
@@ -738,6 +759,16 @@ def _compare_case(key, cases, scores):
     table.append(
         ["运行状态", *(STATES.get(r["status"], r["status"]) if r else "缺少运行" for r in cases)]
     )
+    if any(row and row["status"] != "completed" for row in cases):
+        table.append(
+            [
+                "未完成原因",
+                *(
+                    _failure_reason(row) if row and row["status"] != "completed" else "—"
+                    for row in cases
+                ),
+            ]
+        )
     per_turn = []
     for row in cases:
         indexed = {}
