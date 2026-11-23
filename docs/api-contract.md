@@ -1641,9 +1641,9 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 
 - `POST /attachments` 接收单个 multipart 图片并返回 attachment_id。`GET /attachments/{attachment_id}` 读取本会话已登记的图片。
 - `POST /messages` 接收 `{client_message_id,text,skill?,attachment_ids?,asset_ids?}`，锁内认领轮次并返回 202。同一消息 ID 重放只执行一次。
-- `POST /approvals` 沿用画布的 decisions 与逐项勾选。`GET /approvals/{call_id}/items` 返回批次估价明细。`POST /cancel` 停止当前轮次。更新维护期间禁发新消息，已接入轮次仍可审批或停止。更新等待同时统计 Studio 的运行中和待审批会话。服务重启时将遗留的运行中轮次记为 interrupted，保留待审批轮次。
+- `POST /approvals` 沿用画布的 decisions 与逐项勾选。`GET /approvals/{call_id}/items` 返回批次估价明细。Studio 的逐项明细和确认摘要共用同一估价行，包含模型显示名、实际数量与脱敏提示词的前 40 字，超长以省略号结尾。`POST /cancel` 停止当前轮次。更新维护期间禁发新消息，已接入轮次仍可审批或停止。更新等待同时统计 Studio 的运行中和待审批会话。服务重启时将遗留的运行中轮次记为 interrupted，保留待审批轮次。
 - `GET /plan`、`GET /usage` 和 `GET /jobs` 分别返回当前会话计划、累计对话用量和关联的 Studio 任务。模型、技能、生成模型、确认金额共用已有 `/api/canvas/agent` 全局端点。
 
-Studio Job 的 API 投影提供可选只读字段 `studio_agent_session_id` 与 `studio_agent_turn_id`。只有 studio 命名空间可有会话关联，turn_id 必须随 session_id。关联保存在 Job 文件的 `params._studio_agent` 扩展中，旧版可读取和回写同一任务文件。普通 Job 省略此扩展，手动重编或再次生成产生普通创作记录。生成用的参考媒体复制到 `.runtime/uploads` 后登记在普通 JobParams 中。每个生成项创建一个 Job，count 存入 n。批次 1–20 项，每项 1–4 份。批次按规范化后的参考和控制参数估价，超过阈值先确认。提交期间部分成功的任务保留。
+Studio Job 的 API 投影提供可选只读字段 `studio_agent_session_id` 与 `studio_agent_turn_id`。只有 studio 命名空间可有会话关联，turn_id 必须随 session_id。关联保存在 Job 文件的 `params._studio_agent` 扩展中，旧版可读取和回写同一任务文件。普通 Job 省略此扩展，手动重编或再次生成产生普通创作记录。生成用的参考媒体复制到 `.runtime/uploads` 后登记在普通 JobParams 中。每个生成项创建一个 Job，count 存入 n。批次 1–20 项，每项最多 4 份，声明式视频只支持 1 条。视频按实际提交条数乘单价估价，超出协议上限的请求在审批前退回。批次按规范化后的参考和控制参数估价，超过阈值先确认。同一轮内模型复用生成调用 ID 时，相同参数重放复用原 Job；更改生成参数产生新请求，重新估价并应用当前确认规则。提交期间部分成功的任务保留。
 
 对话模型用量沿用 `.runtime/agent-usage/YYYY-MM.jsonl`。Studio 请求、待结算项和主机结算行都标记 `workspace=studio`、`project_id=null`，网关调用标记为 `studio:<session_id>:<revision>`。缺少 workspace 的旧行属于画布。读取单个 Studio 会话只结算该工作区、该会话的用量。

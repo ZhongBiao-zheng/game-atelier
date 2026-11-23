@@ -321,3 +321,22 @@ def test_reply_timestamps_follow_each_model_response_and_submission(studio, revi
         < datetime.fromisoformat(job.submitted_at)
         < datetime.fromisoformat(after["created_at"])
     )
+
+
+@pytest.mark.parametrize("tool", ["run_generation", "run_generations"])
+def test_approval_describes_each_generation(studio, tool):
+    api, url, vendor, _ = studio
+    first = VIDEO | {"prompt": "落日" * 21, "count": 3}
+    second = VIDEO | {"prompt": "远山", "count": 1}
+    batch = tool == "run_generations"
+    send(api, url, vendor, tool, {"items": [first, second]} if batch else first)
+    [approval] = settle(api, url)["pending_approvals"]
+    preview = "落日" * 20 + "…"
+    assert approval["summary"].splitlines()[1] == f"Video · 3 份 · {preview}"
+    if batch:
+        assert approval["summary"].splitlines()[2] == "Video · 1 份 · 远山"
+        endpoint = url + "/approvals/" + approval["call_id"] + "/items"
+        rows = api.get(endpoint).json()["items"]
+        assert [(row["model"], row["count"], row["title"]) for row in rows] == [
+            ("Video", 3, preview), ("Video", 1, "远山")
+        ]

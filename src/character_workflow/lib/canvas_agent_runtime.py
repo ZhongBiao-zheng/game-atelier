@@ -1149,12 +1149,15 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
     # SDK 只为 OpenAI 官方地址默认请求流式用量；兼容地址也必须显式请求末尾的 usage 块。
     if llm_protocols.speaks_openai(protocol) and protocol != llm_protocols.OPENAI_RESPONSES:
         settings.include_usage = True
+    model_class = (OpenAIResponsesModel if protocol == llm_protocols.OPENAI_RESPONSES
+                   else OpenAIChatCompletionsModel)
+    if adapt_model := getattr(workspace, "model_class", None):
+        model_class = adapt_model(model_class)
     return Agent(
         name=workspace.event,
         instructions=workspace.instructions(session),
         tools=workspace.tools(),
-        model=(OpenAIResponsesModel if protocol == llm_protocols.OPENAI_RESPONSES
-               else OpenAIChatCompletionsModel)(model=session.model, openai_client=client),
+        model=model_class(model=session.model, openai_client=client),
         model_settings=settings,
     )
 

@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict, deque
+from contextlib import aclosing
 from pathlib import Path
 from typing import Literal
 
@@ -116,31 +117,61 @@ def items_for(tool, args):
     )
 
 
+def studio_models(scope, kind):
+    rows = scope.models(kind)
+    if kind != "video":
+        return rows
+    # 普通创作台给一个 Job 传 n；内置视频 caller 逐条提交，声明式视频使用模板声明的上限。
+    # 自动路由按协议分组，声明式还按模板分组，路由的能力与其成员一致。
+    return [
+        row
+        if row["protocol"] == "declarative"
+        else {**row, "capabilities": {**row["capabilities"], "count": {"min": 1, "max": 4}}}
+        for row in rows
+    ]
+
+
 def check_models(items, scope):
     by_kind = {}
     for item in items:
         if item.kind not in by_kind:
-            by_kind[item.kind] = {(row["alias"], row["model"]) for row in scope.models(item.kind)}
-        if (item.alias, item.model) not in by_kind[item.kind]:
+            by_kind[item.kind] = {
+                (row["alias"], row["model"]): row
+                for row in studio_models(scope or runtime.ALL_MODELS, item.kind)
+            }
+        row = by_kind[item.kind].get((item.alias, item.model))
+        if scope is not None and row is None:
             raise ValueError("当前创作设置不允许使用这个类型或模型")
+        if row is not None and item.kind == "video":
+            maximum = row["capabilities"]["count"]["max"]
+            if item.count > maximum:
+                raise ValueError(f"该视频模型一次最多生成 {maximum} 条")
+    return by_kind
 
 
 def estimate_rows(items, sid, scope=None):
-    if scope is not None:
-        check_models(items, scope)
+    models = check_models(items, scope)
     rows = []
     for index, item in enumerate(items):
         params = item.parameters(sid)
+        alias, model = item.alias, item.model
         if item.kind == "video":
+            if alias is None:
+                from character_workflow.lib.model_routes import resolve_auto
+
+                key, selected = resolve_auto("video", model, params=params, consume=False)
+                alias, model = key.alias, selected.id
             params["n"] = 1
-        amount = cost._estimate(item.kind, item.alias, item.model, params)
+        amount = cost._estimate(item.kind, alias, model, params)
         if item.kind == "video" and amount is not None:
             amount *= item.count
+        prompt = " ".join(runtime.redact(item.prompt).split())
         rows.append(
             {
                 "index": index,
-                "title": runtime.redact(item.prompt)[:80],
-                "model": item.model,
+                "title": prompt[:40] + ("…" if len(prompt) > 40 else ""),
+                "model": models[item.kind].get((item.alias, item.model), {}).get("name")
+                or item.model,
                 "count": item.count,
                 "estimate_cny": amount,
             }
@@ -231,7 +262,22 @@ def submit(workspace, item, params, call_id, index):
 
     if not call_id:
         raise ValueError("生成调用缺少唯一标识")
-    identity = json.dumps([workspace.session_id, workspace.active_turn, call_id, index])
+    # 使用已校验的参数与引用路径，复制参考素材前取键，避免临时 UUID 破坏重入去重。
+    identity = json.dumps(
+        [
+            workspace.session_id,
+            workspace.active_turn,
+            call_id,
+            index,
+            item.kind,
+            item.alias,
+            item.model,
+            item.prompt,
+            params,
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     jid = "studio-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
     # 与删除/停止共用外部会话锁：已取消的后台工作不能在会话清理后再创建 Job。
     with sessions.lock(workspace.session_id):
@@ -272,6 +318,20 @@ def tool_error(error):
     return "错误：" + runtime.redact(str(getattr(error, "detail", error)))[:800]
 
 
+def generation_signature(name, arguments):
+    """工具重入比较使用校验后的默认值和参数类型。无效参数仍交给工具正常报错。"""
+    try:
+        items = items_for(name, json.loads(arguments))
+        normalized = [
+            item.model_dump()
+            | {"params": JobParams.model_validate(item.params).model_dump(exclude_defaults=True)}
+            for item in items
+        ]
+    except (TypeError, ValueError):
+        normalized = arguments
+    return json.dumps([name, normalized], sort_keys=True, separators=(",", ":"))
+
+
 class StudioWorkspace:
     event = "studio-agent"
     project_id = None
@@ -282,6 +342,62 @@ class StudioWorkspace:
         self.notify = notify
         self.active_turn = None
         self.response_times: dict[str, deque[str]] = defaultdict(deque)
+        self.provider_call_ids: dict[str, str] = {}
+        self.used_call_ids: set[str] = set()
+        self.generation_calls: dict[tuple[str, str], tuple[str, str]] = {}
+        self.generation_outputs: dict[str, str] = {}
+
+    def model_class(self, base):
+        # SDK 在执行工具和询问授权之前校验调用 ID。只为 Studio 生成的冲突分配本地 ID。
+        # 继续请求厂商时恢复原始调用 / 结果配对，保留原生协议签名和 Responses item.id。
+        workspace = self
+
+        class StudioModel(base):
+            async def stream_response(self, system_instructions, input, *args, **kwargs):
+                stream = super().stream_response(
+                    system_instructions, workspace.provider_input(input), *args, **kwargs
+                )
+                done = []
+                async with aclosing(stream):
+                    async for event in stream:
+                        if event.type == "response.output_item.done":
+                            done.append(event.item)
+                        elif event.type == "response.completed":
+                            for item in event.response.output or done:
+                                workspace.identify_call(item)
+                        yield event
+
+        return StudioModel
+
+    def provider_input(self, items):
+        if not self.provider_call_ids or isinstance(items, str):
+            return items
+        output = []
+        for item in items:
+            if isinstance(item, dict) and item.get("call_id") in self.provider_call_ids:
+                item = {**item, "call_id": self.provider_call_ids[item["call_id"]]}
+                item.pop("studio_provider_call_id", None)
+            output.append(item)
+        return output
+
+    def identify_call(self, item):
+        if item.type != "function_call":
+            return
+        provider_id = item.call_id
+        if item.name in {"run_generation", "run_generations"} and provider_id:
+            signature = generation_signature(item.name, item.arguments)
+            key = provider_id, signature
+            if key in self.generation_calls:
+                item.call_id, item.arguments = self.generation_calls[key]
+            else:
+                if provider_id in self.used_call_ids:
+                    identity = json.dumps([self.active_turn, *key])
+                    item.call_id = "call_" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+                self.generation_calls[key] = (item.call_id, item.arguments)
+            if item.call_id != provider_id:
+                item.studio_provider_call_id = provider_id
+                self.provider_call_ids[item.call_id] = provider_id
+        self.used_call_ids.add(item.call_id)
 
     def observe_response(self, response):
         # SDK 等 on_llm_end 返回才执行本次响应里的工具。重复的正文按出现顺序匹配。
@@ -294,6 +410,26 @@ class StudioWorkspace:
     def read(self):
         session = sessions.read(self.session_id)
         self.active_turn = session.turns[-1].turn_id if session.turns else None
+        self.provider_call_ids.clear()
+        self.used_call_ids.clear()
+        self.generation_calls.clear()
+        self.generation_outputs.clear()
+        current_turn = True
+        for item in reversed(session.history):
+            if item.get("role") == "user":
+                current_turn = False
+            if current_turn and item.get("type") == "function_call_output":
+                self.generation_outputs.setdefault(item["call_id"], item["output"])
+            if item.get("type") != "function_call":
+                continue
+            call_id = item["call_id"]
+            self.used_call_ids.add(call_id)
+            provider_id = item.get("studio_provider_call_id", call_id)
+            if provider_id != call_id:
+                self.provider_call_ids[call_id] = provider_id
+            if current_turn and item["name"] in {"run_generation", "run_generations"}:
+                signature = generation_signature(item["name"], item["arguments"])
+                self.generation_calls[provider_id, signature] = (call_id, item["arguments"])
         return session
 
     def mutate(self, update):
@@ -448,8 +584,14 @@ class StudioWorkspace:
             amount = sum(row["estimate_cny"] or 0 for row in rows)
             priced = sum(row["estimate_cny"] is not None for row in rows)
             label = f"预计 {amount:g} 元" if priced else "未计价"
-            return f"{len(rows)} 项生成，{label}" + (
+            total = f"{len(rows)} 项生成，{label}" + (
                 f"（{len(rows) - priced} 项未计价）" if 0 < priced < len(rows) else ""
+            )
+            return "\n".join(
+                [
+                    total,
+                    *(f"{row['model']} · {row['count']} 份 · {row['title']}" for row in rows),
+                ]
             )
         return self.describe_tool(tool, args)
 
@@ -507,7 +649,7 @@ class StudioWorkspace:
             }
         if name == "list_models":
             kinds = [args["mode"]] if args.get("mode") else scope.kinds()
-            return {"models": [row for kind in kinds for row in scope.models(kind)]}
+            return {"models": [row for kind in kinds for row in studio_models(scope, kind)]}
         if name == "search_library":
             limit = int(args.get("limit", 12))
             if not 1 <= limit <= 12:
@@ -622,6 +764,8 @@ class StudioWorkspace:
 
             async def invoke(ctx, raw):
                 call_id = ctx.tool_call_id
+                if name.startswith("run_generation") and call_id in self.generation_outputs:
+                    return self.generation_outputs[call_id]
                 try:
                     args = json.loads(raw or "{}")
                     await asyncio.to_thread(
@@ -644,6 +788,9 @@ class StudioWorkspace:
                 return output
 
             async def approval(ctx, args, call_id):
+                # 用户裁决后从已存历史开启新 SDK run；同一调用重放原结果，含拒绝与部分成功。
+                if call_id in self.generation_outputs:
+                    return False
                 try:
                     rows = await asyncio.to_thread(
                         estimate_rows, items_for(name, args), self.session_id, ctx.context.scope
