@@ -102,3 +102,79 @@ def test_terminal_local_state_keeps_explicit_unsettled_provider_charge(state):
         {"status": state, "error": "连接中断，未自动重发（可能已计费）"}
     )
     assert not request_may_be_in_flight({"status": state, "error": "对话模型返回错误 429：已限流"})
+
+
+def test_interrupt_after_paid_post_keeps_both_rows_and_costs(monkeypatch, tmp_path):
+    original = LocalAPI.request
+    submits = []
+
+    def interrupt_after_second_approval(self, method, url, **kwargs):
+        response = original(self, method, url, **kwargs)
+        if method.upper() == "POST" and url.endswith("/approvals"):
+            submits.append(url)
+            if len(submits) == 2:
+                response.close()
+                raise KeyboardInterrupt
+        return response
+
+    monkeypatch.setattr(LocalAPI, "request", interrupt_after_second_approval)
+    code, rows = run_matrix(tmp_path, ["completed", "interrupted-demand", "unstarted"])
+    assert code == 130
+    assert [r["case_id"] for r in rows] == ["completed", "interrupted-demand"]
+    assert rows[0]["status"] == "completed" and rows[0]["usage"]["cost_complete"]
+    partial = rows[1]
+    assert (partial["status"], partial["reason"]) == ("stopped", "interrupted")
+    assert not partial["usage"]["cost_complete"]
+    assert partial["usage"]["chat_cost_cny"] > 0
+    assert partial["usage"]["generation_cost_cny"] == 0.25
+    assert partial["usage"]["total_cost_cny"] > 0.25
+    assert len(submits) == 2 and len(partial["generations"]) == 1
+    assert partial["approvals"] and partial["turn_outcomes"][0]["reason"] == "interrupted"
+
+
+def test_interrupt_waiting_for_approval_cancels_turn(monkeypatch, tmp_path):
+    original = LocalAPI.request
+    cancelled = []
+    interrupted = False
+
+    def interrupt_at_card(self, method, url, **kwargs):
+        nonlocal interrupted
+        response = original(self, method, url, **kwargs)
+        if method.upper() == "GET" and not interrupted and "/approvals/" in url:
+            interrupted = True
+            response.close()
+            raise KeyboardInterrupt
+        if method.upper() == "POST" and url.endswith("/cancel"):
+            cancelled.append(url)
+        return response
+
+    monkeypatch.setattr(LocalAPI, "request", interrupt_at_card)
+    code, rows = run_matrix(tmp_path, ["interrupt-at-card"])
+    assert interrupted and len(cancelled) == 1
+    assert code == 130 and len(rows) == 1
+    assert rows[0]["reason"] == "interrupted"
+    assert rows[0]["usage"]["chat_cost_cny"] > 0
+    assert rows[0]["usage"]["generation_cost_cny"] == 0
+    assert not rows[0]["usage"]["cost_complete"]
+
+
+def test_interrupt_while_saving_final_media_preserves_charge(monkeypatch, tmp_path):
+    from scripts.agent_eval import driver
+
+    original = driver.media_evidence
+    interrupted = False
+
+    def stop_once(*args):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+        return original(*args)
+
+    monkeypatch.setattr(driver, "media_evidence", stop_once)
+    code, rows = run_matrix(tmp_path, ["produced"])
+    assert code == 130 and len(rows) == 1
+    assert rows[0]["reason"] == "interrupted"
+    assert not rows[0]["usage"]["cost_complete"]
+    assert rows[0]["usage"]["generation_cost_cny"] == 0.25
+    assert len(rows[0]["generations"]) == 1

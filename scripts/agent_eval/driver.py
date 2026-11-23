@@ -461,6 +461,7 @@ def run_case(
     }
     notices, jobs, session, usage, job_turn = set(), [], {}, {}, {}
     quotes = {}
+    pending_quote = None
     unmatched_results = 0
     canvas_marks = {}
     project = url = None
@@ -470,6 +471,15 @@ def run_case(
     model_may_be_running = False
     waiting_for_submission_reply = False
     settlement_uncertain = False
+
+    def interrupt_case():
+        nonlocal settlement_uncertain
+        row.update(status="stopped", reason="interrupted")
+        settlement_uncertain = True
+        notices.add("评测被中断，金额仅含已观察到的用量及生成估价")
+        if url:
+            stop_work(api, url, project, jobs, notices, model_may_be_running)
+
     try:
         url, project, applied = set_up(api, case, model, fixtures)
         row["effective_settings"] = applied
@@ -572,6 +582,7 @@ def run_case(
                         fixed_four,
                     )
                     row["approvals"].extend(records)
+                    pending_quote = (jobs, records)
                     model_may_be_running = True
                     waiting_for_submission_reply = True
                     body(
@@ -583,10 +594,11 @@ def run_case(
                         unmatched_results += remember_quotes(
                             jobs, _jobs(api, project, url), records, quotes
                         )
+                    pending_quote = None
                 elif status in ("failed", "interrupted"):
                     row.update(
                         status="failed" if status == "failed" else "stopped",
-                        reason=session.get("error") or status,
+                        reason=session.get("error") or f"session_{status}",
                     )
                     settlement_uncertain = not stop_work(
                         api, url, project, jobs, notices, model_may_be_running
@@ -616,6 +628,8 @@ def run_case(
             )
             if row["status"] != "completed":
                 break
+    except KeyboardInterrupt:
+        interrupt_case()
     except (Unsupported, requests.RequestException, ValueError, KeyError, OSError) as error:
         row.update(
             status="not_applicable" if isinstance(error, Unsupported) else "failed",
@@ -624,108 +638,142 @@ def run_case(
             else f"{type(error).__name__}（HTTP {getattr(getattr(error, 'response', None), 'status_code', '未知')}）",
         )
         if url:
-            settlement_uncertain = not stop_work(
-                api,
-                url,
-                project,
-                jobs,
-                notices,
-                model_may_be_running,
-                unknown_delivery=waiting_for_submission_reply,
-            )
-    if url:
-        try:
-            session = body(api.get(url), "会话")
-            jobs = _read_with_quotes(api, project, url, quotes)
-            response = api.get(url + "/usage")
-            if not response.ok:
-                raise Unsupported("对话用量")
-            usage = response.json()
-            if session.get("status") not in {"idle", "interrupted", "failed"}:
-                settlement_uncertain = True
-        except (requests.RequestException, Unsupported, ValueError, KeyError):
-            if turn_index:
-                settlement_uncertain = True
-            notices.add("结束时未能获取完整的会话、生成或用量")
-    row["steps"] = steps_from(session)
-    row["messages"] = session.get("messages", [])
-    for message in reversed(row["messages"]):
-        if message.get("role") == "user":
-            break
-        if message.get("role") == "assistant" and message.get("text"):
-            row["final_reply"] = message["text"]
-            break
-    row["step_count"] = max(len(row["steps"]), usage.get("requests", 0))
-    row["validation_errors"] = sum(
-        bool(
-            re.search(
-                "参数错误|参数不合规|validation error",
-                str(step.get("result") or ""),
-                flags=re.IGNORECASE,
-            )
-        )
-        for step in row["steps"]
-    )
-    row["loaded_skills"] = skills_from(row["steps"]) if session else None
-    if session and "history" not in session:
-        notices.add("该会话接口仅返回可见工具步骤与摘要，未公开的原始工具参数记为 null")
-    for index, job in enumerate(sorted(jobs, key=lambda j: j.get("submitted_at", "")), 1):
-        tid = job.get("studio_agent_turn_id")
-        session_index = next(
-            (
-                i
-                for i, t in enumerate(session.get("turns", []), 1)
-                if tid and t.get("turn_id") == tid
-            ),
-            None,
-        )
-        number = session_index or job_turn.get(job["job_id"], turn_index or None)
-        evidence = media_evidence(api, job, directory, index, number, notices)
-        if project:
-            evidence.update(
-                canvas_marks.get(job["job_id"], {"on_canvas": None, "canvas_evidence": None})
-            )
-        row["generations"].append(evidence)
-    recorded = {turn["turn_index"] for turn in row["turn_outcomes"]}
-    if turn_index and turn_index not in recorded and model_may_be_running:
-        row["turn_outcomes"].append(
-            {
-                "turn_index": turn_index,
-                "status": row["status"],
-                "reason": row["reason"],
-                "session_status": session.get("status"),
-                "error": session.get("error"),
-            }
-        )
-    for outcome in row["turn_outcomes"]:
-        number = outcome["turn_index"]
-        names = row["turns"][number - 1].get("attachments", [])
-        outcome.update(
-            per_turn_observation(
-                session, row["steps"], [a for a in row["attachments"] if a["name"] in names], number
-            )
-        )
-        if project:
-            marks = [
-                job.get("on_canvas") for job in row["generations"] if job["turn_index"] == number
-            ]
-            outcome["on_canvas"] = (
-                False if False in marks else None if None in marks else bool(marks)
-            )
+            try:
+                settlement_uncertain = not stop_work(
+                    api,
+                    url,
+                    project,
+                    jobs,
+                    notices,
+                    model_may_be_running,
+                    unknown_delivery=waiting_for_submission_reply,
+                )
+            except KeyboardInterrupt:
+                interrupt_case()
 
-    row["usage"] = usage_from(usage, jobs, session)
-    if row["status"] == "not_applicable" and not row["messages"] and not jobs:
-        row["usage"]["cost_complete"] = turn_index == 0
-    if usage.get("source") in {"lan", "mixed"} and usage.get("unpriced"):
-        notices.add("网关会话汇总未区分已结算与仍待结算的请求，无法确认总额")
-    if settlement_uncertain:
-        row["usage"]["cost_complete"] = False
-        notices.add("请求可能仍在结算，当前合计仅含已观测到的费用")
-    if any(job.get("status") not in TERMINAL_JOBS for job in jobs):
-        notices.add("停止时仍有已提交任务，最终结算金额未知")
-        row["usage"]["cost_complete"] = False
-    if remaining is not None and row["usage"]["total_cost_cny"] > remaining:
-        row.update(status="stopped", reason="budget_exceeded")
-    row["elapsed_seconds"] = round(time.monotonic() - start, 3)
-    row["unobservable"] = sorted(notices)
-    return row
+    def collect():
+        nonlocal jobs, session, usage, settlement_uncertain
+        if url:
+            try:
+                session = body(api.get(url), "会话")
+                jobs = _read_with_quotes(api, project, url, quotes)
+                if pending_quote:
+                    before, records = pending_quote
+                    remember_quotes(before, jobs, records, quotes)
+                    for job in jobs:
+                        job.update(quotes.get(job["job_id"], {}))
+                response = api.get(url + "/usage")
+                if not response.ok:
+                    raise Unsupported("对话用量")
+                usage = response.json()
+                if session.get("status") not in {"idle", "interrupted", "failed"}:
+                    settlement_uncertain = True
+            except (requests.RequestException, Unsupported, ValueError, KeyError):
+                if turn_index:
+                    settlement_uncertain = True
+                notices.add("结束时未能获取完整的会话、生成或用量")
+        row["steps"] = steps_from(session)
+        row["messages"] = session.get("messages", [])
+        for message in reversed(row["messages"]):
+            if message.get("role") == "user":
+                break
+            if message.get("role") == "assistant" and message.get("text"):
+                row["final_reply"] = message["text"]
+                break
+        row["step_count"] = max(len(row["steps"]), usage.get("requests", 0))
+        row["validation_errors"] = sum(
+            bool(
+                re.search(
+                    "参数错误|参数不合规|validation error",
+                    str(step.get("result") or ""),
+                    flags=re.IGNORECASE,
+                )
+            )
+            for step in row["steps"]
+        )
+        row["loaded_skills"] = skills_from(row["steps"]) if session else None
+        if session and "history" not in session:
+            notices.add("该会话接口仅返回可见工具步骤与摘要，未公开的原始工具参数记为 null")
+        collected = {entry["job_id"] for entry in row["generations"]}
+        for index, job in enumerate(sorted(jobs, key=lambda j: j.get("submitted_at", "")), 1):
+            if job["job_id"] in collected:
+                continue
+            tid = job.get("studio_agent_turn_id")
+            session_index = next(
+                (
+                    i
+                    for i, t in enumerate(session.get("turns", []), 1)
+                    if tid and t.get("turn_id") == tid
+                ),
+                None,
+            )
+            number = session_index or job_turn.get(job["job_id"], turn_index or None)
+            evidence = media_evidence(api, job, directory, index, number, notices)
+            if project:
+                evidence.update(
+                    canvas_marks.get(job["job_id"], {"on_canvas": None, "canvas_evidence": None})
+                )
+            row["generations"].append(evidence)
+        recorded = {turn["turn_index"] for turn in row["turn_outcomes"]}
+        if (
+            turn_index
+            and turn_index not in recorded
+            and (model_may_be_running or row["reason"] == "interrupted")
+        ):
+            row["turn_outcomes"].append(
+                {
+                    "turn_index": turn_index,
+                    "status": row["status"],
+                    "reason": row["reason"],
+                    "session_status": session.get("status"),
+                    "error": session.get("error"),
+                }
+            )
+        for outcome in row["turn_outcomes"]:
+            number = outcome["turn_index"]
+            names = row["turns"][number - 1].get("attachments", [])
+            outcome.update(
+                per_turn_observation(
+                    session,
+                    row["steps"],
+                    [a for a in row["attachments"] if a["name"] in names],
+                    number,
+                )
+            )
+            if project:
+                marks = [
+                    job.get("on_canvas")
+                    for job in row["generations"]
+                    if job["turn_index"] == number
+                ]
+                outcome["on_canvas"] = (
+                    False if False in marks else None if None in marks else bool(marks)
+                )
+
+        row["usage"] = usage_from(usage, jobs, session)
+        if row["status"] == "not_applicable" and not row["messages"] and not jobs:
+            row["usage"]["cost_complete"] = turn_index == 0
+        if usage.get("source") in {"lan", "mixed"} and usage.get("unpriced"):
+            notices.add("网关会话汇总未区分已结算与仍待结算的请求，无法确认总额")
+        if settlement_uncertain:
+            row["usage"]["cost_complete"] = False
+            notices.add("请求可能仍在结算，当前合计仅含已观测到的费用")
+        if any(job.get("status") not in TERMINAL_JOBS for job in jobs):
+            notices.add("停止时仍有已提交任务，最终结算金额未知")
+            row["usage"]["cost_complete"] = False
+        if (
+            row["reason"] != "interrupted"
+            and remaining is not None
+            and row["usage"]["total_cost_cny"] > remaining
+        ):
+            row.update(status="stopped", reason="budget_exceeded")
+        row["elapsed_seconds"] = round(time.monotonic() - start, 3)
+        row["unobservable"] = sorted(notices)
+        return row
+
+    try:
+        return collect()
+    except KeyboardInterrupt:
+        # This can also happen while retrieving the final bill or saving a result.
+        interrupt_case()
+        return collect()
