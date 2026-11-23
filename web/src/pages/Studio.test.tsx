@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -2266,6 +2266,42 @@ async function openPanelAndReproduce(asset: CreationAsset) {
   await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
   await act(async () => { await assetPanelProps.current!.onReproduce(asset); });
 }
+
+describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () => {
+  it('团队库的图当参考后被移除：来源标题一起清空', async () => {
+    mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('Volcengine Ark');
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
+    const file = new File(['png'], 'rain.png', { type: 'image/png' });
+    act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '雨夜电影感', mime_type: 'image/png' } as never, 'lib:e1'); });
+    await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle).toBe('雨夜电影感'));
+
+    const [item] = screen.getAllByTestId('reference-stack-item');
+    const buttons = within(item).getAllByRole('button');
+    fireEvent.click(buttons[buttons.length - 1]);  // 缩略图右上角的移除
+    await waitFor(() => expect(screen.queryAllByTestId('reference-stack-item')).toHaveLength(0));
+    await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
+  });
+
+  it('来自提示词资产的来源标题：移除参考图不受影响', async () => {
+    mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('Volcengine Ark');
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    await waitFor(() => expect(assetPanelProps.current?.onUseTeamPrompt).toBeTypeOf('function'));
+    act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
+    const file = new File(['png'], 'other.png', { type: 'image/png' });
+    act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '别的图', mime_type: 'image/png' } as never, 'lib:e2'); });
+    act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
+    const [item] = screen.getAllByTestId('reference-stack-item');
+    const buttons = within(item).getAllByRole('button');
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(screen.queryAllByTestId('reference-stack-item')).toHaveLength(0));
+    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗台橘猫');
+  });
+});
 
 describe('Studio 复刻生成资产', () => {
   it('输入框为空时直接填入提示词、模型、参数与参考图，来源记为资产标题', async () => {

@@ -210,6 +210,16 @@ function StudioFull() {
   const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
   // iPhone 的 HEIC 照片 Chrome 预览不了：无论从哪个入口进来，都在后台换成 JPEG。
   useHeicAsJpeg(referenceImages, setReferenceImages, setAssetNotice);
+  // 来源标题跟着它的来源对象走：来自参考图的，那张参考被移除时一起清空（Windows 实测 W3）。
+  // 来自提示词资产或复用配置的不记文件，保持原行为。
+  const sourceTitleFile = useRef<File | null>(null);
+  useEffect(() => {
+    const file = sourceTitleFile.current;
+    if (!file) return;
+    const present = [referenceImages, referenceVideos, referenceAudios, [videoFrames.first, videoFrames.last],
+      ...Object.values(mjRefs)].some(list => list.includes(file));
+    if (!present) { sourceTitleFile.current = null; setPromptAssetSourceTitle(null); }
+  }, [referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs]);
   useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice);
   useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice);
 
@@ -1080,6 +1090,7 @@ function StudioFull() {
           }}
           onUsePrompt={(asset, renderedPrompt) => {
             setPromptText(renderedPrompt);
+            sourceTitleFile.current = null;
             setPromptAssetSourceTitle(asset.title);
             setPromptAssetId(asset.asset_id);
             setClickPinned(true);
@@ -1092,7 +1103,7 @@ function StudioFull() {
             addReferenceFile(reused, entry.mime_type ?? file.type, entry.title);
           }}
           onUseTeamPrompt={(text, entry) => {
-            setPromptText(text); setPromptAssetId(null); setPromptAssetSourceTitle(entry.title); setClickPinned(true);
+            setPromptText(text); setPromptAssetId(null); sourceTitleFile.current = null; setPromptAssetSourceTitle(entry.title); setClickPinned(true);
           }}
         />
       )}
@@ -1273,7 +1284,7 @@ function StudioFull() {
     } else if (route.target === 'videos') { slots.referenceVideos = [...slots.referenceVideos, file]; setReferenceVideos(slots.referenceVideos); }
     else if (route.target === 'audios') { slots.referenceAudios = [...slots.referenceAudios, file]; setReferenceAudios(slots.referenceAudios); }
     else { slots.referenceImages = [...slots.referenceImages, file]; setReferenceImages(slots.referenceImages); }
-    setPromptAssetSourceTitle(title); setPromptAssetId(null); setClickPinned(true); setAssetNotice('已加入参考图');
+    sourceTitleFile.current = file; setPromptAssetSourceTitle(title); setPromptAssetId(null); setClickPinned(true); setAssetNotice('已加入参考图');
   }
 
   async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
@@ -1376,6 +1387,7 @@ function StudioFull() {
     }
     // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
     setPromptText(config.prompt);
+    sourceTitleFile.current = null;
     setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
     setPromptAssetId(config.promptAssetId ?? null);
   }
