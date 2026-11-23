@@ -954,8 +954,9 @@ function StudioFull() {
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
         <div className="mx-auto flex w-full max-w-[1024px] justify-end">
-          {composer.mode === 'agent' && <StudioSessionPicker agent={composer.agent} clearDraft={composer.clearDraft} />}
-          <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
+          {composer.mode === 'agent'
+            ? <StudioSessionPicker agent={composer.agent} clearDraft={composer.clearDraft} />
+            : <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />}
         </div>
       </div>
       {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
@@ -968,7 +969,7 @@ function StudioFull() {
         className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-52.5"
       >
         {composer.mode === 'agent' ? <StudioAgentTimeline agent={composer.agent} jobs={persistedJobs}
-          renderJob={job => renderRounds(reversedRounds.filter(r => r.jobId === job.job_id), true)} />
+          renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)} />
           : renderRounds(reversedRounds)}
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内

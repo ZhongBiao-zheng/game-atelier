@@ -228,7 +228,7 @@ function AgentInput({ state }: { state: StudioComposerState }) {
 export function StudioComposer({ state, children }: { state: StudioComposerState; children: ReactNode }) {
   return <div className="pointer-events-auto mx-auto w-full max-w-[780px]">
     {state.mode === 'creation' ? children : <AgentInput state={state} />}
-    <div className="relative -mt-3 rounded-b-xl border border-t-0 border-input bg-panel px-3 pb-1.5 pt-4">
+    <div className="relative -mt-3 rounded-b-xl border border-t-0 border-input studio-mode-bar px-3 pb-1.5 pt-4">
       <Segmented disabled={state.agent.pending} aria-label="输入模式" className="inline-grid grid-cols-2">
         <SegmentedItem value="creation" selected={state.mode === 'creation'} onSelect={() => state.switchMode('creation')} className="h-7 px-3 text-xs">创作</SegmentedItem>
         <SegmentedItem value="agent" selected={state.mode === 'agent'} onSelect={() => state.switchMode('agent')} className="h-7 px-3 text-xs">Agent</SegmentedItem>

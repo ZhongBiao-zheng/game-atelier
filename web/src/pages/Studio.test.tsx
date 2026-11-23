@@ -3128,3 +3128,14 @@ it('团队使用连续追加并按来源复用 File，满额不覆盖，也不�
   const requests = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
   expect(requests.filter(([url, init]) => (String(url).includes('/adopt') || String(url).includes('/creation-assets')) && init?.method && init.method !== 'GET')).toEqual([]);
 });
+
+it('Agent 只显示对话选择，切回创作保留原查询条件', async () => {
+  renderStudio();
+  fireEvent.click(await screen.findByRole('button', { name: '生成模式筛选' }));
+  fireEvent.click(screen.getByRole('option', { name: '视频' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
+  expect(screen.getByRole('button', { name: '对话' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /^(时间|生成模式|操作类型)筛选/ })).toBeNull();
+  fireEvent.click(screen.getByRole('radio', { name: '创作' }));
+  expect(screen.getByRole('button', { name: '生成模式筛选：视频' })).toBeVisible();
+});
