@@ -374,17 +374,25 @@ def remember_quotes(jobs_before, jobs_after, records, quotes):
     return sum(sizes[: max(0, len(accepted) - len(new_ids))])
 
 
+def model_returned(session):
+    # The product records an empty completed response as failed after its usage hook runs.
+    return session.get("status") in {"idle", "awaiting_approval"} or (
+        session.get("status") == "failed"
+        and (session.get("error") or "").startswith("模型没有返回内容，可以重试或换个模型")
+    )
+
+
 def request_may_be_in_flight(session):
     status = session.get("status")
-    if status in {"idle", "awaiting_approval"}:
+    if model_returned(session):
         return False
     if status in {"failed", "interrupted"}:
-        # A rejected request (e.g. HTTP 429) is terminal. A lost upstream reply is
-        # different: product status can be terminal locally while the provider bills later.
+        # These messages identify a local step limit or an explicit provider rejection.
+        # A terminal HTTP 5xx, an SSE error frame, or a truncated response can follow
+        # real processing without triggering the SDK's end-of-response usage hook.
         error = session.get("error") or ""
-        return any(
-            marker in error for marker in ("可能已计费", "响应超时", "连不上对话模型", "服务重启")
-        )
+        rejected = re.match(r"对话模型返回错误 (400|401|403|404|405|413|415|422|429)[：:]", error)
+        return not (rejected or error.startswith("这一轮步骤太多，已停下"))
     return True
 
 
@@ -471,6 +479,28 @@ def run_case(
     model_may_be_running = False
     waiting_for_submission_reply = False
     settlement_uncertain = False
+    usage_gap = False
+    segment_start_requests = None
+
+    def observe_usage(current, session_state):
+        nonlocal usage, usage_gap
+        # Each user message/approval starts a fresh model run. Compare also during the
+        # run, so an earlier priced response cannot hide a later response with zero usage.
+        fields = ("requests", "input_tokens", "output_tokens")
+        if all(isinstance(current.get(k), int) and isinstance(usage.get(k), int) for k in fields):
+            if current["requests"] > usage["requests"] and all(
+                current[k] == usage[k] for k in fields[1:]
+            ):
+                usage_gap = True
+                notices.add("对话请求数增加，但没有登记这次请求的 token 用量")
+            if (
+                model_returned(session_state)
+                and segment_start_requests is not None
+                and current["requests"] <= segment_start_requests
+            ):
+                usage_gap = True
+                notices.add("模型轮次已返回，但没有登记本轮的用量记录")
+        usage = current
 
     def interrupt_case():
         nonlocal settlement_uncertain
@@ -503,6 +533,7 @@ def run_case(
             not response.ok or not required_usage.issubset(response.json())
         ):
             raise Unsupported("缺少对话用量接口，无法约束真实预算")
+        usage = response.json() if response.ok else {}
         for turn_index, turn in enumerate(case["turns"], 1):
             payload = prepare_turn(api, url, project, turn, fixtures, row)
             if time.monotonic() - start >= limits["max_seconds"]:
@@ -510,6 +541,7 @@ def run_case(
                 break
             model_may_be_running = True
             waiting_for_submission_reply = True
+            segment_start_requests = usage.get("requests")
             session = body(api.post(url + "/messages", json=payload), "发送对话")
             waiting_for_submission_reply = False
             while True:
@@ -520,7 +552,7 @@ def run_case(
                     job_turn.setdefault(job["job_id"], turn_index)
                 response = api.get(url + "/usage")
                 if response.ok:
-                    usage = response.json()
+                    observe_usage(response.json(), session)
                     if remaining is not None and not required_usage.issubset(usage):
                         raise Unsupported("对话用量缺少计价字段")
                 elif remaining is not None:
@@ -540,6 +572,12 @@ def run_case(
                         if remaining is not None and spent["total_cost_cny"] > remaining
                         else "max_cost_cny"
                     )
+                elif (
+                    remaining is not None
+                    and usage_gap
+                    and not (status == "idle" and turn_index == len(case["turns"]))
+                ):
+                    reason = "unpriced_chat"
                 elif remaining is not None and usage.get("unpriced") and not spent["cost_complete"]:
                     reason = "unpriced_chat"
                 elif (
@@ -585,6 +623,7 @@ def run_case(
                     pending_quote = (jobs, records)
                     model_may_be_running = True
                     waiting_for_submission_reply = True
+                    segment_start_requests = usage.get("requests")
                     body(
                         api.post(url + "/approvals", json={"decisions": decisions}, timeout=120),
                         "提交裁决",
@@ -665,7 +704,7 @@ def run_case(
                 response = api.get(url + "/usage")
                 if not response.ok:
                     raise Unsupported("对话用量")
-                usage = response.json()
+                observe_usage(response.json(), session)
                 if session.get("status") not in {"idle", "interrupted", "failed"}:
                     settlement_uncertain = True
             except (requests.RequestException, Unsupported, ValueError, KeyError):
@@ -755,6 +794,8 @@ def run_case(
             row["usage"]["cost_complete"] = turn_index == 0
         if usage.get("source") in {"lan", "mixed"} and usage.get("unpriced"):
             notices.add("网关会话汇总未区分已结算与仍待结算的请求，无法确认总额")
+        if usage_gap:
+            row["usage"]["cost_complete"] = False
         if settlement_uncertain:
             row["usage"]["cost_complete"] = False
             notices.add("请求可能仍在结算，当前合计仅含已观测到的费用")
