@@ -57,6 +57,18 @@ def steps_from(session):
             elif item.get("type") == "function_call_output" and item.get("call_id") in pending:
                 step = pending.pop(item["call_id"])
                 result = str(item.get("output", ""))
+                if step["tool"] == "load_skill":
+                    payload = _arguments(result)
+                    if isinstance(payload, dict) and isinstance(payload.get("skills"), list):
+                        # Extract per-skill outcomes before truncating long tool text.
+                        step["loaded_skills"] = [
+                            entry["name"]
+                            for entry in payload["skills"]
+                            if isinstance(entry, dict)
+                            and entry.get("name")
+                            and "content" in entry
+                            and not entry.get("error")
+                        ]
                 step.update(
                     result=result[:4000],
                     status="failed"
@@ -82,20 +94,22 @@ def steps_from(session):
     return steps
 
 
-def skills_from(session, steps):
+def skills_from(steps):
     skills = set()
     for step in steps:
-        if step["tool"] == "load_skill" and step["status"] == "completed":
-            args = step["arguments"]
-            if isinstance(args, dict) and args.get("name"):
-                skills.add(args["name"])
-            elif re.fullmatch(r"[\w.-]+", step.get("result") or ""):
-                skills.add(step["result"])
-    # Studio's HTTP tool messages retain the successful load_skill argument.
-    for msg in session.get("messages", []):
-        if msg.get("role") == "tool" and msg.get("title") == "load_skill":
-            if re.fullmatch(r"[\w.-]+", msg.get("text") or ""):
-                skills.add(msg["text"])
+        if step["tool"] != "load_skill" or step["status"] != "completed":
+            continue
+        if "loaded_skills" in step:
+            skills.update(step["loaded_skills"])
+        elif isinstance(step.get("arguments"), dict):
+            if name := step["arguments"].get("name"):
+                skills.add(name)
+        else:
+            # Studio exposes the completed step with a name (old) or joined names
+            # (new). A failed step never contributes its requested names.
+            summary = step.get("result") or ""
+            if re.fullmatch(r"[\w.-]+(?:、[\w.-]+)*", summary):
+                skills.update(summary.split("、"))
     return sorted(skills)
 
 
@@ -116,7 +130,7 @@ def per_turn_observation(session, steps, attachments, turn_index):
         "turn_index": turn_index,
         "final_reply": answer,
         "attachments": attachments,
-        "loaded_skills": skills_from({"messages": messages}, scoped_steps) if messages else None,
+        "loaded_skills": skills_from(scoped_steps) if messages else None,
     }
 
 

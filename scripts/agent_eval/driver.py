@@ -627,7 +627,7 @@ def run_case(
         )
         for step in row["steps"]
     )
-    row["loaded_skills"] = skills_from(session, row["steps"]) if session else None
+    row["loaded_skills"] = skills_from(row["steps"]) if session else None
     if session and "history" not in session:
         notices.add("该会话接口仅返回可见工具步骤与摘要，未公开的原始工具参数记为 null")
     for index, job in enumerate(sorted(jobs, key=lambda j: j.get("submitted_at", "")), 1):

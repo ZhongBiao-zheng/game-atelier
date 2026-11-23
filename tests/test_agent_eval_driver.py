@@ -257,3 +257,41 @@ def test_canvas_selected_reference_is_connected_to_actual_result_node(tmp_path):
     assert mark["selected_node_ids"] == mark["linked_node_ids"] == ["hero"]
     assert len(mark["output_version_ids"]) == 1
     assert mark["output_version_ids"] == mark["visible_version_ids"]
+
+
+def test_batched_skill_observations_use_per_name_result_before_truncating():
+    from scripts.agent_eval.observations import skills_from, steps_from
+    import json
+
+    steps = steps_from(
+        {
+            "history": [
+                {"role": "user"},
+                {
+                    "type": "function_call",
+                    "call_id": "s",
+                    "name": "load_skill",
+                    "arguments": json.dumps({"names": ["first", "missing", "last"]}),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "s",
+                    "output": json.dumps(
+                        {
+                            "skills": [
+                                {"name": "first", "content": "x" * 8000},
+                                {"name": "missing", "error": "missing"},
+                                {"name": "last", "content": "done"},
+                            ]
+                        }
+                    ),
+                },
+            ]
+        }
+    )
+    assert skills_from(steps) == ["first", "last"]
+    # Studio's public view exposes the completed step and its names only.
+    assert skills_from(
+        [{"tool": "load_skill", "status": "completed", "result": "first、last"}]
+    ) == ["first", "last"]
+    assert skills_from([{"tool": "load_skill", "status": "failed", "result": "missing"}]) == []

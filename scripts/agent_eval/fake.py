@@ -55,6 +55,29 @@ def reply(messages, tools):
     }
     if prompt.strip() == "帮我做个图":
         return None, "你想要角色立绘、场景概念图，还是活动海报？"
+    skill = (
+        "usecase-turnaround"
+        if "三视图" in prompt
+        else "usecase-character"
+        if "女剑客" in prompt
+        else None
+    )
+    instructions = " ".join(
+        str(m.get("content", "")) for m in messages if m["role"] in ("system", "developer")
+    )
+    if skill and skill in instructions and "load_skill" not in used:
+        schema = next(
+            (
+                t["function"]["parameters"]
+                for t in tools
+                if t.get("function", {}).get("name") == "load_skill"
+            ),
+            {},
+        )
+        if "names" in schema.get("properties", {}):
+            return "load_skill", {"names": [skill]}
+        if "name" in schema.get("properties", {}):
+            return "load_skill", {"name": skill}
     if match := re.search(r"(\d+)\s*张\s*(\d+)x(\d+)", prompt):
         args.update(count=int(match[1]), params={"size": f"{match[2]}x{match[3]}"})
     if "竖版" in prompt:
@@ -93,8 +116,9 @@ def reply(messages, tools):
                 },
             ]
         }
+        canvas_calls = {c["id"] for c in calls if c["function"]["name"] == "get_canvas"}
         for message in messages[last_user + 1 :]:
-            if message.get("role") == "tool":
+            if message.get("role") == "tool" and message.get("tool_call_id") in canvas_calls:
                 try:
                     document = json.loads(message["content"])
                 except (ValueError, TypeError):
