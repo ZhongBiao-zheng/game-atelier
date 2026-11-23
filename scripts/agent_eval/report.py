@@ -240,6 +240,22 @@ def _used_previous(expect, previous, jobs):
     )
 
 
+def _image_family(model):
+    # Match modelFamily.ts, with the Gemini image aliases from imageSizeCatalog.ts.
+    model_id = model.rsplit("/", 1)[-1].lower().replace("_", "-")
+    if model_id.startswith(("mj-", "niji")) or "midjourney" in model_id:
+        return "midjourney"
+    if "gpt-image" in model_id:
+        return "gpt-image"
+    if "nano-banana" in model_id or re.match(
+        r"^gemini-.*-image(?:-|$)", model_id.replace(".", "-")
+    ):
+        return "nano-banana"
+    if "seedream" in model_id or "seededit" in model_id:
+        return "seedream"
+    return "standard"
+
+
 def _generation_limit(expect, jobs):
     counts = [expect[key] for key in ("images", "videos") if key in expect]
     if not counts:
@@ -308,17 +324,13 @@ def _turn_checks(row, previous):
         reason = f"{connections.count(True)}/{len(jobs)} 个结果有画布版本与选中节点直连证据"
         checks["on_canvas"] = _all_match(connections, expect["on_canvas"], reason)
     if "model_family" in keys:
-
-        def normalize(name):
-            return re.sub(r"[\s_\-./]+", "", name.casefold())
-
+        family = expect["model_family"].lower().replace("_", "-")
         models = [job.get("model") for job in jobs]
-        matches = [
-            None if not model else normalize(expect["model_family"]) in normalize(model)
-            for model in models
-        ]
+        families = [_image_family(model) if model else None for model in models]
+        matches = [None if actual is None else actual == family for actual in families]
+        measured = "、".join(f"{m}（{f}）" if m else "未知模型" for m, f in zip(models, families))
         checks["model_family"] = _all_match(
-            matches or [False], True, "、".join(m or "未知模型" for m in models) or "没有生成"
+            matches or [False], True, f"期望 {family}，实际 {measured or '没有生成'}"
         )
     if "uses_all_attachments" in keys:
         checks["uses_all_attachments"] = _attachments(expect, row, jobs)

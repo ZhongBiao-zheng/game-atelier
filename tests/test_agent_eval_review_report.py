@@ -164,3 +164,27 @@ def test_r6_two_turns_each_have_their_own_result_allowance():
         grades["1.generation_limit"]["status"] == "pass"
         and grades["2.generation_limit"]["status"] == "fail"
     )
+
+
+@pytest.mark.parametrize(
+    "model,expected,verdict",
+    [
+        ("sm/MJ_fast_imagine", "midjourney", "pass"),
+        ("sm/v2-midjourney-pro", "midjourney", "pass"),
+        ("sm/niji-7", "midjourney", "pass"),
+        ("midjourney/flux", "midjourney", "fail"),
+        ("sm/GPT_IMAGE_2", "gpt-image", "pass"),
+        ("sm/NANO_BANANA_2", "nano-banana", "pass"),
+        ("sm/GEMINI_3.1_FLASH_IMAGE_PREVIEW", "nano-banana", "pass"),
+        ("sm/gemini-3-pro-image", "nano-banana", "pass"),
+        ("sm/gemini-3-pro-text", "nano-banana", "fail"),
+        ("sm/doubao-seededit-3.0", "seedream", "pass"),
+        ("sm/doubao-seedream-5.0", "seedream", "pass"),
+    ],
+)
+def test_model_families_follow_product_slug_and_gemini_image_aliases(model, expected, verdict):
+    row = _row()
+    row["expect"] = {"model_family": expected}
+    row["generations"][0]["model"] = model
+    check = machine_checks(row)["model_family"]
+    assert check["status"] == verdict and model in check["reason"]
