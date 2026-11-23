@@ -104,3 +104,65 @@ def generation_estimate(project_id: str, node_id: str, count: int,
 def needs_cost_confirmation(estimate_cny: float | None) -> bool:
     """未计价不拦：拦了 Agent 在大量未定价渠道上就没法用；确认卡与面板标「未计价」。"""
     return estimate_cny is not None and estimate_cny > confirm_above_cny()
+
+
+GENERATION_TOOLS = {"run_generation", "run_generations"}
+
+
+class TurnSpend:
+    """Amounts are estimates. Reservations cover sibling calls checked before either executes."""
+
+    def __init__(self, history=()):
+        self.submitted = 0.0
+        self.reserved = {}
+        generation_ids = set()
+        counted = set()
+        for item in history:
+            if item.get("role") == "user":
+                self.submitted = 0.0
+                generation_ids.clear()
+                counted.clear()
+            call_id = item.get("call_id")
+            if item.get("type") == "function_call" and item.get("name") in GENERATION_TOOLS:
+                generation_ids.add(call_id)
+            if item.get("type") == "function_call_output" and call_id in generation_ids - counted:
+                self.submitted += submitted_estimate(item.get("output"))
+                counted.add(call_id)
+
+    def requires_approval(self, call_id, prices):
+        amount = sum(value for value in prices if value is not None)
+        self.reserved.pop(call_id, None)
+        pending = sum(self.reserved.values())
+        if amount and needs_cost_confirmation(round(self.submitted + pending + amount, 6)):
+            return True
+        self.reserved[call_id] = amount
+        return False
+
+    def finish(self, call_id, output):
+        self.reserved.pop(call_id, None)
+        self.submitted += submitted_estimate(output)
+
+
+def submitted_estimate(output):
+    try:
+        result = json.loads(output)
+    except (TypeError, ValueError):
+        return 0.0
+    return result.get("submitted_estimate_cny", 0.0) if isinstance(result, dict) else 0.0
+
+
+def with_submitted_estimate(output, prices):
+    """Only include accepted items. Errors and entirely unpriced calls retain their output."""
+    try:
+        result = json.loads(output)
+    except ValueError:
+        return output
+    if "items" in result:
+        indexes = [row["index"] for row in result["items"] if row.get("status") == "submitted"]
+    else:
+        indexes = [0] if result.get("run_id") or result.get("job_id") else []
+    amount = sum(prices[i] or 0 for i in indexes if i < len(prices))
+    if amount:
+        result["submitted_estimate_cny"] = round(amount, 6)
+        return json.dumps(result, ensure_ascii=False)
+    return output

@@ -2081,6 +2081,7 @@ class CanvasAgentBatchItem(BaseModel):
 
 class CanvasAgentBatchItems(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    turn_estimate_cny: float | None = None
     confirm_above_cny: float
     items: list[CanvasAgentBatchItem] = Field(max_length=20)
 

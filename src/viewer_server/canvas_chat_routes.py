@@ -208,7 +208,7 @@ async def post_approvals(project_id: str, session_id: str,
     return public_session(session)
 
 
-@router.get(f"{SESSION}/approvals/{{call_id}}/items", response_model=CanvasAgentBatchItems)
+@router.get(f"{SESSION}/approvals/{{call_id}}/items", response_model=CanvasAgentBatchItems, response_model_exclude_unset=True)
 async def get_batch_items(project_id: str, session_id: str, call_id: str) -> CanvasAgentBatchItems:
     """批量生成确认卡的逐项数据；只有本机页面能访问（Agent 连接只能用 /api/canvas-agent/ 下的工具）。"""
     return CanvasAgentBatchItems(**await _call(runtime.batch_items, project_id, session_id, call_id))

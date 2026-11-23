@@ -498,3 +498,16 @@ def test_unreachable_host_is_not_an_error(isolated_data_root, monkeypatch):
             raise requests.ConnectionError("host offline")
     monkeypatch.setattr(atelier_gateway, "_session", Down)
     assert agent_usage.fetch_host_call_tag("team", "session-aaaaaaaa:1") is None
+
+
+def test_turn_spend_confirmation_resume_and_new_message(isolated_data_root):
+    spend = cost.TurnSpend()
+    assert not spend.requires_approval("a", [6])
+    assert spend.requires_approval("parallel", [5])
+    output = cost.with_submitted_estimate('{"run_id":"r1"}', [6])
+    spend.finish("a", output)
+    assert spend.requires_approval("correction", [6])
+    history = [{"role": "user"}, {"type": "function_call", "call_id": "a", "name": "run_generation"},
+               {"type": "function_call_output", "call_id": "a", "output": output}]
+    assert cost.TurnSpend(history).requires_approval("again", [6])
+    assert not cost.TurnSpend([*history, {"role": "user"}]).requires_approval("again", [6])

@@ -535,7 +535,7 @@ export interface CanvasAgentSessionUsage {
   source: 'local' | 'lan' | 'mixed';
 }
 
-/** Agent 发起的生成单次估价超过 confirm_above_cny 时，Auto 下也先确认（服务端 canvas_agent_cost）。 */
+/** Agent 发起的生成本轮累计估价超过 confirm_above_cny 时，Auto 下也先确认（服务端 canvas_agent_cost）。 */
 export interface CanvasAgentSettings {
   confirm_above_cny: number;
 }
@@ -558,6 +558,7 @@ export interface CanvasAgentBatchItem {
 }
 
 export interface CanvasAgentBatchItems {
+  turn_estimate_cny?: number | null;
   confirm_above_cny: number;
   items: CanvasAgentBatchItem[];
 }

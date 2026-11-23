@@ -44,8 +44,9 @@ function BatchItems({ data, selected, disabled, onToggle, unit }: {
         </Label>
       ))}
     </div>
+    {data.turn_estimate_cny != null && <p className="text-muted-foreground">本轮已提交预计 {formatGenerationCost(data.turn_estimate_cny)}</p>}
     <p className="mt-1 text-muted-foreground">{footer}</p>
-    {priced.length > 0 && total > data.confirm_above_cny && (
+    {priced.length > 0 && total + (data.turn_estimate_cny ?? 0) > data.confirm_above_cny && (
       <p className="text-muted-foreground">{`超过确认金额 ${formatGenerationCost(data.confirm_above_cny)}`}</p>
     )}
   </>;

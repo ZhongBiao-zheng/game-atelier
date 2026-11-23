@@ -340,3 +340,19 @@ def test_approval_describes_each_generation(studio, tool):
         assert [(row["model"], row["count"], row["title"]) for row in rows] == [
             ("Video", 3, preview), ("Video", 1, "远山")
         ]
+
+
+def test_correction_crosses_turn_budget_and_next_message_starts_fresh(studio, monkeypatch):
+    api, url, vendor, _ = studio
+    monkeypatch.setattr(cost, "_estimate", lambda *args: 6)
+    vendor.on("POST", CHAT, _chat_tool("run_generation", IMAGE),
+              _chat_tool("run_generation", IMAGE | {"prompt": "corrected"}), _chat_text("完成"))
+    assert api.post(url + "/messages", json={"client_message_id": "start", "text": "出图"}).status_code == 202
+    [approval] = settle(api, url)["pending_approvals"]
+    assert "本轮已提交预计 6¥" in approval["summary"] and len(list_jobs()) == 1
+    assert api.post(url + "/approvals", json={"decisions": [
+        {"call_id": approval["call_id"], "approve": False}]}).status_code == 202
+    assert settle(api, url)["status"] == "idle"
+    vendor.on("POST", CHAT, _chat_tool("run_generation", IMAGE), _chat_text("完成"))
+    assert api.post(url + "/messages", json={"client_message_id": "next", "text": "新图"}).status_code == 202
+    assert settle(api, url)["status"] == "idle" and len(list_jobs()) == 2

@@ -289,6 +289,8 @@ def batch(session_id: CanvasAgentSessionId, call_id: str):
         raise HTTPException(404, detail="没有这个待确认操作")
     return {
         "items": estimate_rows(items_for(item.tool, runtime._arguments(item.arguments)), session_id),
+        **({"turn_estimate_cny": cost.TurnSpend(session.history).submitted}
+           if session.permission_mode == "auto" else {}),
         "confirm_above_cny": cost.confirm_above_cny(),
     }
 

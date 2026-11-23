@@ -117,6 +117,7 @@ class TurnContext:
     model: str = ""
     # 工具在本轮里推送面板事件用（update_plan 写完待办推 kind=plan）；测试里不传就不推。
     notify: Notify | None = None
+    spend: cost.TurnSpend = field(default_factory=cost.TurnSpend)
 
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
@@ -153,6 +154,13 @@ def generation_over_threshold(project_id: str, arguments: dict) -> bool:
 def generations_over_threshold(project_id: str, arguments: dict) -> bool:
     """Auto 下 run_generations 按合计估价判断；未计价的项不计入合计，也不单独拦。"""
     return cost.needs_cost_confirmation(_generations_estimate(project_id, arguments, [])["total"])
+
+
+def generation_prices(project_id, tool, arguments):
+    if tool == "run_generation":
+        estimate = cost.generation_estimate(project_id, arguments["surface_node_id"], _count(arguments))
+        return [estimate["estimate_cny"]]
+    return [row["estimate_cny"] for row in _generations_estimate(project_id, arguments, [])["rows"]]
 
 
 def _generations_estimate(project_id: str, arguments: dict, batch_changes: list[dict]) -> dict:
@@ -695,6 +703,8 @@ def build_tools() -> list:
     from agents import FunctionTool
 
     def make(name: str, description: str, schema: dict) -> FunctionTool:
+        quotes = {}
+
         async def invoke(ctx, raw: str) -> str:
             turn: TurnContext = ctx.context
             arguments = json.loads(raw or "{}")
@@ -708,6 +718,10 @@ def build_tools() -> list:
             text, created = await asyncio.to_thread(run_tool_safely, turn.project_id, name,
                                                     arguments, turn.scope,
                                                     frozenset(turn.created_node_ids))
+            if name in cost.GENERATION_TOOLS:
+                call_id = ctx.tool_call_id
+                text = cost.with_submitted_estimate(text, quotes.pop(call_id, []))
+                turn.spend.finish(call_id, text)
             turn.created_node_ids.update(created)
             return text
 
@@ -715,6 +729,10 @@ def build_tools() -> list:
             turn: TurnContext = ctx.context
             if not arguments_valid(turn.project_id, name, arguments):
                 return False  # 执行时会因校验失败直接返回错误，没有任何副作用
+            if name in cost.GENERATION_TOOLS and turn.permission_mode == "auto":
+                prices = await asyncio.to_thread(generation_prices, turn.project_id, name, arguments)
+                quotes[_call_id] = prices
+                return turn.spend.requires_approval(_call_id, prices)
             return await asyncio.to_thread(confirmation_required, turn.project_id, name,
                                            arguments, turn.permission_mode)
 
@@ -919,7 +937,9 @@ def batch_items(project_id: str, session_id: str, call_id: str) -> dict:
         raise CanvasToolError("NOT_FOUND", "没有这个待确认的批量生成", 404)
     batch_changes = [change for item in session.pending_approvals if item.tool == "apply_changes"
                      for change in _arguments(item.arguments).get("changes") or []]
-    return {"confirm_above_cny": cost.confirm_above_cny(),
+    prior = cost.TurnSpend(session.history).submitted if session.permission_mode == "auto" else 0
+    return {**({"turn_estimate_cny": prior} if session.permission_mode == "auto" else {}),
+            "confirm_above_cny": cost.confirm_above_cny(),
             "items": generation_rows(project_id, _arguments(approval.arguments), batch_changes)}
 
 
@@ -1233,10 +1253,11 @@ class CanvasWorkspace:
     def execute_approved(self, session, approval, created, rejected):
         arguments = _arguments(approval.arguments)
         rows = generation_rows(self.project_id, arguments, []) if approval.tool == "run_generations" else []
+        prices = generation_prices(self.project_id, approval.tool, arguments) if approval.tool in cost.GENERATION_TOOLS else []
         text, nodes = run_tool_safely(self.project_id, approval.tool, arguments, ModelScope.of(session),
                                       frozenset(session.created_node_ids) | created, rejected)
         record = generations_record(rows, text) if rows and not is_tool_error(text) else None
-        return text, nodes, record
+        return cost.with_submitted_estimate(text, prices) if prices else text, nodes, record
 
 
 class DeltaBuffer:
@@ -1289,7 +1310,7 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     context = TurnContext(buffer.workspace.project_id, session.permission_mode,
                           set(getattr(session, "created_node_ids", ())), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "",
-                          buffer.notify)
+                          buffer.notify, cost.TurnSpend(session.history))
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
                                  hooks=usage_hooks(getattr(buffer.workspace, "observe_response", None)),
                                  run_config=_run_config(buffer.workspace.media))
@@ -1379,6 +1400,8 @@ async def run_workspace_turn(workspace, notify):
     for call in calls:
         arguments = _arguments(call.arguments)
         summary = await asyncio.to_thread(workspace.summary, call.name, arguments, batch_changes)
+        if session.permission_mode == "auto" and call.name in cost.GENERATION_TOOLS:
+            summary = f"{summary}\n本轮已提交预计 {_money(context.spend.submitted)}"
         pending.append(CanvasAgentApproval(
             call_id=call.call_id, tool=call.name, arguments=call.arguments or "{}",
             summary=redact(summary)[:4000],

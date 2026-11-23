@@ -150,22 +150,28 @@ def check_models(items, scope):
     return by_kind
 
 
+def item_estimate(item, params):
+    params = dict(params)
+    alias, model = item.alias, item.model
+    if item.kind == "video":
+        if alias is None:
+            from character_workflow.lib.model_routes import resolve_auto
+
+            key, selected = resolve_auto("video", model, params=params, consume=False)
+            alias, model = key.alias, selected.id
+        params["n"] = 1
+    amount = cost._estimate(item.kind, alias, model, params)
+    if item.kind == "video" and amount is not None:
+        amount *= item.count
+    return amount
+
+
 def estimate_rows(items, sid, scope=None):
     models = check_models(items, scope)
     rows = []
     for index, item in enumerate(items):
         params = item.parameters(sid)
-        alias, model = item.alias, item.model
-        if item.kind == "video":
-            if alias is None:
-                from character_workflow.lib.model_routes import resolve_auto
-
-                key, selected = resolve_auto("video", model, params=params, consume=False)
-                alias, model = key.alias, selected.id
-            params["n"] = 1
-        amount = cost._estimate(item.kind, alias, model, params)
-        if item.kind == "video" and amount is not None:
-            amount *= item.count
+        amount = item_estimate(item, params)
         prompt = " ".join(runtime.redact(item.prompt).split())
         rows.append(
             {
@@ -624,11 +630,13 @@ class StudioWorkspace:
             chosen = {index: item for index, item in enumerate(items) if index not in rejected}
             check_models(chosen.values(), scope)
             prepared = {index: item.parameters(sid) for index, item in chosen.items()}
+            prices = [None] * len(items)
             rows = []
             for index, item in enumerate(items):
                 row = {"index": index, "status": "rejected"}
                 if index not in rejected:
                     try:
+                        prices[index] = item_estimate(item, prepared[index])
                         jid = submit(self, item, prepared[index], call_id, index)
                         row.update(status="submitted", job_id=jid)
                     except Exception as error:
@@ -639,10 +647,13 @@ class StudioWorkspace:
                             error=tool_error(error),
                         )
                 rows.append(row)
+            amount = sum(prices[row["index"]] or 0 for row in rows if row["status"] == "submitted")
+            estimate = {"submitted_estimate_cny": round(amount, 6)} if amount else {}
             if name == "run_generation":
-                return rows[0]
+                return {**rows[0], **estimate}
             return {
                 "items": rows,
+                **estimate,
                 **{
                     state: sum(row["status"] == state for row in rows)
                     for state in ("submitted", "failed", "rejected")
@@ -785,6 +796,8 @@ class StudioWorkspace:
                             ctx.context.notify(self.event, {**self.address(), "kind": "plan"})
                 except (OSError, ValueError, KeyError, TypeError) as error:
                     output = tool_error(error)
+                if name in cost.GENERATION_TOOLS:
+                    ctx.context.spend.finish(call_id, output)
                 await asyncio.to_thread(self.finish_step, call_id, name, output)
                 return output
 
@@ -799,8 +812,8 @@ class StudioWorkspace:
                 except (OSError, ValueError, TypeError, LookupError) as error:
                     invalid_calls[call_id] = tool_error(error)
                     return False
-                return ctx.context.permission_mode != "auto" or cost.needs_cost_confirmation(
-                    sum(row["estimate_cny"] or 0 for row in rows)
+                return ctx.context.permission_mode != "auto" or ctx.context.spend.requires_approval(
+                    call_id, [row["estimate_cny"] for row in rows]
                 )
 
             return FunctionTool(
