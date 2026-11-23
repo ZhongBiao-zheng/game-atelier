@@ -241,9 +241,9 @@ def _used_previous(expect, previous, jobs):
 
 
 def _image_family(model):
-    # Match modelFamily.ts, with the Gemini image aliases from imageSizeCatalog.ts.
+    # Product slug rules, including the evaluation aliases for Niji and Gemini image models.
     model_id = model.rsplit("/", 1)[-1].lower().replace("_", "-")
-    if model_id.startswith(("mj-", "niji")) or "midjourney" in model_id:
+    if model_id.startswith("mj-") or "midjourney" in model_id or "niji" in model_id:
         return "midjourney"
     if "gpt-image" in model_id:
         return "gpt-image"
@@ -542,6 +542,19 @@ def _incomplete(rows):
     return sum(row["status"] != "completed" for row in rows)
 
 
+def _recorded_cost(rows):
+    amounts = [
+        row["usage"]["total_cost_cny"]
+        for row in rows
+        if (row.get("usage") or {}).get("total_cost_cny") is not None
+    ]
+    return sum(amounts) if amounts else None
+
+
+def _unsettled(rows):
+    return sum((row.get("usage") or {}).get("cost_complete") is False for row in rows)
+
+
 def _failure_reason(row):
     return row.get("reason") or next(
         (
@@ -557,10 +570,20 @@ def _overview(rows):
     counts = Counter(row["status"] for row in rows)
     status = " · ".join(f"{_e(STATES.get(k, k))} {v}" for k, v in counts.items())
     sources = "、".join(dict.fromkeys(_source(row) for row in rows))
-    heading = ["运行", "未完成的运行数", "总体检查通过率"] + [
-        "平均" + label for label, _ in METRICS.values()
+    heading = [
+        "运行",
+        "未完成的运行数",
+        "已记录费用合计 / 元",
+        "未结清的运行数",
+        "总体检查通过率",
+    ] + ["平均" + label for label, _ in METRICS.values()]
+    values = [
+        str(len(rows)),
+        str(_incomplete(rows)),
+        _number(_recorded_cost(rows), 4),
+        str(_unsettled(rows)),
+        _show_rate(_rate(rows, LABELS)),
     ]
-    values = [str(len(rows)), str(_incomplete(rows)), _show_rate(_rate(rows, LABELS))]
     for key, (_, places) in METRICS.items():
         value = _number(_average(rows, key), places)
         n = sum(_metric(row, key) is not None for row in rows)
@@ -581,7 +604,12 @@ def _usage(row):
         usage.get("chat_cost_source")
     )
     chat_label = f"对话费（{source}）/ 元" if source else "对话费 / 元"
-    pairs = [(name, _number(_metric(row, key), places)) for key, (name, places) in METRICS.items()]
+    pairs = []
+    for key, (name, places) in METRICS.items():
+        if key == "total_cost_cny" and usage.get("cost_complete") is False:
+            pairs.append(("已记录费用（结算未完整）/ 元", _number(usage.get(key), places)))
+        else:
+            pairs.append((name, _number(_metric(row, key), places)))
     pairs += [
         (
             "输入 / 输出 Token",
@@ -772,6 +800,24 @@ def _run_comparison(old, new):
     table = [["指标", "改造前", "改造后", "变化"]]
     before, after = _incomplete(old), _incomplete(new)
     table.append(["未完成的运行数", str(before), str(after), _delta(before, after, 0)])
+    recorded_before, recorded_after = _recorded_cost(old), _recorded_cost(new)
+    table.append(
+        [
+            "已记录费用合计 / 元",
+            _number(recorded_before, 4),
+            _number(recorded_after, 4),
+            _delta(recorded_before, recorded_after, 4),
+        ]
+    )
+    pending_before, pending_after = _unsettled(old), _unsettled(new)
+    table.append(
+        [
+            "未结清的运行数",
+            str(pending_before),
+            str(pending_after),
+            _delta(pending_before, pending_after, 0),
+        ]
+    )
     for label, keys in [("总体检查通过率", LABELS), *((v, [k]) for k, v in LABELS.items())]:
         a, b = _rate(old, keys), _rate(new, keys)
         pct_a = 100 * a[0] / a[1] if a[1] else None
@@ -797,6 +843,15 @@ def _compare_case(key, cases, scores):
                     for row in cases
                 ),
             ]
+        )
+    costs = [(row or {}).get("usage") or {} for row in cases]
+    if any(usage.get("cost_complete") is False for usage in costs):
+        table.append(
+            ["已记录费用 / 元", *(_number(usage.get("total_cost_cny"), 4) for usage in costs)]
+        )
+        labels = {True: "完整", False: "结算未完整"}
+        table.append(
+            ["费用记录", *(labels.get(usage.get("cost_complete"), "—") for usage in costs)]
         )
     per_turn = []
     for row in cases:

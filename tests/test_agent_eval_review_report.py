@@ -188,3 +188,40 @@ def test_model_families_follow_product_slug_and_gemini_image_aliases(model, expe
     row["generations"][0]["model"] = model
     check = machine_checks(row)["model_family"]
     assert check["status"] == verdict and model in check["reason"]
+
+
+def test_partial_cost_is_in_recorded_total_without_entering_complete_cost_average(tmp_path):
+    settled, interrupted = _row(), _row()
+    settled.update(case_id="complete", directory="complete", generations=[])
+    settled["usage"].update(cost_complete=True, total_cost_cny=1.125)
+    interrupted.update(
+        case_id="interrupted",
+        directory="interrupted",
+        generations=[],
+        status="stopped",
+        reason="keyboard_interrupt",
+    )
+    interrupted["usage"].update(
+        cost_complete=False, chat_cost_cny=0.5, generation_cost_cny=0.25, total_cost_cny=0.75
+    )
+    after, before = tmp_path / "after", tmp_path / "before"
+    write_report(after, [settled, interrupted])
+    html = (after / "index.html").read_text()
+    assert "已记录费用合计 / 元" in html and "<td>1.875</td>" in html
+    assert "已记录费用（结算未完整）/ 元 <b>0.75</b>" in html
+    interrupted["usage"].update(cost_complete=True, total_cost_cny=0.5)
+    write_report(before, [settled, interrupted])
+    table = compare(before, after, tmp_path)
+    assert "已记录费用合计 / 元  |  1.625  |  1.875  |  +0.25" in table
+    assert "未结清的运行数  |  0  |  1  |  +1" in table
+    assert "平均费用 / 元  |  0.8125  |  1.125" in table
+    assert (
+        "已记录费用 / 元  |  0.5  |  0.75" in table and "费用记录  |  完整  |  结算未完整" in table
+    )
+
+
+def test_niji_inside_final_slug_is_midjourney():
+    row = _row()
+    row["expect"] = {"model_family": "midjourney"}
+    row["generations"][0]["model"] = "gateway/custom-NiJi-image"
+    assert machine_checks(row)["model_family"]["status"] == "pass"
