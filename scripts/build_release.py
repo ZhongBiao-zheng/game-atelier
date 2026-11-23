@@ -109,8 +109,10 @@ def build(output: Path, platform: str) -> Path:
     app = payload / "app"
     app.mkdir()
     for name in ("src", "web/dist", "scripts", "skills", ".claude-plugin", "plugins"):
-        shutil.copytree(REPO / name, app / name,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        excluded = ["__pycache__", "*.pyc"]
+        if name == "scripts":
+            excluded.append("agent_eval")
+        shutil.copytree(REPO / name, app / name, ignore=shutil.ignore_patterns(*excluded))
     for name in ("pyproject.toml", "uv.lock", ".python-version"):
         shutil.copy2(REPO / name, app / name)
     (payload / "VERSION").write_text(version + "\n", encoding="utf-8")

@@ -1,0 +1,48 @@
+- id: 01-character-vague
+  surface: studio
+  title: 模糊需求，单个角色
+  settings: {creation_mode: image, permission: auto, confirm_above_cny: 2, preferred_models: []}
+  turns:
+    - say: "画一个赛博朋克风的女剑客"
+  limits: {max_results: 2, max_cost_cny: 2.0, max_steps: 30, max_seconds: 600}
+  expect:
+    images: 1
+    asks_user: false
+    skills: [usecase-character]
+  human_check:
+    - 汇报里有没有一行写明补了哪些假设
+    - 有没有添加用户没提的角色、文字、品牌
+    - 是不是全身立绘，背景是否干净
+
+- id: 04-turnaround
+  surface: studio
+  title: 带角色参考图的三视图
+  settings: {creation_mode: image, permission: auto, confirm_above_cny: 2, preferred_models: []}
+  turns:
+    - say: "给这个角色做一张三视图"
+      attachments: [hero-a.png]
+  limits: {max_results: 2, max_cost_cny: 2.0, max_steps: 30, max_seconds: 600}
+  expect:
+    images: 1
+    ratio: "16:9"
+    uses_all_attachments: true
+    asks_user: false
+    skills: [usecase-turnaround]
+  human_check:
+    - 正面、侧面、背面是否同一角色、同比例、脚底对齐
+    - 披风在背面视图里的左右位置是否正确
+    - 提示词是否只写「按图1 的角色」而没有重写外观
+
+- id: 11-underspecified
+  surface: studio
+  title: 信息不足，应该反问
+  settings: {creation_mode: image, permission: auto, confirm_above_cny: 2, preferred_models: []}
+  turns:
+    - say: "帮我做个图"
+  limits: {max_results: 0, max_cost_cny: 0.5, max_steps: 10, max_seconds: 120}
+  expect:
+    images: 0
+    asks_user: true
+  human_check:
+    - 是否一次把问题问完
+    - 每个问题有没有给 2 到 3 个画面上有差别的选项
