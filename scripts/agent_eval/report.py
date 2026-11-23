@@ -30,7 +30,7 @@ LABELS = {
     "asks_user": "反问用户",
     "skills": "技能加载",
     "no_resubmit_after_failure": "失败后未重提",
-    "generation_limit": "每轮生成次数",
+    "generation_limit": "每轮生成份数",
 }
 VERDICTS = {"pass": "通过", "fail": "不通过", "na": "不适用"}
 STATES = {"completed": "完成", "failed": "失败", "stopped": "已停止", "not_applicable": "不适用"}
@@ -240,6 +240,23 @@ def _used_previous(expect, previous, jobs):
     )
 
 
+def _generation_limit(expect, jobs):
+    counts = [expect[key] for key in ("images", "videos") if key in expect]
+    if not counts:
+        return _check(None, "本轮未指定期望的图片张数或视频段数")
+    expected = sum(counts)
+    allowed = expected * 2
+    media_jobs = [job for job in jobs if job.get("kind") in ("image", "video")]
+    observed = sum(len(job.get("outputs") or []) for job in media_jobs)
+    complete = all(job.get("outputs") is not None for job in media_jobs)
+    known = str(observed) if complete else f"至少 {observed}"
+    reason = (
+        f"本轮已登记 {known} 份（图片和视频合计），期望 {expected} 份"
+        f" + 一轮修正最多 {expected} 份 = 上限 {allowed} 份"
+    )
+    return _check(None if not complete and observed <= allowed else observed <= allowed, reason)
+
+
 def _turn_checks(row, previous):
     expect = row["expect"]
     keys = _requested(expect)
@@ -252,7 +269,7 @@ def _turn_checks(row, previous):
     videos = [item for item in items if item.get("kind") == "video"]
     checks = {
         "no_resubmit_after_failure": _retry(row, jobs),
-        "generation_limit": _check(len(jobs) <= 2, f"本轮提交 {len(jobs)} 次，上限 2 次"),
+        "generation_limit": _generation_limit(expect, jobs),
     }
     if "images" in keys:
         checks["images"] = _output_count(expect["images"], images, "张")

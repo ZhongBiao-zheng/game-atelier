@@ -106,3 +106,61 @@ def test_r4_duration_tolerance_is_inclusive_half_second(observed, verdict):
     check = machine_checks(row)["duration_s"]
     assert check["status"] == verdict and "4.5 至 5.5 秒" in check["reason"]
     assert ("未知" if observed is None else f"{observed:.3f}") in check["reason"]
+
+
+@pytest.mark.parametrize(
+    "expected,groups,hard_limit,verdict",
+    [
+        ({"images": 2}, [("image", 1), ("image", 1), ("image", 1)], 4, "pass"),
+        ({"images": 2}, [("image", 4)], 3, "pass"),
+        ({"images": 2}, [("image", 5)], 10, "fail"),
+        ({"images": 0}, [("image", 1)], 2, "fail"),
+        ({"images": 0}, [], 0, "pass"),
+        ({"images": 1, "videos": 1}, [("image", 1), ("video", 3)], 4, "pass"),
+        ({"videos": 1}, [("video", 2), ("image", 1)], 5, "fail"),
+        ({}, [("image", 2)], 4, "na"),
+    ],
+)
+def test_r6_counts_registered_results_against_per_turn_expected_plus_one_revision(
+    expected,
+    groups,
+    hard_limit,
+    verdict,
+):
+    row = _row()
+    row.update(expect=expected, limits={"max_results": hard_limit})
+    row["generations"] = [
+        {
+            "kind": kind,
+            "turn_index": 1,
+            "outputs": [{"kind": kind, "error": "media_unavailable"} for _ in range(count)],
+        }
+        for kind, count in groups
+    ]
+    grade = machine_checks(row)["generation_limit"]
+    assert grade["status"] == verdict
+    if expected:
+        n = sum(expected.values())
+        assert f"{n} 份 + 一轮修正最多 {n} 份 = 上限 {2 * n} 份" in grade["reason"]
+
+
+def test_r6_two_turns_each_have_their_own_result_allowance():
+    row = _row()
+    row.update(
+        turns=[{"say": "甲", "expect": {"images": 2}}, {"say": "乙"}],
+        turn_outcomes=[
+            {"turn_index": 1, "status": "completed"},
+            {"turn_index": 2, "status": "completed"},
+        ],
+        expect={"images": 1},
+        limits={"max_results": 10},
+    )
+    row["generations"] = [
+        {"turn_index": index, "kind": "image", "outputs": [{"kind": "image"}] * 3}
+        for index in (1, 2)
+    ]
+    grades = machine_checks(row)
+    assert (
+        grades["1.generation_limit"]["status"] == "pass"
+        and grades["2.generation_limit"]["status"] == "fail"
+    )
