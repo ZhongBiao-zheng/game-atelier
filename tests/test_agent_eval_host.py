@@ -60,14 +60,14 @@ def test_report_scrubber_removes_credentials_urls_and_nested_request_headers(tmp
         assert private not in text
 
 
-def test_fake_transport_denies_external_dns_and_all_unselected_loopback_ports(monkeypatch):
+def test_fake_transport_denies_external_dns_and_all_unselected_loopback_ports(monkeypatch, tmp_path):
     import socket
 
     with pytest.raises(ValueError, match="回环"):
         host._fake_ports({"keys": [{"base_url": "https://unselected.invalid/v1"}]})
     filters = []
     monkeypatch.setattr(_server.sys, "addaudithook", filters.append)
-    _server.restrict_fake_network({31314})
+    _server.restrict_network({31314}, tmp_path / "preflight")
     (audit,) = filters
     with pytest.raises(PermissionError, match="DNS"):
         audit("socket.getaddrinfo", ("unselected.invalid", 443))

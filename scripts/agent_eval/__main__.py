@@ -1,4 +1,4 @@
-"""Run with python -m scripts.agent_eval [run|compare] --help."""
+"""Run with python -m scripts.agent_eval [run|preflight|compare] --help."""
 
 import argparse
 import hashlib
@@ -13,10 +13,11 @@ from pathlib import Path
 
 import yaml
 
-from .cases_io import load_cases
+from .cases_io import inspect_cases, load_cases
 from .driver import run_case
 from .fake import FakeProvider
 from .host import serve
+from .preflight import preflight
 from .report import compare, write_report
 
 HERE = Path(__file__).resolve().parent
@@ -36,7 +37,11 @@ def run(args):
         raise ValueError("对话模型须使用 --chat-model 别名/模型")
     if real and any(m.split("/", 1)[0] not in providers for m in models):
         raise ValueError("对话模型必须属于 --providers 指定的供应商")
-    cases = load_cases(args.cases, args.only, args.fixtures)
+    checking = real or args.command == "preflight"
+    if checking:
+        cases, manifest_issues = inspect_cases(args.cases, args.only, args.fixtures)
+    else:
+        cases = load_cases(args.cases, args.only, args.fixtures)
     rev = subprocess.run(
         ["git", "-C", str(args.server_root), "rev-parse", "--short", "HEAD"],
         capture_output=True,
@@ -45,9 +50,8 @@ def run(args):
     ).stdout.strip()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out = args.out or Path(".scratch/agent-eval") / f"{stamp}-{rev}"
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+    if args.command == "run" and out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise ValueError("--out 需要新目录或空目录")
-    out.mkdir(parents=True, exist_ok=True)
     budget = Decimal(str(args.budget_cny)) if args.budget_cny is not None else None
     spent = Decimal(0)
     rows = []
@@ -58,7 +62,15 @@ def run(args):
             keys_from=args.keys_from,
             providers=providers,
             fake_keys=None if real else vendor.keys,
+            preflight=checking,
         ) as api:
+            if checking:
+                if not preflight(api, cases, models, budget, manifest_issues):
+                    return 2
+                if args.command == "preflight":
+                    return 0
+                api.finish_preflight()
+            out.mkdir(parents=True, exist_ok=True)
             try:
                 for case in cases:
                     for model in models:
@@ -111,7 +123,7 @@ def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     cli = argparse.ArgumentParser(description="Atelier 内置 Agent 回归评测")
     commands = cli.add_subparsers(dest="command", required=True)
-    p = commands.add_parser("run", help="运行需求 × 对话模型")
+    p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--server-root", type=Path, default=HERE.parents[1])
     p.add_argument("--cases", type=Path, default=HERE / "examples.yaml")
     p.add_argument("--fixtures", type=Path, default=HERE / "fixtures")
@@ -121,11 +133,13 @@ def main(argv=None):
     p.add_argument("--chat-model", action="append")
     p.add_argument("--budget-cny", type=float)
     p.add_argument("--out", type=Path)
+    commands.add_parser("run", parents=[p], help="运行需求 × 对话模型")
+    commands.add_parser("preflight", parents=[p], help="离线检查清单、模型登记与预算")
     c = commands.add_parser("compare", help="比对两次运行的指标与人工评分")
     c.add_argument("before", type=Path)
     c.add_argument("after", type=Path)
     c.add_argument("--out", type=Path)
-    if not args or args[0] not in ("run", "compare", "-h", "--help"):
+    if not args or args[0] not in ("run", "preflight", "compare", "-h", "--help"):
         args.insert(0, "run")
     options = cli.parse_args(args)
     try:

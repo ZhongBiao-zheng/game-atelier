@@ -97,49 +97,74 @@ class Case(Fields):
     human_check: list[Name] = Field(default_factory=list)
 
 
-def load_cases(path: Path, only: str | None, fixtures: Path):
+def _attachments(raw):
+    turns = raw.get("turns")
+    if isinstance(turns, list):
+        for turn in turns:
+            if isinstance(turn, dict) and isinstance(turn.get("attachments"), list):
+                yield from (item for item in turn["attachments"] if isinstance(item, str))
+    canvas = raw.get("canvas")
+    if isinstance(canvas, dict) and isinstance(canvas.get("nodes"), list):
+        for node in canvas["nodes"]:
+            if isinstance(node, dict) and isinstance(node.get("file"), str):
+                yield node["file"]
+
+
+def inspect_cases(path: Path, only: str | None, fixtures: Path):
     files = sorted([*path.glob("*.yaml"), *path.glob("*.yml")]) if path.is_dir() else [path]
     selected = {entry.strip() for entry in only.split(",")} if only else set()
-    seen, cases = set(), []
+    seen, cases, issues = set(), [], []
+    fixtures = fixtures.resolve()
     for file in files:
-        with file.open(encoding="utf-8") as stream:
-            for doc in yaml.safe_load_all(stream):
-                for index, raw in enumerate(doc if isinstance(doc, list) else [doc], 1):
-                    try:
-                        case = Case.model_validate(raw)
-                    except ValidationError as error:
-                        label = raw.get("id") if isinstance(raw, dict) else None
-                        label = (
-                            label
-                            if isinstance(label, str) and re.fullmatch(r"[\w-]+", label)
-                            else f"{file.name}#{index}"
-                        )
-                        fields = ", ".join(
-                            ".".join(map(str, detail["loc"])) or "需求" for detail in error.errors()
-                        )
-                        raise ValueError(f"{label} 含未知或无效字段：{fields}") from None
-                    if case.id in seen:
-                        raise ValueError(f"{case.id} 的 id 重复")
-                    seen.add(case.id)
-                    if case.canvas is not None and case.surface != "canvas":
-                        raise ValueError(f"{case.id} 的 canvas 只适用于画布")
-                    if selected and case.id not in selected:
+        try:
+            documents = list(yaml.safe_load_all(file.read_text(encoding="utf-8")))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            issues.append(f"{file.name} 无法读取为 YAML 清单")
+            continue
+        for doc in documents:
+            for index, raw in enumerate(doc if isinstance(doc, list) else [doc], 1):
+                case_id = raw.get("id") if isinstance(raw, dict) else None
+                label = f"{file.name}#{index}"
+                if isinstance(case_id, str) and re.fullmatch(r"[\w-]{1,100}", case_id):
+                    label = case_id
+                    if selected and case_id not in selected:
                         continue
-                    names = [file for turn in case.turns for file in turn.attachments]
-                    if case.canvas:
-                        names.extend(node.file for node in case.canvas.nodes)
-                    for name in names:
-                        candidate = (fixtures / name).resolve()
-                        if (
-                            not candidate.is_relative_to(fixtures.resolve())
-                            or not candidate.is_file()
-                        ):
-                            raise ValueError(f"{case.id} 指定的附件不可用")
-                    # Preserve which checks were actually requested; all spending limits have defaults.
-                    cases.append(
-                        case.model_dump(exclude_unset=True, exclude_none=True)
-                        | {"limits": case.limits.model_dump()}
+                    if case_id in seen:
+                        issues.append(f"{case_id} 的 id 重复")
+                        continue
+                    seen.add(case_id)
+                if isinstance(raw, dict):
+                    for name in dict.fromkeys(_attachments(raw)):
+                        try:
+                            candidate = (fixtures / name).resolve()
+                            available = candidate.is_relative_to(fixtures) and candidate.is_file()
+                        except (OSError, RuntimeError, ValueError):
+                            available = False
+                        if not available:
+                            issues.append(f"{label} 指定的附件不可用：{name}")
+                try:
+                    case = Case.model_validate(raw)
+                except ValidationError as error:
+                    fields = ", ".join(
+                        ".".join(map(str, detail["loc"])) or "需求" for detail in error.errors()
                     )
-    if not cases or selected - seen:
-        raise ValueError("需求清单为空，或 --only 包含不存在的 id")
+                    issues.append(f"{label} 含未知或无效字段：{fields}")
+                    continue
+                if case.canvas is not None and case.surface != "canvas":
+                    issues.append(f"{case.id} 的 canvas 只适用于画布")
+                cases.append(
+                    case.model_dump(exclude_unset=True, exclude_none=True)
+                    | {"limits": case.limits.model_dump()}
+                )
+    if selected - seen:
+        issues.append("--only 包含不存在的 id：" + ", ".join(sorted(selected - seen)))
+    if not cases and not issues:
+        issues.append("需求清单为空")
+    return cases, issues
+
+
+def load_cases(path: Path, only: str | None, fixtures: Path):
+    cases, issues = inspect_cases(path, only, fixtures)
+    if issues:
+        raise ValueError("\n".join(issues))
     return cases

@@ -19,14 +19,25 @@ def _loopback(host):
         return False
 
 
-def restrict_fake_network(ports):
+def restrict_network(ports, preflight_marker):
     # Check DNS too: a refused HTTP connection must not send a public DNS query first.
     def audit(event, args):
+        if event not in {
+            "socket.connect",
+            "socket.sendto",
+            "socket.getaddrinfo",
+            "socket.gethostbyname",
+            "socket.gethostbyaddr",
+        }:
+            return
+        checking = preflight_marker.exists()
+        if not checking and ports is None:
+            return
         if event in {"socket.connect", "socket.sendto"}:
             sock, address = args
             if sock.family not in (socket.AF_INET, socket.AF_INET6):
                 return
-            if not _loopback(address[0]) or address[1] not in ports:
+            if checking or not _loopback(address[0]) or address[1] not in ports:
                 raise PermissionError("仅允许本次评测的假上游")
         elif event in {"socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr"}:
             if args[0] is not None and not _loopback(args[0]):
@@ -58,8 +69,10 @@ def stop_if_parent_exits(port_file):
 if __name__ == "__main__":
     port_file = Path(sys.argv[1])
     threading.Thread(target=stop_if_parent_exits, args=(port_file,), daemon=True).start()
-    if "ATELIER_EVAL_FAKE_PORTS" in os.environ:
-        restrict_fake_network(set(json.loads(os.environ["ATELIER_EVAL_FAKE_PORTS"])))
+    ports = os.environ.get("ATELIER_EVAL_FAKE_PORTS")
+    restrict_network(
+        set(json.loads(ports)) if ports is not None else None, port_file.with_name("preflight")
+    )
 
     import uvicorn
 

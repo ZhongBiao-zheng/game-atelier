@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -66,6 +67,23 @@ def selected_keys(data_root, providers):
     return result
 
 
+def _copy_price_snapshots(source, data, keys):
+    names = set()
+    for key in keys["keys"]:
+        host = (urlsplit(key.get("base_url") or "").hostname or "").lower()
+        for domain, filename in (("tu-zi.com", "tuzi.json"), ("openai-hk.com", "openai-hk.json")):
+            if host == domain or host.endswith("." + domain):
+                names.add(filename)
+        if key.get("provider") == "tokendance":
+            names.add("tokendance.json")
+    for name in names:
+        path = source.resolve() / ".runtime" / "prices" / name
+        if path.is_file() and path.resolve() == path:
+            target = data / ".runtime" / "prices"
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target / name)
+
+
 def credential_values(value):
     if isinstance(value, list):
         for item in value:
@@ -94,6 +112,9 @@ class LocalAPI(requests.Session):
         )
         self._lease = None
         self._secrets = set(credential_values(keys))
+
+    def finish_preflight(self):
+        (self.data_root.parent / "preflight").unlink()
 
     def scrub(self, value):
         if isinstance(value, str):
@@ -274,7 +295,12 @@ def _interrupt_on_termination():
 
 @contextmanager
 def serve(
-    server_root: Path, *, keys_from: Path | None, providers: list[str], fake_keys: dict | None
+    server_root: Path,
+    *,
+    keys_from: Path | None,
+    providers: list[str],
+    fake_keys: dict | None,
+    preflight: bool = False,
 ):
     if bool(keys_from is not None) != bool(providers) or (keys_from is None) == (fake_keys is None):
         raise ValueError("真实运行需要同时指定数据目录和供应商")
@@ -299,6 +325,10 @@ def serve(
         ) as handle:
             json.dump(keys, handle)
         python = server_root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if keys_from is not None:
+            _copy_price_snapshots(Path(keys_from), data, keys)
+        if preflight:
+            (root / "preflight").touch()
         port_file = root / "port"
         proc = subprocess.Popen(
             [
