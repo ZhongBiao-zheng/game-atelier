@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import quote, urlsplit
 import uuid
@@ -227,19 +228,48 @@ def _environment(home, data, server_root, fake):
 
 
 def _stop(proc):
-    if proc.poll() is None:
-        if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGTERM)
-        else:
-            proc.terminate()
-        try:
-            proc.wait(timeout=4)
-        except subprocess.TimeoutExpired:
+    try:
+        if proc.poll() is None:
             if os.name == "posix":
-                os.killpg(proc.pid, signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGTERM)
             else:
-                proc.kill()
-            proc.wait()
+                proc.terminate()
+            try:
+                proc.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:
+                    proc.kill()
+                proc.wait()
+    finally:
+        proc.stdin.close()
+
+
+@contextmanager
+def _interrupt_on_termination():
+    # Only the CLI's main thread owns the process signal handlers. The pipe still
+    # protects children of callers that embed the harness in another thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {}
+    interrupted = False
+
+    def interrupt(signum, frame):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+
+    try:
+        for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+            if (signum := getattr(signal, name, None)) is not None:
+                previous[signum] = signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 @contextmanager
@@ -252,7 +282,10 @@ def serve(
     if not (server_root / "src" / "viewer_server" / "server_app.py").is_file():
         raise ValueError("server-root 不是有 viewer-server 的 Atelier 检出目录")
     keys = fake_keys if fake_keys is not None else selected_keys(Path(keys_from), providers)
-    with tempfile.TemporaryDirectory(prefix="atelier-agent-eval-") as tmp:
+    with (
+        _interrupt_on_termination(),
+        tempfile.TemporaryDirectory(prefix="atelier-agent-eval-") as tmp,
+    ):
         root = Path(tmp)
         home = root / "home"
         home.mkdir()
@@ -276,7 +309,7 @@ def serve(
             env=_environment(home, data, server_root, fake_keys),
             cwd=server_root,
             start_new_session=os.name == "posix",
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

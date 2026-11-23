@@ -4,8 +4,10 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import sys
+import threading
 
 
 def _loopback(host):
@@ -33,7 +35,29 @@ def restrict_fake_network(ports):
     sys.addaudithook(audit)
 
 
+def stop_if_parent_exits(port_file):
+    # The evaluator is the only writer, and closes its pipe after a normal shutdown.
+    # EOF here means it died without stopping us. An ongoing provider call must not
+    # keep a non-daemon worker thread (and hence the isolated process) alive.
+    try:
+        while os.read(sys.stdin.fileno(), 1):
+            pass
+        root = port_file.parent
+        if (
+            root.name.startswith("atelier-agent-eval-")
+            and port_file.name == "port"
+            and str(root / "home") == os.environ.get("HOME")
+            and str(root / "data") == os.environ.get("GAME_ATELIER_DATA_ROOT")
+        ):
+            (root / "data" / ".config" / "keys.json").unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+    finally:
+        os._exit(1)
+
+
 if __name__ == "__main__":
+    port_file = Path(sys.argv[1])
+    threading.Thread(target=stop_if_parent_exits, args=(port_file,), daemon=True).start()
     if "ATELIER_EVAL_FAKE_PORTS" in os.environ:
         restrict_fake_network(set(json.loads(os.environ["ATELIER_EVAL_FAKE_PORTS"])))
 
@@ -53,5 +77,5 @@ if __name__ == "__main__":
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        Path(sys.argv[1]).write_text(str(listener.getsockname()[1]), encoding="ascii")
+        port_file.write_text(str(listener.getsockname()[1]), encoding="ascii")
         uvicorn.Server(config).run(sockets=[listener])
