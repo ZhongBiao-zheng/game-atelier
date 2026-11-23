@@ -98,7 +98,7 @@ def test_http_import_folder_list_and_delete(isolated_data_root):
         )
         assert imported.status_code == 200, imported.json()
         assert imported.json() == {"name": "three-view", "description": "三视图出图流程",
-                                   "has_scripts": False}
+                                   "has_scripts": False, "builtin": False}
         assert [row["name"] for row in client.get("/api/canvas/agent/skills").json()["skills"]] \
             == ["three-view"]
         assert client.delete("/api/canvas/agent/skills/three-view").status_code == 204
