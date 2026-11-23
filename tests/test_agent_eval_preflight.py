@@ -226,3 +226,45 @@ def test_only_selected_fixed_price_files_enter_isolation(tmp_path):
         "openai-hk.json",
         "tokendance.json",
     }
+
+
+def test_preference_requires_a_quote_for_that_specific_model(tmp_path, capsys):
+    with FakeProvider(["eval/chat"]) as vendor:
+        key = vendor.keys["keys"][0]
+        key["models"].append(
+            {"id": "unpriced-image", "name": "Unpriced", "modality": "image", "protocol": "openai"}
+        )
+        _source(tmp_path, vendor.keys)
+        manifest = tmp_path / "image.yaml"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "id": "portrait",
+                    "title": "角色",
+                    "surface": "studio",
+                    "settings": {"preferred_models": ["eval/unpriced-image"]},
+                    "turns": [{"say": "画一个角色"}],
+                    "expect": {"images": 1},
+                }
+            )
+        )
+        assert (
+            cli.main(
+                [
+                    "preflight",
+                    "--cases",
+                    str(manifest),
+                    "--keys-from",
+                    str(tmp_path),
+                    "--providers",
+                    "eval",
+                    "--chat-model",
+                    "eval/chat",
+                    "--budget-cny",
+                    "2",
+                ]
+            )
+            == 2
+        )
+        text = capsys.readouterr().out
+        assert "gpt-image-1  ¥0.25" in text and "portrait 缺少" in text
