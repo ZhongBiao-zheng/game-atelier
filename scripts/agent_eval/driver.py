@@ -374,15 +374,36 @@ def remember_quotes(jobs_before, jobs_after, records, quotes):
     return sum(sizes[: max(0, len(accepted) - len(new_ids))])
 
 
-def stop_work(api, url, project, jobs, notices):
+def request_may_be_in_flight(session):
+    status = session.get("status")
+    if status in {"idle", "awaiting_approval"}:
+        return False
+    if status in {"failed", "interrupted"}:
+        # A rejected request (e.g. HTTP 429) is terminal. A lost upstream reply is
+        # different: product status can be terminal locally while the provider bills later.
+        error = session.get("error") or ""
+        return any(
+            marker in error for marker in ("可能已计费", "响应超时", "连不上对话模型", "服务重启")
+        )
+    return True
+
+
+def stop_work(api, url, project, jobs, notices, in_flight, *, unknown_delivery=False):
     # Cancel the model first so a new Job cannot appear between listing and cancellation.
     confirmed = True
     if url:
         try:
-            stopped = body(api.post(url + "/cancel", json={}), "停止轮次")
-            if stopped.get("status") not in {"idle", "interrupted", "failed"}:
-                confirmed = False
-                notices.add("停止轮次未获确认")
+            before = body(api.get(url), "停止前读取轮次")
+        except (requests.RequestException, Unsupported, ValueError):
+            before = {}
+        else:
+            in_flight = request_may_be_in_flight(before)
+        try:
+            if before.get("status") not in {"idle", "failed", "interrupted"}:
+                stopped = body(api.post(url + "/cancel", json={}), "停止轮次")
+                if stopped.get("status") not in {"idle", "interrupted", "failed"}:
+                    confirmed = False
+                    notices.add("停止轮次未获确认")
         except (requests.RequestException, Unsupported, ValueError):
             confirmed = False
             notices.add("停止轮次未获确认")
@@ -403,7 +424,7 @@ def stop_work(api, url, project, jobs, notices):
             except requests.RequestException:
                 confirmed = False
                 notices.add("停止请求未获确认，已提交任务可能继续计费")
-    return confirmed
+    return confirmed and not in_flight and not unknown_delivery
 
 
 def run_case(
@@ -447,6 +468,7 @@ def run_case(
     # Set before sending a request that may start billable work. A timeout can mean
     # the server already accepted it. An observed quiescent session clears the flag.
     model_may_be_running = False
+    waiting_for_submission_reply = False
     settlement_uncertain = False
     try:
         url, project, applied = set_up(api, case, model, fixtures)
@@ -477,11 +499,12 @@ def run_case(
                 row.update(status="stopped", reason="max_seconds")
                 break
             model_may_be_running = True
+            waiting_for_submission_reply = True
             session = body(api.post(url + "/messages", json=payload), "发送对话")
+            waiting_for_submission_reply = False
             while True:
                 session = body(api.get(url), "读取会话")
-                # A failed/interrupted run can omit the last provider charge as well.
-                model_may_be_running = session.get("status") not in {"idle", "awaiting_approval"}
+                model_may_be_running = request_may_be_in_flight(session)
                 jobs = _read_with_quotes(api, project, url, quotes)
                 for job in jobs:
                     job_turn.setdefault(job["job_id"], turn_index)
@@ -532,8 +555,9 @@ def run_case(
                     reason = "max_seconds"
                 if reason:
                     row.update(status="stopped", reason=reason)
-                    stopped = stop_work(api, url, project, jobs, notices)
-                    settlement_uncertain = model_may_be_running or not stopped
+                    settlement_uncertain = not stop_work(
+                        api, url, project, jobs, notices, model_may_be_running
+                    )
                     break
                 if status == "awaiting_approval":
                     if not cards:
@@ -549,7 +573,12 @@ def run_case(
                     )
                     row["approvals"].extend(records)
                     model_may_be_running = True
-                    body(api.post(url + "/approvals", json={"decisions": decisions}), "提交裁决")
+                    waiting_for_submission_reply = True
+                    body(
+                        api.post(url + "/approvals", json={"decisions": decisions}, timeout=120),
+                        "提交裁决",
+                    )
+                    waiting_for_submission_reply = False
                     if any(r["accepted_indices"] for r in records):
                         unmatched_results += remember_quotes(
                             jobs, _jobs(api, project, url), records, quotes
@@ -559,8 +588,9 @@ def run_case(
                         status="failed" if status == "failed" else "stopped",
                         reason=session.get("error") or status,
                     )
-                    stopped = stop_work(api, url, project, jobs, notices)
-                    settlement_uncertain = model_may_be_running or not stopped
+                    settlement_uncertain = not stop_work(
+                        api, url, project, jobs, notices, model_may_be_running
+                    )
                     break
                 elif status == "idle" and all(j["status"] in TERMINAL_JOBS for j in jobs):
                     break
@@ -594,8 +624,15 @@ def run_case(
             else f"{type(error).__name__}（HTTP {getattr(getattr(error, 'response', None), 'status_code', '未知')}）",
         )
         if url:
-            stopped = stop_work(api, url, project, jobs, notices)
-            settlement_uncertain = model_may_be_running or not stopped
+            settlement_uncertain = not stop_work(
+                api,
+                url,
+                project,
+                jobs,
+                notices,
+                model_may_be_running,
+                unknown_delivery=waiting_for_submission_reply,
+            )
     if url:
         try:
             session = body(api.get(url), "会话")
@@ -604,6 +641,8 @@ def run_case(
             if not response.ok:
                 raise Unsupported("对话用量")
             usage = response.json()
+            if session.get("status") not in {"idle", "interrupted", "failed"}:
+                settlement_uncertain = True
         except (requests.RequestException, Unsupported, ValueError, KeyError):
             if turn_index:
                 settlement_uncertain = True
