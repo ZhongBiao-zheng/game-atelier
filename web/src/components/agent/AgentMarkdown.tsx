@@ -1,3 +1,6 @@
+import { useMemo } from 'react';
+import { usePlugins } from '@/plugin-host/registry';
+import type { PluginEntry } from '@/schema/plugins';
 import ReactMarkdown from 'react-markdown';
 
 // 与服务端 canvas_agent_runtime.READ_LABELS 同名同字：只读工具的消息正文就是这个标签，相同则不重复显示。
@@ -16,9 +19,28 @@ export const TOOL_LABELS: Record<string, string> = {
   check_run: '核对生成结果',
   wait_for_run: '等待生成结果',
   wait_for_runs: '等待多个生成结果',
-  load_skill: '读取 Skill',
-  read_skill_file: '读取 Skill 文件',
+  search_team: '查找团队库参考',
+  read_spec: '读取类别规范',
+  append_lesson: '记录项目经验',
+  load_skill: '读取技能',
+  read_skill_file: '读取技能文件',
 };
+
+export function agentToolLabels(plugins: readonly PluginEntry[]): Record<string, string> {
+  const labels = { ...TOOL_LABELS };
+  for (const { manifest } of plugins) {
+    if (!manifest) continue;
+    for (const tool of manifest.contributes.agent_tools ?? []) {
+      labels[`plugin_${manifest.id.replace(/-/g, '_')}_${tool.name}`] = manifest.name;
+    }
+  }
+  return labels;
+}
+
+export function useAgentToolLabels() {
+  const plugins = usePlugins();
+  return useMemo(() => agentToolLabels(plugins), [plugins]);
+}
 
 /** 模型回复常带 Markdown：标题压到正文字号，面板里只用 sm / xs 两档。 */
 export function AgentMarkdown({ text }: { text: string }) {

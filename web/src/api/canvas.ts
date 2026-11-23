@@ -75,7 +75,7 @@ type WorkspaceSessionList<P extends string | null> = P extends null ? { sessions
 export function listCanvasAgentSessions<P extends string | null>(projectId: P): Promise<WorkspaceSessionList<P>> {
   return requestJson<WorkspaceSessionList<P>>(
     agentSessionsPath(projectId),
-    '读取画布 Agent 会话',
+    '读取Agent 会话',
   );
 }
 
@@ -86,7 +86,7 @@ export function createCanvasAgentSession<P extends string | null>(
 ): Promise<WorkspaceSession<P>> {
   return requestJson<WorkspaceSession<P>>(
     agentSessionsPath(projectId),
-    '创建画布 Agent 会话',
+    '创建Agent 会话',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -101,7 +101,7 @@ export function getCanvasAgentSession<P extends string | null>(
 ): Promise<WorkspaceSession<P>> {
   return requestJson<WorkspaceSession<P>>(
     `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`,
-    '读取画布 Agent 会话',
+    '读取Agent 会话',
   );
 }
 
@@ -112,7 +112,7 @@ export function deleteCanvasAgentSession(
 ): Promise<void> {
   return request(
     `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`,
-    '删除画布 Agent 会话',
+    '删除Agent 会话',
     { method: 'DELETE', headers: { 'If-Match': String(revision) } },
   ).then(() => undefined);
 }

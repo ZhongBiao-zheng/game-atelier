@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { AgentProcessToggle } from '@/components/agent/AgentProcessToggle';
-import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
+import { AgentMarkdown, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,7 @@ function ProcessGroup({ projectId, messages, steps }: {
 }
 
 function Message({ projectId, message }: { projectId: string; message: CanvasAgentMessage }) {
+  const labels = useAgentToolLabels();
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1">
@@ -112,7 +113,7 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
     );
   }
   if (message.role === 'tool') {
-    const label = TOOL_LABELS[message.title ?? ''] ?? message.title;
+    const label = labels[message.title ?? ''] ?? message.title;
     const images = message.references.filter(ref => ref.kind === 'content' && ref.version_id);
     return (
       <div className="flex gap-2 text-xs text-muted-foreground">
@@ -168,6 +169,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   onOpenKeySettings: () => void;
   className?: string;
 }) {
+  const labels = useAgentToolLabels();
   const agent = useCanvasAgent(projectId, true);
   const { session, streaming, activeTool, pending } = agent;
   const [text, setText] = useState('');
@@ -302,14 +304,14 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         {running && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <LoadingIcon size="sm" aria-label="Agent 正在处理" className="animate-spin" />
-            {activeTool && `${TOOL_LABELS[activeTool] ?? activeTool}…`}
+            {activeTool && `${labels[activeTool] ?? activeTool}…`}
           </p>
         )}
         {awaiting && session && (
           <CanvasAgentApprovalCard
             key={session.pending_approvals.map(item => item.call_id).join(',')}
             approvals={session.pending_approvals}
-            labels={TOOL_LABELS}
+            labels={labels}
             disabled={pending}
             onDecide={(approved, items) => void agent.decide(approved, items)}
             loadBatchItems={callId => getCanvasAgentBatchItems(projectId, session.session_id, callId)}
