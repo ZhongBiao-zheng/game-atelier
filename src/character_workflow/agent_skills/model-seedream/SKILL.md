@@ -1,6 +1,9 @@
 ---
 name: model-seedream
 description: Seedream / 即梦系列（模型名含 seedream 或 seededit）的提示词写法：中文直写、分区坐标、图一图二指代、组图、色值不能写进提示词等已知问题。给这类模型写提示词前读。
+metadata:
+  title: Seedream 写法
+  picker: hidden
 ---
 
 # Seedream / 即梦写法

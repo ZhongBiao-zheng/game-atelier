@@ -1,6 +1,9 @@
 ---
 name: model-image-other
 description: 其他图像模型的提示词写法：FLUX、Qwen-Image、混元、可图、Ideogram、Recraft，以及没有专门技能的模型。模型名不含 gpt-image、nano-banana、seedream、midjourney 时读这一份。
+metadata:
+  title: 其他图像模型写法
+  picker: hidden
 ---
 
 # 其他图像模型写法

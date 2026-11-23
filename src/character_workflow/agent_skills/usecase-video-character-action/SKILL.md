@@ -1,6 +1,8 @@
 ---
 name: usecase-video-character-action
 description: 角色动作镜头的配方：让一个角色动起来的短视频，待机、行走、攻击、施法、转身展示、登场镜头。用户要让角色或立绘动起来、做一段角色动作视频时读。
+metadata:
+  title: 角色动作视频
 ---
 
 # 角色动作镜头

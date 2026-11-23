@@ -1,6 +1,8 @@
 ---
 name: usecase-expression-action
 description: 表情表与动作表的配方：一个角色的多个表情、多个动作或姿势排成网格，表情包、动作参考表、精灵图草稿。用户要一组表情、一套动作、表情包时读。
+metadata:
+  title: 表情与动作表
 ---
 
 # 表情表与动作表

@@ -1,6 +1,9 @@
 ---
 name: prompt-method
 description: 写图像提示词的通用方法：五维框架、把模糊形容词翻译成可见条件、反默认清单、参考图与改图的写法、出图后的检查与归因。写任何图片提示词前读。各模型的写法见 model-*，各品类的配方见 usecase-*。
+metadata:
+  title: 通用写法
+  picker: hidden
 ---
 
 # 图像提示词通用写法

@@ -1,6 +1,9 @@
 ---
 name: model-midjourney
 description: Midjourney 与 niji（模型名以 mj- 开头，或含 midjourney、niji）的提示词写法：英文短语、主体前置、风格与光线、参数走生成参数、不承担文字排版。给这类模型写提示词前读，它的写法和其他图像模型相反。
+metadata:
+  title: Midjourney 写法
+  picker: hidden
 ---
 
 # Midjourney / niji 写法

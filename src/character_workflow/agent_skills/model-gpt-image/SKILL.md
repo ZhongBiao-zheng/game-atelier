@@ -1,6 +1,9 @@
 ---
 name: model-gpt-image
 description: GPT Image 系列（模型名含 gpt-image）的提示词写法：结构顺序、画面文字、改图与多图参考、尺寸规则、已知问题。给这类模型写提示词前读。
+metadata:
+  title: GPT Image 写法
+  picker: hidden
 ---
 
 # GPT Image 系列写法

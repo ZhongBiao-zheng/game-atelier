@@ -1,6 +1,9 @@
 ---
 name: model-nano-banana
 description: Nano Banana / Gemini 图像系列（模型名含 nano-banana 或 gemini 图像）的提示词写法：完整句子描述、对话式改图、多图参考与身份锁、擅长的任务。给这类模型写提示词前读。
+metadata:
+  title: Nano Banana 写法
+  picker: hidden
 ---
 
 # Nano Banana / Gemini 图像写法

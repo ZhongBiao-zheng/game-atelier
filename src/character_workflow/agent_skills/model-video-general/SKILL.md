@@ -1,6 +1,9 @@
 ---
 name: model-video-general
 description: Kling / 可灵、Sora、Veo、海螺、Runway、Vidu 等视频模型的提示词写法：结构骨架、六个维度、运镜用语、参考图绑定、各家的差别。模型名不含 seedance 的视频模型读这一份。
+metadata:
+  title: 通用视频写法
+  picker: hidden
 ---
 
 # 通用视频写法（Kling、Sora、Veo 等）

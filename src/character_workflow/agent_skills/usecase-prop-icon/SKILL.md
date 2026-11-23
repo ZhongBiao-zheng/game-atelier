@@ -1,6 +1,8 @@
 ---
 name: usecase-prop-icon
 description: 道具与图标的配方：游戏道具、装备、技能图标、物品图标、成套图标、应用图标。用户要画道具、武器、物品、图标、一套 icon 时读。
+metadata:
+  title: 道具与图标
 ---
 
 # 道具与图标

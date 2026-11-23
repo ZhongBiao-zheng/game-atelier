@@ -1,6 +1,9 @@
 ---
 name: model-seedance
 description: Seedance / 即梦视频（模型名含 seedance）的提示词写法：12 段详写骨架、参考素材的用途声明、空间地图、按秒节拍、行为式表演、只要音效。给 Seedance 写视频提示词前读。Kling、Sora、Veo 等见 model-video-general。
+metadata:
+  title: Seedance 写法
+  picker: hidden
 ---
 
 # Seedance 视频写法

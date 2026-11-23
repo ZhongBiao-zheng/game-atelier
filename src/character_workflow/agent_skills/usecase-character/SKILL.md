@@ -1,6 +1,8 @@
 ---
 name: usecase-character
 description: 角色立绘的配方：单个角色的全身或半身立绘、角色原画、卡面人物。用户要画一个角色、出立绘、设计角色形象时读。三视图和设定表见 usecase-turnaround，表情和动作表见 usecase-expression-action。
+metadata:
+  title: 角色立绘
 ---
 
 # 角色立绘

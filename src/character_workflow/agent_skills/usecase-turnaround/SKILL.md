@@ -1,6 +1,8 @@
 ---
 name: usecase-turnaround
 description: 三视图与角色设定表的配方：正侧背三视图、角色设定板、给视频模型当参考用的角色表。用户要三视图、转面图、设定图、角色板时读。
+metadata:
+  title: 三视图与设定表
 ---
 
 # 三视图与角色设定表

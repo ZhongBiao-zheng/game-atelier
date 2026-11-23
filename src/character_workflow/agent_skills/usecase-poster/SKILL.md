@@ -1,6 +1,8 @@
 ---
 name: usecase-poster
 description: 海报与美宣的配方：游戏宣传图、角色 KV、活动海报、版本主视觉、社媒封面。用户要做海报、KV、宣传图、美宣、封面时读。
+metadata:
+  title: 海报与美宣
 ---
 
 # 海报与美宣
