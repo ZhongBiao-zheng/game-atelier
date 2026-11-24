@@ -7,30 +7,44 @@ import { readStudioView, updateStudioView } from '@/pages/studioDraft';
 
 function Page({ home = false }: { home?: boolean }) {
   const state = useStudioComposer(home);
-  return <StudioComposer state={state}><span>生成参数</span></StudioComposer>;
+  return <StudioComposer state={state} onSubmit={vi.fn()} onToggleAssetPanel={vi.fn()} />;
 }
 
 beforeEach(() => { sessionStorage.clear(); localStorage.clear(); });
 
-it('默认显示创作输入，Agent 隐藏生成参数，刷新恢复输入模式', () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
+function pickMode(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模式' }));
+  fireEvent.click(screen.getByRole('option', { name }));
+}
+
+function typeAgent(text: string) {
+  const field = screen.getByRole('textbox', { name: 'Agent 消息' });
+  field.textContent = text;
+  fireEvent.input(field);
+}
+
+it('三种模式共用输入壳，保留 Agent 草稿并在刷新时恢复生成模式', () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessions: [], skills: [], models: [] }))));
   const first = render(<Page />);
-  expect(screen.getByText('生成参数')).toBeVisible();
-  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
-  expect(screen.queryByText('生成参数')).toBeNull();
-  expect(screen.getByLabelText('创作设置')).toBeVisible();
-  expect(screen.getByRole('button', { name: '引用资产' })).toBeVisible();
-  fireEvent.change(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作'), { target: { value: '未发送的草稿' } });
-  fireEvent.click(screen.getByRole('radio', { name: '创作' }));
-  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
-  expect(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作')).toHaveValue('未发送的草稿');
+  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('图片');
+  fireEvent.click(screen.getByLabelText('选择生成模式'));
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Agent', '图片', '视频']);
+  fireEvent.click(screen.getByRole('option', { name: 'Agent' }));
+  expect(screen.queryByLabelText('选择厂商')).toBeNull();
+  const track = screen.getByLabelText('选择生成模式').parentElement!.parentElement!;
+  expect(Array.from(track.querySelectorAll('button')).map(btn => btn.getAttribute('aria-label') ?? btn.textContent))
+    .toEqual(['选择生成模式', '选择模型', '创作模式', '模型偏好', '权限模式：Auto', '选择 Skill', '打开创作资产']);
+  typeAgent('未发送的草稿');
+  pickMode('视频');
+  pickMode('Agent');
+  expect(screen.getByRole('textbox')).toHaveTextContent('未发送的草稿');
   first.unmount();
   render(<Page />);
-  expect(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作')).toBeVisible();
+  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('Agent');
 });
 
 it('首页只在发送时新建会话，收件后跳到创作台并恢复同一会话', async () => {
-  updateStudioView({ mode: 'agent', activeSessionId: 'old' });
+  updateStudioView({ inputMode: 'agent', activeSessionId: 'old' });
   localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
   const created = { session_id: 'new', revision: 1, status: 'idle', model: 'chat', model_alias: 'fake',
     title: '新对话', pending_approvals: [], turns: [], messages: [] };
@@ -45,12 +59,10 @@ it('首页只在发送时新建会话，收件后跳到创作台并恢复同一�
   vi.stubGlobal('fetch', calls);
   const location = memoryLocation({ path: '/', record: true });
   render(<Router hook={location.hook}><Page home /></Router>);
-  expect(screen.getByText('生成参数')).toBeVisible();
-  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
-  fireEvent.change(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作'), { target: { value: '设计灯笼' } });
+  typeAgent('设计灯笼');
   await waitFor(() => expect(screen.getByLabelText('发送')).toBeEnabled());
   fireEvent.click(screen.getByLabelText('发送'));
-  await waitFor(() => expect(readStudioView()).toEqual({ mode: 'agent', activeSessionId: 'new' }));
+  await waitFor(() => expect(readStudioView()).toEqual({ inputMode: 'agent', activeSessionId: 'new' }));
   await waitFor(() => expect(location.history?.at(-1)).toBe('/studio'));
   const messages = calls.mock.calls.filter(([path]) => path.endsWith('/messages'));
   expect(messages).toHaveLength(1);
@@ -58,7 +70,7 @@ it('首页只在发送时新建会话，收件后跳到创作台并恢复同一�
 });
 
 it('恢复目标会话时等待列表，即使已拿到模型也不会向新会话发送', async () => {
-  updateStudioView({ mode: 'agent', activeSessionId: 'previous' });
+  updateStudioView({ inputMode: 'agent', activeSessionId: 'previous' });
   localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
   let restore!: (response: Response) => void;
   const sessions = new Promise<Response>(resolve => { restore = resolve; });
@@ -71,7 +83,7 @@ it('恢复目标会话时等待列表，即使已拿到模型也不会向新会�
   });
   vi.stubGlobal('fetch', requests);
   render(<Page />);
-  fireEvent.change(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作'), { target: { value: '继续修改' } });
+  typeAgent('继续修改');
   await screen.findByText('Chat');
   expect(screen.getByLabelText('发送')).toBeDisabled();
   restore(new Response(JSON.stringify({ sessions: [{ session_id: 'previous' }] })));
@@ -79,22 +91,17 @@ it('恢复目标会话时等待列表，即使已拿到模型也不会向新会�
   expect(requests.mock.calls.filter(([path]) => path.endsWith('/messages'))).toHaveLength(0);
 });
 
-it('在光标处插入本机素材，移除前一张后引用随之重新编号', async () => {
-  const assets = ['甲', '乙'].map((title, i) => ({ asset_id: String(i), title, content: { kind: 'media', mime_type: 'image/png' } }));
-  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(
-    path.startsWith('/api/creation-assets') ? { assets } : { skills: [], sessions: [], models: [], errors: [] }))));
+it('Agent 参考图片复用图片堆叠和引用编号', () => {
+  updateStudioView({ inputMode: 'agent' });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ skills: [], sessions: [], models: [] }))));
+  URL.createObjectURL = vi.fn(() => 'blob:test');
+  URL.revokeObjectURL = vi.fn();
   render(<Page />);
-  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
-  const editor = screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作') as HTMLTextAreaElement;
-  fireEvent.change(editor, { target: { value: '左@右', selectionStart: 2 } });
-  fireEvent.click(await screen.findByRole('button', { name: '甲' }));
-  expect(editor.value).toBe('左 @图1 右');
-  await waitFor(() => expect(screen.queryByRole('button', { name: '乙' })).not.toBeInTheDocument());
-  const next = editor.value + '@';
-  fireEvent.change(editor, { target: { value: next, selectionStart: next.length, selectionEnd: next.length } });
-  fireEvent.click(await screen.findByRole('button', { name: '乙' }));
-  expect(editor.value).toContain('@图2');
-  fireEvent.click(screen.getByLabelText('移除引用 甲'));
-  expect(editor.value).toContain('@图1');
-  expect(editor.value).not.toContain('@图2');
+  const files = Array.from({ length: 17 }, (_, i) => new File(['x'], `图${i}.png`, { type: 'image/png' }));
+  const input = document.querySelector('input[accept="image/*"]')!;
+  fireEvent.change(input, { target: { files: [new File([], 'v.mp4', { type: 'video/mp4' }), ...files] } });
+  typeAgent('使用 @图2');
+  expect(screen.getByRole('textbox')).toHaveTextContent('使用 @图2');
+  expect(new Set(vi.mocked(URL.createObjectURL).mock.calls.map(([file]) => (file as File).name))).toEqual(new Set(files.slice(0, 16).map(file => file.name)));
+  expect(screen.queryByLabelText('引用资产')).toBeNull();
 });
