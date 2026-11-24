@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { AgentProcessToggle } from '@/components/agent/AgentProcessToggle';
 import { AgentMarkdown, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
+import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
@@ -154,7 +155,7 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
           <p className="mt-1 whitespace-pre-wrap break-words border-l border-border pl-2">{message.reasoning_summary}</p>
         </details>
       )}
-      {message.text && <AgentMarkdown text={message.text} />}
+      {message.text && <AgentMarkdown text={parseAgentReply(message.text).body} />}
     </div>
   );
 }
@@ -200,6 +201,9 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const empty = messages.length === 0 && !running && !awaiting;
+  // 只有会话正常停下、最后一条是 Agent 回复时，才显示它末尾的推荐追问。
+  const lastMessage = status === 'idle' ? messages.at(-1) : undefined;
+  const suggestions = lastMessage?.role === 'assistant' ? parseAgentReply(lastMessage.text).suggestions : [];
   const usageLabel = session ? agentUsageLabel(agent.usage) : null;
 
   // 选中的节点变了：之前移除过的不再记着，免得重新选中却带不进来。
@@ -300,7 +304,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         {buildCanvasAgentTimeline(messages, running || awaiting).map(block => block.kind === 'message'
           ? <Message key={block.message.message_id} projectId={projectId} message={block.message} />
           : <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps} />)}
-        {running && streaming && <AgentMarkdown text={streaming} />}
+        <AgentSuggestions suggestions={suggestions} onPick={value => { setText(value); textareaRef.current?.focus(); }} />
+        {running && streaming && <AgentMarkdown text={parseAgentReply(streaming).body || streaming} />}
         {running && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <LoadingIcon size="sm" aria-label="Agent 正在处理" className="animate-spin" />

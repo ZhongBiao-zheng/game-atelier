@@ -2,11 +2,12 @@ import { useState, type ReactNode } from 'react';
 import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
+import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
 import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
 import { Hint } from '@/components/ui/tooltip';
-import { AiIcon, ArrowToolIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
+import { AiIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
 import type { StudioAgentSession, StudioAgentStep, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
@@ -155,24 +156,6 @@ function compareTime(a: string, b: string) {
   return fraction(a).localeCompare(fraction(b));
 }
 
-const SUGGESTION_LINE = /^(?:[-*•]\s*)?→\s+(.+)$/;
-const MAX_SUGGESTIONS = 3;
-
-/** 回复末尾连续的 `→ ` 行是推荐追问（约定见 studio_agent.INSTRUCTIONS「汇报」），从正文里剥离；正文中间的箭头行不算。 */
-export function parseAgentReply(raw: string): { body: string; suggestions: string[] } {
-  const lines = raw.trimEnd().split('\n');
-  const suggestions: string[] = [];
-  let end = lines.length;
-  while (end > 0) {
-    const trimmed = lines[end - 1].trim();
-    const match = trimmed.match(SUGGESTION_LINE);
-    if (match) suggestions.unshift(match[1].trim());
-    else if (trimmed) break;
-    end -= 1;
-  }
-  return { body: lines.slice(0, end).join('\n').trim(), suggestions: suggestions.slice(0, MAX_SUGGESTIONS) };
-}
-
 export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJob, last, onPickSuggestion }: {
   turn: StudioAgentTurn;
   session: StudioAgentSession;
@@ -273,28 +256,7 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
         </div>
       </div>
     )}
-    {suggestions.length > 0 && onPickSuggestion && (
-      <div aria-label="推荐追问" className="flex flex-col items-start gap-2 pt-2">
-        <span className="flex items-center gap-1.5 text-xs text-subtle-foreground">
-          <AiIcon size="sm" />继续探索
-        </span>
-        <div className="flex flex-wrap items-center gap-2">
-          {suggestions.map((text, idx) => (
-            <Button
-              key={idx}
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={() => onPickSuggestion(text)}
-              className="group h-auto rounded-full border-border bg-card/70 px-3.5 py-1.5 text-left text-xs font-normal text-muted-foreground transition-colors hover:border-primary/50 hover:bg-secondary/70 hover:text-foreground"
-            >
-              <span>{text}</span>
-              <ArrowToolIcon size="sm" className="ml-1 shrink-0 text-subtle-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-            </Button>
-          ))}
-        </div>
-      </div>
-    )}
+    {onPickSuggestion && <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />}
     {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
   </section>;
 }

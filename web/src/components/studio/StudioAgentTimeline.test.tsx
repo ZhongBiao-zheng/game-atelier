@@ -5,7 +5,8 @@ import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
 import { StudioSessionControls } from './StudioSessionControls';
 import { within } from '@testing-library/react';
-import { parseAgentReply, StudioAgentTurnCard } from './StudioAgentTimeline';
+import { parseAgentReply } from '@/components/agent/AgentSuggestions';
+import { StudioAgentTurnCard } from './StudioAgentTimeline';
 
 import { mixedTimeline } from '@/lib/historyFilters';
 import type { ComponentProps } from 'react';
