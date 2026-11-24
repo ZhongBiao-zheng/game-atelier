@@ -522,8 +522,7 @@ class StudioWorkspace:
     def instructions(self, session):
         return INSTRUCTIONS + runtime.CREATION_MODE_PROMPTS[session.creation_mode] + skills.skills_prompt()
 
-    def hydrate(self, history):
-        return runtime.hydrate_refs(history, self.media, "（引用的素材已不可用）")
+    missing_image = "（引用的素材已不可用）"
 
     def media(self, ref):
         try:

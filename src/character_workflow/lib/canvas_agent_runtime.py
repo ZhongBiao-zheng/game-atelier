@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
 from character_workflow.lib.agent_instructions import CORE, REPLY_LANGUAGE
-from character_workflow.lib import agent_usage
+from character_workflow.lib import agent_context, agent_usage
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
@@ -51,7 +51,6 @@ Notify = Callable[[str, dict], None]
 MAX_TURNS = 30
 TOOL_OUTPUT_LIMIT = 20_000
 DELTA_FLUSH_SECONDS = 0.15
-MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "read_media",
@@ -771,48 +770,6 @@ def _media_data_url(project_id: str, version_id: str) -> str | None:
     return f"data:{preview['mime_type']};base64,{preview['data_base64']}" if preview else None
 
 
-def hydrate(project_id: str, history: list[dict]) -> tuple[list[dict], dict[str, str]]:
-    """Replace atelier-media refs with data URLs; returns (items, data_url → ref)."""
-    return hydrate_refs(history, lambda ref: _media_data_url(project_id, ref),
-                        "（引用的图片已不在画布上）")
-
-
-def hydrate_refs(history, resolve, missing):
-    reverse: dict[str, str] = {}
-
-    def convert(value: Any) -> Any:
-        if isinstance(value, dict):
-            url = value.get("image_url")
-            if value.get("type") == "input_image" and isinstance(url, str) \
-                    and url.startswith(MEDIA_SCHEME):
-                data_url = resolve(url.removeprefix(MEDIA_SCHEME))
-                if data_url is None:
-                    return {"type": "input_text", "text": missing}
-                reverse[data_url] = url
-                return {**value, "image_url": data_url}
-            return {key: convert(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        return value
-
-    return convert(history), reverse
-
-
-def dehydrate(items: list[dict], reverse: dict[str, str]) -> list[dict]:
-    def convert(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: convert(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        if isinstance(value, str) and value in reverse:
-            return reverse[value]
-        if isinstance(value, str) and value.startswith("data:"):
-            return "（图片已省略）"
-        return value
-
-    return convert(items)
-
-
 def _jsonable(items: list) -> list[dict]:
     return json.loads(json.dumps(items, ensure_ascii=False, default=str))
 
@@ -835,7 +792,7 @@ def user_item(project_id: str, text: str, node_ids: list[str]) -> tuple[dict, li
         version = document.content_versions.get(version_id or "")
         if version is not None and version.kind == "image":
             content.append({"type": "input_image", "detail": "auto",
-                            "image_url": f"{MEDIA_SCHEME}{version_id}"})
+                            "image_url": f"{agent_context.MEDIA_SCHEME}{version_id}"})
     return {"role": "user", "content": content}, references
 
 
@@ -1234,8 +1191,7 @@ class CanvasWorkspace:
 
     messages = staticmethod(display_messages)
 
-    def hydrate(self, history):
-        return hydrate(self.project_id, history)
+    missing_image = "（引用的图片已不在画布上）"
 
     def turn_id(self, session):
         return f"turn-{int(time.time() * 1000)}"
@@ -1289,16 +1245,17 @@ class DeltaBuffer:
         self.last = time.monotonic()
 
 
-def _run_config(resolve):
-    """每次调模型前把最近的结果图附上（只影响这次请求，不进历史）。"""
+def _run_config(workspace):
+    """Prepare each model request without modifying the runner's replay history."""
     from agents import RunConfig
     from agents.run_config import ModelInputData
 
+    def prepare(items):
+        items = agent_context.hydrate_user_images(items, workspace.media, workspace.missing_image)
+        return vision.with_attached_images(items, workspace.media)
+
     async def attach(data) -> ModelInputData:
-        items = await asyncio.to_thread(
-            vision.with_attached_images, list(data.model_data.input),
-            resolve,
-        )
+        items = await asyncio.to_thread(prepare, list(data.model_data.input))
         return ModelInputData(input=items, instructions=data.model_data.instructions)
 
     return RunConfig(call_model_input_filter=attach)
@@ -1316,7 +1273,7 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
                           buffer.notify, cost.TurnSpend(session.history))
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
                                  hooks=usage_hooks(getattr(buffer.workspace, "observe_response", None)),
-                                 run_config=_run_config(buffer.workspace.media))
+                                 run_config=_run_config(buffer.workspace))
     async for event in result.stream_events():
         data = getattr(event, "data", None)
         if getattr(event, "type", "") == "raw_response_event" \
@@ -1357,7 +1314,7 @@ def record_usage(turn: TurnContext, usage: Any) -> None:
         logger.warning("canvas agent usage not recorded", exc_info=True)
 
 
-# 测试替换点：(session, hydrated history, buffer) → (RunResult-like, TurnContext)
+# 测试替换点：(session, original history, buffer) → (RunResult-like, TurnContext)
 run_model: Callable[..., Awaitable[Any]] = _run_model
 
 
@@ -1377,8 +1334,7 @@ async def run_workspace_turn(workspace, notify):
     base = list(session.history)
     buffer = DeltaBuffer(notify, workspace)
     try:
-        hydrated, reverse = await asyncio.to_thread(workspace.hydrate, base)
-        result, context = await run_model(session, hydrated, buffer)
+        result, context = await run_model(session, base, buffer)
     except asyncio.CancelledError:
         await asyncio.to_thread(finish_failed, workspace, turn_id,
                                 "interrupted", "已停止")
@@ -1394,8 +1350,7 @@ async def run_workspace_turn(workspace, notify):
         # 成功、失败、被停止都查：已经发生的请求主机都结算了。
         start_host_settlement(session)
 
-    items = dehydrate(_jsonable(result.to_input_list()), reverse)
-    new_items = items[len(base):]
+    new_items = _jsonable(result.to_input_list()[len(base):])
     pending = []
     calls = [interruption.raw_item for interruption in result.interruptions]
     batch_changes = [change for call in calls if call.name == "apply_changes"
@@ -1414,8 +1369,8 @@ async def run_workspace_turn(workspace, notify):
     status = "awaiting_approval" if pending else "idle"
     error = None
     if not pending:
-        items = _drop_trailing_empty_output(items, len(base))
-        new_items = items[len(base):]
+        new_items = _drop_trailing_empty_output(new_items)
+        items = [*base, *new_items]
         if _ended_without_reply(items):
             # 模型正常结束但最后一次响应既没有文字也没有工具调用（各协议都会出现，SDK 照常结束）。
             # 这一轮执行过工具：只是少了总结，加一条面板提示；没执行过：算失败。都不自动重试。
@@ -1429,7 +1384,7 @@ async def run_workspace_turn(workspace, notify):
     def update(current: CanvasAgentSession, now: str) -> dict:
         return {
             **with_appended_messages(current, [*workspace.messages(new_items, turn_id), *notes], now),
-            "history": items,
+            "history": [*current.history, *new_items],
             "pending_approvals": pending,
             "status": status,
             "error": error,
@@ -1447,11 +1402,11 @@ async def run_workspace_turn(workspace, notify):
 NO_SUMMARY_NOTE = "模型没有补充说明"
 
 
-def _drop_trailing_empty_output(items: list, start: int) -> list:
+def _drop_trailing_empty_output(items: list) -> list:
     """去掉这一轮末尾没有内容的模型输出（空的 assistant 消息、单独的 reasoning）：它们留在历史里，
     下一轮发给上游时会变成空内容消息（Anthropic 拒收）或没有后续条目的 reasoning（Responses 拒收）。"""
     end = len(items)
-    while end > start:
+    while end > 0:
         item = items[end - 1]
         if not isinstance(item, dict):
             break
