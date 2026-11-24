@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { Studio } from './Studio';
+import * as connection from '@/api/connection';
+import { createTestEventStream } from '@/test/eventStream';
 import { clearStudioDraft, DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from './studioDraft';
 
 const base = '/api/studio/agent/sessions';
@@ -225,4 +227,53 @@ it('滚动时保留实际输入焦点，已卸载的弹窗焦点不会持续撑�
   expect(document.activeElement).toBe(document.body);
   fireEvent.scroll(scroll);
   expect(shell).toHaveClass('min-h-0');
+});
+
+it('首屏与切换各拉一次任务，普通会话更新不拉；生成完成与 SSE 重连补查', async () => {
+  const ready = { phase: 'ready' as const, generation: 1, editing: true, message: null };
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue(ready);
+  try {
+    const { requests } = server();
+    const events = createTestEventStream();
+    const respond = requests.getMockImplementation()!;
+    let revision = 1;
+    let completed = 1;
+    requests.mockImplementation(async (url, init) => {
+      if (url === '/events') return events.open();
+      const response = await respond(url, init);
+      if (url !== base + '/' + ordinary) return response;
+      const details = await response.json();
+      details.revision = revision;
+      details.turns[0].steps = Array.from({ length: completed }, (_, i) => ({
+        step_id: 'gen-' + i, tool: 'run_generations', summary: '提交生成', status: 'completed',
+      }));
+      return Response.json(details);
+    });
+    const count = (id: string) => requests.mock.calls.filter(([url]) => url === base + '/' + id + '/jobs').length;
+    mount();
+    await screen.findByText('无归属字段的旧图');
+    await act(async () => {});
+    expect(count(DEFAULT_STUDIO_SESSION_ID)).toBe(1);
+    fireEvent.click(screen.getByLabelText('切换对话'));
+    fireEvent.click(await screen.findByRole('button', { name: '山色' }));
+    await screen.findByText('配个背景');
+    expect(count(ordinary)).toBe(1);
+
+    const update = () => act(async () => events.emit('studio-agent', { kind: 'session', session_id: ordinary }));
+    revision++;
+    await update();
+    expect(count(ordinary)).toBe(1);
+    revision++;
+    completed++;
+    await update();
+    expect(count(ordinary)).toBe(2);
+
+    ready.generation++;
+    // Studio itself rerenders on a session update and reconnects to the new generation.
+    await update();
+    await waitFor(() => expect(count(ordinary)).toBe(3));
+    expect(count(DEFAULT_STUDIO_SESSION_ID)).toBe(1);
+  } finally {
+    state.mockRestore();
+  }
 });

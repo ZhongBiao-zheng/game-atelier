@@ -39,7 +39,7 @@ interface UseSSEOptions {
   onStudioAgent?: (data: CanvasAgentEventPayload) => void;
   onCanvasAgent?: (data: CanvasAgentEventPayload) => void;
   /** 连接（含重连）成功时回调 —— 全量刷新兜底，覆盖断连期间丢失的事件。 */
-  onConnect?: () => void;
+  onConnect?: (reconnected?: boolean) => void;
 }
 
 export function useSSE(options?: UseSSEOptions): number {
@@ -59,6 +59,7 @@ export function useSSE(options?: UseSSEOptions): number {
   onCanvasAgentRef.current = options?.onCanvasAgent;
   const onGatewayTaskRef = useRef(options?.onGatewayTask);
   onGatewayTaskRef.current = options?.onGatewayTask;
+  const needsResync = useRef(false);
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
 
@@ -80,7 +81,8 @@ export function useSSE(options?: UseSSEOptions): number {
         }
         if (closed) return;
         bump();
-        onConnectRef.current?.();
+        onConnectRef.current?.(needsResync.current);
+        needsResync.current = true;
         await readServerEvents(response.body, ({ event, data }) => {
           if (closed) return;
           if (['job-changed', 'image-added'].includes(event)) bump();
@@ -104,7 +106,10 @@ export function useSSE(options?: UseSSEOptions): number {
           }
         }, controller.signal);
       } catch { /* Reconnect only while this connection generation remains mounted. */ }
-      if (!closed) timer = setTimeout(() => { void connect(); }, 3000);
+      if (!closed) {
+        needsResync.current = true;
+        timer = setTimeout(() => { void connect(); }, 3000);
+      }
     }
 
     void connect();

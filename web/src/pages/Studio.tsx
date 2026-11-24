@@ -500,10 +500,20 @@ function StudioFull() {
       return [...updated, ...Array.from(incoming.values()).filter(job => !atStart.has(job.job_id) || retained.has(job.job_id))];
     });
   }, [scopedId]);
+  const submissions = useMemo(() => {
+    if (!session || session.session_id !== scopedId) return null;
+    return session.turns.reduce((count, turn) => count + turn.steps.filter(step =>
+      step.status === 'completed' && (step.tool === 'run_generation' || step.tool === 'run_generations'),
+    ).length, 0);
+  }, [session, scopedId]);
+  const lastScope = useRef<{ id: typeof scopedId; submissions: number | null }>();
   useEffect(() => {
-    void refreshPersistedJobs().catch(() => undefined);
-
-  }, [refreshPersistedJobs, session?.revision]);
+    const previous = lastScope.current;
+    const switched = !previous || previous.id !== scopedId;
+    const submitted = previous?.submissions != null && submissions != null && submissions > previous.submissions;
+    lastScope.current = { id: scopedId, submissions };
+    if (switched || submitted) void refreshPersistedJobs().catch(() => undefined);
+  }, [scopedId, submissions, refreshPersistedJobs]);
 
   const handleJobChanged = useCallback((data: JobChangedPayload) => {
     if (!data.job_id) return;
@@ -514,11 +524,14 @@ function StudioFull() {
     }).catch(() => undefined);
   }, []);
 
-  // onConnect 全量刷新兜底：断连期间 / SSE 队列满丢掉的事件靠重连补齐。
+  // 首屏已按会话加载；后续连接补齐断连期间漏掉的事件。
   useSSE({
     onStudioAgent: composer.agent.onAgentEvent,
     onJobChanged: handleJobChanged,
-    onConnect: () => { composer.agent.onReconnect(); void refreshPersistedJobs().catch(() => {}); },
+    onConnect: reconnected => {
+      composer.agent.onReconnect();
+      if (reconnected) void refreshPersistedJobs().catch(() => undefined);
+    },
   });
 
   // SSE 兜底轮询：系统代理（Clash/V2Ray 的 TUN/全局模式）会把 127.0.0.1 的流式响应整条缓冲，
