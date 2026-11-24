@@ -6,7 +6,6 @@ import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSugge
 import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
-import { Hint } from '@/components/ui/tooltip';
 import { AiIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
 import type { StudioAgentSession, StudioAgentStep, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -246,9 +245,6 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
                 <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary font-medium tabular-nums text-foreground">
                   {idx + 1}
                 </span>
-                <Hint label={job.prompt}>
-                  <span className="min-w-0 flex-1 truncate font-medium text-foreground">{job.prompt}</span>
-                </Hint>
               </div>
               {renderJob(job)}
             </div>

@@ -104,3 +104,15 @@ it('对话菜单可直接切换、新建和按 revision 删除', () => {
   open(); fireEvent.click(screen.getByRole('button', { name: '删除对话 另一段对话' }));
   expect(agent.removeSession).toHaveBeenCalledWith('s2', 2);
 });
+
+it('多方案的每条提示词只在对应的作品卡片里出现一次', () => {
+  const batch = ['松林', '落日'].map((prompt, i) => ({
+    ...jobs[0], job_id: 'batch-' + i, prompt,
+  }));
+  render(<TurnCards agent={makeAgent('idle')} jobs={batch} renderJob={j => <p>{j.prompt}</p>} />);
+  const cards = within(screen.getByTestId('agent-multi-job-batch'));
+  batch.forEach((job, i) => {
+    expect(cards.getByText(String(i + 1))).toBeVisible();
+    expect(cards.getAllByText(job.prompt)).toHaveLength(1);
+  });
+});
