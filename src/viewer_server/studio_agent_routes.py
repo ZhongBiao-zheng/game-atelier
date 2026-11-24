@@ -16,6 +16,7 @@ from fastapi.concurrency import contextmanager_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from character_workflow.lib.agent_context import MEDIA_SCHEME
 from character_workflow.lib import (
     agent_usage,
     canvas_agent_cost as cost,
@@ -100,7 +101,7 @@ def begin(sid, payload):
                     {
                         "type": "input_image",
                         "detail": "auto",
-                        "image_url": runtime.MEDIA_SCHEME + ref,
+                        "image_url": MEDIA_SCHEME + ref,
                     },
                 ]
             )
@@ -123,7 +124,7 @@ def begin(sid, payload):
                     {
                         "type": "input_image",
                         "detail": "auto",
-                        "image_url": runtime.MEDIA_SCHEME + ref,
+                        "image_url": MEDIA_SCHEME + ref,
                     }
                 )
             elif asset.content.kind == "prompt":
