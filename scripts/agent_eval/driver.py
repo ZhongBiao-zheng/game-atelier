@@ -480,10 +480,11 @@ def run_case(
     waiting_for_submission_reply = False
     settlement_uncertain = False
     usage_gap = False
+    gap_requests = None
     segment_start_requests = None
 
     def observe_usage(current, session_state):
-        nonlocal usage, usage_gap
+        nonlocal usage, usage_gap, gap_requests
         # Each user message/approval starts a fresh model run. Compare also during the
         # run, so an earlier priced response cannot hide a later response with zero usage.
         fields = ("requests", "input_tokens", "output_tokens")
@@ -500,6 +501,8 @@ def run_case(
             ):
                 usage_gap = True
                 notices.add("模型轮次已返回，但没有登记本轮的用量记录")
+            if usage_gap and gap_requests is None:
+                gap_requests = current["requests"]
         usage = current
 
     def interrupt_case():
@@ -576,6 +579,9 @@ def run_case(
                     remaining is not None
                     and usage_gap
                     and not (status == "idle" and turn_index == len(case["turns"]))
+                    # 缺口出现时模型那次请求已经返回，回合可能只是还在收尾（仍是 running）。
+                    # 只有又发起了新请求，或回合停在非最后一轮，才说明还会继续花钱。
+                    and (status != "running" or usage.get("requests", 0) > (gap_requests or 0))
                 ):
                     reason = "unpriced_chat"
                 elif remaining is not None and usage.get("unpriced") and not spent["cost_complete"]:

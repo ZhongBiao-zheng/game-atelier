@@ -169,9 +169,13 @@ def test_termination_cleans_up_service_and_temporary_keys(tmp_path, end):
             proc.send_signal(getattr(signal, end))
         proc.wait(timeout=15)
         end_time = time.monotonic() + 8
-        while (Path(work).exists() or not _has_exited(child)) and time.monotonic() < end_time:
+        keys = Path(work) / "data" / ".config" / "keys.json"
+        gone = (lambda: not keys.exists()) if os.name == "nt" else (lambda: not Path(work).exists())
+        while (not gone() or not _has_exited(child)) and time.monotonic() < end_time:
             time.sleep(0.05)
-        assert not Path(work).exists()
+        # Windows 上进程删不掉自己仍打开的文件，工作目录会残留在系统临时目录；
+        # 必须保证的是密钥已删除、服务已退出。其他平台要求整个目录被清掉。
+        assert gone()
         assert _has_exited(child)
         with socket.socket() as listener_probe:
             assert listener_probe.connect_ex(("127.0.0.1", urlsplit(base_url).port)) != 0
