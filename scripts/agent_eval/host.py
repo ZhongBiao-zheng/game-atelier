@@ -336,7 +336,8 @@ def _interrupt_on_termination():
 
     try:
         for name in ("SIGINT", "SIGTERM", "SIGHUP"):
-            if (signum := getattr(signal, name, None)) is not None:
+            signum = getattr(signal, name, None)
+            if signum is not None and signal.getsignal(signum) != signal.SIG_IGN:
                 previous[signum] = signal.signal(signum, interrupt)
         yield
     finally:
