@@ -656,21 +656,42 @@ describe('shared model picker interactions', () => {
 });
 
 
-describe('参考素材堆叠添加按钮', () => {
-  it('折叠锚定首图，展开锚定末图，进入加号保持展开和放大', () => {
+describe('参考素材三阶交互（堆叠 → 悬停预览与展开卡 → 顶部素材抽屉）', () => {
+  it('折叠态右下角 + 圆钮在悬停时同一个节点动态形变为「+ 参考内容」卡，≥3 张时显示 ⤢ 展开抽屉', () => {
+    const onChange = vi.fn();
     const files = [0, 1, 2].map(i => new File(['image'], `${i}.png`, { type: 'image/png' }));
-    render(<PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" referenceImages={files} onReferenceImagesChange={vi.fn()} />);
+    render(<PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" referenceImages={files} onReferenceImagesChange={onChange} />);
     const items = screen.getAllByTestId('reference-stack-item');
-    expect(screen.queryByLabelText('保存参考图为资产')).not.toBeInTheDocument();
-    expect(items[0]).toContainElement(screen.getByTestId('reference-stack-add'));
+    const addNode = screen.getByTestId('reference-stack-add');
+    expect(items).toHaveLength(3);
+    expect(addNode.style.width).toBe('26px');
+
+    // 第 2 阶：悬停首图 → 同一个 addNode 形变为 48×60 卡片，顶部浮出无描边大图预览且位置跟随当前悬停图，中间出现 ⤢ 展开卡
     fireEvent.mouseEnter(items[0]);
-    expect(items[2]).toContainElement(screen.getByTestId('reference-stack-add'));
-    fireEvent.mouseEnter(items[2]);
-    fireEvent.mouseEnter(screen.getByTestId('reference-stack-add'));
-    expect(items[2].style.transform).toContain('scale(1.12)');
-    expect(items[2]).toContainElement(screen.getByTestId('reference-stack-add'));
-    fireEvent.mouseLeave(items[0].parentElement!);
-    expect(items[0]).toContainElement(screen.getByTestId('reference-stack-add'));
+    expect(screen.getByTestId('reference-stack-add')).toBe(addNode);
+    expect(addNode.style.width).toBe('48px');
+    expect(screen.getByTestId('reference-hover-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('reference-hover-preview').style.left).toBe('16px');
+    expect(screen.getByTestId('reference-drawer-expand')).toBeInTheDocument();
+    expect(screen.getAllByTestId('reference-stack-item')[0].style.transform).toContain('scale(1.04)');
+
+    // 第 3 阶：点击 ⤢ 展开卡 → 打开输入框顶部素材抽屉
+    fireEvent.click(screen.getByTestId('reference-drawer-expand'));
+    expect(screen.getByTestId('reference-drawer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('reference-drawer-item')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: '全部 (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '图片 (3)' })).toBeInTheDocument();
+
+    // 点击 ⤡ 收起按钮回到左上角堆叠态
+    fireEvent.click(screen.getByTestId('reference-drawer-collapse'));
+    expect(screen.queryByTestId('reference-drawer')).toBeNull();
+    expect(screen.getAllByTestId('reference-stack-item')).toHaveLength(3);
+
+    // 再次展开并点击清空全部素材
+    fireEvent.mouseEnter(screen.getAllByTestId('reference-stack-item')[0]);
+    fireEvent.click(screen.getByTestId('reference-drawer-expand'));
+    fireEvent.click(screen.getByTestId('reference-drawer-clear'));
+    expect(onChange).toHaveBeenCalledWith([]);
     cleanup();
   });
 });

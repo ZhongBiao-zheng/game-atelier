@@ -3,7 +3,7 @@ import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
-import { LibraryIcon, ScrollBottomIcon } from '@/components/ui/icons';
+import { ScrollBottomIcon } from '@/components/ui/icons';
 
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
@@ -928,7 +928,7 @@ function StudioFull() {
           reuseParameter={reuseParameter}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
-          onReuseReferences={handleReuseReferences}
+          onReuseReferences={embedded ? undefined : handleReuseReferences}
           onEditAsReference={handleEditAsReference}
           onShareResult={(jobId, index, path, config) => setShareRequest({
             source: { kind: 'job_output', job_id: jobId, output_index: index },
@@ -971,10 +971,15 @@ function StudioFull() {
         onScroll={handleHistoryScroll}
         data-studio-history-scroll
         data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-52.5"
+        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-64"
       >
         {composer.mode === 'agent' ? <StudioAgentTimeline agent={composer.agent} jobs={persistedJobs}
-          renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)} />
+          renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)}
+          onPickSuggestion={text => {
+            composer.input.setText(text);
+            setClickPinned(true);
+            composer.input.textarea.current?.focus();
+          }} />
           : renderRounds(reversedRounds)}
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -1044,6 +1049,11 @@ function StudioFull() {
               segments: promptToAssetSegments(promptText),
             });
           }}
+          assetPanelOpen={assetPanelOpen}
+          onToggleAssetPanel={() => {
+            if (assetPanelOpen) assetPanelRef.current?.requestClose();
+            else setAssetPanelOpen(true);
+          }}
           providers={providers}
           providerAlias={providerAlias}
           model={model}
@@ -1095,23 +1105,6 @@ function StudioFull() {
         />
       </StudioComposer>
           </div>
-          <Button variant="bare"
-            type="button"
-            aria-label="打开创作资产"
-            aria-expanded={assetPanelOpen}
-            onClick={() => {
-              if (assetPanelOpen) assetPanelRef.current?.requestClose();
-              else setAssetPanelOpen(true);
-            }}
-            className={`pointer-events-auto grid shrink-0 place-items-center lg:absolute lg:bottom-0 lg:left-full lg:ml-3 rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-              dockCollapsed ? 'mb-5.5 size-8' : 'mb-4 size-10'
-            }`}
-          >
-            <LibraryIcon size="lg"
-              aria-hidden
-              className={`transition-transform duration-300 ${dockCollapsed ? 'scale-90': ''}`}
-            />
-          </Button>
         </div>
       </div>
       {assetPanelOpen && (

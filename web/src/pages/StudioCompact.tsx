@@ -393,10 +393,16 @@ export function StudioCompact() {
     }
   };
 
+  const heroHeading = composer.mode === 'agent'
+    ? '今天想一起创作什么？'
+    : kind === 'video'
+      ? '描述你想生成的镜头'
+      : '描述你想生成的图片';
+
   return (
     <div className="py-8" aria-label="生图沙箱">
       <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
-        描述你想生成的图片
+        {heroHeading}
       </h1>
       <StudioComposer state={composer}>
         <PromptInput

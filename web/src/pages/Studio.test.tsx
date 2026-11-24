@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -283,10 +283,10 @@ describe('Studio', () => {
     await waitFor(() => expect(screen.queryByLabelText('添加参考图')).not.toBeInTheDocument());
   });
 
-  it('资产入口与展开态生成按钮同尺寸、同底部高度', () => {
+  it('资产入口已内聚进输入壳工具栏，与其它控制芯片同高', () => {
     renderStudio();
 
-    expect(screen.getByLabelText('打开创作资产')).toHaveClass('size-10', 'mb-4');
+    expect(screen.getByLabelText('打开创作资产')).toHaveClass('h-9', 'px-3');
     expect(screen.getByLabelText('提交生成')).toHaveClass('w-10', 'h-10', 'bottom-4');
   });
 
@@ -2279,8 +2279,8 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle).toBe('雨夜电影感'));
 
     const [item] = screen.getAllByTestId('reference-stack-item');
-    const buttons = within(item).getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);  // 缩略图右上角的移除
+    fireEvent.mouseEnter(item);  // 移除按钮只在悬停的缩略图右上角出现
+    fireEvent.click(screen.getByRole('button', { name: '移除参考素材 1' }));
     await waitFor(() => expect(screen.queryAllByTestId('reference-stack-item')).toHaveLength(0));
     await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
   });
@@ -2305,8 +2305,8 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗边的猫');
 
     const [item] = screen.getAllByTestId('reference-stack-item');
-    const buttons = within(item).getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.mouseEnter(item);
+    fireEvent.click(screen.getByRole('button', { name: '移除参考素材 1' }));
     await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
   });
 
@@ -2321,8 +2321,8 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '别的图', mime_type: 'image/png' } as never, 'lib:e2'); });
     act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
     const [item] = screen.getAllByTestId('reference-stack-item');
-    const buttons = within(item).getAllByRole('button');
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.mouseEnter(item);
+    fireEvent.click(screen.getByRole('button', { name: '移除参考素材 1' }));
     await waitFor(() => expect(screen.queryAllByTestId('reference-stack-item')).toHaveLength(0));
     expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗台橘猫');
   });

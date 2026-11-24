@@ -219,6 +219,32 @@
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 
+  /* 输入框长提示词极细滚动条：超长文本触顶封顶时在右侧边缘浮现 3px 细胶囊滑块。 */
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 65%, transparent) transparent;
+  }
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
+    border-radius: 999px;
+    border: 0;
+  }
+  .thin-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* 历史提示词第二行末端的参数行渐隐遮罩：让提示词自然淡出并衔接到右侧参数行。 */
+  .prompt-spec-fade {
+    background: linear-gradient(to right, transparent, var(--background) 28px);
+  }
+
   /* 永久预留滚动条槽位。本仓全局把滚动条改成占位 10px 的经典条（见下方 @layer base
      ::-webkit-scrollbar），overflow:auto 容器里滚动条增删会改变内容宽度 ±10px；当列宽随
      之变、而图片 w-full 高度随列宽等比缩放时，墙高会反向跨过视口临界 → 滚动条增删每帧翻转

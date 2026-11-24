@@ -6,7 +6,7 @@ import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { openOnboarding } from '@/lib/onboardingGuide';
-import { AddIcon, ArrowUpIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, ImageIcon, ImagesIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
+import { AddIcon, ArrowUpIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, CollapseIcon, ExpandIcon, ImageIcon, ImagesIcon, LibraryIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -62,6 +62,8 @@ interface Props {
   /** 外部资产面板要求在最后一次编辑光标处插入文本。 */
   insertTextRequest?: { requestId: string; text: string } | null;
   onSavePromptAsset?: () => void;
+  onToggleAssetPanel?: () => void;
+  assetPanelOpen?: boolean;
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
@@ -114,15 +116,15 @@ interface Props {
   onVideoFramesChange?: (frames: FrameSlots) => void;
 }
 
-const REF_W = 56.5;
-const REF_H = 70;
+const REF_W = 48;
+const REF_H = 60;
+const REF_STEP = 42;
 // 折叠堆叠时按 index 取的旋转角度（循环），制造层次让用户看到下面的图
 const COLLAPSE_ANGLES = [8, -4, 22, -8, 8, -4];
 const collapseAngle = (i: number) => COLLAPSE_ANGLES[i % COLLAPSE_ANGLES.length];
-// 展开时两两对称交替：8, -5, 8, -5...
-const expandAngle = (i: number) => (i % 2 === 0 ? 8 : -5);
-// hover 单张时的放大倍率，与出图历史的参考堆叠同款手感（那边 1.1 / 1.18）。
-const REF_HOVER_SCALE = 1.12;
+// hover 单张时微放大 + 微上抬
+const REF_HOVER_SCALE = 1.04;
+const REF_HOVER_LIFT = -5;
 
 function providerName(provider?: KeyView) {
   if (!provider) return '未配置厂商';
@@ -228,6 +230,8 @@ export function PromptInput({
   onValueChange,
   insertTextRequest,
   onSavePromptAsset,
+  onToggleAssetPanel,
+  assetPanelOpen,
   providers = [],
   providerAlias,
   model,
@@ -291,6 +295,9 @@ export function PromptInput({
   const [barHovering, setBarHovering] = useState(false);
   const [refExpanded, setRefExpanded] = useState(false);
   const [refHovered, setRefHovered] = useState<number | null>(null);
+  const [refDrawerOpen, setRefDrawerOpen] = useState(false);
+  const [refDrawerTab, setRefDrawerTab] = useState<'all' | 'image' | 'video' | 'audio'>('all');
+  const isLongPrompt = text.length > 140 || text.split('\n').length > 4;
   // 参考图槽位的大图层（堆叠里的图片素材点开）。Lightbox 自带 portal：壳上的
   // backdrop-filter 会给 fixed 后代造 containing block，挂在壳内的 fixed 会缩进壳里。
   const [slotLightbox, setSlotLightbox] = useState<string | null>(null);
@@ -811,6 +818,27 @@ export function PromptInput({
     if (text.includes('@')) setText(renumberMentions(text, MENTION_LABELS[item.kind], removedNumber));
   }
 
+  function handleRefClearAll() {
+    onReferenceImagesChange?.([]);
+    onReferenceVideosChange?.([]);
+    onReferenceAudiosChange?.([]);
+    if (text.includes('@')) {
+      setText(text.replace(/@(?:图片|图|视频|音频)\d+\s?/g, ''));
+    }
+    setRefDrawerOpen(false);
+    setRefExpanded(false);
+    setRefHovered(null);
+  }
+
+  useEffect(() => {
+    if (stackItems.length === 0) setRefDrawerOpen(false);
+  }, [stackItems.length]);
+
+  const showRefPanel = !isMj && (isOmni || (!isVideo && onReferenceImagesChange && maxRef > 0));
+  const hoveredRefItem = refHovered !== null ? stackItems[refHovered] : null;
+  const hoveredRefThumb = refHovered !== null ? thumbFor(refHovered) : null;
+  const hoveredRefUrl = refHovered !== null ? mediaUrls[refHovered] : null;
+
   return (
     <div
       ref={shellRef}
@@ -827,22 +855,155 @@ export function PromptInput({
         collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-3.5 pb-4 gap-3 min-h-[174px]'
       }`}
     >
-      <div className={`flex min-h-0 gap-2 transition-[height] duration-300 ${collapsed ? 'h-[60px]' : 'h-[92px]'}`}>
-        {!isMj && (isOmni || (!isVideo && onReferenceImagesChange && maxRef > 0)) && (
+      {showRefPanel && (
+        <FileInput
+          ref={refFileInputRef}
+          id={refInputId}
+          accept={stackAccept}
+          multiple
+          className="hidden"
+          onChange={handleRefAdd}
+        />
+      )}
+      {hoveredRefItem && !collapsed && (
+        <div
+          data-testid="reference-hover-preview"
+          className="shell-glow pointer-events-none absolute -top-3 z-50 w-[168px] -translate-y-full overflow-hidden rounded-xl transition-[left] duration-200 ease-out"
+          style={{
+            left: `${16 + (refDrawerOpen ? (refHovered ?? 0) * (REF_W + 8) : (refHovered ?? 0) * REF_STEP)}px`,
+          }}
+        >
+          {hoveredRefItem.kind === 'video' && hoveredRefUrl ? (
+            <video src={hoveredRefUrl} autoPlay muted loop playsInline className="max-h-[220px] w-full rounded-xl object-cover" />
+          ) : hoveredRefItem.kind === 'image' && hoveredRefThumb ? (
+            <img src={hoveredRefThumb} alt="参考素材预览" className="max-h-[220px] w-full rounded-xl object-cover" />
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl bg-card px-2.5 py-2 text-xs text-muted-foreground">
+              <AudioIcon size="sm" aria-hidden />
+              <span className="truncate">{hoveredRefItem.file.name}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {showRefPanel && refDrawerOpen && !collapsed && stackItems.length > 0 && (
+        <div data-testid="reference-drawer" className="border-b border-border/70 pb-3">
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1">
+              {([
+                { key: 'all', label: `全部 (${stackItems.length})`, show: true },
+                { key: 'image', label: `图片 (${referenceImages.length})`, show: true },
+                { key: 'video', label: `视频${referenceVideos.length ? ` (${referenceVideos.length})` : ''}`, show: isOmni || referenceVideos.length > 0 },
+                { key: 'audio', label: `音频${referenceAudios.length ? ` (${referenceAudios.length})` : ''}`, show: isOmni || referenceAudios.length > 0 },
+              ] as const).filter(tab => tab.show).map((tab) => (
+                <Button
+                  key={tab.key}
+                  variant={refDrawerTab === tab.key ? 'secondary' : 'ghost'}
+                  size="sm"
+                  type="button"
+                  onClick={() => setRefDrawerTab(tab.key)}
+                  className="h-7 rounded-lg px-2.5 text-xs"
+                >
+                  {tab.label}
+                </Button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                data-testid="reference-drawer-clear"
+                onClick={handleRefClearAll}
+                className="h-7 rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                清空全部素材
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                data-testid="reference-drawer-collapse"
+                aria-label="收起参考素材"
+                onClick={() => { setRefDrawerOpen(false); setRefHovered(null); }}
+                className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+              >
+                <CollapseIcon size="sm" />
+              </Button>
+            </div>
+          </div>
+          <div className="thin-scrollbar flex items-center gap-2 overflow-x-auto pb-1 pt-1">
+            {stackItems.map((item, i) => {
+              if (refDrawerTab !== 'all' && item.kind !== refDrawerTab) return null;
+              const thumb = thumbFor(i);
+              const label = workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label;
+              return (
+                <div
+                  key={i}
+                  data-testid="reference-drawer-item"
+                  className="group relative shrink-0"
+                  style={{ width: REF_W, height: REF_H }}
+                  onMouseEnter={() => setRefHovered(i)}
+                  onMouseLeave={() => setRefHovered(null)}
+                >
+                  <div
+                    role={item.kind === 'image' ? 'button' : undefined}
+                    tabIndex={item.kind === 'image' ? 0 : undefined}
+                    aria-label={item.kind === 'image' ? '查看参考图大图' : undefined}
+                    onClick={item.kind === 'image' && thumb ? () => setSlotLightbox(thumb) : undefined}
+                    onKeyDown={item.kind === 'image' && thumb
+                      ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSlotLightbox(thumb); } }
+                      : undefined}
+                    className={`relative h-full w-full overflow-hidden rounded-lg border-[1.5px] border-white bg-card ${
+                      item.kind === 'image' ? 'cursor-zoom-in' : ''
+                    }`}
+                  >
+                    {thumb ? (
+                      <img src={thumb} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
+                        {item.kind === 'video' ? <VideoIcon size="lg" aria-hidden /> : <AudioIcon size="lg" aria-hidden />}
+                        <span className="w-full truncate text-center text-xs">{item.file.name}</span>
+                      </div>
+                    )}
+                    {mentionsEnabled && label && (
+                      <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
+                        {label}
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    type="button"
+                    aria-label={`移除参考素材 ${i + 1}`}
+                    onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
+                    className="absolute -right-1.5 -top-1.5 z-10 flex size-[18px] items-center justify-center rounded-full border border-border bg-scrim p-0 text-foreground/80 opacity-0 backdrop-blur-glass transition-opacity hover:bg-destructive hover:text-foreground group-hover:opacity-100"
+                  >
+                    <CloseIcon size="sm" />
+                  </Button>
+                </div>
+              );
+            })}
+            {stackCanAdd && (
+              <Label
+                htmlFor={refInputId}
+                className="flex shrink-0 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary text-muted-foreground transition-colors hover:border-input hover:text-foreground"
+                style={{ width: REF_W, height: REF_H }}
+              >
+                <AddIcon size="md" />
+                <span className="text-xs">参考内容</span>
+              </Label>
+            )}
+          </div>
+        </div>
+      )}
+      <div className={`flex min-h-0 gap-3.5 transition-[height] duration-300 ${collapsed ? 'h-[60px] items-center' : 'min-h-[92px] items-start'}`}>
+        {showRefPanel && !(refDrawerOpen && !collapsed && stackItems.length > 0) && (
           <div
             data-testid="reference-images-panel"
-            className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
+            className={`shrink-0 relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'h-[60px] scale-80' : 'h-[92px]'}`}
             style={{ width: REF_W + 14 }}
           >
-            <FileInput
-              ref={refFileInputRef}
-              id={refInputId}
-              accept={stackAccept}
-              multiple
-              className="hidden"
-              onChange={handleRefAdd}
-            />
-
             {stackItems.length === 0 ? (
               <Label
                 htmlFor={refInputId}
@@ -854,22 +1015,26 @@ export function PromptInput({
               </Label>
             ) : (
               <>
-                {/* hover 区域覆盖参考图 + 添加按钮：展开只由参考图触发，移动到添加按钮上保持展开，离开整个区域才收起 */}
+                {/* 三阶交互第 1/2 阶：默认堆叠；悬停时右侧层级始终高于左侧、只压一个角，hover 微上抬微放大，+ 圆钮动态形变为右侧「+ 参考内容」卡片 */}
                 <div
                   className="absolute inset-y-0 left-0 overflow-visible"
                   style={{
                     width: refExpanded
-                      ? `${(stackItems.length - 1) * REF_W + REF_W + 12}px`
-                      : `${REF_W + 12}px`,
+                      ? `${(stackItems.length > 1 ? 2 : 1) * REF_STEP + REF_W + 14}px`
+                      : `${REF_W + 14}px`,
                     transition: 'width 300ms ease',
                   }}
                   onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
                 >
                   {stackItems.map((item, i) => {
+                    // 展开时：若只有 2 张图则第 2 张直接显示；若 ≥3 张图则第 2 个槽位留给 ⤢ 展开卡，隐藏 i >= 1
+                    const hideInExpanded = refExpanded && (stackItems.length > 2 ? i >= 1 : i >= 2);
+                    if (hideInExpanded) return null;
                     const hovered = refHovered === i;
-                    // 倾斜扇形回到图片参考（2026-08-20 飙哥指定）：与 omni 同一套公式。
-                    const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
+                    const angle = refExpanded ? (i === 0 ? -6 : 4) : collapseAngle(i);
                     const thumb = thumbFor(i);
+                    // 展开后右侧始终压左侧（哪怕 hover 左卡也不越级盖住右卡）；折叠时首图在最上
+                    const zIndex = refExpanded ? 10 + i * 10 : stackItems.length - i;
                     return (
                       <div
                         key={i}
@@ -878,16 +1043,14 @@ export function PromptInput({
                         style={{
                           width: REF_W,
                           height: REF_H,
-                          // 展开后右侧压左侧；折叠时保持左侧（首图）在最上
-                          zIndex: hovered ? 40 : (refExpanded ? i : stackItems.length - i),
-                          left: refExpanded ? `${i * REF_W}px` : '0px',
-                          transform: `translateY(-50%) rotate(${angle}deg) scale(${hovered ? REF_HOVER_SCALE : 1})`,
-                          transition: 'left 300ms ease, transform 300ms ease',
+                          zIndex,
+                          left: refExpanded ? `${i * REF_STEP}px` : '0px',
+                          transform: `translateY(calc(-50% + ${hovered ? REF_HOVER_LIFT : 0}px)) rotate(${angle}deg) scale(${hovered ? REF_HOVER_SCALE : 1})`,
+                          transition: 'left 300ms ease, transform 250ms ease',
                         }}
-                        onMouseEnter={() => { setRefExpanded(true); setRefHovered(i); }}
+                        onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(i); } }}
                         onMouseLeave={() => setRefHovered(null)}
                       >
-                        {/* 图片素材点开大图；视频/音频没有大图形态（omni 的 chip hover 预览负责播放）。 */}
                         <div
                           role={item.kind === 'image' ? 'button' : undefined}
                           tabIndex={item.kind === 'image' ? 0 : undefined}
@@ -908,37 +1071,90 @@ export function PromptInput({
                               <span className="w-full truncate text-center text-xs">{item.file.name}</span>
                             </div>
                           )}
-                          {/* @引用编号徽标：与 mentionItems 的「图N」一致，用户看着它敲 @。 */}
                           {mentionsEnabled && (
                             <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
                               {workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label}
                             </span>
                           )}
                         </div>
-                        <Button variant="bare"
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
-                          className="absolute -top-1.5 -right-1.5 z-10 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors"
-                          style={{
-                            zIndex: 50,
-                            opacity: hovered ? 1 : 0,
-                            pointerEvents: hovered ? 'auto' : 'none',
-                          }}
-                        >
-                          <CloseIcon size="sm" />
-                        </Button>
-                        {stackCanAdd && i === (refExpanded ? stackItems.length - 1 : 0) && (
-                          <Label
-                            data-testid="reference-stack-add"
-                            htmlFor={refInputId}
-                            className="absolute -right-2.5 -bottom-2.5 z-10 flex size-7 items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card"
-                          >
-                            <AddIcon size="sm" />
-                          </Label>
-                        )}
                       </div>
                     );
                   })}
+                  {refHovered !== null && stackItems[refHovered] && (
+                    <Button
+                      variant="bare"
+                      type="button"
+                      aria-label={`移除参考素材 ${refHovered + 1}`}
+                      onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(refHovered); } }}
+                      onClick={(e) => { e.stopPropagation(); handleRefRemove(refHovered); }}
+                      className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 backdrop-blur-glass transition-all duration-200 hover:bg-destructive hover:text-foreground"
+                      style={{
+                        left: `${(refExpanded ? refHovered * REF_STEP : 0) + REF_W - 11}px`,
+                        top: `calc(50% - ${REF_H / 2 + 11}px)`,
+                      }}
+                    >
+                      <CloseIcon size="sm" />
+                    </Button>
+                  )}
+                  {refExpanded && stackItems.length > 2 && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      data-testid="reference-drawer-expand"
+                      aria-label="展开全部参考素材"
+                      onClick={() => { setRefDrawerOpen(true); setRefExpanded(false); setRefHovered(null); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setRefDrawerOpen(true);
+                          setRefExpanded(false);
+                          setRefHovered(null);
+                        }
+                      }}
+                      className="absolute top-1/2 flex cursor-pointer items-center justify-center overflow-hidden rounded-lg border-[1.5px] border-white bg-card text-white transition-transform duration-200 hover:-translate-y-1 hover:scale-104"
+                      style={{
+                        width: REF_W,
+                        height: REF_H,
+                        left: `${REF_STEP}px`,
+                        zIndex: 20,
+                        transform: 'translateY(-50%) rotate(4deg)',
+                      }}
+                    >
+                      {thumbFor(1) && (
+                        <img src={thumbFor(1)!} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40 blur-[1px]" />
+                      )}
+                      <span className="relative z-10 flex h-full w-full items-center justify-center bg-scrim/70 backdrop-blur-glass">
+                        <ExpandIcon size="md" />
+                      </span>
+                    </div>
+                  )}
+                  {stackCanAdd && (
+                    <Label
+                      data-testid="reference-stack-add"
+                      htmlFor={refInputId}
+                      onMouseEnter={() => { if (!collapsed) setRefExpanded(true); }}
+                      className="absolute flex cursor-pointer flex-col items-center justify-center overflow-hidden border border-border bg-secondary text-muted-foreground hover:border-input hover:bg-card hover:text-foreground"
+                      style={{
+                        width: refExpanded ? REF_W : 26,
+                        height: refExpanded ? REF_H : 26,
+                        left: refExpanded ? `${(stackItems.length > 1 ? 2 : 1) * REF_STEP}px` : `${REF_W - 14}px`,
+                        top: refExpanded ? '50%' : `calc(50% + ${REF_H / 2 - 8}px)`,
+                        borderRadius: refExpanded ? '8px' : '9999px',
+                        zIndex: 30,
+                        transform: refExpanded ? 'translateY(-50%) rotate(-5deg)' : 'translateY(-50%) rotate(0deg)',
+                        transition: 'left 300ms ease, top 300ms ease, width 300ms ease, height 300ms ease, border-radius 300ms ease, transform 300ms ease, background-color 200ms ease, color 200ms ease',
+                      }}
+                    >
+                      <AddIcon size={refExpanded ? 'md' : 'sm'} className="shrink-0" />
+                      <span
+                        className={`overflow-hidden whitespace-nowrap text-xs transition-all duration-300 ${
+                          refExpanded ? 'mt-1 max-h-4 opacity-100' : 'mt-0 max-h-0 opacity-0'
+                        }`}
+                      >
+                        参考内容
+                      </span>
+                    </Label>
+                  )}
                 </div>
               </>
             )}
@@ -973,7 +1189,7 @@ export function PromptInput({
           aria-multiline="true"
           aria-label="生图 prompt"
           aria-describedby={variableError ? variableErrorId : undefined}
-          data-placeholder={noWorkflowPrompt ? '此工作流无需提示词' : mentionsEnabled && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
+          data-placeholder={noWorkflowPrompt ? '此工作流无需提示词' : isVideo ? (mentionsEnabled && stackItems.length > 0 ? '描述画面主体、运镜与氛围，输入 @ 引用参考素材...' : '描述画面主体、运镜与氛围...') : (mentionsEnabled && stackItems.length > 0 ? '描述你想生成的画面，输入 @ 引用参考素材...' : '描述你想生成的画面...')}
           onInput={onEditorInput}
           onKeyDown={onKey}
           onKeyUp={rememberEditorRange}
@@ -986,8 +1202,8 @@ export function PromptInput({
           onCompositionEnd={(e) => { composing.current = false; onEditorInput(e); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
-          className={`no-scrollbar flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
-            collapsed ? 'h-6 self-center overflow-hidden pr-10' : onSavePromptAsset ? 'h-full pr-10' : 'h-full pr-2'
+          className={`${isLongPrompt && !collapsed ? 'thin-scrollbar' : 'no-scrollbar'} flex-1 min-h-0 w-full cursor-text whitespace-pre-wrap break-words bg-transparent text-sm leading-6 text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
+            collapsed ? 'h-6 self-center overflow-hidden pr-10' : `min-h-[92px] max-h-[220px] overflow-y-auto py-1 ${onSavePromptAsset ? 'pr-10' : 'pr-2'}`
           }`}
         />
         {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
@@ -1358,6 +1574,18 @@ export function PromptInput({
                 </ToolbarPopover>
               </div>
             </>
+          )}
+          {onToggleAssetPanel && (
+            <div className="relative shrink-0">
+              <ControlButton
+                active={Boolean(assetPanelOpen)}
+                aria-label="打开创作资产"
+                aria-expanded={Boolean(assetPanelOpen)}
+                onClick={onToggleAssetPanel}
+              >
+                <LibraryIcon size="sm" aria-hidden /> 资产库
+              </ControlButton>
+            </div>
           )}
           </div>
           {/* 渐隐区拦截层：被盖住的控件不可 hover / 点击，必须先滚出来。 */}

@@ -18,7 +18,8 @@ it('默认显示创作输入，Agent 隐藏生成参数，刷新恢复输入模�
   expect(screen.getByText('生成参数')).toBeVisible();
   fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
   expect(screen.queryByText('生成参数')).toBeNull();
-  expect(screen.getByRole('button', { name: '创作设置' })).toBeVisible();
+  expect(screen.getByLabelText('创作设置')).toBeVisible();
+  expect(screen.getByRole('button', { name: '引用资产' })).toBeVisible();
   fireEvent.change(screen.getByPlaceholderText('输入想法或上传参考，和 Agent 一起创作'), { target: { value: '未发送的草稿' } });
   fireEvent.click(screen.getByRole('radio', { name: '创作' }));
   fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));

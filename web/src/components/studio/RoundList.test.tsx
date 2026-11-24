@@ -56,6 +56,26 @@ describe('RoundList video', () => {
     expect(screen.getByText('一只猫在跳舞')).toBeInTheDocument();
   });
 
+  it('expands long truncated prompts into an in-place floating card on hover, and shows 使用提示词 on short prompts', () => {
+    const longPrompt = '核心主题：写实暗黑特摄 | BLACK SUN美学风格 面部：参考上传图片，五官、脸型、发型百分百还原，杜绝美化。表情全程阴郁 服装：哑光黑色皮质长风衣';
+    const { unmount } = render(<RoundList rounds={[{
+      ...videoDone,
+      config: { ...videoDone.config, prompt: longPrompt },
+    }]} />);
+    expect(screen.queryByTestId('round-prompt-expanded')).toBeNull();
+    fireEvent.mouseEnter(screen.getByTestId('round-prompt-container'));
+    expect(screen.getByTestId('round-prompt-expanded')).toHaveTextContent(longPrompt);
+    fireEvent.mouseLeave(screen.getByTestId('round-prompt-container'));
+    expect(screen.queryByTestId('round-prompt-expanded')).toBeNull();
+    unmount();
+
+    const onReEdit = vi.fn();
+    render(<RoundList rounds={[videoDone]} onReEdit={onReEdit} />);
+    fireEvent.mouseEnter(screen.getByTestId('round-prompt-container'));
+    fireEvent.click(screen.getByTestId('round-use-prompt'));
+    expect(onReEdit).toHaveBeenCalledWith(videoDone.config, videoDone.jobId);
+  });
+
   it('shows the frozen creation asset title without an interactive reference', () => {
     render(<RoundList rounds={[{
       ...videoDone,
@@ -593,7 +613,7 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
 
     const runLine = screen.getByTestId('round-run-meta');
     const cost = screen.getByTestId('round-generation-cost');
-    expect(runLine).toHaveClass('flex', 'ml-auto', 'tabular-nums');
+    expect(runLine).toHaveClass('flex', 'border-l', 'tabular-nums');
     expect(cost).toHaveTextContent('10.11¥');
     expect(runLine.lastElementChild).toBe(cost);
   });

@@ -171,7 +171,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         if (cancelled || sessionIdRef.current) return;
         const last = projectId === null ? readStudioView().activeSessionId : readStorage(sessionStorageKey(projectId));
         if (projectId === null && home) return;
-        const target = list.find(item => item.session_id === last) ?? (projectId === null ? undefined : list[0]);
+        const target = list.find(item => item.session_id === last) ?? list[0];
         if (target) await selectSession(target.session_id);
         else if (projectId === null) {
           updateStudioView({ activeSessionId: null });

@@ -2,7 +2,7 @@ import type { PromptPreviewRequest } from '@/components/assets/SetPromptPreviewD
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AddImageIcon, AudioIcon, BookmarkIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
+import { AddImageIcon, AudioIcon, BookmarkIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -117,10 +117,10 @@ export type RoundState =
 const ROUND_SECTION_CLASS = 'space-y-3';
 const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
 // 参考图只占提示词这一行的左侧——标签行与操作行始终从最左缘开始，有没有参考图都一样。
-const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-3';
+const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-4';
 const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
 const ROUND_ACTIONS_CLASS = 'flex flex-wrap items-center gap-2';
-const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 text-xs tabular-nums text-muted-foreground';
+const ROUND_RUN_META_CLASS = 'flex items-center gap-1.5 border-l border-border pl-3 text-xs tabular-nums text-muted-foreground';
 
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   const r = !config.sizeMode || config.sizeMode === 'ratio' ? config.ratio : undefined;
@@ -483,6 +483,7 @@ function PendingBatch({
                 config={round.config}
                 jobId={round.jobId}
                 mediaActive={mediaActive}
+                onUsePrompt={onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
               />
             </div>
           </div>
@@ -681,7 +682,7 @@ const REF_ROTATIONS = [-6, 5, -4, 7, -5, 4, -3, 6];
 const REF_OVERLAP_REST = 30;
 const REF_OVERLAP_HOVER = 8;
 
-// 出图历史里提示词左侧的参考图堆叠：未 hover 重叠旋转成一叠；hover 时整组散开、每张以中心为轴放大；点击整组复用。
+// 出图历史里提示词左侧的参考图堆叠：未 hover 重叠旋转成一叠；hover 时整组散开、每张以中心为轴放大；点击看大图（或整组复用）。
 function ReferenceStack({
   config,
   jobId,
@@ -696,46 +697,70 @@ function ReferenceStack({
   const refs = allRefs(config);
   const [hover, setHover] = useState(false);
   const [active, setActive] = useState<number | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (refs.length === 0) return null;
+  const activeSrc = refs[active ?? 0];
+  const canPreview = activeSrc && isImagePath(activeSrc);
   return (
-    <Hint label="点击复用这组参考素材"><Button variant="bare"
-      type="button"
-      data-testid="reference-stack"
-      aria-label="复用这组参考素材"
-      onClick={() => { void onReuse?.(config, jobId); }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => { setHover(false); setActive(null); }}
-      style={{
-        width: REF_CARD_W + Math.max(0, refs.length - 1) * (REF_CARD_W - REF_OVERLAP_REST),
-        height: REF_CARD_H,
-      }}
-      className="group relative z-20 flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0"
-    >
-      {refs.map((src, i) => {
-        const angle = REF_ROTATIONS[i % REF_ROTATIONS.length];
-        const isActive = active === i;
-        const scale = isActive ? 1.18 : hover ? 1.1 : 1;
-        return (
-          <span
-            key={i}
-            onMouseEnter={() => setActive(i)}
-            style={{
-              width: REF_CARD_W,
-              height: REF_CARD_H,
-              left: 0,
-              top: 0,
-              zIndex: isActive ? 30 : i,
-              transform: `translateX(${i * (REF_CARD_W - (hover ? REF_OVERLAP_HOVER : REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
-              transformOrigin: 'center',
-              transition: 'transform 250ms ease',
-            }}
-            className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
-          >
-            <RefThumb src={src} jobId={jobId} mediaActive={mediaActive} />
-          </span>
-        );
-      })}
-    </Button></Hint>
+    <>
+      <div className="relative shrink-0">
+        <Hint label={canPreview ? '点击查看参考大图' : '点击复用这组参考素材'}><Button variant="bare"
+          type="button"
+          data-testid="reference-stack"
+          aria-label="复用这组参考素材"
+          onClick={() => {
+            if (canPreview && !onReuse) {
+              setLightboxSrc(refImageSrc(activeSrc, jobId));
+              return;
+            }
+            if (onReuse) void onReuse(config, jobId);
+            else if (canPreview) setLightboxSrc(refImageSrc(activeSrc, jobId));
+          }}
+          onDoubleClick={() => {
+            if (canPreview) setLightboxSrc(refImageSrc(activeSrc, jobId));
+          }}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => { setHover(false); setActive(null); }}
+          style={{
+            width: REF_CARD_W + Math.max(0, refs.length - 1) * (REF_CARD_W - REF_OVERLAP_REST),
+            height: REF_CARD_H,
+          }}
+          className="group relative z-20 flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0"
+        >
+          {refs.map((src, i) => {
+            const angle = REF_ROTATIONS[i % REF_ROTATIONS.length];
+            const isActive = active === i;
+            const scale = isActive ? 1.18 : hover ? 1.1 : 1;
+            return (
+              <span
+                key={i}
+                onMouseEnter={() => setActive(i)}
+                onClick={e => {
+                  if (isImagePath(src) && e.detail === 1 && !onReuse) {
+                    e.stopPropagation();
+                    setLightboxSrc(refImageSrc(src, jobId));
+                  }
+                }}
+                style={{
+                  width: REF_CARD_W,
+                  height: REF_CARD_H,
+                  left: 0,
+                  top: 0,
+                  zIndex: isActive ? 30 : i,
+                  transform: `translateX(${i * (REF_CARD_W - (hover ? REF_OVERLAP_HOVER : REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
+                  transformOrigin: 'center',
+                  transition: 'transform 250ms ease',
+                }}
+                className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
+              >
+                <RefThumb src={src} jobId={jobId} mediaActive={mediaActive} />
+              </span>
+            );
+          })}
+        </Button></Hint>
+      </div>
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+    </>
   );
 }
 
@@ -752,19 +777,23 @@ function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): stri
 
 type MentionHover = { kind: MentionKind; path: string; left: number; top: number };
 
-/** 历史记录里的提示词：@图片N/@图N/@视频N/@音频N 渲染成同款 chip。 */
+/** 历史记录里的提示词：@图片N/@图N/@视频N/@音频N 渲染成同款 chip；悬停时零位移浮现外框（长文本展开全文，短文本浮现「使用提示词」）。 */
 function MentionPrompt({
   prompt,
   config,
   jobId,
   mediaActive,
+  onUsePrompt,
 }: {
   prompt: string;
   config: RoundConfig;
   jobId?: string;
   mediaActive: boolean;
+  onUsePrompt?: () => void;
 }) {
   const [hover, setHover] = useState<MentionHover | null>(null);
+  const [expandedOpen, setExpandedOpen] = useState(false);
+  const isLongPrompt = prompt.length > 48 || prompt.includes('\n');
   const parts = useMemo(() => {
     const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
     let last = 0;
@@ -781,25 +810,69 @@ function MentionPrompt({
     return out;
   }, [prompt, config]);
 
+  const renderParts = () =>
+    parts.map((part, i) =>
+      typeof part === 'string' ? (
+        <span key={i}>{part}</span>
+      ) : (
+        <MentionChip
+          key={i}
+          label={part.label}
+          kind={part.kind}
+          path={part.path}
+          jobId={jobId}
+          onHover={setHover}
+          mediaActive={mediaActive}
+        />
+      ),
+    );
+
   return (
     <>
-      <Hint label={prompt}><p className="line-clamp-2 text-base leading-7 text-foreground">
-        {parts.map((part, i) =>
-          typeof part === 'string' ? (
-            <span key={i}>{part}</span>
+      <div
+        data-testid="round-prompt-container"
+        className="relative"
+        onMouseEnter={() => setExpandedOpen(true)}
+        onMouseLeave={() => setExpandedOpen(false)}
+      >
+        <p className="line-clamp-2 text-sm leading-6 text-foreground">
+          {renderParts()}
+        </p>
+        {expandedOpen && (
+          isLongPrompt ? (
+            <div
+              data-testid="round-prompt-expanded"
+              className="shell-glow absolute -left-[13px] -right-[13px] -top-[9px] z-40 rounded-xl border border-border bg-popover px-3 py-2 text-sm leading-6 text-foreground"
+            >
+              <p className="whitespace-pre-wrap break-words">
+                {renderParts()}
+              </p>
+            </div>
           ) : (
-            <MentionChip
-              key={i}
-              label={part.label}
-              kind={part.kind}
-              path={part.path}
-              jobId={jobId}
-              onHover={setHover}
-              mediaActive={mediaActive}
-            />
-          ),
+            <div
+              data-testid="round-prompt-expanded"
+              className="shell-glow absolute -left-[13px] -top-[7px] z-40 inline-flex max-w-full items-center gap-3 rounded-xl border border-border bg-popover px-3 py-1.5 text-sm leading-6 text-foreground"
+            >
+              <p className="whitespace-pre-wrap break-words">
+                {renderParts()}
+              </p>
+              {onUsePrompt && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  data-testid="round-use-prompt"
+                  onClick={onUsePrompt}
+                  className="h-6 shrink-0 gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+                >
+                  <TextIcon size="sm" aria-hidden />
+                  使用提示词
+                </Button>
+              )}
+            </div>
+          )
         )}
-      </p></Hint>
+      </div>
       {hover && createPortal(
         <div
           data-testid="round-mention-preview"
@@ -847,7 +920,7 @@ function MentionChip({ label, kind, path, jobId, onHover, mediaActive }: {
   return (
     <span
       data-mention={label}
-      className="inline-flex select-none items-center gap-1 align-middle text-primary"
+      className="inline-flex items-center gap-1 align-middle text-primary"
       onMouseEnter={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         onHover({ kind, path, left: r.left + r.width / 2, top: r.top });
@@ -855,13 +928,13 @@ function MentionChip({ label, kind, path, jobId, onHover, mediaActive }: {
       onMouseLeave={() => onHover(null)}
     >
       {thumb ? (
-        <img src={thumb} alt="" className="h-[18px] w-[18px] rounded-sm object-cover" />
+        <img src={thumb} alt="" draggable={false} className="pointer-events-none h-[18px] w-[18px] select-none rounded-sm object-cover" />
       ) : kind !== 'image' ? (
-        <span className="grid h-[18px] w-[18px] place-items-center rounded-sm bg-secondary text-muted-foreground">
+        <span className="grid h-[18px] w-[18px] select-none place-items-center rounded-sm bg-secondary text-muted-foreground">
           {kind === 'video' ? <VideoIcon size="sm" aria-hidden /> : <AudioIcon size="sm" aria-hidden />}
         </span>
       ) : null}
-      {label}
+      <span>{label}</span>
     </span>
   );
 }
@@ -1011,6 +1084,7 @@ function DoneBatch({
               config={round.config}
               jobId={round.jobId}
               mediaActive={mediaActive}
+              onUsePrompt={onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
             />
           </div>
         </div>
@@ -1265,6 +1339,7 @@ function FailedCard({
                 config={config}
                 jobId={round.jobId}
                 mediaActive={mediaActive}
+                onUsePrompt={onReEdit ? () => { void onReEdit(config, round.jobId); } : undefined}
               />
             </div>
           </div>
