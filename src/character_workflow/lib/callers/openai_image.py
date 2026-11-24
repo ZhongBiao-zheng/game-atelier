@@ -17,6 +17,7 @@ import requests
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
+from character_workflow.lib.callers.connect_failure import initial_handshake_eof
 from character_workflow.lib.callers.image_output import write_image
 from character_workflow.lib.image_size_catalog import (
     image_size_options, is_nano_image_size_model,
@@ -630,6 +631,15 @@ def _hk_edits_fields(
     return fields
 
 
+def _post_image_request(url: str, **kwargs: Any) -> requests.Response:
+    try:
+        return requests.post(url, **kwargs)
+    except requests.exceptions.SSLError as error:
+        if not initial_handshake_eof(error):
+            raise
+    return requests.post(url, **kwargs)
+
+
 def _post_multipart(
     url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float]
 ) -> dict:
@@ -637,7 +647,7 @@ def _post_multipart(
     # files 字节已在 _ref_file_parts 预读入内存，重试重发同一份 data/files 安全。
     headers = {"Authorization": f"Bearer {api_key}"}
     for attempt in range(3):
-        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
+        resp = _post_image_request(url, headers=headers, data=fields, files=files, timeout=timeout)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
             if (_is_retryable(resp.status_code, resp.text) and attempt < 2
@@ -1018,7 +1028,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
     }
     for attempt in range(3):
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            resp = _post_image_request(url, headers=headers, json=payload, timeout=timeout)
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。

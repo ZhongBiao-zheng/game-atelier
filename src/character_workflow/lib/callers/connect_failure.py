@@ -24,8 +24,11 @@ from __future__ import annotations
 
 import errno
 import socket
+import ssl
+import traceback
 
 import requests
+from urllib3.connectionpool import HTTPSConnectionPool
 from urllib3 import exceptions as urllib3_exceptions
 
 _MARKERS = (
@@ -63,6 +66,32 @@ def _walk(error: BaseException) -> list[BaseException]:
         seen.append(current)
         pending.extend(_related(current))
     return seen
+
+
+def initial_handshake_eof(error: requests.exceptions.SSLError) -> bool:
+    """Only replay a POST if its original hop failed before urllib3 called conn.request."""
+    # Each redirect creates a new PreparedRequest. Replaying the original URL
+    # after a later hop failed could submit an already accepted order twice.
+    first_send = next((
+        frame for frame, _ in traceback.walk_tb(error.__traceback__)
+        if frame.f_code is requests.Session.send.__code__
+    ), None)
+    if (first_send is None or error.request is None
+            or first_send.f_locals.get("request") is not error.request):
+        return False
+
+    # Follow only the active transport error, never an earlier exception's context.
+    outer = error.args[0] if error.args else None
+    if not isinstance(outer, urllib3_exceptions.MaxRetryError):
+        return False
+    cause = outer.reason
+    if not isinstance(cause, urllib3_exceptions.SSLError) or not cause.args:
+        return False
+    eof = cause.args[0]
+    if not isinstance(eof, ssl.SSLEOFError):
+        return False
+    frames = {frame.f_code for frame, _ in traceback.walk_tb(eof.__traceback__)}
+    return {HTTPSConnectionPool._validate_conn.__code__, ssl.SSLSocket.do_handshake.__code__} <= frames
 
 
 def never_sent(error: BaseException) -> bool:
