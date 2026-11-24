@@ -16,6 +16,7 @@ from urllib.parse import quote
 from PIL import Image, ImageOps
 
 from .media_artifacts import video_contact_sheet
+from .observations import requested_results
 
 
 LABELS = {
@@ -257,21 +258,57 @@ def _image_family(model):
     return "standard"
 
 
+def _result_counts(jobs):
+    submitted_min = delivered_min = 0
+    submitted_known = delivered_known = jobs is not None
+    for job in jobs or []:
+        if job.get("kind", "image") not in ("image", "video"):
+            continue
+        outputs = job.get("outputs")
+        delivered = len(outputs or [])
+        delivered_min += delivered
+        if outputs is None:
+            delivered_known = False
+        # A missing field identifies earlier reports. An explicit null means the observation
+        # layer could not recover the original quantity (e.g. the provider rewrote params.n).
+        requested = (
+            job["requested_results"] if "requested_results" in job else requested_results(job)
+        )
+        if requested is None:
+            submitted_known = False
+            submitted_min += max(1, delivered)
+        else:
+            submitted_min += requested
+    return {
+        "submitted": submitted_min if submitted_known else None,
+        "submitted_min": submitted_min,
+        "delivered": delivered_min if delivered_known else None,
+        "delivered_min": delivered_min,
+    }
+
+
+def _count_text(counts, key):
+    if counts[key] is not None:
+        return str(counts[key])
+    lower = counts[key + "_min"]
+    return f"至少 {lower}" if lower else "未知"
+
+
 def _generation_limit(expect, jobs):
-    counts = [expect[key] for key in ("images", "videos") if key in expect]
-    if not counts:
-        return _check(None, "本轮未指定期望的图片张数或视频段数")
-    expected = sum(counts)
-    allowed = expected * 2
-    media_jobs = [job for job in jobs if job.get("kind") in ("image", "video")]
-    observed = sum(len(job.get("outputs") or []) for job in media_jobs)
-    complete = all(job.get("outputs") is not None for job in media_jobs)
-    known = str(observed) if complete else f"至少 {observed}"
+    counts = _result_counts(jobs)
     reason = (
-        f"本轮已登记 {known} 份（图片和视频合计），期望 {expected} 份"
-        f" + 一轮修正最多 {expected} 份 = 上限 {allowed} 份"
+        f"已提交份数 {_count_text(counts, 'submitted')}，"
+        f"已交付份数 {_count_text(counts, 'delivered')}"
     )
-    return _check(None if not complete and observed <= allowed else observed <= allowed, reason)
+    expected_counts = [expect[key] for key in ("images", "videos") if key in expect]
+    if not expected_counts:
+        return _check(None, reason + "，本轮未指定期望的图片张数或视频段数")
+    expected = sum(expected_counts)
+    allowed = expected * 2
+    reason += f"，期望 {expected} 份 + 一轮修正最多 {expected} 份 = 上限 {allowed} 份"
+    if counts["submitted_min"] > allowed:
+        return _check(False, reason)
+    return _check(True if counts["submitted"] is not None else None, reason)
 
 
 def _turn_checks(row, previous):
@@ -355,6 +392,7 @@ def _turn_checks(row, previous):
             if key != "skills":
                 checks[key] = _check(None, "缺少本轮的生成记录")
     if stopped_at_limit:
+        limit_basis = checks["generation_limit"]["reason"]
         # Partial turns can still demonstrate facts about submitted jobs and delivered media.
         observable = set()
         if items:
@@ -366,7 +404,7 @@ def _turn_checks(row, previous):
         for key in keys:
             if key not in observable:
                 checks[key] = _check(None, f"本轮因 {row['reason']} 停止，缺少可判定的证据")
-        checks["generation_limit"] = _check(False, f"本轮触及 {row['reason']} 上限")
+        checks["generation_limit"] = _check(False, f"本轮触及 {row['reason']} 上限。{limit_basis}")
     return {key: checks[key] for key in keys}
 
 
@@ -629,7 +667,10 @@ def _usage(row):
             pairs.append(("已记录费用（结算未完整）/ 元", _number(usage.get(key), places)))
         else:
             pairs.append((name, _number(_metric(row, key), places)))
+    counts = row["result_counts"]
     pairs += [
+        ("已提交份数", _count_text(counts, "submitted")),
+        ("已交付份数", _count_text(counts, "delivered")),
         (
             "输入 / 输出 Token",
             f"{_number(usage.get('input_tokens'), 0)} / {_number(usage.get('output_tokens'), 0)}",
@@ -754,6 +795,7 @@ def write_report(out, rows):
         directory = _local(out, row["directory"])
         directory.mkdir(exist_ok=True, parents=True)
         _prepare_media(directory, row)
+        row["result_counts"] = _result_counts(row.get("generations"))
         row["checks"] = machine_checks(row)
         _dump_json(
             _local(directory, "transcript.json"),
@@ -874,6 +916,14 @@ def _compare_case(key, cases, scores):
         labels = {True: "完整", False: "结算未完整"}
         table.append(
             ["费用记录", *(labels.get(usage.get("cost_complete"), "—") for usage in costs)]
+        )
+    counts = [
+        (row.get("result_counts") or _result_counts(row.get("generations"))) if row else None
+        for row in cases
+    ]
+    for field, label in (("submitted", "已提交份数"), ("delivered", "已交付份数")):
+        table.append(
+            [label, *(_count_text(item, field) if item is not None else "—" for item in counts)]
         )
     per_turn = []
     for row in cases:

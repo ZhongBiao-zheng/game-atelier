@@ -46,3 +46,71 @@ def test_agent_step_limit_with_no_artifacts_only_fails_own_turn():
     assert checks["2.generation_limit"]["status"] == "fail"
     assert checks["2.images"]["status"] == checks["2.asks_user"]["status"] == "na"
     assert all(grade["status"] == "na" for key, grade in checks.items() if key.startswith("3."))
+
+
+def test_cancelled_and_failed_jobs_consume_every_requested_result_even_without_media(tmp_path):
+    from scripts.agent_eval.report import compare, write_report
+
+    row = _row()
+    row.update(
+        expect={"images": 2},
+        generations=[
+            {"kind": "image", "status": "failed", "requested_results": 3, "outputs": []},
+            {"kind": "video", "status": "cancelled", "requested_results": 2, "outputs": []},
+        ],
+    )
+    old, new = tmp_path / "before", tmp_path / "after"
+    write_report(old, [row])
+    assert row["result_counts"] == {
+        "submitted": 5,
+        "submitted_min": 5,
+        "delivered": 0,
+        "delivered_min": 0,
+    }
+    assert row["checks"]["generation_limit"]["status"] == "fail"
+    first = (old / "index.html").read_text()
+    assert "已提交份数 <b>5</b>" in first and "已交付份数 <b>0</b>" in first
+    row["generations"][0]["requested_results"] = 2
+    write_report(new, [row])
+    assert row["checks"]["generation_limit"]["status"] == "pass"
+    comparison = compare(old, new, tmp_path)
+    assert "已提交份数  |  5  |  4" in comparison and "已交付份数  |  0  |  0" in comparison
+
+
+@pytest.mark.parametrize(
+    "generations,expected,verdict,quantity",
+    [
+        (
+            [{"kind": "image", "requested_results": None, "params": {"n": 1}, "outputs": []}],
+            1,
+            "na",
+            "至少 1",
+        ),
+        (
+            [{"kind": "video", "requested_results": None, "outputs": [{"kind": "video"}] * 3}],
+            1,
+            "fail",
+            "至少 3",
+        ),
+        ([{"kind": "image", "params": {"n": 4}, "outputs": []}], 1, "fail", "4"),
+        (
+            [{"kind": "image", "params": {"n": 1, "actual_n": 1}, "outputs": [{"kind": "image"}]}],
+            1,
+            "na",
+            "至少 1",
+        ),
+        (
+            [{"kind": "image", "model": "mj-fast", "params": {"n": 1}, "outputs": []}],
+            1,
+            "fail",
+            "4",
+        ),
+    ],
+)
+def test_submitted_quantity_uses_evidence_and_preserves_unknown_upper_bound(
+    generations, expected, verdict, quantity
+):
+    row = _row()
+    row.update(expect={"images": expected}, generations=generations)
+    grade = machine_checks(row)["generation_limit"]
+    assert grade["status"] == verdict and f"已提交份数 {quantity}，" in grade["reason"]
