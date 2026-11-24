@@ -21,11 +21,11 @@ export function StudioSessionControls({ agent, clearDraft, disabled = false }: {
   const title = agent.session?.title ?? agent.sessions.find(s => s.session_id === agent.selectedSessionId)?.title
     ?? (agent.selectedSessionId === DEFAULT_STUDIO_SESSION_ID ? '默认会话' : '新建对话');
   return <div className="pointer-events-auto flex min-w-0 items-center gap-1.5">
-    <Button ref={anchor} variant="outline" size="sm" aria-label="切换对话" aria-expanded={open}
+    <Button ref={anchor} variant="ghost" size="sm" aria-label="切换对话" aria-expanded={open}
       className={capsule + ' min-w-0 shrink gap-1 px-2 sm:px-3'} onClick={() => setOpen(!open)}>
       <ChatIcon size="sm" /><span className="max-w-40 truncate">{title}</span><ChevronDownIcon size="sm" />
     </Button>
-    <Hint label="新建对话"><Button variant="outline" size="icon" aria-label="新建对话"
+    <Hint label="新建对话"><Button variant="ghost" size="icon" aria-label="新建对话"
       className={capsule + ' w-9'} disabled={busy} onClick={newChat}><NewChatIcon /></Button></Hint>
     <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchor} direction="down" autoFocus
       aria-label="对话列表" className="w-60 rounded-xl border border-border bg-card p-2" maxHeight={360}>

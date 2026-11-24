@@ -116,3 +116,12 @@ it('多方案的每条提示词只在对应的作品卡片里出现一次', () =
     expect(cards.getAllByText(job.prompt)).toHaveLength(1);
   });
 });
+
+it('两枚会话按钮与筛选条共用同色玻璃边框', () => {
+  render(<StudioSessionControls agent={makeAgent('idle')} clearDraft={() => {}} />);
+  for (const name of ['切换对话', '新建对话']) {
+    const capsule = screen.getByRole('button', { name });
+    expect(capsule).toHaveClass('h-9', 'rounded-full', 'border', 'border-input', 'bg-glass', 'backdrop-blur-glass');
+    expect(capsule).not.toHaveClass('glass-specular');
+  }
+});
