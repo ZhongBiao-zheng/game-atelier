@@ -19,7 +19,8 @@ def demand(case_id):
         "title": case_id,
         "surface": "studio",
         "turns": [{"say": case_id}],
-        "limits": {"max_results": 1, "max_cost_cny": 2, "max_seconds": 30, "max_steps": 20},
+        # 这里测的是结算，不测计时：CI 机器忙时 30 秒会被判 max_seconds 停下（偶发失败）。
+        "limits": {"max_results": 1, "max_cost_cny": 2, "max_seconds": 120, "max_steps": 20},
     }
 
 
@@ -229,7 +230,7 @@ def test_uncertain_provider_reply_cannot_spend_next_budget(monkeypatch, tmp_path
     row = rows[0]
     assert row["case_id"] == "make-picture" and not row["usage"]["cost_complete"]
     if reply in {"missing_usage", "after_approval"}:
-        assert row["status"] == "completed"
+        assert row["status"] == "completed", (row.get("reason"), row.get("unobservable"))
         assert any("token 用量" in notice for notice in row["unobservable"])
     else:
         assert row["status"] == "failed"

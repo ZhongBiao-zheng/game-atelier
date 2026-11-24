@@ -330,9 +330,11 @@ def serve(
         if preflight:
             (root / "preflight").touch()
         port_file = root / "port"
-        # 启动失败时要能看到原因：子进程的 stderr 留在临时目录，报错时带上末尾几行。
-        stderr_path = root / "server-stderr.log"
-        stderr_file = open(stderr_path, "wb")  # noqa: SIM115 — 交给子进程后立即关闭本端
+        # 启动失败时要能看到原因：子进程的 stderr 写到评测目录之外（子进程退出前一直占着句柄，
+        # 放在评测目录里 Windows 上就删不掉目录），报错时带上末尾几行，结束后尽力删除。
+        fd, stderr_name = tempfile.mkstemp(prefix="atelier-agent-eval-stderr-", suffix=".log")
+        stderr_path = Path(stderr_name)
+        stderr_file = os.fdopen(fd, "wb")
         proc = subprocess.Popen(
             [
                 str(python if python.is_file() else sys.executable),
@@ -374,3 +376,7 @@ def serve(
             if api is not None:
                 api.close()
             _stop(proc)
+            try:
+                stderr_path.unlink()
+            except OSError:
+                pass  # Windows 上子进程尚未完全退出时文件仍被占用，留在系统临时目录即可。
