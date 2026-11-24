@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import re
+import tempfile
 from collections import Counter
 from datetime import datetime
 from html import escape
@@ -753,9 +754,12 @@ def write_report(out, rows):
                 )
             },
         )
-    with (out / "results.jsonl").open("w", encoding="utf-8") as file:
-        for row in rows:
-            file.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+    with tempfile.TemporaryDirectory(dir=out, prefix=".results-") as staging:
+        pending = Path(staging) / "results.jsonl"
+        with pending.open("w", encoding="utf-8") as file:
+            for row in rows:
+                file.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+        pending.replace(out / "results.jsonl")
     with (out / "scores.csv").open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.writer(file)
         writer.writerow(["case_id", "chat_model", *SCORE_FIELDS])
