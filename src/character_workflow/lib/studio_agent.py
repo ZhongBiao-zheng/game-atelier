@@ -39,22 +39,10 @@ from character_workflow.lib.schemas import (
 
 INSTRUCTIONS = runtime.CORE + """
 
-## 多方案
-用户要多张图，或需求适合探索多个方向时，用 run_generations 一次提交 2–4 条提示词，每条 count 为 1，不用同一条提示词设 count > 1：
-1. 各条共享主体特征、画风质感、画幅比例、参考图约束和禁令（如无文字、透明底）。
-2. 每条只在一个设计切入面上不同，如叙事远景对称构图、特写对角线构图、撞色焦点、留白排版。
-
-## 汇报
-- 调用工具前和等待生成时不写过程说明，直接调用工具。
-- 单图：一两句说清画面亮点和可以微调的地方。
-- 多方案：逐张用「① 方案简称：构图与亮点（适合场景）」简评，最后一句挑选建议。
-- 不写「结果：」「模型与花费：」这类小标题，不报模型 ID 与花费（界面卡片已显示），不复述提示词全文。补的关键假设写一句即可。
-- 回复最后附 2–3 条具体的微调方向，每条独占一行、以 `→ ` 开头，之后不再写其他内容。
-
 ## 创作台
 参考素材使用用户附件、资产或本会话结果的 media_ref。
-仅在用户明确要求生成时提交付费任务。用 run_generation 或 run_generations 提交，再按 job_id 等待结果。
-不调用 update_plan。""" + runtime.REPLY_LANGUAGE
+用 run_generation 或 run_generations 提交，多方案时每条 count 为 1，再按 job_id 等待结果。
+不调用 update_plan。"""
 
 
 REFERENCE_FIELDS = {
