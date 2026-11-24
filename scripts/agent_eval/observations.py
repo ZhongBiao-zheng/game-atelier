@@ -229,6 +229,37 @@ def _reference_paths(job):
     return list(dict.fromkeys(path for path in paths if isinstance(path, str) and path))
 
 
+def is_midjourney(model):
+    slug = str(model or "").rsplit("/", 1)[-1].lower().replace("_", "-")
+    return slug.startswith("mj-") or "midjourney" in slug or "niji" in slug
+
+
+def requested_results(job):
+    """Read the number submitted, even when the provider delivered fewer results."""
+    kind = job.get("kind", "image")
+    if kind not in {"image", "video"}:
+        return None
+    context = job.get("canvas_run") or {}
+    candidates = context.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        # Allocated at submission. Failed and cancelled candidates remain in this list.
+        return len(candidates)
+    if kind == "image" and is_midjourney(job.get("model")):
+        return 4
+    params = job.get("params") or {}
+    snapshot = (context.get("snapshot") or {}).get("normalized_params") or {}
+    for count in (
+        snapshot.get("n"),
+        params.get("requested_n"),
+        job.get("_requested_results"),
+        # Some providers replace n with actual_n when downloads finish.
+        params.get("n") if params.get("actual_n") is None else None,
+    ):
+        if type(count) is int and count > 0:
+            return count
+    return None
+
+
 def media_evidence(api, job, directory, number, turn_index, notices):
     params = job.get("params") or {}
     cost, source = job_cost(job)
@@ -292,6 +323,7 @@ def media_evidence(api, job, directory, number, turn_index, notices):
         "job_id": job["job_id"],
         "turn_index": turn_index,
         "kind": job.get("kind", "image"),
+        "requested_results": requested_results(job),
         "model": job.get("model"),
         "alias": job.get("alias"),
         "prompt": job.get("prompt"),

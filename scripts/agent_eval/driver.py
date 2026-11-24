@@ -16,8 +16,10 @@ import requests
 
 from .observations import (
     canvas_result,
+    is_midjourney,
     media_evidence,
     per_turn_observation,
+    requested_results,
     skills_from,
     steps_from,
     usage_from,
@@ -263,7 +265,7 @@ def decide(api, url, cards, money_left, count_left, turn_index, fixed_four=()):
             price = item.get("budget_cny", item.get("estimate_cny"))
             count = item.get("count")
             model = str(item.get("model") or "").lower().replace("_", "-")
-            if model in fixed_four or model.startswith(("mj-", "niji")) or "midjourney" in model:
+            if model in fixed_four or is_midjourney(model):
                 count = 4
             item["reserved_results"] = count
             if (
@@ -341,7 +343,11 @@ def _jobs(api, project, url):
 def _read_with_quotes(api, project, url, quotes):
     jobs = _jobs(api, project, url)
     for job in jobs:
-        job.update(quotes.get(job["job_id"], {}))
+        entry = quotes.setdefault(job["job_id"], {})
+        job.update(entry)
+        count = requested_results(job)
+        if count is not None:
+            entry.setdefault("_requested_results", count)
     return jobs
 
 
@@ -361,6 +367,12 @@ def remember_quotes(jobs_before, jobs_after, records, quotes):
     new_jobs = {j["job_id"]: j for j in jobs_after if j["job_id"] in new_ids}
     for jid, job in new_jobs.items():
         entry = quotes.setdefault(jid, {})
+        # Exact submission evidence is distinct from the upper bound reserved below.
+        count = requested_results(job)
+        if count is None and sizes and len(set(sizes)) == 1 and len(new_jobs) <= len(accepted):
+            count = sizes[0]
+        if count is not None:
+            entry.setdefault("_requested_results", count)
         if len(prices) == 1 and len(new_ids) == len(accepted):
             entry["_approval_estimate"] = next(iter(prices))
         if sizes and (
@@ -524,7 +536,7 @@ def run_case(
         if catalog.ok:
             for spec in catalog.json().get("models", []):
                 mid = spec["model"].lower().replace("_", "-")
-                if mid.startswith(("mj-", "niji")) or "midjourney" in mid:
+                if is_midjourney(mid):
                     fixed_four.update({mid, spec["name"].lower().replace("_", "-")})
         # Verify observation & stop prerequisites before sending a paid message.
         response = api.get(url + "/usage")

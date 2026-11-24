@@ -241,3 +241,103 @@ def test_explicit_provider_rejection_and_local_max_steps_are_terminal(error):
     assert not request_may_be_in_flight(
         {"status": "failed", "error": "这一轮步骤太多，已停下；可以让它继续"}
     )
+
+
+@pytest.mark.parametrize(
+    ("job", "count", "delivered"),
+    [
+        ({"kind": "video", "params": {"n": 3}, "status": "failed"}, 3, 0),
+        ({"params": {"n": 3}, "status": "canceled"}, 3, 0),
+        (
+            {"kind": "video", "params": {"n": 3}, "status": "partial", "output_paths": ["one.mp4"]},
+            3,
+            1,
+        ),
+        (
+            {
+                "params": {"n": 1},
+                "canvas_run": {"candidates": [{"status": "succeeded"}, {"status": "failed"}]},
+                "status": "partial",
+                "output_paths": ["one.png"],
+            },
+            2,
+            1,
+        ),
+        ({"params": {"n": 1}, "model": "demo/mj-6", "status": "failed"}, 4, 0),
+        ({"model": "vendor/speed-niji-6", "status": "running"}, 4, 0),
+        (
+            {"params": {"actual_n": 1, "n": 1}, "status": "partial", "output_paths": ["x.png"]},
+            None,
+            1,
+        ),
+        (
+            {"params": {}, "_reserved_results": 3, "status": "done", "output_paths": ["x.png"]},
+            None,
+            1,
+        ),
+    ],
+)
+def test_media_evidence_keeps_requested_results_separate_from_delivery(
+    tmp_path, job, count, delivered
+):
+    import requests
+
+    from scripts.agent_eval.observations import media_evidence
+
+    class MissingMedia:
+        def get(self, *args, **kwargs):
+            raise requests.ConnectionError()
+
+    evidence = media_evidence(MissingMedia(), {"job_id": "test", **job}, tmp_path, 1, 1, set())
+    assert evidence["requested_results"] == count
+    assert len(evidence["outputs"]) == delivered
+
+
+def test_different_approval_counts_do_not_assign_the_largest_request_to_every_job():
+    from scripts.agent_eval.driver import remember_quotes
+    from scripts.agent_eval.observations import requested_results
+
+    def observe(counts):
+        records = [
+            {
+                "items": [
+                    {"index": i, "reserved_results": n, "estimate_cny": n / 2}
+                    for i, n in enumerate(counts)
+                ],
+                "accepted_indices": list(range(len(counts))),
+            }
+        ]
+        jobs = [{"job_id": str(i)} for i in range(len(counts))]
+        quotes = {}
+        remember_quotes([], jobs, records, quotes)
+        return [requested_results(job | quotes[job["job_id"]]) for job in jobs]
+
+    assert observe([2]) == [2]
+    assert observe([2, 2]) == [2, 2]
+    assert observe([1, 3]) == [None, None]
+
+
+def test_initial_studio_count_survives_provider_overwriting_n_with_actual_delivery():
+    from types import SimpleNamespace
+
+    from scripts.agent_eval.driver import _read_with_quotes
+    from scripts.agent_eval.observations import requested_results
+
+    class Jobs:
+        params = {"n": 4}
+
+        def get(self, *args):
+            return SimpleNamespace(
+                ok=True,
+                status_code=200,
+                headers={},
+                json=lambda: [{"job_id": "j", "params": self.params}],
+                raise_for_status=lambda: None,
+            )
+
+    api = Jobs()
+    quotes = {}
+    [pending] = _read_with_quotes(api, None, "/session", quotes)
+    api.params = {"n": 2, "actual_n": 2}
+    [completed] = _read_with_quotes(api, None, "/session", quotes)
+    assert requested_results(pending) == requested_results(completed) == 4
