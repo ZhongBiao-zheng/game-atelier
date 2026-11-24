@@ -204,3 +204,25 @@ it('旧会话的慢响应不能替换已切换到的会话任务', async () => {
   expect(screen.queryByText('旧会话慢响应')).toBeNull();
   expect(screen.getByText('第一幅草图')).toBeVisible();
 });
+
+it('滚动时保留实际输入焦点，已卸载的弹窗焦点不会持续撑开输入壳', async () => {
+  server();
+  mount();
+  await screen.findByText('无归属字段的旧图');
+  const scroll = screen.getByTestId('studio-history-scroll');
+  const editor = screen.getByLabelText('生图 prompt');
+  const shell = screen.getByTestId('studio-prompt-shell');
+  scroll.scrollTop = -200;
+  act(() => editor.focus());
+  fireEvent.scroll(scroll);
+  expect(shell).toHaveClass('min-h-[174px]');
+  act(() => editor.blur());
+  // 临时按钮代表随弹窗卸载的焦点目标，移除 DOM 节点不会触发 React 的 blur。
+  const temporaryButton = document.createElement('button');
+  shell.appendChild(temporaryButton);
+  act(() => temporaryButton.focus());
+  temporaryButton.remove();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.scroll(scroll);
+  expect(shell).toHaveClass('min-h-0');
+});

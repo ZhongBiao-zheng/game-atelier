@@ -149,6 +149,7 @@ function StudioFull() {
   // shellFocused / clickPinned 是两个展开覆盖：输入焦点期间恒展开；点击收缩壳展开但不回滚，
   // 再次滚动（dist>160 的 scroll 事件）即取消点击钉住。
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const [scrolledUp, setScrolledUp] = useState(false);
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
@@ -165,6 +166,8 @@ function StudioFull() {
     const el = scrollRef.current;
     if (!el) return;
     const dist = Math.abs(el.scrollTop);
+    // 弹窗关闭时聚焦的选项会被卸载，浏览器可能不发 blur。滚动时以实际焦点为准。
+    setShellFocused(Boolean(dockRef.current?.contains(document.activeElement)));
     setScrolledUp((prev) => (prev ? dist > 80 : dist > 160));
     if (dist > 160 || dist <= 80) setClickPinned(false);
   };
@@ -1007,7 +1010,7 @@ function StudioFull() {
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
+      <div ref={dockRef} className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
         <div className="relative mx-auto flex max-w-[844px] items-end gap-3 lg:max-w-[780px]">
           <div className="relative min-w-0 flex-1">
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
