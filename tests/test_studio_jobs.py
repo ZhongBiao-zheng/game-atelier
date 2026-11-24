@@ -246,3 +246,26 @@ def test_auto_route_snapshot_is_server_owned_and_survives_prompt_param_replaceme
         assert stored.params.route_id == "gpt-image-2"
         assert stored.params.route_order == ["default"]
         assert stored.params.route_tried is None
+
+
+@pytest.mark.parametrize("owner", ["omitted", "default", "existing", "missing", "invalid"])
+def test_manual_job_session_ownership(client, owner):
+    from character_workflow.lib import jobs, studio_agent_sessions as sessions
+
+    body = {"prompt": "lake", "model": "gpt-image-2", "params": {}}
+    sid = {
+        "omitted": None, "default": sessions.DEFAULT_SESSION_ID, "existing": sessions.create({}).session_id,
+        "missing": "session-not-found", "invalid": "bad",
+    }[owner]
+    if sid is not None:
+        body["studio_agent_session_id"] = sid
+    response = client.post("/api/studio/jobs", json=body)
+    if owner in {"missing", "invalid"}:
+        assert response.status_code == (404 if owner == "missing" else 422)
+        assert not jobs.list_jobs()
+        return
+    assert response.status_code == 201
+    assert response.json().get("studio_agent_session_id") == sid
+    assert response.json().get("studio_agent_turn_id") is None
+    job = jobs.read_job(response.json()["job_id"])
+    assert (job.studio_agent_session_id, job.studio_agent_turn_id) == (sid, None)

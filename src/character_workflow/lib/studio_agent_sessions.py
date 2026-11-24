@@ -110,6 +110,10 @@ def read(sid):
     return _read(sid)
 
 
+def owns_job(sid, job):
+    return job.namespace == "studio" and (job.studio_agent_session_id or DEFAULT_SESSION_ID) == sid
+
+
 def summaries():
     fields = {"session_id", "title", "updated_at", "status", "revision"}
     if not session_path(DEFAULT_SESSION_ID).exists():

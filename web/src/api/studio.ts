@@ -9,6 +9,7 @@ export interface StudioJobCreate {
   params: JobParams;
   alias?: string;
   kind?: JobKind;
+  studio_agent_session_id?: string;
   /** 「再次生成」来自的失败轮次：网关未确认的失败、请求不变时由服务端接回原任务。 */
   reattach_job_id?: string;
 }

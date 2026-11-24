@@ -347,11 +347,7 @@ def usage(session_id: CanvasAgentSessionId):
 def jobs(session_id: CanvasAgentSessionId):
     sessions.read(session_id)
     return {
-        "jobs": [
-            j
-            for j in list_jobs()
-            if j.namespace == "studio" and j.studio_agent_session_id == session_id
-        ]
+        "jobs": [job for job in list_jobs() if sessions.owns_job(session_id, job)]
     }
 
 

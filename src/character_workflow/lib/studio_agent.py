@@ -203,7 +203,7 @@ def job_for(sid, job_id):
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", job_id):
         raise ValueError("无效的任务 ID")
     job = read_job(job_id)
-    if job.namespace != "studio" or job.studio_agent_session_id != sid:
+    if not sessions.owns_job(sid, job):
         raise ValueError("任务不属于当前对话")
     return job
 

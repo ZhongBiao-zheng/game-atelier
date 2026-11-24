@@ -2,7 +2,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from character_workflow.lib import studio_agent_sessions as sessions
+from character_workflow.lib import jobs, studio_agent_sessions as sessions
+from character_workflow.lib.schemas import Job, JobParams
+from character_workflow.lib.studio_agent import job_for
 from tests.local_client import LocalTestClient
 from viewer_server.server_app import build_app
 
@@ -55,3 +57,40 @@ def test_patch_and_delete_default_session(client):
         assert rejected.status_code == 400
         assert rejected.json()["detail"] == "默认会话不能删除"
     assert client.get(f"{BASE}/{DEFAULT}").json() == row
+
+
+def save_job(jid, sid=None, tid=None, **fields):
+    return jobs.save_job(Job(
+        job_id=jid, character_id="local", prompt="cat", submitted_at="now", model="m",
+        params=JobParams(), output_paths=[], status="pending", error=None,
+        studio_agent_session_id=sid, studio_agent_turn_id=tid, **fields,
+    ))
+
+
+@pytest.fixture
+def mixed_jobs():
+    other = sessions.create({}).session_id
+    save_job("legacy")
+    save_job("default-manual", DEFAULT)
+    save_job("other-manual", other)
+    save_job("other-agent", other, "turn-1")
+    save_job("assist", namespace="assist", kind="text")
+    return other
+
+
+@pytest.mark.parametrize("default", [True, False])
+def test_list_session_jobs(client, mixed_jobs, default):
+    sid = DEFAULT if default else mixed_jobs
+    response = client.get(f"{BASE}/{sid}/jobs")
+    assert response.status_code == 200
+    ids = {job["job_id"] for job in response.json()["jobs"]}
+    assert ids == ({"legacy", "default-manual"} if default else {"other-manual", "other-agent"})
+
+
+def test_agent_job_for_checks_same_ownership_as_list(mixed_jobs):
+    assert job_for(DEFAULT, "legacy").job_id == "legacy"
+    assert job_for(mixed_jobs, "other-manual").job_id == "other-manual"
+    for sid, jid in [(mixed_jobs, "legacy"), (mixed_jobs, "default-manual"),
+                     (DEFAULT, "other-agent"), (DEFAULT, "assist")]:
+        with pytest.raises(ValueError, match="任务不属于当前对话"):
+            job_for(sid, jid)

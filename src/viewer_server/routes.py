@@ -14,6 +14,7 @@ import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -24,7 +25,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from character_workflow.lib import data_root, keys, model_routes
+from character_workflow.lib import data_root, keys, model_routes, studio_agent_sessions
 from character_workflow.lib.atomic_io import (
     atomic_write_bytes,
     atomic_write_json,
@@ -44,7 +45,7 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     JOB_PARAM_PATH_FIELDS,
     AccentThemes, AccentThemesUpdate,
-    CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
+    CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionId, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
     CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
     CanvasReproduceResponse,
@@ -1989,6 +1990,7 @@ class _StudioJobCreate(BaseModel):
     params: JobParams
     alias: str | None = None
     kind: JobKind = JobKind.IMAGE
+    studio_agent_session_id: CanvasAgentSessionId | None = None
     # 「再次生成」来自哪个失败轮次：网关未确认的失败在 20 小时内、请求不变时接回主机上的原任务。
     reattach_job_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$")
 
@@ -3847,7 +3849,9 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     The runner is fired via BackgroundTasks so the response returns immediately;
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
-    job = _create_user_job(body, namespace="studio")
+    sid = body.studio_agent_session_id
+    with studio_agent_sessions.locked_session(sid) if sid else nullcontext():
+        job = _create_user_job(body, namespace="studio", studio_agent_session_id=sid)
     # The BackgroundTask only detaches a tracked asyncio task; the potentially long provider
     # lifecycle is not tied to Uvicorn's response-drain phase during shutdown.
     background.add_task(_start_studio_job_task, job.job_id)
