@@ -15,8 +15,8 @@ function job(p: Partial<Job>): Job {
 }
 
 describe('deriveGenMode', () => {
-  it('canvas 任务按来源筛选', () => {
-    expect(deriveGenMode(job({ namespace: 'canvas', kind: 'image' }))).toBe('canvas');
+  it('Agent 任务按轮次归属筛选', () => {
+    expect(deriveGenMode(job({ namespace: 'studio', studio_agent_turn_id: 'turn-1', kind: 'image' }))).toBe('agent');
   });
   it('studio video → video', () => {
     expect(deriveGenMode(job({ namespace: 'studio', kind: 'video' }))).toBe('video');
@@ -52,7 +52,7 @@ describe('filterRounds', () => {
     const rounds = [
       doneRound({ jobId: 'i', mode: 'image' }),
       doneRound({ jobId: 'v', mode: 'video' }),
-      doneRound({ jobId: 's', mode: 'canvas' }),
+      doneRound({ jobId: 's', mode: 'agent' }),
     ];
     const out = filterRounds(
       rounds,

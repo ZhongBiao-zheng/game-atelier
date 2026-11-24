@@ -3,7 +3,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { CanvasAgentMessage, StudioAgentSession, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
-import { parseAgentReply, StudioAgentTimeline, StudioSessionPicker } from './StudioAgentTimeline';
+import { StudioSessionControls } from './StudioSessionControls';
+import { within } from '@testing-library/react';
+import { parseAgentReply, StudioAgentTimeline } from './StudioAgentTimeline';
 
 const makeMessage = (role: CanvasAgentMessage['role'], text: string, sequence: number): CanvasAgentMessage => ({
   role, text, sequence, turn_id: 't1', message_id: String(sequence), references: [], title: null,
@@ -82,11 +84,11 @@ it('运行时默认收起工具步骤，待确认强制展开，停止后能展�
 
 it('对话菜单可直接切换、新建和按 revision 删除', () => {
   const agent = makeAgent('idle');
-  render(<StudioSessionPicker agent={agent} clearDraft={() => {}} />);
-  const open = () => fireEvent.click(screen.getByRole('button', { name: '对话' }));
+  render(<StudioSessionControls agent={agent} clearDraft={() => {}} />);
+  const open = () => fireEvent.click(screen.getByRole('button', { name: '切换对话' }));
   open(); fireEvent.click(screen.getByRole('button', { name: '另一段对话' }));
   expect(agent.selectSession).toHaveBeenCalledWith('s2');
-  open(); fireEvent.click(screen.getByRole('button', { name: '新对话' }));
+  open(); fireEvent.click(within(screen.getByLabelText('对话列表')).getByRole('button', { name: '新建对话' }));
   expect(agent.newSession).toHaveBeenCalledOnce();
   open(); fireEvent.click(screen.getByRole('button', { name: '删除对话 另一段对话' }));
   expect(agent.removeSession).toHaveBeenCalledWith('s2', 2);
