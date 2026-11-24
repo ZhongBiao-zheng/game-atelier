@@ -94,3 +94,82 @@ def test_agent_job_for_checks_same_ownership_as_list(mixed_jobs):
                      (DEFAULT, "other-agent"), (DEFAULT, "assist")]:
         with pytest.raises(ValueError, match="任务不属于当前对话"):
             job_for(sid, jid)
+
+
+def test_delete_returns_jobs_after_turn_stops_and_preserves_outputs(client, monkeypatch, tmp_path):
+    from viewer_server import studio_agent_routes
+
+    session = sessions.create({})
+    sid = session.session_id
+    manual = save_job("manual", sid)
+    agent = save_job("agent", sid, "turn-1")
+    other = save_job("untouched", sessions.create({}).session_id)
+    output = tmp_path / "result.png"
+    output.write_bytes(b"result")
+
+    async def stop_turn(stopped_sid):
+        assert stopped_sid == sid
+        assert jobs.read_job(agent.job_id).studio_agent_turn_id == "turn-1"
+        jobs.update_job_status(manual.job_id, status=jobs.JobStatus.DONE, output_paths=[str(output)])
+
+    monkeypatch.setattr(studio_agent_routes, "stop_task", stop_turn)
+    response = client.delete(f"{BASE}/{sid}", headers={"If-Match": str(session.revision)})
+    assert response.status_code == 204
+    assert client.get(f"{BASE}/{sid}").status_code == 404
+    assert jobs.read_job(other.job_id) == other
+    assert jobs.read_job(manual.job_id).output_paths == [str(output)]
+    assert output.read_bytes() == b"result"
+    assert jobs.read_job(agent.job_id).status == agent.status
+    jobs.update_job_status(agent.job_id, status=jobs.JobStatus.DONE, output_paths=[str(output)])
+    assert {j["job_id"] for j in client.get(f"{BASE}/{DEFAULT}/jobs").json()["jobs"]} == {"agent", "manual"}
+    reloaded = {job.job_id: job for job in jobs.list_jobs()}
+    assert set(reloaded) == {"manual", "agent", "untouched"}
+    for jid in ("agent", "manual"):
+        assert reloaded[jid].studio_agent_session_id is None
+        assert reloaded[jid].studio_agent_turn_id is None
+        assert reloaded[jid].status == jobs.JobStatus.DONE
+
+
+def test_delete_retries_only_remaining_jobs_after_write_failure(client, monkeypatch):
+    session = sessions.create({})
+    sid = session.session_id
+    save_job("a", sid, "turn-1")
+    save_job("b", sid)
+    url = f"{BASE}/{sid}"
+    headers = {"If-Match": str(session.revision)}
+    write = jobs.write_job_under_lock
+    attempts = []
+
+    def fail_second(job):
+        attempts.append(job.job_id)
+        if len(attempts) == 2:
+            raise OSError("simulated disk error")
+        return write(job)
+
+    monkeypatch.setattr(jobs, "write_job_under_lock", fail_second)
+    assert client.delete(url, headers=headers).status_code == 500
+    assert sessions.read(sid) == session
+    assert jobs.read_job("a").studio_agent_session_id is None
+    assert jobs.read_job("b").studio_agent_session_id == sid
+    assert client.delete(url, headers=headers).status_code == 204
+    assert attempts == ["a", "b", "b"]
+    assert not sessions.session_path(sid).exists()
+    assert [(job.job_id, job.studio_agent_session_id, job.studio_agent_turn_id)
+            for job in jobs.list_jobs()] == [("a", None, None), ("b", None, None)]
+
+
+def test_delete_preserves_session_when_job_cannot_be_read(client, monkeypatch):
+    session = sessions.create({})
+    save_job("unreadable", session.session_id)
+    url = f"{BASE}/{session.session_id}"
+    headers = {"If-Match": str(session.revision)}
+
+    with monkeypatch.context() as patch:
+        def deny_read(path):
+            raise PermissionError("simulated read failure")
+
+        patch.setattr(jobs, "read_text_with_retry", deny_read)
+        assert client.delete(url, headers=headers).status_code == 500
+        assert sessions.read(session.session_id) == session
+    assert client.delete(url, headers=headers).status_code == 204
+    assert jobs.read_job("unreadable").studio_agent_session_id is None

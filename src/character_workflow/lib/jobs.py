@@ -129,16 +129,26 @@ def _load_job(data: Any) -> Job:
     return Job.model_validate(data)
 
 
-def list_jobs() -> list[Job]:
+def list_jobs(*, strict: bool = False) -> list[Job]:
     jobs_dir = _runtime_dir() / "jobs"
-    if not jobs_dir.exists():
+    try:
+        paths = sorted(path for path in jobs_dir.iterdir() if path.suffix == ".json")
+    except FileNotFoundError:
+        return []
+    except PermissionError:
+        if strict:
+            raise
         return []
     jobs: list[Job] = []
-    for p in sorted(jobs_dir.glob("*.json")):
+    for p in paths:
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
             jobs.append(_load_job(json.loads(read_text_with_retry(p))))
+        except FileNotFoundError:
+            continue  # 枚举后被并发删除。
         except (OSError, json.JSONDecodeError, ValidationError):
+            if strict:
+                raise
             logger.warning("skipping bad job file: %s", p.name)
     return jobs
 

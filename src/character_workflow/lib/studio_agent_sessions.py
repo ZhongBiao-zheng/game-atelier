@@ -8,7 +8,7 @@ from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, jobs
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.canvas_agent_sessions import _validate_session_id
 from character_workflow.lib.canvas_tool_common import CanvasToolError
@@ -147,6 +147,22 @@ def mutate(sid, update):
         return updated
 
 
+def _return_jobs_to_default(sid):
+    # 删除要求完整枚举，避免读取失败被普通列表跳过，留下指向已删除会话的任务。
+    for job in jobs.list_jobs(strict=True):
+        if job.studio_agent_session_id != sid:
+            continue
+        with jobs.job_lock(job.job_id):
+            try:
+                current = jobs.read_job(job.job_id)
+            except FileNotFoundError:
+                continue
+            if current.studio_agent_session_id == sid:
+                jobs.write_job_under_lock(current.model_copy(update={
+                    "studio_agent_session_id": None, "studio_agent_turn_id": None,
+                }))
+
+
 @contextmanager
 def delete(sid, revision):
     # 先等已持写锁的操作退出，同时核对版本、认领删除；停任务期间新写入立即返回。
@@ -158,6 +174,10 @@ def delete(sid, revision):
                 raise CanvasToolError("REVISION_CONFLICT", "对话已更新", 409)
             deleting.enter_context(_delete_lock(path))
         yield
+        try:
+            _return_jobs_to_default(sid)
+        except (OSError, ValueError) as error:
+            raise CanvasToolError("JOB_REASSIGN_FAILED", "任务退回默认会话失败，请重试", 500) from error
         directory = upload_dir(sid)
         try:
             if directory.exists():
