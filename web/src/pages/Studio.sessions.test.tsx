@@ -189,3 +189,18 @@ it('时间、生成模式、喜欢和任务提示词均以整轮为筛选单位'
   expect(turn()).toBeVisible();
   expect(manual()).toBeNull();
 });
+
+it('旧会话的慢响应不能替换已切换到的会话任务', async () => {
+  const { requests } = server();
+  const respond = requests.getMockImplementation()!;
+  let resolveOld!: (response: Response) => void;
+  const slow = new Promise<Response>(resolve => { resolveOld = resolve; });
+  requests.mockImplementation((url, init) => url === base + '/' + DEFAULT_STUDIO_SESSION_ID + '/jobs' ? slow : respond(url, init));
+  mount();
+  fireEvent.click(await screen.findByLabelText('切换对话'));
+  fireEvent.click(await screen.findByRole('button', { name: '山色' }));
+  expect(await screen.findByText('第一幅草图')).toBeVisible();
+  await act(async () => resolveOld(new Response(JSON.stringify({ jobs: [job('late', '旧会话慢响应')] }))));
+  expect(screen.queryByText('旧会话慢响应')).toBeNull();
+  expect(screen.getByText('第一幅草图')).toBeVisible();
+});

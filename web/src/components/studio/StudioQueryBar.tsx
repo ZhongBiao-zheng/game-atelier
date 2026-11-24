@@ -80,14 +80,14 @@ export function StudioQueryBar({
       {/* 搜索区常驻挂载，靠宽度过渡做展开/收起滑动动画（条件渲染会瞬间跳变）。 */}
       <div
         className={`flex items-center overflow-hidden transition-[width] duration-300 ease-out ${
-          searchOpen ? 'w-20 md:w-48 lg:w-80 pr-1' : 'w-8'
+          searchOpen ? 'w-24 md:w-48 lg:w-80 pr-1' : 'w-8'
         }`}
       >
         <Button variant="bare"
           type="button"
           aria-label="搜索"
           onClick={() => (searchOpen ? searchInputRef.current?.focus() : setSearchOpen(true))}
-          className="grid size-8 shrink-0 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className={`grid size-8 shrink-0 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${searchOpen ? 'max-sm:hidden' : ''}`}
         >
           <SearchIcon aria-hidden />
         </Button>
@@ -119,7 +119,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={timeRef} className="relative">
         <FilterChip active={openPanel === 'time'} filtered={Boolean(timeLabel)} aria-label={`时间筛选${timeLabel ? `：${timeLabel}` : ''}`} onClick={() => toggle('time')}>
-          <span className="max-w-14 truncate sm:max-w-32">{timeLabel || '时间'}</span> <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
+          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{timeLabel || '时间'}</span> <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
@@ -135,7 +135,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={modeRef} className="relative">
         <FilterChip active={openPanel === 'mode'} filtered={Boolean(modeLabel)} aria-label={`生成模式筛选${modeLabel ? `：${modeLabel}` : ''}`} onClick={() => toggle('mode')}>
-          <span className="max-w-14 truncate sm:max-w-32">{modeLabel || '生成模式'}</span> <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
+          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{modeLabel || <><span className={searchOpen ? 'max-sm:hidden' : ''}>生成</span>模式</>}</span> <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
@@ -160,7 +160,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={opRef} className="relative">
         <FilterChip active={openPanel === 'op'} filtered={Boolean(opLabel)} aria-label={`操作类型筛选${opLabel ? `：${opLabel}` : ''}`} onClick={() => toggle('op')}>
-          <span className="max-w-14 truncate sm:max-w-32">{opLabel || '操作类型'}</span> <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
+          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{opLabel || <>操作<span className={searchOpen ? 'max-sm:hidden' : ''}>类型</span></>}</span> <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'op'} onClose={() => setOpenPanel(null)} anchorRef={opRef} direction="down" role="listbox" aria-label="操作类型列表" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">操作</div>
