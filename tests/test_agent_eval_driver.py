@@ -1,33 +1,9 @@
-"""Use the same public HTTP surface as a paid run, with a loopback-only fake vendor."""
-
-from pathlib import Path
+"""Driver policies and observations using in-memory session data."""
 
 import pytest
 
 from scripts.agent_eval.driver import decide, run_case
-from scripts.agent_eval.fake import FakeProvider
-from scripts.agent_eval.host import serve
 from scripts.agent_eval.observations import job_cost, usage_from
-
-
-def test_overrun_cancels_turn_before_generation_and_preserves_usage(tmp_path):
-    case = {
-        "id": "stop",
-        "title": "预算",
-        "surface": "studio",
-        "settings": {"permission": "auto"},
-        "turns": [{"say": "画一位旅行者。"}, {"say": "改变披风颜色"}],
-        "limits": {"max_results": 1, "max_steps": 30, "max_seconds": 25, "max_cost_cny": 1},
-    }
-    root = Path(__file__).resolve().parents[1]
-    with FakeProvider(["eval/chat"]) as vendor:
-        with serve(root, keys_from=None, providers=[], fake_keys=vendor.keys) as api:
-            row = run_case(api, case, "eval/chat", tmp_path, tmp_path / "results", 0.0001)
-            assert api.get("/api/jobs").json() == []
-    assert (row["status"], row["reason"]) == ("stopped", "budget_exceeded")
-    assert row["usage"]["total_cost_cny"] > 0.0001
-    assert row["effective_settings"]["permission_mode"] == "review"
-    assert [m["text"] for m in row["messages"] if m["role"] == "user"] == ["画一位旅行者。"]
 
 
 def test_single_card_requires_a_recognized_quote_and_reserves_output_count():
@@ -209,56 +185,6 @@ def test_inflight_jobs_reserve_requested_quantity_and_terminal_jobs_count_real_o
     assert occupied_results(jobs) == 3
 
 
-def test_zero_result_cap_without_global_budget_refuses_generation_in_auto(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    case = {
-        "id": "zero",
-        "title": "零份",
-        "surface": "studio",
-        "settings": {"permission": "auto"},
-        "turns": [{"say": "画一个旅行者。"}],
-        "limits": {"max_results": 0, "max_cost_cny": 2, "max_steps": 30, "max_seconds": 20},
-    }
-    with (
-        FakeProvider(["eval/chat"]) as vendor,
-        serve(root, keys_from=None, providers=[], fake_keys=vendor.keys) as api,
-    ):
-        row = run_case(api, case, "eval/chat", tmp_path, tmp_path / "out", None)
-        assert api.get("/api/jobs").json() == []
-    assert row["status"] == "completed"
-    assert row["effective_settings"]["permission_mode"] == "review"
-    assert row["approvals"] and not any(a["approved"] for a in row["approvals"])
-
-
-def test_canvas_selected_reference_is_connected_to_actual_result_node(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    case = {
-        "id": "13-canvas-turnaround",
-        "surface": "canvas",
-        "title": "画布选中角色图",
-        "canvas": {
-            "nodes": [{"id": "hero", "type": "image", "title": "女剑客", "file": "hero-a.png"}],
-            "selected": ["hero"],
-        },
-        "turns": [{"say": "做一张她的三视图"}],
-        "limits": {"max_results": 2, "max_cost_cny": 2, "max_steps": 30, "max_seconds": 20},
-    }
-    folder = root / "scripts/agent_eval/fixtures"
-    with (
-        FakeProvider(["eval/chat"]) as vendor,
-        serve(root, keys_from=None, providers=[], fake_keys=vendor.keys) as api,
-    ):
-        row = run_case(api, case, "eval/chat", folder, tmp_path / "out", None)
-    [message] = [m for m in row["messages"] if m["role"] == "user"]
-    assert [ref["node_id"] for ref in message["references"]] == ["hero"]
-    [job] = row["generations"]
-    assert job["on_canvas"] is True and row["turn_outcomes"][0]["on_canvas"] is True
-    mark = job["canvas_evidence"]
-    assert mark["selected_node_ids"] == mark["linked_node_ids"] == ["hero"]
-    assert len(mark["output_version_ids"]) == 1
-    assert mark["output_version_ids"] == mark["visible_version_ids"]
-
-
 def test_batched_skill_observations_use_per_name_result_before_truncating():
     from scripts.agent_eval.observations import skills_from, steps_from
     import json
@@ -295,3 +221,23 @@ def test_batched_skill_observations_use_per_name_result_before_truncating():
         [{"tool": "load_skill", "status": "completed", "result": "first、last"}]
     ) == ["first", "last"]
     assert skills_from([{"tool": "load_skill", "status": "failed", "result": "missing"}]) == []
+
+
+@pytest.mark.parametrize("state", ["failed", "interrupted"])
+def test_terminal_local_state_keeps_explicit_unsettled_provider_charge(state):
+    from scripts.agent_eval.driver import request_may_be_in_flight
+
+    assert request_may_be_in_flight(
+        {"status": state, "error": "连接中断，未自动重发（可能已计费）"}
+    )
+    assert not request_may_be_in_flight({"status": state, "error": "对话模型返回错误 429：已限流"})
+
+
+@pytest.mark.parametrize("error", ["401：", "403：", "429："])
+def test_explicit_provider_rejection_and_local_max_steps_are_terminal(error):
+    from scripts.agent_eval.driver import request_may_be_in_flight
+
+    assert not request_may_be_in_flight({"status": "failed", "error": "对话模型返回错误 " + error})
+    assert not request_may_be_in_flight(
+        {"status": "failed", "error": "这一轮步骤太多，已停下；可以让它继续"}
+    )

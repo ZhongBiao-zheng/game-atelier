@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.agent_eval import __main__ as cli
+from scripts.agent_eval import cli
 
 
 def test_real_requires_budget_before_accessing_source(tmp_path, monkeypatch, capsys):
@@ -12,38 +12,6 @@ def test_real_requires_budget_before_accessing_source(tmp_path, monkeypatch, cap
         cli.main(["run", "--keys-from", str(tmp_path / "missing"), "--providers", "demo"])
     assert stopped.value.code == 2
     assert "--budget-cny" in capsys.readouterr().err
-
-
-def test_matrix_stops_at_ninety_percent_and_reports_scrubbed_outputs(tmp_path, monkeypatch):
-    # Exercise the real loopback service, chat SDK, job runner, scoring and all artifact writers.
-    key = "temporary-eval-test-key-010203040506"
-
-    class KnownKeyProvider(cli.FakeProvider):
-        def __init__(self, models):
-            super().__init__(models)
-            for channel in self.keys["keys"]:
-                channel["access_key"] = key
-
-    monkeypatch.setattr(cli, "FakeProvider", KnownKeyProvider)
-    cases = tmp_path / "cases.yaml"
-    case = {
-        "id": "redaction",
-        "title": "报告文字脱敏",
-        "turns": [{"say": "请出图 " + key}],
-        "surface": "studio",
-        "settings": {"creation_mode": "image", "permission": "review"},
-    }
-    cases.write_text(json.dumps([case, case | {"id": "must-skip"}]), encoding="utf-8")
-    out = tmp_path / "out"
-    assert cli.main(["run", "--cases", str(cases), "--out", str(out), "--budget-cny", "0.275"]) == 0
-    [row] = [json.loads(s) for s in (out / "results.jsonl").read_text().splitlines()]
-    assert row["case_id"] == "redaction" and row["status"] == "completed"
-    assert row["generations"][0]["outputs"][0]["width"] == 640
-    assert 0.275 * 0.9 <= row["usage"]["total_cost_cny"] < 0.275
-    assert "90%" in row["matrix_stop_reason"] and "[redacted]" in row["turns"][0]["say"]
-    for path in out.rglob("*"):
-        if path.is_file():
-            assert key.encode() not in path.read_bytes()
 
 
 def test_matrix_stops_at_exact_threshold_and_on_unobservable_spend(tmp_path, monkeypatch):

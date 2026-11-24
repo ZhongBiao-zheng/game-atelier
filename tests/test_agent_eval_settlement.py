@@ -2,15 +2,19 @@
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
 import requests
 import yaml
 
-from scripts.agent_eval import __main__ as cli
+from scripts.agent_eval import cli
 from scripts.agent_eval.fake import Handler
 from scripts.agent_eval.host import LocalAPI
+
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="隔离评测服务只支持 macOS 与 Linux")
 
 
 def demand(case_id):
@@ -92,16 +96,6 @@ def test_lost_approval_reply_never_replays_post_or_starts_next_case(monkeypatch,
     assert rows[0]["status"] == "failed"
     assert not rows[0]["usage"]["cost_complete"]
     assert len(rows[0]["generations"]) == 1
-
-
-@pytest.mark.parametrize("state", ["failed", "interrupted"])
-def test_terminal_local_state_keeps_explicit_unsettled_provider_charge(state):
-    from scripts.agent_eval.driver import request_may_be_in_flight
-
-    assert request_may_be_in_flight(
-        {"status": state, "error": "连接中断，未自动重发（可能已计费）"}
-    )
-    assert not request_may_be_in_flight({"status": state, "error": "对话模型返回错误 429：已限流"})
 
 
 def test_interrupt_after_paid_post_keeps_both_rows_and_costs(monkeypatch, tmp_path):
@@ -239,16 +233,6 @@ def test_uncertain_provider_reply_cannot_spend_next_budget(monkeypatch, tmp_path
         assert row["usage"]["chat_requests"] == 2
     else:
         assert row["usage"]["total_cost_cny"] == 0
-
-
-@pytest.mark.parametrize("error", ["401：", "403：", "429："])
-def test_explicit_provider_rejection_and_local_max_steps_are_terminal(error):
-    from scripts.agent_eval.driver import request_may_be_in_flight
-
-    assert not request_may_be_in_flight({"status": "failed", "error": "对话模型返回错误 " + error})
-    assert not request_may_be_in_flight(
-        {"status": "failed", "error": "这一轮步骤太多，已停下；可以让它继续"}
-    )
 
 
 def test_missing_sse_usage_without_global_budget_preserves_each_row(monkeypatch, tmp_path):

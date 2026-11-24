@@ -49,6 +49,60 @@ _AUTH_LINE = re.compile(
     r"""["']?\s*[:=]\s*[^\r\n]+"""
 )
 _HEADERS = {"headers", "request_headers", "response_headers"}
+_STARTUP_TIMEOUT = 30
+_STDERR_BYTES = 16 * 1024
+_STDERR_FIELDS = re.compile(
+    r"""(?i)\b(?:%s)["']?\s*[:=]\s*[^\r\n]+"""
+    % "|".join(re.escape(field) for field in sorted(_CREDENTIAL_FIELDS | _HEADERS | {"api-key"}))
+)
+
+
+class StartupError(RuntimeError):
+    """A startup error whose message can be displayed to the operator."""
+
+
+def _scrub_text(value, data_root, secrets):
+    value = _URL.sub("[redacted URL]", value)
+    value = value.replace(str(data_root.parent), "<isolated>")
+    for secret in sorted(secrets, key=len, reverse=True):
+        value = value.replace(secret, "[redacted]")
+    return _AUTH_LINE.sub("[redacted header]", value)
+
+
+class _StartupStderr:
+    def __init__(self, stream):
+        self._tail = b""
+        self._record = True
+        self._thread = threading.Thread(target=self._drain, args=(stream,), daemon=True)
+        self._thread.start()
+
+    def _drain(self, stream):
+        with stream:
+            while chunk := stream.read1(_STDERR_BYTES):
+                if self._record:
+                    # One extra byte tells the formatter whether the first line was cut.
+                    self._tail = (self._tail + chunk)[-(_STDERR_BYTES + 1) :]
+
+    def discard(self):
+        self._record = False
+        self._tail = b""
+
+    def error(self, message, data, secrets, server_root):
+        self._thread.join(timeout=1)
+        raw = self._tail
+        truncated = len(raw) > _STDERR_BYTES
+        if truncated:
+            # A partial URL or credential would no longer match the redactor.
+            raw = raw.partition(b"\n")[2]
+        value = _scrub_text(raw.decode("utf-8", errors="replace"), data, secrets)
+        value = _STDERR_FIELDS.sub("[redacted credential]", value)
+        for root in (data.parent.resolve(), server_root, Path(__file__).resolve().parents[2]):
+            value = value.replace(str(root), "<local>")
+        lines = value.splitlines()
+        excerpt = "\n".join(lines[-12:])
+        if truncated or len(lines) > 12 or len(excerpt) > 3000:
+            excerpt = "（前文已截断）\n" + excerpt[-3000:]
+        return StartupError(f"{message}\nstderr：{excerpt or '（无输出）'}")
 
 
 def selected_keys(data_root, providers):
@@ -118,10 +172,7 @@ class LocalAPI(requests.Session):
 
     def scrub(self, value):
         if isinstance(value, str):
-            value = value.replace(str(self.data_root.parent), "<isolated>")
-            for secret in sorted(self._secrets, key=len, reverse=True):
-                value = value.replace(secret, "[redacted]")
-            return _AUTH_LINE.sub("[redacted header]", _URL.sub("[redacted URL]", value))
+            return _scrub_text(value, self.data_root, self._secrets)
         if isinstance(value, (list, tuple)):
             return [self.scrub(item) for item in value]
         if isinstance(value, dict):
@@ -341,16 +392,21 @@ def serve(
             start_new_session=os.name == "posix",
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         api = None
         try:
-            deadline = time.monotonic() + 30
+            stderr = _StartupStderr(proc.stderr)
+
+            def startup_error(message):
+                _stop(proc)
+                secrets = api._secrets if api is not None else credential_values(keys)
+                return stderr.error(message, data, secrets, server_root)
+
+            deadline = time.monotonic() + _STARTUP_TIMEOUT
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
-                    raise RuntimeError(
-                        f"隔离服务启动失败（退出码 {proc.returncode}），请检查目标检出的依赖"
-                    )
+                    raise startup_error(f"隔离服务启动失败（退出码 {proc.returncode}）")
                 if api is None and port_file.exists():
                     port = port_file.read_text(encoding="ascii")
                     if port.isdigit():
@@ -361,9 +417,14 @@ def serve(
                         break
                     except (requests.ConnectionError, requests.Timeout):
                         pass
+                    except requests.HTTPError as exc:
+                        raise startup_error(
+                            f"隔离服务会话连接失败（HTTP {exc.response.status_code}）"
+                        ) from None
                 time.sleep(0.08)
             else:
-                raise TimeoutError("隔离服务未能在 30 秒内启动")
+                raise startup_error(f"隔离服务未能在 {_STARTUP_TIMEOUT} 秒内启动")
+            stderr.discard()
             yield api
         finally:
             if api is not None:

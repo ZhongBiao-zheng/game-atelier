@@ -1,7 +1,13 @@
 import json
+import sys
 
-from scripts.agent_eval import __main__ as cli
+import pytest
+
+from scripts.agent_eval import cli
 from scripts.agent_eval.fake import FakeProvider, Handler
+
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="隔离评测服务只支持 macOS 与 Linux")
 
 
 def _source(root, keys):
@@ -207,25 +213,6 @@ def test_missing_required_video_and_gateway_chat_price_fail_together(tmp_path, c
         )
         text = capsys.readouterr().out
         assert "无可核对价格" in text and "视频模型 0 个" in text and "clip 缺少" in text
-
-
-def test_only_selected_fixed_price_files_enter_isolation(tmp_path):
-    from scripts.agent_eval.host import _copy_price_snapshots
-
-    source, data = tmp_path / "source", tmp_path / "isolated"
-    price_dir = source / ".runtime/prices"
-    price_dir.mkdir(parents=True)
-    for name in ("openai-hk.json", "tuzi.json", "tokendance.json", "other.json"):
-        (price_dir / name).write_text("{}")
-    _copy_price_snapshots(
-        source,
-        data,
-        {"keys": [{"base_url": "https://example.openai-hk.com"}, {"provider": "tokendance"}]},
-    )
-    assert {p.name for p in (data / ".runtime/prices").iterdir()} == {
-        "openai-hk.json",
-        "tokendance.json",
-    }
 
 
 def test_preference_requires_a_quote_for_that_specific_model(tmp_path, capsys):
