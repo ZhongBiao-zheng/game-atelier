@@ -3,10 +3,10 @@ import { WorkflowParameters } from './WorkflowParameters';
 import { workflowReferenceError } from '@/lib/workflowInputs';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
-import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, type RefObject, useImperativeHandle, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { openOnboarding } from '@/lib/onboardingGuide';
-import { AddIcon, ArrowUpIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, CollapseIcon, ExpandIcon, ImageIcon, ImagesIcon, LibraryIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
+import { AddIcon, AiIcon, ArrowUpIcon, StopIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, CollapseIcon, ExpandIcon, ImageIcon, ImagesIcon, LibraryIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -43,7 +43,8 @@ import {
 import { Lightbox } from '../Lightbox';
 import { ToolbarPopover } from './ToolbarPopover';
 import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
-import type { JobKind, JobParams } from '@/schema/jobs';
+import type { StudioInputMode } from '@/pages/studioDraft';
+import type { JobParams } from '@/schema/jobs';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -91,8 +92,11 @@ interface Props {
   referenceImages?: File[];
   onReferenceImagesChange?: (files: File[]) => void;
   // --- video mode (optional; only used when kind === 'video') ---
-  kind?: JobKind;
-  onKindChange?: (kind: JobKind) => void;
+  kind?: StudioInputMode;
+  inputRef?: RefObject<HTMLDivElement>;
+  agentControls?: ReactNode;
+  onStop?: () => void;
+  onKindChange?: (kind: StudioInputMode) => void;
   videoMode?: VideoMode;
   videoCaps?: VideoControlCaps;
   duration?: number;
@@ -254,7 +258,7 @@ export function PromptInput({
   referenceImages = [],
   onReferenceImagesChange,
   kind = 'image',
-  onKindChange,
+  onKindChange, inputRef, agentControls, onStop,
   videoMode = 'firstlast',
   videoCaps,
   duration = 5,
@@ -278,6 +282,8 @@ export function PromptInput({
   onVideoFramesChange,
 }: Props) {
   const isVideo = kind === 'video';
+  const isAgent = kind === 'agent';
+  const ActionIcon = isAgent && onStop ? StopIcon : ArrowUpIcon;
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
@@ -307,6 +313,7 @@ export function PromptInput({
   // @引用编辑器：contentEditable DOM 是输入现场，text 字符串是状态层；
   // lastSynced 区分「用户输入回流」与「外部改写」——只有外部改写才重建 DOM。
   const editorRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(inputRef, () => editorRef.current!, []);
   const lastEditorRange = useRef<Range | null>(null);
   const handledInsertRequest = useRef<string | null>(null);
   const lastSynced = useRef<string | null>(null);
@@ -329,7 +336,7 @@ export function PromptInput({
     && (provider?.provider !== 'evolink' || isEvolinkMidjourney(m.id, provider.provider))
   ).map(model => ({ key: provider!, model }));
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
-  const selectedModel = models.find((item) => item.id === model);
+  const selectedModel = isAgent ? undefined : models.find((item) => item.id === model);
   const workflowInputs = selectedModel?.workflow_inputs;
   const fixedWorkflowSeed = workflowInputs?.some(input => input.type === 'seed' && sizeParams.workflow_inputs?.[input.id] != null) ?? false;
   const noWorkflowPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
@@ -635,9 +642,9 @@ export function PromptInput({
       ? (QUALITY_LABELS[quality] ?? quality)
       : null;
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
-  const isMj = caps.family === 'midjourney';
+  const isMj = !isAgent && caps.family === 'midjourney';
   const isEvoMj = isEvolinkMidjourney(size.modelId, size.provider);
-  const maxRef = caps.maxRefImages ?? maxReferenceImages(selectedModel?.id);
+  const maxRef = isAgent ? 16 : caps.maxRefImages ?? maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
   const maxRefVids = videoCaps?.maxRefVideos ?? MAX_REF_VIDEOS;
@@ -661,8 +668,8 @@ export function PromptInput({
     (videoCaps?.maxFrames ?? 0) >= 2 &&
     !videoFrames?.first &&
     Boolean(videoFrames?.last);
-  const variableError = noWorkflowPrompt ? null : promptVariableError(text);
-  const canSubmit =
+  const variableError = isAgent || noWorkflowPrompt ? null : promptVariableError(text);
+  const canSubmit = isAgent ? Boolean(!disabled && (text.trim() || referenceImages.length)) :
     Boolean(provider && selectedModel && (text.trim() || noWorkflowPrompt) && !disabled) && !lastFrameOnlyBlocked
       && !variableError
       && !workflowReferenceProblem
@@ -693,6 +700,10 @@ export function PromptInput({
   }, [refImagesLimit, referenceImages, onReferenceImagesChange]);
 
   const submit = useCallback(() => {
+    if (isAgent) {
+      if (canSubmit) void onSubmit(serializeMentions(text.trim()));
+      return;
+    }
     if (workflowReferenceProblem) return;
     if (!noWorkflowPrompt && promptVariableError(text)) {
       if (editorRef.current) focusEmptyVariable(editorRef.current, true);
@@ -704,7 +715,7 @@ export function PromptInput({
     if ((!trimmed && !noWorkflowPrompt) || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
     if (promptVariableParts(template).some(part => part.kind === 'variable')) onSubmit(trimmed, template);
     else onSubmit(trimmed);
-  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams, noWorkflowPrompt, workflowReferenceProblem]);
+  }, [isAgent, canSubmit, text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams, noWorkflowPrompt, workflowReferenceProblem]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (variableInput(e.target)) return;
@@ -794,7 +805,7 @@ export function PromptInput({
       onReferenceVideosChange?.(videos);
       onReferenceAudiosChange?.(audios);
     } else {
-      onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
+      onReferenceImagesChange?.([...referenceImages, ...Array.from(files).filter(file => !isAgent || file.type.startsWith('image/'))].slice(0, maxRef));
     }
     e.target.value = '';
   }
@@ -1187,9 +1198,9 @@ export function PromptInput({
           suppressContentEditableWarning
           role="textbox"
           aria-multiline="true"
-          aria-label="生图 prompt"
+          aria-label={isAgent ? "Agent 消息" : "生图 prompt"}
           aria-describedby={variableError ? variableErrorId : undefined}
-          data-placeholder={noWorkflowPrompt ? '此工作流无需提示词' : isVideo ? (mentionsEnabled && stackItems.length > 0 ? '描述画面主体、运镜与氛围，输入 @ 引用参考素材...' : '描述画面主体、运镜与氛围...') : (mentionsEnabled && stackItems.length > 0 ? '描述你想生成的画面，输入 @ 引用参考素材...' : '描述你想生成的画面...')}
+          data-placeholder={isAgent ? '输入想法或上传参考，和 Agent 一起创作' : noWorkflowPrompt ? '此工作流无需提示词' : isVideo ? (mentionsEnabled && stackItems.length > 0 ? '描述画面主体、运镜与氛围，输入 @ 引用参考素材...' : '描述画面主体、运镜与氛围...') : (mentionsEnabled && stackItems.length > 0 ? '描述你想生成的画面，输入 @ 引用参考素材...' : '描述你想生成的画面...')}
           onInput={onEditorInput}
           onKeyDown={onKey}
           onKeyUp={rememberEditorRange}
@@ -1311,8 +1322,8 @@ export function PromptInput({
               aria-label="选择生成模式"
               onClick={() => setOpenPanel(openPanel === 'kind' ? null : 'kind')}
             >
-              {isVideo ? <VideoIcon size="sm" aria-hidden /> : <ImageIcon size="sm" aria-hidden />}
-              {isVideo ? '视频' : '图片'}
+              {isAgent ? <AiIcon size="sm" aria-hidden /> : isVideo ? <VideoIcon size="sm" aria-hidden /> : <ImageIcon size="sm" aria-hidden />}
+              {isAgent ? 'Agent' : isVideo ? '视频' : '图片'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'kind'}
@@ -1325,6 +1336,7 @@ export function PromptInput({
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
+                  { key: 'agent', label: 'Agent', icon: <AiIcon size="lg" aria-hidden /> },
                   { key: 'image', label: '图片', icon: <ImageIcon size="lg" aria-hidden /> },
                   { key: 'video', label: '视频', icon: <VideoIcon size="lg" aria-hidden /> },
                 ] as const).map((item) => (
@@ -1346,6 +1358,7 @@ export function PromptInput({
             </ToolbarPopover>
           </div>
 
+          {isAgent ? agentControls : <>
           <div ref={providerRef} data-testid="provider-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'provider'}
@@ -1575,6 +1588,7 @@ export function PromptInput({
               </div>
             </>
           )}
+          </>}
           {onToggleAssetPanel && (
             <div className="relative shrink-0">
               <ControlButton
@@ -1623,16 +1637,16 @@ export function PromptInput({
       </div>
       {/* 提交按钮：唯一一颗，锚定壳右下角。收/放时壳底边在屏幕上不动，按钮只原位缩放
           40↔32px，不随状态重新挂载——视觉连续性与参考堆叠 / 编辑器的缩放一致。 */}
-      <Hint label={workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
+      <Hint label={isAgent ? (onStop ? '停止' : '发送') : workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
         type="button"
-        onClick={(e) => { e.stopPropagation(); submit(); }}
-        disabled={!canSubmit}
-        aria-label="提交生成"
+        onClick={(e) => { e.stopPropagation(); if (onStop) onStop(); else submit(); }}
+        disabled={!onStop && !canSubmit}
+        aria-label={isAgent ? (onStop ? "停止" : "发送") : "提交生成"}
         className={`absolute right-4 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-all duration-300 ${
           collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
         }`}
       >
-        <ArrowUpIcon size="lg"
+        <ActionIcon size="lg"
           aria-hidden
           className={`transition-transform duration-300 ${collapsed ? 'scale-90': ''}`}
         />

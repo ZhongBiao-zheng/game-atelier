@@ -14,7 +14,6 @@ import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { listStudioAgentJobs } from '@/api/canvas';
 import { StudioSessionPicker, StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
-import { PromptInput } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
   type CreationAssetPanelHandle,
@@ -199,7 +198,8 @@ function StudioFull() {
   const [promptAssetId, setPromptAssetId] = useState<string | null>(draft?.promptAssetId ?? null);
   const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(draft?.promptAssetSourceTitle ?? null);
   const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
-  const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
+  const kind = composer.mode === 'video' ? 'video' : 'image';
+  const setKind = composer.switchMode;
   // 旧版本 videoMode 存过 t2v/i2v/ref/v2v —— 仅 'omni' 原样保留，其余一律回落首尾帧。
   const [videoMode, setVideoMode] = useState<VideoMode>(draft?.videoMode ?? (saved.videoMode === 'omni' ? 'omni' : 'firstlast'));
   const [duration, setDuration] = useState<number>(draft?.duration ?? saved.duration ?? 5);
@@ -309,7 +309,7 @@ function StudioFull() {
         setModel(patch.model);
         setRecipeNotice(current => withoutMissingModel(current));
       }
-      if (patch.kind !== undefined) setKind(patch.kind);
+      if (patch.kind === 'image' || patch.kind === 'video') setKind(patch.kind);
       if (patch.sizeParams !== undefined) setSizeParams(patch.sizeParams);
       if (patch.quality !== undefined) setQuality(patch.quality);
       if (patch.count !== undefined) setCount(patch.count);
@@ -360,7 +360,7 @@ function StudioFull() {
   // 不同 job 的输出常同名（v1.png / v2.png）。删掉后 File 不在数组里，同一张图可以再导。
   const editRefSource = useRef(new WeakMap<File, string>());
   const handleEditAsReference = useCallback(async (path: string) => {
-    const target: 'stack' | 'frame' | 'mj' = kind === 'video'
+    const target: 'stack' | 'frame' | 'mj' = composer.mode === 'agent' ? 'stack' : kind === 'video'
       ? (videoMode === 'omni' ? 'stack' : 'frame')
       : imageFamily(model) === 'midjourney' ? 'mj' : 'stack';
     setClickPinned(true);
@@ -368,7 +368,7 @@ function StudioFull() {
     if (target === 'frame' && (videoCaps?.maxFrames ?? 2) < 1) return;
     const sourceOf = (f: File | null) => (f ? editRefSource.current.get(f) : undefined);
     const already = target === 'stack'
-      ? referenceImages.some((f) => sourceOf(f) === path)
+      ? (composer.mode === 'agent' ? composer.files : referenceImages).some((f) => sourceOf(f) === path)
       : target === 'frame'
         ? sourceOf(videoFrames.first) === path
         : mjRefs.image.some((f) => sourceOf(f) === path);
@@ -377,7 +377,9 @@ function StudioFull() {
     try {
       const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
       editRefSource.current.set(file, path);
-      if (target === 'frame') {
+      if (composer.mode === 'agent') {
+        if (file.type.startsWith('image/')) composer.setFiles(prev => [...prev, file].slice(0, 16));
+      } else if (target === 'frame') {
         setVideoFrames((prev) => ({ ...prev, first: file }));
       } else if (target === 'mj') {
         setMjRefs((prev) => ({ ...prev, image: [...prev.image, file] }));
@@ -387,7 +389,7 @@ function StudioFull() {
     } catch (e) {
       console.warn('[studio] 参考图导入失败（源文件取不到）', path, e);
     }
-  }, [kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
+  }, [composer.mode, composer.files, composer.setFiles, kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
 
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
@@ -924,7 +926,7 @@ function StudioFull() {
           onToggleHidden={toggleHidden}
           onDeleteFailed={deleteFailedRound}
           onCancel={cancelRound}
-          onReEdit={(config, id) => { if (embedded) composer.switchMode('creation'); return reEdit(config, id); }}
+          onReEdit={(config, id) => { return reEdit(config, id); }}
           reuseParameter={reuseParameter}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
@@ -976,9 +978,10 @@ function StudioFull() {
         {composer.mode === 'agent' ? <StudioAgentTimeline agent={composer.agent} jobs={persistedJobs}
           renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)}
           onPickSuggestion={text => {
-            composer.input.setText(text);
+            composer.switchMode('agent');
+            composer.setText(text);
             setClickPinned(true);
-            composer.input.textarea.current?.focus();
+            composer.editor.current?.focus();
           }} />
           : renderRounds(reversedRounds)}
       </div>
@@ -1031,8 +1034,7 @@ function StudioFull() {
             </span>
           )}
         </div>
-        <StudioComposer state={composer}>
-        <PromptInput
+        <StudioComposer state={composer}
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
@@ -1079,8 +1081,6 @@ function StudioFull() {
           menuDirection="up"
           referenceImages={referenceImages}
           onReferenceImagesChange={setReferenceImages}
-          kind={kind}
-          onKindChange={setKind}
           videoMode={videoMode}
           videoCaps={videoCaps}
           duration={duration}
@@ -1103,7 +1103,6 @@ function StudioFull() {
           videoFrames={videoFrames}
           onVideoFramesChange={setVideoFrames}
         />
-      </StudioComposer>
           </div>
         </div>
       </div>
@@ -1292,7 +1291,12 @@ function StudioFull() {
     }
   }
 
-  function mediaReferenceRoute(mime: string, empty = false) {
+  function mediaReferenceRoute(mime: string, empty = false): ReturnType<typeof routeStudioMediaAsset> {
+    if (composer.mode === 'agent') {
+      if (!mime.startsWith('image/')) return { notice: '只支持图片参考' } as const;
+      if (!empty && composer.files.length >= 16) return { notice: '参考图已满' } as const;
+      return { target: 'images' } as const;
+    }
     const slots = referenceSlots.current;
     return routeStudioMediaAsset(mime, {
       kind, videoMode, model, videoCaps: kind === 'video' ? videoCaps : null,
@@ -1305,6 +1309,10 @@ function StudioFull() {
   }
 
   function addReferenceFile(file: File, mime: string, title: string) {
+    if (composer.mode === 'agent') {
+      if (mime.startsWith('image/')) composer.setFiles(current => [...current, file].slice(0, 16));
+      return;
+    }
     const slots = referenceSlots.current;
     const target = mediaReferenceRoute(mime, true);
     if ('notice' in target) { setAssetNotice(target.notice); return; }

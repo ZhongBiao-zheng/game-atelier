@@ -7,7 +7,6 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
-import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
 import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
@@ -86,7 +85,7 @@ export function StudioCompact() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
-  const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
+  const kind = composer.mode === 'video' ? 'video' : 'image';
   const [videoMode, setVideoMode] = useState<VideoMode>(draft?.videoMode ?? (saved.videoMode === 'omni' ? 'omni' : 'firstlast'));
   const [duration, setDuration] = useState<number>(draft?.duration ?? saved.duration ?? 5);
   const [videoResolution, setVideoResolution] = useState<string>(draft?.videoResolution ?? saved.videoResolution ?? '720p');
@@ -404,8 +403,7 @@ export function StudioCompact() {
       <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
         {heroHeading}
       </h1>
-      <StudioComposer state={composer}>
-        <PromptInput
+      <StudioComposer state={composer}
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
         value={promptText}
@@ -434,8 +432,6 @@ export function StudioCompact() {
         menuDirection="down"
         referenceImages={referenceImages}
         onReferenceImagesChange={setReferenceImages}
-        kind={kind}
-        onKindChange={setKind}
         videoMode={videoMode}
         videoCaps={videoCaps}
         duration={duration}
@@ -458,7 +454,6 @@ export function StudioCompact() {
         videoFrames={videoFrames}
         onVideoFramesChange={setVideoFrames}
       />
-      </StudioComposer>
       {compactError && (
         <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
           {compactError}

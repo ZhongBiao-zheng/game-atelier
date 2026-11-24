@@ -8,10 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
-export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelect }: {
+export function CanvasAgentModelPicker({ models, alias, model, triggerClassName, disabled, onSelect }: {
   models: CanvasAgentChatModelList | null;
   alias: string | null;
   model: string | null;
+  triggerClassName?: string;
   disabled?: boolean;
   onSelect: (choice: CanvasAgentChatModel) => void;
 }) {
@@ -45,7 +46,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
-        className="flex h-7 min-w-0 max-w-[8rem] items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+        className={cn('flex h-7 min-w-0 max-w-[8rem] items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50', triggerClassName)}
       >
         {/* 记住的模型已不在列表里（Key 里停用了）：当作没选。 */}
         <span className="truncate">{(models ? current?.name : model) ?? '选择模型'}</span>

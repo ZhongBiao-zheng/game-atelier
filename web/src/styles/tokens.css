@@ -965,12 +965,3 @@
 .gateway-quota::-webkit-progress-value { background: currentColor; border-radius: 999px; }
 .gateway-quota::-moz-progress-bar { background: currentColor; border-radius: 999px; }
 .gateway-running { background: color-mix(in srgb, var(--status-done) 14%, transparent); color: var(--status-done); }
-
-
-.studio-mode-bar {
-  background-color: var(--panel);
-}
-
-.light .studio-mode-bar {
-  background-color: color-mix(in srgb, var(--background) 80%, var(--card));
-}

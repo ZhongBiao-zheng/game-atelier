@@ -21,11 +21,12 @@ const sameRef = (a: CanvasAgentModelRef, b: CanvasAgentModelRef) => a.alias === 
  * 一致）：一个都没勾就不能生成。勾选结果在自动打开时也保留，再关掉时恢复。
  * 图像 / 视频两页始终都在（偏好与当前创作模式无关），页内按供应商（Key 别名）分组。
  */
-export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, disabled, onChange }: {
+export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, triggerClassName, disabled, onChange }: {
   models: CanvasAgentGenerationModel[] | null;
   mode: CanvasAgentCreationMode;
   auto: boolean;
   preferred: CanvasAgentModelRef[];
+  triggerClassName?: string;
   disabled?: boolean;
   onChange: (update: { auto_models?: boolean; preferred_models?: CanvasAgentModelRef[] }) => void;
 }) {
@@ -66,6 +67,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
         className={cn(
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           !auto && 'text-primary',
+          triggerClassName,
         )}
       ><ModelIcon /></Button></Hint>
       <ToolbarPopover

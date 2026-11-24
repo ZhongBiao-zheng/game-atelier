@@ -86,7 +86,7 @@ function carriedSettings(session: CanvasAgentSession | StudioAgentSession): Canv
   };
 }
 
-export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false) {
+export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false, loadControls = open) {
   const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
   const [selecting, setSelecting] = useState(false);
   const [restoring, setRestoring] = useState(() => projectId === null && !home && Boolean(readStudioView().activeSessionId));
@@ -186,28 +186,28 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   // 模型列表要实时拉各 Key 的 /models，只在首次打开时拉一次。
   useEffect(() => {
-    if (!open || models) return;
+    if (!loadControls || models) return;
     listCanvasAgentChatModels().then(setModels, loadError => setError(messageOf(loadError)));
-  }, [open, models]);
+  }, [loadControls, models]);
 
   useEffect(() => {
-    if (!open || generationModels) return;
+    if (!loadControls || generationModels) return;
     listCanvasAgentGenerationModels()
       .then(result => setGenerationModels(result.models), loadError => setError(messageOf(loadError)));
-  }, [open, generationModels]);
+  }, [loadControls, generationModels]);
 
   const reloadSkills = useCallback(() => {
     listCanvasAgentSkills().then(result => setSkills(result.skills), loadError => setError(messageOf(loadError)));
   }, []);
-  useEffect(() => { if (open) reloadSkills(); }, [open, reloadSkills]);
+  useEffect(() => { if (loadControls) reloadSkills(); }, [loadControls, reloadSkills]);
 
   useEffect(() => {
-    if (!open || confirmAbove !== null) return;
+    if (!loadControls || confirmAbove !== null) return;
     getCanvasAgentSettings().then(
       settings => setConfirmAbove(settings.confirm_above_cny),
       loadError => setError(messageOf(loadError)),
     );
-  }, [open, confirmAbove]);
+  }, [loadControls, confirmAbove]);
 
   const onAgentEvent = (event: CanvasAgentEventPayload) => {
       if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;

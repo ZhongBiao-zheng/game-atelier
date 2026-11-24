@@ -14,10 +14,11 @@ const MAX_CONFIRM_ABOVE = 10_000;
  * 权限：审查 = 每一步都先确认；Auto = 直接执行，只有单次估价超过确认金额的生成先确认
  * （服务端 canvas_agent_runtime.generation_over_threshold，未计价的不拦）。
  */
-export function CanvasAgentPermissionMenu({ auto, confirmAbove, disabled, onModeChange, onConfirmAboveChange }: {
+export function CanvasAgentPermissionMenu({ auto, confirmAbove, triggerClassName, disabled, onModeChange, onConfirmAboveChange }: {
   auto: boolean;
   /** null：还没读到。 */
   confirmAbove: number | null;
+  triggerClassName?: string;
   disabled?: boolean;
   onModeChange: (mode: 'review' | 'auto') => void;
   onConfirmAboveChange: (value: number) => void;
@@ -40,6 +41,7 @@ export function CanvasAgentPermissionMenu({ auto, confirmAbove, disabled, onMode
         className={cn(
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           auto && 'text-primary',
+          triggerClassName,
         )}
       >{auto ? <AutoModeIcon /> : <ConfirmModeIcon />}</Button></Hint>
       <ToolbarPopover

@@ -20,10 +20,11 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, onChanged, label }: {
+export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, disabled, onSelect, onChanged, label }: {
   label?: string;
   skills: CanvasAgentSkill[];
   selected: string | null;
+  triggerClassName?: string;
   disabled?: boolean;
   onSelect: (name: string) => void;
   /** 导入或删除之后重新读取列表。 */
@@ -111,6 +112,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           selected && 'text-primary',
           label && 'flex w-auto gap-1 px-2 text-xs',
+          triggerClassName,
         )}
       ><SkillIcon />{label}</Button></Hint>
       <ToolbarPopover

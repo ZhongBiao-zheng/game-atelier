@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { AiIcon, CheckIcon, ChevronDownIcon, ImageIcon, VideoIcon } from '@/components/ui/icons';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -12,8 +13,9 @@ export const CREATION_MODES: { value: CanvasAgentCreationMode; label: string; sh
   { value: 'video', label: '视频创作', short: '视频', description: '只用视频模型', Icon: VideoIcon },
 ];
 
-export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
+export function CanvasAgentModeMenu({ mode, triggerClassName, disabled, onSelect }: {
   mode: CanvasAgentCreationMode;
+  triggerClassName?: string;
   disabled?: boolean;
   onSelect: (mode: CanvasAgentCreationMode) => void;
 }) {
@@ -25,7 +27,7 @@ export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
           type="button"
           disabled={disabled}
           aria-label="创作模式"
-          className="flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+          className={cn('flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40', triggerClassName)}
         >
           <current.Icon size="sm" />
           {current.short}

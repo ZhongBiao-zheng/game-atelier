@@ -51,15 +51,16 @@ export function clearStudioDraft(): void {
   draft = null;
 }
 
-export type StudioMode = 'creation' | 'agent';
-type StudioView = { mode: StudioMode; activeSessionId: string | null };
+export type StudioInputMode = 'agent' | 'image' | 'video';
+export const DEFAULT_STUDIO_SESSION_ID = 'session-default-studio';
+type StudioView = { inputMode: StudioInputMode; activeSessionId: string | null };
 
 export function readStudioView(): StudioView {
   try {
     const saved = JSON.parse(sessionStorage.getItem('studio:view') ?? '{}');
-    return { mode: saved.mode === 'agent' ? 'agent' : 'creation',
+    return { inputMode: saved.inputMode === 'video' || saved.inputMode === 'agent' ? saved.inputMode : 'image',
       activeSessionId: typeof saved.activeSessionId === 'string' ? saved.activeSessionId : null };
-  } catch { return { mode: 'creation', activeSessionId: null }; }
+  } catch { return { inputMode: 'image', activeSessionId: null }; }
 }
 
 export function updateStudioView(change: Partial<StudioView>) {
