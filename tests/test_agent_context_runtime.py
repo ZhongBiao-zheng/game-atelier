@@ -70,3 +70,20 @@ def test_user_and_tool_images_reach_model_but_only_refs_are_saved(
     assert history[0]["content"][-1]["image_url"] == "atelier-media://" + ref
     [output] = [item for item in history if item.get("type") == "function_call_output"]
     assert json.loads(output["output"])["attach_images"] == [ref]
+
+    # Once the attachment ages out, read_media accepts the reference shown in the placeholder.
+    for index in (2, 3):
+        responses = [_chat_text("继续")] if index == 2 else [_chat_tool("read_media", args), _chat_text("看到了")]
+        vendor.on("POST", CHAT, *responses)
+        followup = {"text": "再看一遍"}
+        if workspace == "studio":
+            followup["client_message_id"] = str(index)
+        assert api.post(url + "/messages", json=followup).status_code == 202
+        assert settle(api, url)["status"] == "idle"
+    last = vendor.calls("POST", CHAT)[-1].json()["messages"]
+    assert f"[早期参考图已省略：media_ref={ref}，需要时调用 read_media]" in json.dumps(last, ensure_ascii=False)
+    saved = read().history
+    assert saved[:len(history)] == history
+    outputs = [json.loads(item["output"]) for item in saved if item.get("type") == "function_call_output"]
+    assert outputs[-1]["attach_images"] == [ref]
+    assert "data:" not in json.dumps(saved)
