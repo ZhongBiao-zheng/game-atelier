@@ -356,3 +356,44 @@ def test_correction_crosses_turn_budget_and_next_message_starts_fresh(studio, mo
     vendor.on("POST", CHAT, _chat_tool("run_generation", IMAGE), _chat_text("完成"))
     assert api.post(url + "/messages", json={"client_message_id": "next", "text": "新图"}).status_code == 202
     assert settle(api, url)["status"] == "idle" and len(list_jobs()) == 2
+
+
+def test_approval_resume_keeps_turn_spend_and_answered_calls_with_folded_history(studio, monkeypatch):
+    from tests.test_agent_context import history_with_models
+
+    api, url, vendor, _ = studio
+    sid = url.rsplit("/", 1)[1]
+    history = history_with_models(5)
+    for message in history[::3]:
+        message["content"] = "此前的用户消息"
+    studio_agent.sessions.mutate(sid, lambda _current, _now: {"history": history})
+    monkeypatch.setattr(cost, "_estimate", lambda *args: 6)
+    first, second, third = (
+        _chat_tool("run_generation", IMAGE | {"prompt": prompt}).replace(b"call_chat1", call_id)
+        for prompt, call_id in (("猫", b"gen1"), ("狗", b"gen2"), ("鸟", b"gen3"))
+    )
+    vendor.on("POST", CHAT, first, second, third, _chat_text("完成"))
+    assert api.post(url + "/messages", json={"client_message_id": "new", "text": "画三张"}).status_code == 202
+    runtime = studio_agent.runtime
+    before = runtime._answered_call_ids(history)
+    for index, (pending_id, approve) in enumerate((("gen2", True), ("gen3", False)), start=1):
+        paused = settle(api, url)
+        assert paused["status"] == "awaiting_approval"
+        assert [row["call_id"] for row in paused["pending_approvals"]] == [pending_id]
+        saved = studio_agent.sessions.read(sid).history
+        assert saved[:len(history)] == history
+        assert cost.TurnSpend(saved).submitted == 6 * index
+        assert runtime._answered_call_ids(saved) == before | {f"gen{i}" for i in range(1, index + 1)}
+        decisions = [{"call_id": pending_id, "approve": approve}]
+        assert api.post(url + "/approvals", json={"decisions": decisions}).status_code == 202
+    assert settle(api, url)["status"] == "idle"
+    saved = studio_agent.sessions.read(sid).history
+    assert saved[:len(history)] == history
+    assert runtime._answered_call_ids(saved) == before | {"gen1", "gen2", "gen3"}
+    assert cost.TurnSpend(saved).submitted == 12 and len(list_jobs()) == 2
+    requests = vendor.calls("POST", CHAT)
+    assert len(requests) == 4
+    for request in requests:
+        outputs = [msg["content"] for msg in request.json()["messages"] if msg["role"] == "tool"]
+        assert outputs[:4] == ["[已折叠早期模型列表（共 12 个），需要选型时重新调用 list_models]"] * 4
+        assert outputs[4] == history[-1]["output"]
