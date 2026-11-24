@@ -132,9 +132,9 @@ def test_turn_pauses_for_approval_then_continues_after_reject(isolated_data_root
         assert [a.call_id for a in paused.pending_approvals] == ["call-1"]
         assert paused.title == "按参考出一张图"
 
-        # 发给模型的是缩略图 data URL，落盘的历史只有 atelier-media 引用。
+        # Runner 拿到与落盘一致的引用，模型请求里的缩略图由假上游用例检查。
         sent_image = calls[0][0]["content"][-1]["image_url"]
-        assert sent_image.startswith("data:image/jpeg;base64,")
+        assert sent_image == f"atelier-media://{imported['version_id']}"
         stored = json.dumps(paused.history)
         assert f"atelier-media://{imported['version_id']}" in stored and "data:" not in stored
 
