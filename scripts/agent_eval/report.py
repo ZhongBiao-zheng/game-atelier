@@ -277,7 +277,12 @@ def _generation_limit(expect, jobs):
 def _turn_checks(row, previous):
     expect = row["expect"]
     keys = _requested(expect)
-    if row["status"] != "completed":
+    stopped_at_limit = row["status"] == "stopped" and row.get("reason") in {
+        "max_results",
+        "max_cost_cny",
+        "max_steps",
+    }
+    if row["status"] != "completed" and not stopped_at_limit:
         reason = row.get("reason") or row.get("error") or STATES.get(row["status"], row["status"])
         return {key: _check(None, f"本轮未完成，{reason}") for key in keys}
     jobs = row.get("generations") or []
@@ -349,6 +354,19 @@ def _turn_checks(row, previous):
         for key in keys:
             if key != "skills":
                 checks[key] = _check(None, "缺少本轮的生成记录")
+    if stopped_at_limit:
+        # Partial turns can still demonstrate facts about submitted jobs and delivered media.
+        observable = set()
+        if items:
+            observable.update(("images", "videos", "dimensions", "duration_s", "orientation"))
+        if jobs:
+            observable.update(
+                ("model_family", "uses_all_attachments", "uses_previous_result", "on_canvas")
+            )
+        for key in keys:
+            if key not in observable:
+                checks[key] = _check(None, f"本轮因 {row['reason']} 停止，缺少可判定的证据")
+        checks["generation_limit"] = _check(False, f"本轮触及 {row['reason']} 上限")
     return {key: checks[key] for key in keys}
 
 
