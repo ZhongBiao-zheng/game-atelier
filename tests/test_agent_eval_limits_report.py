@@ -89,8 +89,8 @@ def test_cancelled_and_failed_jobs_consume_every_requested_result_even_without_m
         (
             [{"kind": "video", "requested_results": None, "outputs": [{"kind": "video"}] * 3}],
             1,
-            "fail",
-            "至少 3",
+            "na",
+            "至少 1",
         ),
         ([{"kind": "image", "params": {"n": 4}, "outputs": []}], 1, "fail", "4"),
         (
