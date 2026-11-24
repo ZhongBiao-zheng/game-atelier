@@ -66,22 +66,23 @@ export function StudioComposer({ state, ...props }: { state: StudioComposerState
   const busy = agent.pending || running || agent.session?.status === 'awaiting_approval';
   const creation = settings.creation_mode ?? 'all';
   const ready = agent.models?.models.some(item => item.model === settings.model && item.alias === settings.model_alias);
+  const triggerClassName = studioControlClass + ' shrink-0 w-auto';
   const controls = <>
-    <CanvasAgentModelPicker triggerClassName={studioControlClass + " shrink-0 w-auto"} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
+    <CanvasAgentModelPicker triggerClassName={triggerClassName} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
             disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
-    <CanvasAgentModeMenu triggerClassName={studioControlClass + " shrink-0 w-auto"} mode={creation} disabled={busy} onSelect={creation_mode => void agent.updateSettings({ creation_mode })} />
-    <CanvasAgentPreferencePicker triggerClassName={studioControlClass + " shrink-0 w-auto"} models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
+    <CanvasAgentModeMenu triggerClassName={triggerClassName} mode={creation} disabled={busy} onSelect={creation_mode => void agent.updateSettings({ creation_mode })} />
+    <CanvasAgentPreferencePicker triggerClassName={triggerClassName} models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
             preferred={settings.preferred_models ?? []} disabled={busy} onChange={agent.updateSettings} />
-    <CanvasAgentPermissionMenu triggerClassName={studioControlClass + " shrink-0 w-auto"} auto={(settings.permission_mode ?? 'auto') === 'auto'} disabled={busy}
+    <CanvasAgentPermissionMenu triggerClassName={triggerClassName} auto={(settings.permission_mode ?? 'auto') === 'auto'} disabled={busy}
             confirmAbove={agent.confirmAbove} onModeChange={permission_mode => void agent.updateSettings({ permission_mode })}
             onConfirmAboveChange={agent.updateConfirmAbove} />
-    <CanvasAgentSkillPicker triggerClassName={studioControlClass + " shrink-0 w-auto"} label={skill ?? '技能'} skills={agent.skills} selected={skill}
+    <CanvasAgentSkillPicker triggerClassName={triggerClassName} label={skill ?? '技能'} skills={agent.skills} selected={skill}
             onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
   </>;
   const agentProps = state.mode === 'agent' ? {
     value: state.text, onValueChange: state.setText,
     referenceImages: state.files, onReferenceImagesChange: state.setFiles,
-    onSubmit: state.send, disabled: !ready || busy || agent.waitingForSession,
+    onSubmit: state.send, onSavePromptAsset: undefined, disabled: props.disabled || !ready || busy || agent.waitingForSession,
     onStop: running ? agent.stop : undefined, agentControls: controls,
   } : {};
   return <div className="pointer-events-auto mx-auto w-full max-w-[780px]">

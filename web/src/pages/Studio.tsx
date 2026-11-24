@@ -971,7 +971,7 @@ function StudioFull() {
 
   return (
     <div
-      className="relative h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] overflow-hidden px-3 sm:px-6"
+      className="relative h-full overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
@@ -1059,7 +1059,7 @@ function StudioFull() {
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
           onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
-          disabled={pending}
+          disabled={pending || composer.agent.pending || composer.agent.waitingForSession}
           value={promptText}
           onValueChange={setPromptText}
           onSavePromptAsset={() => {

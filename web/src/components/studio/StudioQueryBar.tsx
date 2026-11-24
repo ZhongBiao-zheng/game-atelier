@@ -67,7 +67,7 @@ export function StudioQueryBar({
   const toggle = (panel: 'time' | 'mode' | 'op') => setOpenPanel((p) => (p === panel ? null : panel));
   const panelCls = 'w-60 rounded-xl border border-border bg-card p-2';
   const optionCls =
-    'flex h-10 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60';
+    'flex h-10 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60';
   const timeLabel = filters.time === 'all' ? '' : TIME_OPTS.find(option => option.key === filters.time)?.label;
   const modeLabel = MODE_OPTS.filter(option => filters.modes.includes(option.key)).map(option => option.label).join('、');
   const opLabel = OP_OPTS.find(option => option.key === filters.op)?.label;
