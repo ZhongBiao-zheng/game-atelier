@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, UploadIcon } from '@/components/ui/icons';
+import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, SearchIcon, UploadIcon } from '@/components/ui/icons';
 
 import {
   canvasMediaUrl,
@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { EditableText, type EditableTextHandle } from '@/components/ui/editable-text';
 import { Label } from '@/components/ui/label';
 import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
@@ -51,6 +52,7 @@ type ImportState =
 
 export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectId: string) => void }) {
   const [projects, setProjects] = useState<CanvasProjectSummary[]>([]);
+  const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ open: false });
@@ -181,12 +183,32 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     }
   }
 
+  const filteredProjects = projects.filter(project =>
+    project.name.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+
   return (
     <section className="stable-scroll h-full overflow-y-auto bg-background">
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
         <header className="mb-8 flex flex-wrap items-center justify-between gap-5">
-          <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
+            {!loading && projects.length > 0 && (
+              <span className="text-xs tabular-nums text-muted-foreground">共 {projects.length} 个项目</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {projects.length > 0 && (
+              <InputGroup className="w-56">
+                <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
+                <InputGroupInput
+                  aria-label="搜索画布项目"
+                  placeholder="搜索画布项目"
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                />
+              </InputGroup>
+            )}
             <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
               <UploadIcon aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
             </Button>
@@ -235,9 +257,12 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <span className="text-sm">新建一个画布项目</span>
             </Button>
           )}
+          {!loading && !loadError && projects.length > 0 && filteredProjects.length === 0 && (
+            <p className="col-span-full py-12 text-center text-sm text-muted-foreground">没有匹配的画布项目</p>
+          )}
           {loading && projects.length === 0
             ? Array.from({ length: 3 }, (_, index) => <CanvasCardSkeleton key={index} />)
-            : projects.map(project => (
+            : filteredProjects.map(project => (
               <CanvasProjectCard
                 key={project.project_id}
                 project={project}
@@ -368,12 +393,14 @@ function CanvasProjectCard({
         className="block w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
       >
         {project.cover ? (
-          <img
-            src={canvasMediaUrl(project.project_id, project.cover.version_id, 360)}
-            alt=""
-            loading="lazy"
-            className="aspect-[16/10] w-full border-b border-border object-cover"
-          />
+          <div className="media-edge overflow-hidden border-b border-border">
+            <img
+              src={canvasMediaUrl(project.project_id, project.cover.version_id, 360)}
+              alt=""
+              loading="lazy"
+              className="media-checker aspect-[16/10] w-full object-cover"
+            />
+          </div>
         ) : (
           <div className="grid aspect-[16/10] place-items-center border-b border-border bg-secondary/30 px-4 text-center font-display text-display text-muted-foreground">
             <span className="line-clamp-2">{project.name}</span>
