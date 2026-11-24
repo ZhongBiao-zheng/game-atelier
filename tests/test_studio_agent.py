@@ -134,7 +134,8 @@ def test_agent_turn_generates_or_waits_for_permission(client, monkeypatch, price
             row = settle(client, url)
             assert row["status"] == "idle" and not list_jobs()
         assert "data:image/" not in json.dumps(store.read(sid).history)
-        assert len(client.get(BASE).json()["sessions"]) == 1
+        visible = [session["session_id"] for session in client.get(BASE).json()["sessions"]]
+        assert visible == [store.DEFAULT_SESSION_ID, sid]
         assert len(client.post(url + "/messages", json=msg).json()["turns"]) == 1
         assert len(vendor.calls("POST", "/v1/chat/completions")) == 2
         assert client.delete(url, headers={"If-Match": str(row["revision"])}).status_code == 204
