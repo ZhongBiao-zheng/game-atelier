@@ -10,7 +10,7 @@ from tests.test_agent_eval_report import _row
         ("failed", "HTTP 401"),
         ("failed", "HTTP 429"),
         ("stopped", "max_seconds"),
-        ("stopped", "max_steps"),
+        ("stopped", "interrupted"),
         ("not_applicable", "当前提交没有该接口"),
     ],
 )
@@ -132,6 +132,7 @@ def test_r6_counts_registered_results_against_per_turn_expected_plus_one_revisio
     row["generations"] = [
         {
             "kind": kind,
+            "requested_results": count,
             "turn_index": 1,
             "outputs": [{"kind": kind, "error": "media_unavailable"} for _ in range(count)],
         }
@@ -156,7 +157,7 @@ def test_r6_two_turns_each_have_their_own_result_allowance():
         limits={"max_results": 10},
     )
     row["generations"] = [
-        {"turn_index": index, "kind": "image", "outputs": [{"kind": "image"}] * 3}
+        {"turn_index": index, "kind": "image", "requested_results": 3, "outputs": [{"kind": "image"}] * 3}
         for index in (1, 2)
     ]
     grades = machine_checks(row)

@@ -18,7 +18,7 @@ def _row():
         'attachments': [{'name': 'a.png', 'sha256': 'abc'}], 'elapsed_seconds': 1.25,
         'usage': {'input_tokens': 2, 'output_tokens': 3, 'total_cost_cny': 0.15},
         'validation_errors': 0, 'step_count': 1, 'steps': [], 'approvals': [],
-        'generations': [{'kind': 'image', 'model': 'Seedream-5.0', 'turn_index': 1, 'status': 'done',
+        'generations': [{'kind': 'image', 'model': 'Seedream-5.0', 'turn_index': 1, 'requested_results': 1, 'status': 'done',
                          'prompt': '<img src=x>', 'params': {'size': '999x999'}, 'references': [{'sha256': 'abc'}],
                          'outputs': [{'kind': 'image', 'width': 999, 'height': 999, 'path': 'result.png'}]}],
     }
