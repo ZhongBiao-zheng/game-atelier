@@ -300,8 +300,7 @@ def submit(workspace, item, params, call_id, index):
     )
     jid = "studio-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
     # 与删除/停止共用外部会话锁：已取消的后台工作不能在会话清理后再创建 Job。
-    with sessions.lock(workspace.session_id):
-        session = sessions.read(workspace.session_id)
+    with sessions.locked_session(workspace.session_id) as session:
         if session.status != "running" or session.turns[-1].turn_id != workspace.active_turn:
             raise ValueError("这一轮已结束")
         try:
@@ -689,8 +688,7 @@ class StudioWorkspace:
             }
         if name == "update_plan":
             plan = CanvasAgentPlan(items=args["items"], updated_at=sessions.now())
-            with sessions.lock(sid):
-                sessions.read(sid)
+            with sessions.locked_session(sid):
                 path = sessions.plan_path(sid)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_json(path, plan.model_dump(mode="json"))

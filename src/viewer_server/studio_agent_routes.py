@@ -316,6 +316,8 @@ async def delete(
     session_id: CanvasAgentSessionId,
     if_match: Annotated[str | None, Header(alias="If-Match")] = None,
 ):
+    if session_id == sessions.DEFAULT_SESSION_ID:
+        raise HTTPException(400, detail="默认会话不能删除")
     revision = _canvas_if_match(if_match, "对话")
     async with guard(session_id):
         async with contextmanager_in_threadpool(sessions.delete(session_id, revision)):

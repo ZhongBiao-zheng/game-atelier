@@ -16,6 +16,10 @@ from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.schemas import StudioAgentSession
 
 
+DEFAULT_SESSION_ID = "session-default-studio"
+DEFAULT_SESSION_TITLE = "默认会话"
+
+
 def root() -> Path:
     return data_root.resolve_data_root() / "studio-agent"
 
@@ -33,7 +37,7 @@ def _delete_lock(path):
 
 
 @contextmanager
-def lock(sid):
+def _lock(sid):
     path = _lock_path(sid)
     with file_lock(path), _delete_lock(path):
         yield
@@ -57,6 +61,11 @@ def now():
 
 def create(settings):
     sid = "session-" + secrets.token_hex(12)
+    with _lock(sid):
+        return _create_locked(sid, settings)
+
+
+def _create_locked(sid, settings):
     timestamp = now()
     session = StudioAgentSession(
         session_id=sid,
@@ -64,8 +73,7 @@ def create(settings):
         updated_at=timestamp,
         **({"title": "新对话"} | settings),
     )
-    with lock(sid):
-        _save(session)
+    _save(session)
     return session
 
 
@@ -75,7 +83,7 @@ def _save(session):
     atomic_write_json(path, session.model_dump(mode="json"))
 
 
-def read(sid):
+def _read(sid):
     try:
         session = StudioAgentSession.model_validate_json(read_text_with_retry(session_path(sid)))
     except FileNotFoundError:
@@ -85,22 +93,40 @@ def read(sid):
     return session
 
 
+@contextmanager
+def locked_session(sid):
+    with _lock(sid):
+        if sid == DEFAULT_SESSION_ID and not session_path(sid).exists():
+            session = _create_locked(sid, {"title": DEFAULT_SESSION_TITLE})
+        else:
+            session = _read(sid)
+        yield session
+
+
+def read(sid):
+    if sid == DEFAULT_SESSION_ID and not session_path(sid).exists():
+        with locked_session(sid) as session:
+            return session
+    return _read(sid)
+
+
 def summaries():
+    fields = {"session_id", "title", "updated_at", "status", "revision"}
+    if not session_path(DEFAULT_SESSION_ID).exists():
+        read(DEFAULT_SESSION_ID)
     sessions = []
     for path in (root() / "sessions").glob("session-*.json"):
         try:
             row = read(path.stem)
         except (ValueError, OSError, CanvasToolError):
             continue
-        sessions.append(
-            row.model_dump(include={"session_id", "title", "updated_at", "status", "revision"})
-        )
-    return sorted(sessions, key=lambda row: row["updated_at"], reverse=True)
+        sessions.append(row.model_dump(include=fields))
+    return sorted(sessions, key=lambda row: (row["session_id"] == DEFAULT_SESSION_ID, row["updated_at"]),
+                  reverse=True)
 
 
 def mutate(sid, update):
-    with lock(sid):
-        current = read(sid)
+    with locked_session(sid) as current:
         timestamp = now()
         fields = update(current, timestamp)
         if not fields:
