@@ -40,12 +40,14 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
   const archiveRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
 
+  const userSkills = useMemo(() => skills.filter(item => !item.builtin), [skills]);
+
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return needle
-      ? skills.filter(item => `${item.name} ${item.description}`.toLowerCase().includes(needle))
-      : skills;
-  }, [skills, query]);
+      ? userSkills.filter(item => `${item.name} ${item.description}`.toLowerCase().includes(needle))
+      : userSkills;
+  }, [userSkills, query]);
 
   function ask(title: string, message: string, confirmText: string, destructive = false) {
     return new Promise<boolean>(resolve => setConfirming({ title, message, confirmText, destructive, resolve }));
@@ -129,38 +131,29 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           className="mb-1"
         />
         <div role="listbox" aria-label="Skill 列表" className="max-h-64 overflow-y-auto">
-          {skills.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">还没有 Skill</p>}
-          {skills.length > 0 && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的 Skill</p>}
-          {[true, false].map(builtin => {
-            const group = matches.filter(item => item.builtin === builtin);
-            const title = builtin ? '内置' : '我的';
-            return group.length > 0 && (
-              <div key={title} role="group" aria-label={title}>
-                <p className="px-2 py-1 text-xs text-muted-foreground">{title}</p>
-                {group.map(item => (
-                  <div key={item.name} className="group flex items-start gap-1 rounded-md hover:bg-secondary">
-                    <Button variant="bare"
-                      type="button"
-                      role="option"
-                      aria-selected={item.name === selected}
-                      onClick={() => { onSelect(item.name); setOpen(false); }}
-                      className={cn('min-w-0 flex-1 px-2 py-1.5 text-left', item.name === selected && 'text-primary')}
-                    >
-                      <span className="block truncate text-xs font-medium">{item.name}</span>
-                      <span className="line-clamp-2 text-xs text-muted-foreground">{item.description}</span>
-                    </Button>
-                    {!item.builtin && <Hint label="删除"><Button variant="bare"
-                      type="button"
-                      aria-label={`删除 Skill ${item.name}`}
-                      disabled={busy}
-                      onClick={() => void remove(item.name)}
-                      className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                    ><DeleteIcon size="sm" /></Button></Hint>}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
+          {userSkills.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">还没有导入 Skill</p>}
+          {userSkills.length > 0 && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的 Skill</p>}
+          {matches.map(item => (
+            <div key={item.name} className="group flex items-start gap-1 rounded-md hover:bg-secondary">
+              <Button variant="bare"
+                type="button"
+                role="option"
+                aria-selected={item.name === selected}
+                onClick={() => { onSelect(item.name); setOpen(false); }}
+                className={cn('min-w-0 flex-1 px-2 py-1.5 text-left', item.name === selected && 'text-primary')}
+              >
+                <span className="block truncate text-xs font-medium">{item.name}</span>
+                <span className="line-clamp-2 text-xs text-muted-foreground">{item.description}</span>
+              </Button>
+              <Hint label="删除"><Button variant="bare"
+                type="button"
+                aria-label={`删除 Skill ${item.name}`}
+                disabled={busy}
+                onClick={() => void remove(item.name)}
+                className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+              ><DeleteIcon size="sm" /></Button></Hint>
+            </div>
+          ))}
         </div>
         {notice && (
           <p role={notice.error ? 'alert' : 'status'} className={cn('px-2 py-1.5 text-xs', notice.error ? 'text-destructive' : 'text-muted-foreground')}>{notice.text}</p>
