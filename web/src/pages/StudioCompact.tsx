@@ -6,6 +6,8 @@ import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } fro
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
+import { CreationAssetPanel } from '@/components/assets/CreationAssetPanel';
+import { readCreationMediaFile } from '@/api/creationAssets';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
@@ -17,7 +19,7 @@ import { nearestDuration, videoControlCaps, type VideoMode, type VideoQuality } 
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import type { JobKind, JobParams } from '@/schema/jobs';
-import { readStudioDraft, writeStudioDraft } from './studioDraft';
+import { DEFAULT_STUDIO_SESSION_ID, updateStudioView, readStudioDraft, writeStudioDraft } from './studioDraft';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
@@ -61,6 +63,7 @@ export function StudioCompact() {
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
   const [pending, setPending] = useState(false);
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
@@ -281,12 +284,14 @@ export function StudioCompact() {
 
     try {
       await createStudioJob({
+        studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
       });
+      updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
       setLocation('/studio');
     } catch (e: any) {
       setCompactError(e.message);
@@ -377,6 +382,7 @@ export function StudioCompact() {
 
     try {
       await createStudioJob({
+        studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
@@ -384,6 +390,7 @@ export function StudioCompact() {
         params: videoParams,
         kind: 'video',
       });
+      updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
       setLocation('/studio');
     } catch (e: any) {
       setCompactError(e.message);
@@ -404,6 +411,8 @@ export function StudioCompact() {
         {heroHeading}
       </h1>
       <StudioComposer state={composer}
+        assetPanelOpen={assetPanelOpen}
+        onToggleAssetPanel={composer.mode === 'agent' ? () => setAssetPanelOpen(open => !open) : undefined}
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
         value={promptText}
@@ -454,6 +463,18 @@ export function StudioCompact() {
         videoFrames={videoFrames}
         onVideoFramesChange={setVideoFrames}
       />
+      {assetPanelOpen && composer.mode === 'agent' && <CreationAssetPanel initialKind="media"
+        onClose={() => setAssetPanelOpen(false)}
+        onUsePrompt={(_asset, text) => composer.setText(text)}
+        onUseMedia={async (asset, content) => {
+          if (!content.mime_type.startsWith('image/')) { setCompactError('Agent 只支持图片参考'); return; }
+          if (composer.files.length >= 16) { setCompactError('参考图已满'); return; }
+          try {
+            const file = await readCreationMediaFile(asset.asset_id, content);
+            composer.setFiles(current => [...current, file].slice(0, 16));
+            setCompactError(null);
+          } catch (error) { setCompactError(error instanceof Error ? error.message : String(error)); }
+        }} />}
       {compactError && (
         <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
           {compactError}

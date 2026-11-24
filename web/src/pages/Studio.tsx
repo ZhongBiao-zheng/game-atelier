@@ -45,7 +45,7 @@ import { DEFAULT_STUDIO_SESSION_ID, readStudioDraft, writeStudioDraft } from './
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
-import { creationAssetInputUrl, creationAssetMediaUrl, markCreationAssetUsed } from '@/api/creationAssets';
+import { creationAssetInputUrl, readCreationMediaFile, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
 import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
@@ -1360,10 +1360,8 @@ function StudioFull() {
     const route = mediaReferenceRoute(content.mime_type);
     if ('notice' in route) { setAssetNotice(route.notice); return; }
     try {
-      const response = await connectionFetch(creationAssetMediaUrl(asset.asset_id));
-      if (!response.ok) throw await apiError(response, '读取媒体资产');
-      const blob = await response.blob();
-      addReferenceFile(new File([blob], content.filename, { type: content.mime_type }), content.mime_type, asset.title);
+      const file = await readCreationMediaFile(asset.asset_id, content);
+      addReferenceFile(file, content.mime_type, asset.title);
     } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
   }
 

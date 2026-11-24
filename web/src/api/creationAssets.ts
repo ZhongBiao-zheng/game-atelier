@@ -4,6 +4,7 @@ import type {
   CreationAsset,
   CategorySuggestion,
   CreationAssetKind,
+  CreationMediaAssetContent,
   CreationAssetList,
   CreationAssetStaleness,
   CreationGenerationFromCanvas,
@@ -200,6 +201,12 @@ export function markCreationAssetUsed(
       body: JSON.stringify({ project_id: projectId }),
     },
   );
+}
+
+export async function readCreationMediaFile(assetId: string, content: CreationMediaAssetContent) {
+  const response = await connectionFetch(creationAssetMediaUrl(assetId));
+  if (!response.ok) throw await apiError(response, '读取媒体资产');
+  return new File([await response.blob()], content.filename, { type: content.mime_type });
 }
 
 export function creationAssetMediaUrl(assetId: string): string {
