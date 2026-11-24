@@ -209,7 +209,7 @@ def launch(ws):
             if isinstance(error, CanvasToolError) and error.code == "SESSION_DELETING":
                 return  # DELETE 已认领会话，负责等本轮退出并清理文件。
             logger.exception("Studio Agent 回合中断")
-            await asyncio.to_thread(interrupt, ws, "这一轮已中断")
+            await asyncio.to_thread(interrupt, ws, f"这一轮已中断（{type(error).__name__}）")
         finally:
             if _tasks.get(ws.session_id) is asyncio.current_task():
                 _tasks.pop(ws.session_id, None)
@@ -235,8 +235,11 @@ def create_session(payload: CanvasAgentSessionUpdate):
 async def get_session(session_id: CanvasAgentSessionId):
     async with guard(session_id):
         ws = workspace(session_id)
+        # guard 阻止新任务启动，但已有任务可以在读盘期间进入待审批并退出。
+        # 先记下任务归属，不能用读盘后的任务表判定较早的 running 快照已被遗弃。
+        was_live = session_id in _tasks
         row = await asyncio.to_thread(ws.read)
-        if row.status == "running" and session_id not in _tasks:
+        if row.status == "running" and not was_live:
             row = await asyncio.to_thread(interrupt, ws, "服务重启，这一轮已中断")
         return sessions.public(row)
 

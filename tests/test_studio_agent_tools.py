@@ -398,3 +398,51 @@ def test_approval_resume_keeps_turn_spend_and_answered_calls_with_folded_history
         outputs = [msg["content"] for msg in request.json()["messages"] if msg["role"] == "tool"]
         assert outputs[:4] == ["[已折叠早期模型列表（共 12 个），需要选型时重新调用 list_models]"] * 4
         assert outputs[4] == history[-1]["output"]
+
+
+def test_poll_crossing_approval_does_not_recover_a_finished_task(studio, monkeypatch):
+    api, url, vendor, _ = studio
+    read_running = threading.Event()
+    task_done = threading.Event()
+    run = studio_agent.runtime.run_workspace_turn
+    workspace = studio_agent_routes.workspace
+
+    async def after_poll(ws, broadcast):
+        assert await asyncio.to_thread(read_running.wait, 5)
+        await run(ws, broadcast)
+
+    def poll_workspace(sid):
+        ws = workspace(sid)
+        task = studio_agent_routes._tasks.get(sid)
+        if task:
+            task.add_done_callback(lambda _: task_done.set())
+            read = ws.read
+
+            def delayed_snapshot():
+                row = read()
+                read_running.set()
+                assert task_done.wait(5)
+                return row
+
+            ws.read = delayed_snapshot
+        return ws
+
+    monkeypatch.setattr(studio_agent.runtime, "run_workspace_turn", after_poll)
+    monkeypatch.setattr(studio_agent_routes, "workspace", poll_workspace)
+    send(api, url, vendor, "run_generation", VIDEO | {"count": 3})
+    row = settle(api, url)
+    assert row["status"] == "awaiting_approval", row["error"]
+    assert [item["call_id"] for item in row["pending_approvals"]] == ["call_chat1"]
+
+
+def test_outer_turn_exception_records_type_without_private_details(studio, monkeypatch):
+    api, url, vendor, _ = studio
+
+    async def broken(ws, broadcast):
+        raise LookupError("private vendor payload")
+
+    monkeypatch.setattr(studio_agent.runtime, "run_workspace_turn", broken)
+    send(api, url, vendor, "run_generation", IMAGE)
+    row = settle(api, url)
+    assert row["status"] == "interrupted"
+    assert "LookupError" in row["error"] and "private vendor payload" not in row["error"]
