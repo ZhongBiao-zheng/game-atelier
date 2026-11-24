@@ -32,6 +32,20 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.140.0', date: '2026-11-24', headline: '创作台 Agent：一个输入框，边聊边出图', changes: [
+    { kind: 'feat', text: '创作台合成一个输入框，在「生成模式」里选 Agent、图片或视频；手动出图和 Agent 对话按时间排在同一条记录里。' },
+    { kind: 'feat', text: '左上角新建、切换、删除对话；以前的出图都在「默认会话」里，删除对话时其中的作品回到默认会话。' },
+    { kind: 'feat', text: 'Agent 每轮都会出作品，问「还能怎么改」也会先给建议、再直接生成，花费超过确认金额才请你确认；要多张时按不同构图方向各出一张。画布 Agent 同样如此。' },
+    { kind: 'feat', text: 'Agent 回复后给出「继续探索」，点一下接着改；画布 Agent 面板也有。' },
+    { kind: 'feat', text: '内置 17 个出图技能（通用写法、各模型族、游戏美术品类、视频），Agent 按需自动使用；技能菜单只列你自己导入的 Skill。' },
+    { kind: 'feat', text: '长对话更省钱，较早轮次的参考图和工具结果不再每轮重发。' },
+    { kind: 'feat', text: '参考素材可以展开成抽屉查看或一键清空；资产库入口移进输入框工具栏。' },
+    { kind: 'feat', text: '画布项目列表支持搜索；自定义供应商并入「添加供应商」页。' },
+    { kind: 'fix', text: '排队中、还没发出的任务，点停止后立即取消。' },
+    { kind: 'fix', text: '参考图来源标题在 HEIC 转换、移除参考时不再错清或残留。' },
+    { kind: 'fix', text: '桌面版覆盖安装时等文件释放再替换，卸载后删除空的安装目录。' },
+    { kind: 'fix', text: '网关密钥没有可用模型时，在保存按钮旁写明原因。' },
+  ] },
   { version: '5.139.0', date: '2026-11-22', headline: '桌面版、更稳的团队网关、更能干的 Agent', changes: [
     { kind: 'feat', text: '桌面版：macOS 与 Windows 有了独立窗口的安装包，首次启动自动下载运行内容，之后在应用内更新。安装包暂未签名，系统会提示来源未知。' },
     { kind: 'feat', text: '团队网关更稳：主机重启后接着查没跑完的任务；成员断线或关掉页面后能接回原来的任务，不重复下单；点停止会送到主机。' },
