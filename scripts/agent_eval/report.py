@@ -276,7 +276,7 @@ def _result_counts(jobs):
         )
         if requested is None:
             submitted_known = False
-            submitted_min += max(1, delivered)
+            submitted_min += 1
         else:
             submitted_min += requested
     return {

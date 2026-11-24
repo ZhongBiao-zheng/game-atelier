@@ -114,3 +114,16 @@ def test_submitted_quantity_uses_evidence_and_preserves_unknown_upper_bound(
     row.update(expect={"images": expected}, generations=generations)
     grade = machine_checks(row)["generation_limit"]
     assert grade["status"] == verdict and f"已提交份数 {quantity}，" in grade["reason"]
+
+
+def test_three_jobs_with_unknown_quantities_prove_three_submissions_without_delivery():
+    row = _row()
+    row.update(
+        expect={"images": 1},
+        generations=[
+            {"kind": "image", "requested_results": None, "outputs": [], "status": "failed"}
+            for _ in range(3)
+        ],
+    )
+    check = machine_checks(row)["generation_limit"]
+    assert check["status"] == "fail" and "已提交份数 至少 3，已交付份数 0" in check["reason"]
