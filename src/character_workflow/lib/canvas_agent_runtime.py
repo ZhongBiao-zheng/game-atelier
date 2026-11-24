@@ -1251,8 +1251,9 @@ def _run_config(workspace):
     from agents.run_config import ModelInputData
 
     def prepare(items):
-        items = agent_context.hydrate_user_images(items, workspace.media, workspace.missing_image)
-        return vision.with_attached_images(items, workspace.media)
+        hydrated = agent_context.hydrate_user_images(items, workspace.media, workspace.missing_image)
+        folded = agent_context.fold_tool_outputs(hydrated)
+        return vision.with_attached_images(folded, workspace.media, attachment_source=items)
 
     async def attach(data) -> ModelInputData:
         items = await asyncio.to_thread(prepare, list(data.model_data.input))

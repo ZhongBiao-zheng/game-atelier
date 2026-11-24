@@ -108,10 +108,13 @@ def attached_ids(item: Any) -> list[str]:
     return [str(v) for v in ids] if isinstance(ids, list) else []
 
 
-def with_attached_images(items: list[Any], data_url: Callable[[str], str | None]) -> list[Any]:
+def with_attached_images(items: list[Any], data_url: Callable[[str], str | None], *,
+                         attachment_source: list[Any] | None = None) -> list[Any]:
     """Insert a user image message after each of the latest tool-output blocks carrying
     attach_images. data_url maps a version id to a thumbnail data URL, or None if gone."""
-    marked = [index for index, item in enumerate(items) if attached_ids(item)]
+    # Folded tool text may no longer contain its attachment markers. Item positions are unchanged.
+    source = items if attachment_source is None else attachment_source
+    marked = [index for index, item in enumerate(source) if attached_ids(item)]
     chosen = set(marked[-MAX_ATTACH_OUTPUTS:])
     if not chosen:
         return items
@@ -120,7 +123,7 @@ def with_attached_images(items: list[Any], data_url: Callable[[str], str | None]
     for index, item in enumerate(items):
         result.append(item)
         if index in chosen:
-            pending.extend(attached_ids(item))
+            pending.extend(attached_ids(source[index]))
         following = items[index + 1] if index + 1 < len(items) else None
         block_ends = not (isinstance(following, dict)
                           and following.get("type") == "function_call_output")
