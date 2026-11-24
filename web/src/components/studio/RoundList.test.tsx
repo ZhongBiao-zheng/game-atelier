@@ -337,9 +337,9 @@ describe('RoundList 大图键盘切换', () => {
 });
 
 describe('RoundList skill 出图删除门控', () => {
-  const imageDone = (mode?: 'image' | 'canvas'): RoundState => ({
+  const imageDone = (shareable = true): RoundState => ({
     kind: 'done',
-    mode,
+    shareable,
     jobId: 'job-img-1',
     submittedAt: new Date().toISOString(),
     imagePaths: ['/data/characters/cao-cao/promo/v1.png'],
@@ -347,20 +347,20 @@ describe('RoundList skill 出图删除门控', () => {
   });
 
   it('studio 出图保留「更多操作」（含删除该批次）', () => {
-    render(<RoundList rounds={[imageDone('image')]} />);
+    render(<RoundList rounds={[imageDone()]} />);
     expect(screen.getByLabelText('更多操作')).toBeInTheDocument();
   });
 
   it('通过更多操作显式保存历史提示词资产', () => {
     const onSavePromptAsset = vi.fn();
-    render(<RoundList rounds={[imageDone('image')]} onSavePromptAsset={onSavePromptAsset} />);
+    render(<RoundList rounds={[imageDone()]} onSavePromptAsset={onSavePromptAsset} />);
     fireEvent.keyDown(screen.getByLabelText('更多操作'), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitem', { name: '保存提示词资产' }));
-    expect(onSavePromptAsset).toHaveBeenCalledWith(imageDone('image').config);
+    expect(onSavePromptAsset).toHaveBeenCalledWith(imageDone().config);
   });
 
   it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
-    render(<RoundList rounds={[imageDone('canvas')]} />);
+    render(<RoundList rounds={[imageDone(false)]} />);
     expect(screen.queryByLabelText('更多操作')).toBeNull();
   });
 });

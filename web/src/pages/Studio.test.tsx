@@ -4,6 +4,11 @@ import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
+import * as canvasApi from '@/api/canvas';
+import type { StudioAgentSession } from '@/schema/canvas';
+import { DEFAULT_STUDIO_SESSION_ID } from './studioDraft';
+const sessionJobsPath = '/api/studio/agent/sessions/' + DEFAULT_STUDIO_SESSION_ID + '/jobs';
+
 import { Studio } from './Studio';
 import { clearStudioDraft, readStudioDraft, writeStudioDraft, type StudioDraft } from './studioDraft';
 import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
@@ -34,9 +39,20 @@ function typePrompt(editor: Element, value: string) {
 beforeEach(() => {
   clearStudioDraft();
   localStorage.clear();
+  sessionStorage.clear();
+  const session = { session_id: DEFAULT_STUDIO_SESSION_ID, title: '默认会话', revision: 1, status: 'idle', turns: [], messages: [] } as unknown as StudioAgentSession;
+  vi.spyOn(canvasApi, 'listCanvasAgentSessions').mockResolvedValue({ sessions: [session] });
+  vi.spyOn(canvasApi, 'getCanvasAgentSession').mockResolvedValue(session);
   (globalThis.URL as any).createObjectURL ??= vi.fn(() => 'blob:test');
   (globalThis.URL as any).revokeObjectURL ??= vi.fn();
-  globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+  globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith('/models')) return Promise.resolve({ ok: true, json: async () => ({ models: [], errors: [] }) } as any);
+    if (url === '/api/studio/jobs') {
+      const body = JSON.parse(String(init?.body));
+      return Promise.resolve({ ok: true, json: async () => ({
+        ...body, namespace: 'studio', status: 'pending', job_id: 'job-test-submit', submitted_at: new Date().toISOString(), output_paths: [],
+      }) } as any);
+    }
     if (url === '/api/keys') {
       return Promise.resolve({
         ok: true,
@@ -72,10 +88,10 @@ beforeEach(() => {
         }),
       } as any);
     }
-    if (url === '/api/jobs') {
+    if (url === sessionJobsPath) {
       return Promise.resolve({
         ok: true,
-        json: async () => [],
+        json: async () => ({ jobs: [] }),
       } as any);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as any);
@@ -121,10 +137,10 @@ describe('Studio 变量冻结边界', () => {
     const literal = `保留${promptVariableToken({ name: '字面量', example: '', value: '不可展开' })}`;
     fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
       const response = await originalFetch(url, init);
-      if (url !== '/api/jobs') return response;
-      const jobs = await response.json();
+      if (url !== sessionJobsPath) return response;
+      const { jobs } = await response.json();
       jobs[0].prompt = literal;
-      return { ...response, json: async () => jobs };
+      return { ...response, json: async () => ({ jobs }) };
     });
     renderStudio();
     expect(await screen.findByText(literal)).toBeInTheDocument();
@@ -157,10 +173,10 @@ function mockCompletedBatchAndKeys() {
         }),
       } as any);
     }
-    if (url === '/api/jobs') {
+    if (url === sessionJobsPath) {
       return Promise.resolve({
         ok: true,
-        json: async () => [{
+        json: async () => ({ jobs: [{
           job_id: 'job-studio-1',
           character_id: 'volc',
           prompt: '一个身披白床单的幽灵般的身影在上海某城市公园的儿童游乐场玩耍，她戴着太阳镜，没有眼。背景是万圣节夜森。',
@@ -184,7 +200,7 @@ function mockCompletedBatchAndKeys() {
           namespace: 'studio',
           alias: 'volc',
           provider: 'seedream',
-        }],
+        }] }),
       } as any);
     }
     if (String(url).startsWith('/api/jobs/job-studio-1/image')) {
@@ -353,10 +369,10 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
+      if (url === sessionJobsPath) {
         return Promise.resolve({
           ok: true,
-          json: async () => [],
+          json: async () => ({ jobs: [] }),
         } as any);
       }
       return Promise.resolve({
@@ -423,8 +439,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -468,8 +484,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -594,8 +610,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -652,7 +668,7 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       return Promise.resolve({
         ok: true,
         json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-08-14T00:00:00Z' }),
@@ -756,8 +772,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -805,8 +821,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -935,10 +951,10 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
+      if (url === sessionJobsPath) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-studio-1',
             character_id: 'volc',
             prompt: '城市海报',
@@ -952,7 +968,7 @@ describe('Studio', () => {
             namespace: 'studio',
             alias: 'volc',
             provider: 'seedream',
-          }],
+          }] }),
         } as any);
       }
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
@@ -993,10 +1009,10 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
+      if (url === sessionJobsPath) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-pending-1',
             character_id: 'oa',
             prompt: '刷新后仍在生成的画面',
@@ -1010,7 +1026,7 @@ describe('Studio', () => {
             namespace: 'studio',
             alias: 'oa',
             provider: 'openai',
-          }],
+          }] }),
         } as any);
       }
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
@@ -1055,7 +1071,7 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => [current] } as any);
+      if (url === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: [current] }) } as any);
       if (url === '/api/jobs/job-stop-1/cancel' && init?.method === 'POST') {
         return Promise.resolve({ ok: true, json: async () => ({ ok: true, job_id: 'job-stop-1', status: 'pending', cancel_requested: true }) } as any);
       }
@@ -1132,8 +1148,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => firstJobs } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: firstJobs }) } as any);
       }
       // SSE 定向更新：按 job_id 拉单条，而不是全量 refetch。
       if (url === '/api/jobs/job-pending-2') {
@@ -1185,7 +1201,7 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (url === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: jobs }) } as any);
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
     });
     globalThis.fetch = fetchMock as any;
@@ -1202,7 +1218,7 @@ describe('Studio', () => {
       'src', '/api/gallery/image?path=%2Ftmp%2Fstudio%2Fjob-poll-1%2Fv1.png',
     );
     expect(screen.queryByTestId('studio-pending-job-poll-1')).not.toBeInTheDocument();
-    const jobsCalls = fetchMock.mock.calls.filter(([u]) => u === '/api/jobs').length;
+    const jobsCalls = fetchMock.mock.calls.filter(([u]) => u === sessionJobsPath).length;
     expect(jobsCalls).toBeGreaterThanOrEqual(2); // 首载 + 至少一次轮询
   });
 
@@ -1220,7 +1236,7 @@ describe('Studio', () => {
     expect((await screen.findByText(/一个身披白床单/)).closest('p')).toHaveClass('line-clamp-2');
     expect(screen.getByTestId('studio-round-list')).toHaveClass(
       'w-full',
-      'min-w-[800px]',
+      'min-w-0',
       'max-w-[1024px]',
       'mx-auto',
       'text-left',
@@ -1349,10 +1365,10 @@ describe('Studio', () => {
           json: async () => ({ default_alias: null, keys: [] }),
         } as any);
       }
-      if (url === '/api/jobs') {
+      if (url === sessionJobsPath) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-failed-1',
             character_id: 'seedream',
             prompt: '失败提示词',
@@ -1366,7 +1382,7 @@ describe('Studio', () => {
             namespace: 'studio',
             alias: 'seedream',
             provider: 'seedream',
-          }],
+          }] }),
         } as any);
       }
       if (url === '/api/jobs/job-failed-1' && init?.method === 'DELETE') {
@@ -1404,17 +1420,17 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
+      if (url === sessionJobsPath) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-fail-2', character_id: 'volc',
             prompt: '失败的幻想世界', submitted_at: '2026-05-28T01:00:00Z',
             model: 'doubao-4.7', alias: 'volc', provider: 'seedream',
             params: { ratio: '3:4', resolution: '2K', size: '1728x2304' },
             output_paths: [], status: 'failed',
             error: 'API 调用超时', kind: 'image', namespace: 'studio',
-          }],
+          }] }),
         } as any);
       }
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
@@ -1444,8 +1460,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
     });
@@ -1480,8 +1496,8 @@ describe('Studio', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -1584,10 +1600,10 @@ describe('Studio', () => {
     const originalFetch = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
       const response = await originalFetch(url, init);
-      if (url !== '/api/jobs') return response;
-      const jobs = await response.json();
+      if (url !== sessionJobsPath) return response;
+      const { jobs } = await response.json();
       jobs[0].params = { ...jobs[0].params, size_mode: 'custom', size: '2048x2048' };
-      return { ...response, json: async () => jobs };
+      return { ...response, json: async () => ({ jobs }) };
     });
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
@@ -1641,8 +1657,8 @@ describe('Studio video submission', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       if (url === '/api/studio/jobs') {
         return Promise.resolve({
@@ -1711,8 +1727,8 @@ describe('Studio video submission', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       if (url === '/api/uploads') {
         return Promise.resolve({ ok: true, json: async () => ({ path: '/uploads/ref-first.png' }) } as any);
@@ -1784,8 +1800,8 @@ describe('Studio video submission', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs') {
-        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) } as any);
       }
       if (url === '/api/uploads') {
         return Promise.resolve({ ok: true, json: async () => ({ path: '/uploads/ref-last.png' }) } as any);
@@ -1849,10 +1865,10 @@ describe('Studio video submission', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs' && !init?.method) {
+      if (url === sessionJobsPath && !init?.method) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-video-done',
             character_id: '',
             prompt: '镜头缓缓推进',
@@ -1875,7 +1891,7 @@ describe('Studio video submission', () => {
             namespace: 'studio',
             alias: 'vvolc',
             provider: 'volcengine_video',
-          }],
+          }] }),
         } as any);
       }
       if (url === '/api/studio/jobs') {
@@ -1932,10 +1948,10 @@ describe('Studio video submission', () => {
           }),
         } as any);
       }
-      if (url === '/api/jobs' && !init?.method) {
+      if (url === sessionJobsPath && !init?.method) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{
+          json: async () => ({ jobs: [{
             job_id: 'job-video-edit', character_id: '',
             prompt: '曹操@图片1 参考@视频1，配合@音频1。',
             submitted_at: '2026-08-22T14:35:52Z', model: 'seedance-2.0-mini',
@@ -1949,7 +1965,7 @@ describe('Studio video submission', () => {
             status: 'done', error: null, kind: 'video', namespace: 'video',
             alias: 'tokendance', provider: 'tokendance', project_id: 'p-975dcbf4f3',
             production_id: 'triple-win-chaos',
-          }],
+          }] }),
         } as any);
       }
       if (href.startsWith('/api/raw') || href.startsWith('https://cdn.example/')) {
@@ -2507,7 +2523,7 @@ describe('Studio 分享：边界', () => {
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
       const href = String(url);
-      if (href === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (href === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: jobs }) } as any);
       if (href === '/api/profile') return Promise.resolve({ ok: true, status: 200, json: async () => ({ display_name: '老王' }) } as any);
       if (href === '/api/team-libraries') return Promise.resolve({ ok: true, status: 200, json: async () => libraries } as any);
       return fallback(url, init);
@@ -2693,7 +2709,7 @@ describe('Studio 生成结果保存为创作资产', () => {
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
       const href = String(url);
-      if (jobs && href === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (jobs && href === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: jobs }) } as any);
       if (href === '/api/creation-assets/generation/from-job') {
         return Promise.resolve({ ok: true, status: 201, json: async () => generationAsset(recipe()) } as any);
       }
@@ -3022,10 +3038,10 @@ describe('历史参数不可用原因', () => {
     const original = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url, init) => {
       const response = await original(url, init);
-      if (url !== '/api/jobs') return response;
-      const jobs = await response.json();
+      if (url !== sessionJobsPath) return response;
+      const { jobs } = await response.json();
       jobs[0].kind = 'video';
-      return { ...response, json: async () => jobs };
+      return { ...response, json: async () => ({ jobs }) };
     });
     renderStudio();
     expect(await hoverHint(await screen.findByRole('button', { name: '4:3' }))).toHaveTextContent('切换到视频模式后可用');
@@ -3063,10 +3079,10 @@ describe('历史参数不可用原因', () => {
     const original = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url, init) => {
       const response = await original(url, init);
-      if (url !== '/api/jobs') return response;
-      const jobs = await response.json();
+      if (url !== sessionJobsPath) return response;
+      const { jobs } = await response.json();
       jobs[0].params.quality = 'high';
-      return { ...response, json: async () => jobs };
+      return { ...response, json: async () => ({ jobs }) };
     });
     renderStudio();
     expect(await hoverHint(await screen.findByRole('button', { name: '高' }))).toHaveTextContent('当前模型不支持');
@@ -3154,13 +3170,16 @@ it('团队使用连续追加并按来源复用 File，满额不覆盖，也不�
   expect(requests.filter(([url, init]) => (String(url).includes('/adopt') || String(url).includes('/creation-assets')) && init?.method && init.method !== 'GET')).toEqual([]);
 });
 
-it('Agent 只显示对话选择，切回创作保留原查询条件', async () => {
+it('三种生成模式共享顶部会话与筛选，切换后保留查询条件', async () => {
   renderStudio();
   fireEvent.click(await screen.findByRole('button', { name: '生成模式筛选' }));
   fireEvent.click(screen.getByRole('option', { name: '视频' }));
-  fireEvent.click(screen.getByRole('radio', { name: 'Agent' }));
-  expect(screen.getByRole('button', { name: '对话' })).toBeVisible();
-  expect(screen.queryByRole('button', { name: /^(时间|生成模式|操作类型)筛选/ })).toBeNull();
-  fireEvent.click(screen.getByRole('radio', { name: '创作' }));
-  expect(screen.getByRole('button', { name: '生成模式筛选：视频' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '生成模式筛选：视频' }));
+  for (const mode of ['Agent', '视频', '图片']) {
+    fireEvent.click(screen.getByLabelText('选择生成模式'));
+    fireEvent.click(screen.getByRole('option', { name: mode }));
+    expect(screen.getByLabelText('切换对话')).toBeVisible();
+    expect(screen.getByLabelText('新建对话')).toBeVisible();
+    expect(screen.getByLabelText('生成模式筛选：视频')).toBeVisible();
+  }
 });

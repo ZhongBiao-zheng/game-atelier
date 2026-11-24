@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/api/studio', () => ({
   getStudioJob: vi.fn(),
   createStudioJob: vi.fn(),
-  listStudioJobs: vi.fn(),
   uploadReferenceImage: vi.fn(),
 }));
 

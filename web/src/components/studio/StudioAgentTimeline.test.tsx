@@ -5,7 +5,17 @@ import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
 import { StudioSessionControls } from './StudioSessionControls';
 import { within } from '@testing-library/react';
-import { parseAgentReply, StudioAgentTimeline } from './StudioAgentTimeline';
+import { parseAgentReply, StudioAgentTurnCard } from './StudioAgentTimeline';
+
+import { mixedTimeline } from '@/lib/historyFilters';
+import type { ComponentProps } from 'react';
+
+function TurnCards({agent, jobs, renderJob, onPickSuggestion}: Pick<ComponentProps<typeof StudioAgentTurnCard>, 'agent' | 'jobs' | 'renderJob' | 'onPickSuggestion'>) {
+  const session = agent.session as StudioAgentSession;
+  const timeline = mixedTimeline([], session, jobs);
+  return timeline.map((entry, i) => entry.kind === 'agent' && <StudioAgentTurnCard key={entry.turn.turn_id}
+    agent={agent} session={session} {...entry} renderJob={renderJob} last={i === timeline.length - 1} onPickSuggestion={onPickSuggestion} />);
+}
 
 const makeMessage = (role: CanvasAgentMessage['role'], text: string, sequence: number): CanvasAgentMessage => ({
   role, text, sequence, turn_id: 't1', message_id: String(sequence), references: [], title: null,
@@ -32,7 +42,7 @@ it('默认收起工具过程，说明文案在上、产出的作品在回合底�
   const pick = vi.fn();
   const agent = makeAgent('idle');
   agent.session!.messages[2].text = '成片已就绪\n→ 换成侧身眨眼的表情';
-  const { container } = render(<StudioAgentTimeline agent={agent} jobs={jobs} renderJob={j => j.job_id} onPickSuggestion={pick} />);
+  const { container } = render(<TurnCards agent={agent} jobs={jobs} renderJob={j => j.job_id} onPickSuggestion={pick} />);
   expect(screen.getByRole('button', { name: '已完成' })).toHaveAttribute('aria-expanded', 'false');
   expect(container.textContent).toMatch(/准备草图.*成片已就绪.*job-0/);
   expect(container.textContent).not.toContain('job-1');
@@ -56,16 +66,16 @@ it('推荐追问只在最后一轮正常结束时出现，没有约定格式就�
   session.turns = [{ ...session.turns[0], turn_id: 't0' }, session.turns[0]];
   session.messages = [...session.messages, { ...makeMessage('assistant', '旧回合\n→ 旧追问', 0), turn_id: 't0' }];
   session.messages[2].text = '成片已就绪\n→ 新追问';
-  const view = render(<StudioAgentTimeline agent={agent} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
+  const view = render(<TurnCards agent={agent} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
   expect(screen.getByRole('button', { name: /新追问/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /旧追问/ })).toBeNull();
   session.messages[2].text = '成片已就绪';
-  view.rerender(<StudioAgentTimeline agent={{ ...agent }} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
+  view.rerender(<TurnCards agent={{ ...agent }} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
   expect(screen.queryByText('继续探索')).toBeNull();
 });
 
 it('运行时默认收起工具步骤，待确认强制展开，停止后能展开查看步骤', () => {
-  const view = (status: StudioAgentTurn['status']) => <StudioAgentTimeline agent={makeAgent(status)} jobs={[]} renderJob={() => null} />;
+  const view = (status: StudioAgentTurn['status']) => <TurnCards agent={makeAgent(status)} jobs={[]} renderJob={() => null} />;
   const tree = render(view('running'));
   const running = screen.getByRole('button', { name: '任务响应中…' });
   expect(running).toHaveAttribute('aria-expanded', 'false');
