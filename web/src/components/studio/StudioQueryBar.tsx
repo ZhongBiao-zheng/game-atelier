@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { CanvasIcon, CheckIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
+import { AiIcon, CheckIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
 
 import { ToolbarPopover } from './ToolbarPopover';
 import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
@@ -13,9 +13,9 @@ const TIME_OPTS: { key: TimeFilter; label: string }[] = [
   { key: '3m', label: '最近三个月' },
 ];
 const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
+  { key: 'agent', label: 'Agent', icon: <AiIcon size="lg" aria-hidden /> },
   { key: 'image', label: '图片', icon: <ImageIcon size="lg" aria-hidden /> },
   { key: 'video', label: '视频', icon: <VideoIcon size="lg" aria-hidden /> },
-  { key: 'canvas', label: '画布', icon: <CanvasIcon size="lg" aria-hidden /> },
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
   { key: 'favorite', label: '喜欢', icon: <FavoriteIcon size="lg" aria-hidden /> },
@@ -32,7 +32,7 @@ function FilterChip({
   return (
     <Button variant="bare"
       type="button"
-      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 sm:px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active ? 'bg-secondary' : 'hover:bg-secondary'
       } ${filtered ? 'text-primary' : 'text-foreground'}`}
       {...props}
@@ -43,7 +43,7 @@ function FilterChip({
 }
 
 function Divider() {
-  return <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />;
+  return <span aria-hidden className="mx-0.5 sm:mx-1 h-4 w-px shrink-0 bg-border" />;
 }
 
 export function StudioQueryBar({
@@ -75,12 +75,12 @@ export function StudioQueryBar({
   return (
     <div
       data-testid="studio-query-bar"
-      className="pointer-events-auto inline-flex h-9 items-center rounded-full border border-input bg-glass px-1.5 backdrop-blur-glass"
+      className="pointer-events-auto inline-flex min-w-0 max-w-full shrink-0 h-9 items-center rounded-full border border-input bg-glass px-1.5 backdrop-blur-glass"
     >
       {/* 搜索区常驻挂载，靠宽度过渡做展开/收起滑动动画（条件渲染会瞬间跳变）。 */}
       <div
         className={`flex items-center overflow-hidden transition-[width] duration-300 ease-out ${
-          searchOpen ? 'w-80 pr-2' : 'w-8'
+          searchOpen ? 'w-20 md:w-48 lg:w-80 pr-1' : 'w-8'
         }`}
       >
         <Button variant="bare"
@@ -119,7 +119,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={timeRef} className="relative">
         <FilterChip active={openPanel === 'time'} filtered={Boolean(timeLabel)} aria-label={`时间筛选${timeLabel ? `：${timeLabel}` : ''}`} onClick={() => toggle('time')}>
-          {timeLabel || '时间'} <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'text-primary': 'text-muted-foreground'} />
+          <span className="max-w-14 truncate sm:max-w-32">{timeLabel || '时间'}</span> <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
@@ -135,7 +135,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={modeRef} className="relative">
         <FilterChip active={openPanel === 'mode'} filtered={Boolean(modeLabel)} aria-label={`生成模式筛选${modeLabel ? `：${modeLabel}` : ''}`} onClick={() => toggle('mode')}>
-          {modeLabel || '生成模式'} <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'text-primary': 'text-muted-foreground'} />
+          <span className="max-w-14 truncate sm:max-w-32">{modeLabel || '生成模式'}</span> <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
@@ -160,7 +160,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={opRef} className="relative">
         <FilterChip active={openPanel === 'op'} filtered={Boolean(opLabel)} aria-label={`操作类型筛选${opLabel ? `：${opLabel}` : ''}`} onClick={() => toggle('op')}>
-          {opLabel || '操作类型'} <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'text-primary': 'text-muted-foreground'} />
+          <span className="max-w-14 truncate sm:max-w-32">{opLabel || '操作类型'}</span> <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'op'} onClose={() => setOpenPanel(null)} anchorRef={opRef} direction="down" role="listbox" aria-label="操作类型列表" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">操作</div>

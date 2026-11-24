@@ -12,7 +12,8 @@ import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { listStudioAgentJobs } from '@/api/canvas';
-import { StudioSessionPicker, StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
+import { StudioSessionControls } from '@/components/studio/StudioSessionControls';
+import { StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import {
   CreationAssetPanel,
@@ -116,6 +117,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
 function StudioFull() {
   const composer = useStudioComposer();
+  const scopedId = composer.agent.selectedSessionId;
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
   const [rounds, setRounds] = useState<RoundState[]>([]);
@@ -359,8 +361,9 @@ function StudioFull() {
   // 每个导入的 File 记住它的来源路径 —— 去重判据是 File 身份而不是文件名：
   // 不同 job 的输出常同名（v1.png / v2.png）。删掉后 File 不在数组里，同一张图可以再导。
   const editRefSource = useRef(new WeakMap<File, string>());
+  const { mode: inputMode, files: agentFiles, setFiles: setAgentFiles } = composer;
   const handleEditAsReference = useCallback(async (path: string) => {
-    const target: 'stack' | 'frame' | 'mj' = composer.mode === 'agent' ? 'stack' : kind === 'video'
+    const target: 'stack' | 'frame' | 'mj' = inputMode === 'agent' ? 'stack' : kind === 'video'
       ? (videoMode === 'omni' ? 'stack' : 'frame')
       : imageFamily(model) === 'midjourney' ? 'mj' : 'stack';
     setClickPinned(true);
@@ -368,7 +371,7 @@ function StudioFull() {
     if (target === 'frame' && (videoCaps?.maxFrames ?? 2) < 1) return;
     const sourceOf = (f: File | null) => (f ? editRefSource.current.get(f) : undefined);
     const already = target === 'stack'
-      ? (composer.mode === 'agent' ? composer.files : referenceImages).some((f) => sourceOf(f) === path)
+      ? (inputMode === 'agent' ? agentFiles : referenceImages).some((f) => sourceOf(f) === path)
       : target === 'frame'
         ? sourceOf(videoFrames.first) === path
         : mjRefs.image.some((f) => sourceOf(f) === path);
@@ -377,8 +380,8 @@ function StudioFull() {
     try {
       const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
       editRefSource.current.set(file, path);
-      if (composer.mode === 'agent') {
-        if (file.type.startsWith('image/')) composer.setFiles(prev => [...prev, file].slice(0, 16));
+      if (inputMode === 'agent') {
+        if (file.type.startsWith('image/')) setAgentFiles(prev => [...prev, file].slice(0, 16));
       } else if (target === 'frame') {
         setVideoFrames((prev) => ({ ...prev, first: file }));
       } else if (target === 'mj') {
@@ -389,7 +392,7 @@ function StudioFull() {
     } catch (e) {
       console.warn('[studio] 参考图导入失败（源文件取不到）', path, e);
     }
-  }, [composer.mode, composer.files, composer.setFiles, kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
+  }, [inputMode, agentFiles, setAgentFiles, kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
 
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
@@ -461,7 +464,6 @@ function StudioFull() {
   }, []);
 
   const selectedSession = composer.mode === 'agent' ? composer.agent.session : null;
-  const scopedId = selectedSession?.session_id;
   const scopedRevision = selectedSession?.revision;
   const latestJobs = useRef(persistedJobs);
   latestJobs.current = persistedJobs;
@@ -586,6 +588,12 @@ function StudioFull() {
     );
   }, [keys, providers, persistedJobs]);
 
+  async function submissionSession(prompt: string) {
+    if (scopedId) return scopedId;
+    const created = await composer.agent.createSession(Array.from(prompt.trim()).slice(0, 40).join('') || '新对话');
+    return created.session_id;
+  }
+
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
@@ -634,6 +642,14 @@ function StudioFull() {
       : promptAssetSourceTitle ?? undefined;
 
     setPending(true);
+    let sessionId: string;
+    try {
+      sessionId = await submissionSession(prompt);
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : String(error));
+      setPending(false);
+      return;
+    }
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
     // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
     let refPaths: string[];
@@ -720,6 +736,7 @@ function StudioFull() {
     let job: Job;
     try {
       job = await createStudioJob({
+        studio_agent_session_id: sessionId,
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
@@ -772,6 +789,14 @@ function StudioFull() {
     const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol, selectedModel?.declared);
 
     setPending(true);
+    let sessionId: string;
+    try {
+      sessionId = await submissionSession(prompt);
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : String(error));
+      setPending(false);
+      return;
+    }
     // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。
     let imgPaths: string[];
     let vidPaths: string[];
@@ -885,6 +910,7 @@ function StudioFull() {
     let job: Job;
     try {
       job = await createStudioJob({
+        studio_agent_session_id: sessionId,
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
@@ -960,10 +986,19 @@ function StudioFull() {
     >
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[1024px] justify-end">
-          {composer.mode === 'agent'
-            ? <StudioSessionPicker agent={composer.agent} clearDraft={composer.clearDraft} />
-            : <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />}
+        <div className="mx-auto flex w-full max-w-[1024px] items-center justify-between gap-2">
+          <StudioSessionControls agent={composer.agent} disabled={pending} clearDraft={() => {
+            composer.clearDraft();
+            setPromptText('');
+            setReferenceImages([]);
+            setReferenceVideos([]);
+            setReferenceAudios([]);
+            setVideoFrames({ first: null, last: null });
+            setMjRefs(EMPTY_MJ_REFS);
+            setPromptAssetId(null);
+            setPromptAssetSourceTitle(null);
+          }} />
+          <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
         </div>
       </div>
       {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。

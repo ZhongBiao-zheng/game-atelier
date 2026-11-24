@@ -7,8 +7,7 @@ import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
 import { Hint } from '@/components/ui/tooltip';
-import { AiIcon, ArrowToolIcon, ChatIcon, ChevronDownIcon, ChevronRightIcon, DeleteIcon, ImageIcon, LoadingIcon, NewChatIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AiIcon, ArrowToolIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
 import type { StudioAgentSession, StudioAgentStep, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
@@ -67,24 +66,6 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
       })}
     </div>
   );
-}
-
-export function StudioSessionPicker({ agent, clearDraft }: { agent: Controller; clearDraft: () => void }) {
-  const [open, setOpen] = useState(false);
-  return <Popover open={open} onOpenChange={setOpen}><PopoverTrigger asChild>
-    <Button variant="outline" size="sm" aria-label="对话" className="pointer-events-auto mr-2 h-9 rounded-full bg-glass">
-      <ChatIcon size="sm" />对话<ChevronDownIcon size="sm" /></Button>
-  </PopoverTrigger><PopoverContent align="start" className="max-h-72 overflow-y-auto p-1">
-    <Button variant="ghost" size="sm" className="w-full justify-start" disabled={agent.pending}
-      onClick={() => { clearDraft(); agent.newSession(); setOpen(false); }}><NewChatIcon size="sm" />新对话</Button>
-    {agent.sessions.map(item => <div key={item.session_id} className="flex items-center">
-      <Button variant={agent.session?.session_id === item.session_id ? 'secondary' : 'ghost'} size="sm"
-        className="min-w-0 flex-1 justify-start" disabled={agent.pending} onClick={() => { clearDraft(); void agent.selectSession(item.session_id); setOpen(false); }}>
-        <span className="truncate">{item.title}</span></Button>
-      <Button variant="ghost" size="icon" aria-label={`删除对话 ${item.title}`} disabled={agent.pending}
-        onClick={() => void agent.removeSession(item.session_id, item.revision)}><DeleteIcon size="sm" /></Button>
-    </div>)}
-  </PopoverContent></Popover>;
 }
 
 function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: boolean }) {

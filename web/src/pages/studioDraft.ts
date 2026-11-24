@@ -59,8 +59,8 @@ export function readStudioView(): StudioView {
   try {
     const saved = JSON.parse(sessionStorage.getItem('studio:view') ?? '{}');
     return { inputMode: saved.inputMode === 'video' || saved.inputMode === 'agent' ? saved.inputMode : 'image',
-      activeSessionId: typeof saved.activeSessionId === 'string' ? saved.activeSessionId : null };
-  } catch { return { inputMode: 'image', activeSessionId: null }; }
+      activeSessionId: typeof saved.activeSessionId === 'string' || saved.activeSessionId === null ? saved.activeSessionId : DEFAULT_STUDIO_SESSION_ID };
+  } catch { return { inputMode: 'image', activeSessionId: DEFAULT_STUDIO_SESSION_ID }; }
 }
 
 export function updateStudioView(change: Partial<StudioView>) {

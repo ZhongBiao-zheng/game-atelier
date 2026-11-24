@@ -18,7 +18,7 @@ import {
   updateCanvasAgentSession,
   updateCanvasAgentSettings,
 } from '@/api/canvas';
-import { readStudioView, updateStudioView } from '@/pages/studioDraft';
+import { DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import type {
   CanvasAgentChatModelList,
@@ -108,6 +108,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   });
   // 「当前会话」以这个 ref 为准，只由选择 / 新建会话改写：不能每次 render 从 state 同步，
   // 否则读取途中任何一次重渲染都会把它冲回 null，读到的会话被当成过期结果丢掉。
+  const explicitDraft = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
 
   const acceptSession = useCallback((updated: CanvasAgentSession | StudioAgentSession) => {
@@ -168,9 +169,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     void (async () => {
       try {
         const list = await refreshList();
-        if (cancelled || sessionIdRef.current) return;
+        if (cancelled || sessionIdRef.current || explicitDraft.current) return;
         const last = projectId === null ? readStudioView().activeSessionId : readStorage(sessionStorageKey(projectId));
-        if (projectId === null && home) return;
+        if (projectId === null && (home || last === null)) return;
         const target = list.find(item => item.session_id === last) ?? list[0];
         if (target) await selectSession(target.session_id);
         else if (projectId === null) {
@@ -262,9 +263,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   }, []);
 
   /** 新会话沿用当前会话的模型 / 思考 / 权限；没有当前会话时用上次选过的模型。 */
-  const createSession = useCallback(async () => {
+  const createSession = useCallback(async (title = '新对话') => {
     const settings: CanvasAgentSessionUpdate = session ? carriedSettings(session) : draft;
-    let created = projectId === null ? await createCanvasAgentSession(null, '新对话', settings)
+    let created = projectId === null ? await createCanvasAgentSession(null, title, settings)
       : await createCanvasAgentSession(projectId, '新对话');
     if (projectId !== null && Object.keys(settings).length) {
       created = await updateCanvasAgentSession(projectId, created.session_id, settings);
@@ -274,12 +275,13 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     else writeStorage(sessionStorageKey(projectId), created.session_id);
     setSession(created);
     setStreaming('');
-    await refreshList();
+    void refreshList().catch(() => undefined);
     return created;
   }, [draft, projectId, refreshList, session]);
 
   /** 新对话只清空面板，设置沿用当前会话；真正的会话在发第一条消息时才建。 */
   const newSession = useCallback(() => {
+    explicitDraft.current = true;
     if (session) setDraft(carriedSettings(session));
     if (projectId === null) updateStudioView({ activeSessionId: null });
     setRestoring(false);
@@ -352,7 +354,10 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const removeSession = (id: string, revision: number) => run(async () => {
     await deleteCanvasAgentSession(projectId, id, revision);
-    if (sessionIdRef.current === id) newSession();
+    if (sessionIdRef.current === id) {
+      if (projectId === null) await selectSession(DEFAULT_STUDIO_SESSION_ID);
+      else newSession();
+    }
     await refreshList();
   });
 
@@ -391,7 +396,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   return {
     sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending: pending || selecting,
     usage, confirmAbove, plan,
-    reloadSkills, sendStudio, removeSession, waitingForSession,
+    selectedSessionId: sessionIdRef.current ?? (restoring ? readStudioView().activeSessionId : null),
+    createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }
