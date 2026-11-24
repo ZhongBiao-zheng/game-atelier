@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
 import { ScrollBottomIcon } from '@/components/ui/icons';
 
-import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
+import { createStudioJob, getStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
@@ -13,7 +13,7 @@ import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { listStudioAgentJobs } from '@/api/canvas';
 import { StudioSessionControls } from '@/components/studio/StudioSessionControls';
-import { StudioAgentTimeline } from '@/components/studio/StudioAgentTimeline';
+import { StudioAgentTurnCard } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import {
   CreationAssetPanel,
@@ -33,7 +33,7 @@ import { imageFamily, isEvolinkMidjourney } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
 import { evolinkMjParams, hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { nearestDuration, videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
-import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
+import { deriveGenMode, filterRounds, hasHistoryFilters, mixedTimeline, type TimelineRound, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -41,7 +41,7 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
-import { readStudioDraft, writeStudioDraft } from './studioDraft';
+import { DEFAULT_STUDIO_SESSION_ID, readStudioDraft, writeStudioDraft } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
@@ -54,6 +54,8 @@ import type { CanvasProject } from '@/schema/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
 import { reuseRoundParameter, type RoundParameter } from './studioParameterReuse';
+import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
+import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -120,7 +122,7 @@ function StudioFull() {
   const scopedId = composer.agent.selectedSessionId;
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
-  const [rounds, setRounds] = useState<RoundState[]>([]);
+  const [localRounds, setRounds] = useState<(RoundState & { sessionId: string })[]>([]);
   // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters 喂 StudioQueryBar，
   // toggleFavorite 透传到结果卡 ★ 收藏按钮。
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
@@ -170,11 +172,16 @@ function StudioFull() {
   // 瞬时跳转（飙哥指定）：回到底部不要从上往下滚的过程。
   const scrollToBottom = () => scrollRef.current?.scrollTo?.({ top: 0, behavior: 'auto' });
 
-  // state 仍 newest-first（提交逻辑零改动）；先按查询面板筛选，再反转使最新一轮落底。
-  const reversedRounds = useMemo(
-    () => [...filterRounds(rounds, historyFilters, favorites, hiddenPaths)].reverse(),
-    [rounds, historyFilters, favorites, hiddenPaths],
-  );
+  const session = composer.agent.session && 'turns' in composer.agent.session ? composer.agent.session : null;
+  const scopedJobs = useMemo(() => persistedJobs.filter(job => jobSessionId(job) === scopedId), [persistedJobs, scopedId]);
+  const rounds = useMemo(() => [
+    ...localRounds.filter(round => round.sessionId === scopedId),
+    ...studioJobsToRounds(scopedJobs.filter(job => !job.studio_agent_turn_id), keys),
+  ], [localRounds, scopedId, scopedJobs, keys]);
+  const timeline = useMemo(() => mixedTimeline(rounds, session, scopedJobs), [rounds, session, scopedJobs]);
+  const visibleRounds = useMemo(() => filterRounds(timeline, historyFilters, favorites, hiddenPaths),
+    [timeline, historyFilters, favorites, hiddenPaths]);
+  const usage = session && agentUsageLabel(composer.agent.usage);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   // 尺寸模式和自定义草稿一起恢复；质量与数量仍在刷新时回默认。
@@ -397,10 +404,20 @@ function StudioFull() {
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
   const targetJobId = useMemo(() => new URLSearchParams(search).get('job'), [search]);
+  const selectSession = composer.agent.selectSession;
+  useEffect(() => {
+    let active = true;
+    if (targetJobId) void getStudioJob(targetJobId).then(job => {
+      if (active && job?.namespace === 'studio' && jobSessionId(job) !== scopeRef.current) {
+        void selectSession(jobSessionId(job));
+      }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [targetJobId, selectSession]);
   const focusConsumedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!targetJobId || focusConsumedRef.current === targetJobId) return;
-    const found = rounds.some((r) => r.jobId === targetJobId);
+    const found = scopedJobs.some(job => job.job_id === targetJobId);
     if (!found) return;
     focusConsumedRef.current = targetJobId;
     const scrollToRound = () => {
@@ -414,7 +431,7 @@ function StudioFull() {
     scrollToRound();
     setTimeout(scrollToRound, 600);
     setTimeout(scrollToRound, 1600);
-  }, [rounds, targetJobId]);
+  }, [scopedJobs, targetJobId, timeline]);
 
   // 分享提醒的「复刻」/「看看」：本页在就地认领；别的页面带着 ?team_asset= 跳过来，挂载后处理一次。
   const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => {});
@@ -457,52 +474,48 @@ function StudioFull() {
     teamAssetActionRef.current(action);
   }, [keysLoaded, search, location, setLocation]);
 
-  const refreshPersistedJobs = useCallback(async () => {
-    const jobs = await listStudioJobs();
-    setPersistedJobs(jobs);
-    return jobs;
-  }, []);
-
-  const selectedSession = composer.mode === 'agent' ? composer.agent.session : null;
-  const scopedRevision = selectedSession?.revision;
+  const scopeRef = useRef(scopedId);
+  scopeRef.current = scopedId;
   const latestJobs = useRef(persistedJobs);
   latestJobs.current = persistedJobs;
-  useEffect(() => {
+  const snapshotRequest = useRef(0);
+  const refreshPersistedJobs = useCallback(async () => {
+    const request = ++snapshotRequest.current;
     if (!scopedId) return;
-    let active = true;
     const atStart = new Map(latestJobs.current.map(job => [job.job_id, job]));
-    void listStudioAgentJobs(scopedId).then(({ jobs }) => {
-      if (!active) return;
-      setPersistedJobs(current => {
-        const incoming = new Map(jobs.map(job => [job.job_id, job]));
-        const merged = current.flatMap(job => {
-          if (job.studio_agent_session_id !== scopedId) return [job];
-          const fetched = incoming.get(job.job_id);
-          incoming.delete(job.job_id);
-          // 请求途中收到的逐 Job SSE 更新优先，迟到的快照不能把完成卡退回运行中。
-          if (atStart.get(job.job_id) !== job) return [job];
-          return fetched ? [fetched] : [];
-        });
-        return [...merged, ...[...incoming.values()].filter(job => !atStart.has(job.job_id))];
+    const { jobs } = await listStudioAgentJobs(scopedId);
+    if (scopeRef.current !== scopedId || request !== snapshotRequest.current) return;
+    setPersistedJobs(current => {
+      const incoming = new Map(jobs.map(job => [job.job_id, job]));
+      const updated = current.filter(job => {
+        if (jobSessionId(job) !== scopedId || atStart.get(job.job_id) === job) return false;
+        incoming.delete(job.job_id);
+        return true;
       });
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [scopedId, scopedRevision]);
+      // 请求期间 SSE 带回的状态优先，已经删除的任务也不从旧快照复活。
+      const retained = new Set(current.map(job => job.job_id));
+      return [...updated, ...Array.from(incoming.values()).filter(job => !atStart.has(job.job_id) || retained.has(job.job_id))];
+    });
+  }, [scopedId]);
+  useEffect(() => {
+    void refreshPersistedJobs().catch(() => undefined);
 
-  // SSE 定向更新：watcher 广播的 {job_id, status} 直接按 job_id 拉单条，
-  // 替代旧的「有活跃 job 时每 2s 全量 refetch + 每次提交各自轮询」三路放大。
+  }, [refreshPersistedJobs, session?.revision]);
+
   const handleJobChanged = useCallback((data: JobChangedPayload) => {
     if (!data.job_id) return;
-    void getStudioJob(data.job_id).then((job) => {
-      // 非 studio job（角色出图）返回 null，忽略。
-      if (job) setPersistedJobs((items) => upsertJob(items, job));
-    });
+    void getStudioJob(data.job_id).then(job => {
+      if (job?.namespace === 'studio' && jobSessionId(job) === scopeRef.current) {
+        setPersistedJobs(items => upsertJob(items, job));
+      }
+    }).catch(() => undefined);
   }, []);
 
   // onConnect 全量刷新兜底：断连期间 / SSE 队列满丢掉的事件靠重连补齐。
   useSSE({
+    onStudioAgent: composer.agent.onAgentEvent,
     onJobChanged: handleJobChanged,
-    onConnect: () => { void refreshPersistedJobs().catch(() => {}); },
+    onConnect: () => { composer.agent.onReconnect(); void refreshPersistedJobs().catch(() => {}); },
   });
 
   // SSE 兜底轮询：系统代理（Clash/V2Ray 的 TUN/全局模式）会把 127.0.0.1 的流式响应整条缓冲，
@@ -510,7 +523,7 @@ function StudioFull() {
   // "生成中"直到手刷（普通 GET 不走流式缓冲，所以手刷能出）。#18 砍掉常驻 2s 轮询让 SSE 成
   // 唯一命脉，放大了这个脆弱点。这里只要还有 pending 轮次就每 4s 全量拉一次（= 自动帮用户手刷），
   // 出完自动翻面；无 pending 不轮询，保留 #18 的初衷。
-  const hasPendingRound = rounds.some((r) => r.kind === 'pending');
+  const hasPendingRound = scopedJobs.some(job => job.status === 'pending') || rounds.some(r => r.kind === 'pending');
   useEffect(() => {
     if (!hasPendingRound) return;
     const timer = setInterval(() => { void refreshPersistedJobs().catch(() => {}); }, 4000);
@@ -519,16 +532,6 @@ function StudioFull() {
 
   useEffect(() => {
     let cancelled = false;
-    listStudioJobs()
-      .then((jobs: Job[]) => {
-        if (cancelled) return;
-        setPersistedJobs(jobs);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPersistedJobs([]);
-        }
-      });
     // 路由列表读失败只是没有「自动」项，不影响按 KEY 选模型。
     // TokenDance 价格快照与密钥一起就绪，首屏费用预估才不会先显示未计价。
     Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[]), loadTokenDancePrices()])
@@ -578,15 +581,6 @@ function StudioFull() {
     providerAlias, model, sizeParams, count, quality,
     kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
-
-  useEffect(() => {
-    setRounds((items) =>
-      mergePersistedRounds(
-        items.map((item) => hydrateRoundModelName(item, providers)),
-        studioJobsToRounds(persistedJobs, keys),
-      ),
-    );
-  }, [keys, providers, persistedJobs]);
 
   async function submissionSession(prompt: string) {
     if (scopedId) return scopedId;
@@ -666,7 +660,7 @@ function StudioFull() {
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
-        { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message },
+        { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
         ...rs,
       ]);
       return;
@@ -728,7 +722,7 @@ function StudioFull() {
     if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
     const startedAt = Date.now();
-    const myRound: RoundState = { kind: 'pending', startedAt, config };
+    const myRound = { kind: 'pending' as const, sessionId, startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
     // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
     scrollToBottom();
@@ -747,7 +741,7 @@ function StudioFull() {
     } catch (e: any) {
       setRounds((rs) =>
         rs.map((r) =>
-          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+          r === myRound ? { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
       setPending(false);
@@ -757,16 +751,8 @@ function StudioFull() {
     // 提交真正发出去了，复刻时的提示才算用完。
     setRecipeNotice(null);
 
-    setPersistedJobs((items) => upsertJob(items, job));
-    // 终态翻面交给 SSE 定向更新（handleJobChanged → persistedJobs → mergePersistedRounds），
-    // 不再每个提交各起一条 2s/5s 轮询。
-    setRounds((rs) =>
-      rs.map((r) =>
-        r === myRound
-          ? { ...myRound, jobId: job.job_id, startedAt: Date.parse(job.submitted_at) || startedAt }
-          : r,
-      ),
-    );
+    setPersistedJobs(items => items.some(item => item.job_id === job.job_id) ? items : [job, ...items]);
+    setRounds(rs => rs.filter(r => r !== myRound));
   };
 
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
@@ -820,7 +806,7 @@ function StudioFull() {
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
-        { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message },
+        { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
         ...rs,
       ]);
       return;
@@ -902,7 +888,7 @@ function StudioFull() {
     };
 
     const startedAt = Date.now();
-    const myRound: RoundState = { kind: 'pending', startedAt, config };
+    const myRound = { kind: 'pending' as const, sessionId, startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
     // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
     scrollToBottom();
@@ -922,7 +908,7 @@ function StudioFull() {
     } catch (e: any) {
       setRounds((rs) =>
         rs.map((r) =>
-          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+          r === myRound ? { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
       setPending(false);
@@ -931,20 +917,24 @@ function StudioFull() {
     setPending(false);
     setRecipeNotice(null);
 
-    setPersistedJobs((items) => upsertJob(items, job));
-    // 同 onSubmit：终态翻面走 SSE 定向更新，无 per-job 轮询（视频分钟级，轮询放大更明显）。
-    setRounds((rs) =>
-      rs.map((r) =>
-        r === myRound
-          ? { ...myRound, jobId: job.job_id, startedAt: Date.parse(job.submitted_at) || startedAt }
-          : r,
-      ),
-    );
+    setPersistedJobs(items => items.some(item => item.job_id === job.job_id) ? items : [job, ...items]);
+    setRounds(rs => rs.filter(r => r !== myRound));
   };
 
-  const renderRounds = (items: RoundState[], embedded = false) => (
+  const renderRounds = (items: TimelineRound[], embedded = false): React.ReactNode => (
         <RoundList
+          key={scopedId}
           rounds={items} embedded={embedded}
+          renderAgent={entry => session && <StudioAgentTurnCard turn={entry.turn} session={session}
+            agent={composer.agent} messages={entry.messages} jobs={entry.jobs}
+            renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)}
+            last={!pending && !hasHistoryFilters(historyFilters) && timeline.at(-1) === entry}
+            onPickSuggestion={text => {
+              composer.switchMode('agent');
+              composer.setText(text);
+              setClickPinned(true);
+              composer.editor.current?.focus();
+            }} />}
           focusJobId={targetJobId ?? undefined}
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
@@ -1010,15 +1000,10 @@ function StudioFull() {
         data-testid="studio-history-scroll"
         className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-64"
       >
-        {composer.mode === 'agent' ? <StudioAgentTimeline agent={composer.agent} jobs={persistedJobs}
-          renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)}
-          onPickSuggestion={text => {
-            composer.switchMode('agent');
-            composer.setText(text);
-            setClickPinned(true);
-            composer.editor.current?.focus();
-          }} />
-          : renderRounds(reversedRounds)}
+        {usage && visibleRounds.length > 0 && <div className="mx-auto w-full max-w-[1024px] pt-4">
+          <Hint label={usage.detail}><span className="text-xs text-muted-foreground">{usage.text}</span></Hint>
+        </div>}
+        {timeline.length ? renderRounds(visibleRounds) : <p className="my-auto text-center font-display text-display italic text-foreground/70">今天想一起创作什么？</p>}
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
@@ -1162,6 +1147,7 @@ function StudioFull() {
             setTeamPanelTarget(null);
           }}
           onUsePrompt={(asset, renderedPrompt) => {
+            if (composer.mode === 'agent') { composer.setText(renderedPrompt); return; }
             setPromptText(renderedPrompt);
             sourceTitleFile.current = null;
             setPromptAssetSourceTitle(asset.title);
@@ -1176,6 +1162,7 @@ function StudioFull() {
             addReferenceFile(reused, entry.mime_type ?? file.type, entry.title);
           }}
           onUseTeamPrompt={(text, entry) => {
+            if (composer.mode === 'agent') { composer.setText(text); return; }
             setPromptText(text); setPromptAssetId(null); sourceTitleFile.current = null; setPromptAssetSourceTitle(entry.title); setClickPinned(true);
           }}
         />
@@ -1384,9 +1371,6 @@ function StudioFull() {
     const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
     // 删不掉要说话：静默 return 的话画师点了删除、记录还在，只能当成界面卡了。
     if (!resp.ok) { alert((await apiError(resp, '删除这条失败记录')).message); return; }
-    // rounds 是渲染态，persistedJobs 是它的数据源之一：只清 rounds 的话，下一次 SSE 推送
-    // 或轮询触发上面那个 mergePersistedRounds 的 effect，这条记录就被合并回来了
-    // （后端其实已经删掉，刷新页面才看得出来）。两处一起清。
     setPersistedJobs((jobs) => jobs.filter((j) => j.job_id !== jobId));
     setRounds((items) => items.filter((item) => item.kind !== 'failed' || item.jobId !== jobId));
   }
@@ -1505,7 +1489,7 @@ function StudioFull() {
     );
     const failed = responses.find((resp) => !resp.ok);
     if (failed) { alert((await apiError(failed, '删除这批结果')).message); return; }
-    setRounds((items) => items.filter((item) => item.kind !== 'done' || item.jobId !== jobId));
+    setPersistedJobs(jobs => jobs.filter(job => job.job_id !== jobId));
   }
 }
 
@@ -1561,13 +1545,8 @@ async function fetchRoundReferences(config: RoundConfig, jobId?: string): Promis
   return { images, videos, audios, sref, cref, oref };
 }
 
-function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {
-  const config = round.config;
-  if (!config) return round;
-  const selectedKey = keys.find((item) => item.alias === config.alias);
-  const selectedModel = selectedKey?.models.find((item) => item.id === config.model);
-  if (!selectedModel?.name || config.modelName === selectedModel.name) return round;
-  return { ...round, config: { ...config, modelName: selectedModel.name } };
+function jobSessionId(job: Job) {
+  return job.studio_agent_session_id ?? DEFAULT_STUDIO_SESSION_ID;
 }
 
 function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
@@ -1623,22 +1602,6 @@ function frozenGenerationCost(job: Job): number | undefined {
   return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0
     ? amount
     : undefined;
-}
-
-function roundKey(round: RoundState): string | null {
-  if (round.kind === 'done') return round.jobId;
-  if (round.kind === 'failed' && round.jobId) return round.jobId;
-  if (round.kind === 'pending' && round.jobId) return round.jobId;
-  return null;
-}
-
-function mergePersistedRounds(current: RoundState[], persisted: RoundState[]): RoundState[] {
-  const persistedKeys = new Set(persisted.map(roundKey).filter((key): key is string => Boolean(key)));
-  const localOnly = current.filter((item) => {
-    const key = roundKey(item);
-    return !key || !persistedKeys.has(key);
-  });
-  return [...localOnly, ...persisted];
 }
 
 function upsertJob(items: Job[], next: Job): Job[] {

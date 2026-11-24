@@ -15,7 +15,7 @@ export function useStudioComposer(home = false) {
   const search = useSearch();
   const link = home ? null : new URLSearchParams(search).get('session');
   const [mode, setMode] = useState<StudioInputMode>(() => readStudioView().inputMode);
-  const agent = useWorkspaceAgent(null, !home || mode === 'agent', home, mode === 'agent');
+  const agent = useWorkspaceAgent(null, !home || mode === 'agent', home, mode === 'agent', !home);
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [skill, setSkill] = useState<string | null>(null);

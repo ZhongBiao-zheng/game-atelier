@@ -7,7 +7,7 @@ import { AddImageIcon, AudioIcon, BookmarkIcon, DeleteIcon, DownloadIcon, EditIc
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
-import type { GenMode } from '@/lib/historyFilters';
+import type { AgentRound, GenMode, TimelineRound } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
@@ -184,10 +184,10 @@ function SourceChip({ title, testId }: { title: string; testId?: string }) {
 }
 
 /** 记录所属的北京日期（YYYY-MM-DD），日期分组用。 */
-function roundDate(round: RoundState): string {
+function roundDate(round: TimelineRound): string {
   const iso = round.kind === 'pending'
     ? new Date(round.startedAt).toISOString()
-    : round.kind === 'done' ? round.completedAt ?? round.submittedAt : round.submittedAt;
+    : round.submittedAt;
   return formatBeijingTime(iso).slice(0, 10);
 }
 
@@ -213,6 +213,7 @@ function shownMjMetadata(config: RoundConfig): string {
 export function RoundList({
   embedded = false,
   rounds,
+  renderAgent,
   focusJobId,
   favorites,
   onToggleFavorite,
@@ -232,7 +233,8 @@ export function RoundList({
   onSetPromptPreview,
 }: {
   embedded?: boolean;
-  rounds: RoundState[];
+  rounds: TimelineRound[];
+  renderAgent?: (round: AgentRound) => ReactNode;
   focusJobId?: string;
   favorites?: string[];
   onToggleFavorite?: (path: string) => void | Promise<void>;
@@ -270,7 +272,7 @@ export function RoundList({
   roundsLengthRef.current = rounds.length;
   const newestWindow = rounds.slice(-mountedHistoryCount);
   const focusedRound = focusJobId
-    ? rounds.find((round) => round.jobId === focusJobId)
+    ? rounds.find((round) => round.kind === 'agent' ? round.jobs.some(job => job.job_id === focusJobId) : round.jobId === focusJobId)
     : undefined;
   const mountedRounds = focusedRound && !newestWindow.includes(focusedRound)
     ? [focusedRound, ...newestWindow]
@@ -349,7 +351,7 @@ export function RoundList({
     <>
       <div
         data-testid="studio-round-list"
-        className={embedded ? "w-full text-left" : "mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"}
+        className={embedded ? "w-full text-left" : "mx-auto mt-8 w-full min-w-0 max-w-[1024px] space-y-8 text-left"}
       >
         {hasEarlierHistory && (
           <div
@@ -363,7 +365,7 @@ export function RoundList({
           const date = roundDate(r);
           const startsDate = index === 0 || roundDate(mountedRounds[index - 1]) !== date;
           const stableKey =
-            r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
+            r.kind === 'agent' ? r.turn.turn_id : r.jobId ? r.jobId :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
           return (
@@ -371,7 +373,7 @@ export function RoundList({
             <Fragment key={stableKey}>
             {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
             {!embedded && startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
-            <MediaActivationBoundary jobId={r.jobId}>
+            {r.kind === 'agent' ? renderAgent?.(r) : <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
               <>
               {r.kind === 'pending' && (
@@ -419,7 +421,7 @@ export function RoundList({
               )}
               </>
               )}
-            </MediaActivationBoundary>
+            </MediaActivationBoundary>}
             </Fragment>
           );
         })}
@@ -1246,7 +1248,7 @@ function DoneBatch({
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
-        {(onSavePromptAsset || round.mode !== 'canvas') && (
+        {(onSavePromptAsset || round.shareable !== false) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <ActionButton compact aria-label="更多操作">...</ActionButton>
@@ -1259,7 +1261,7 @@ function DoneBatch({
                 保存提示词资产
               </DropdownMenuItem>
             )}
-            {round.mode !== 'canvas' && (
+            {round.shareable !== false && (
               <DropdownMenuItem onSelect={() => { void onDeleteBatch?.(round.jobId, round.imagePaths); }}>
                 <DeleteIcon className="shrink-0" aria-hidden />
                 删除该批次结果

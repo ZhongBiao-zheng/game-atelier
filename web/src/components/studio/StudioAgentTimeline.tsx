@@ -3,7 +3,6 @@ import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
 import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
-import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
 import { Hint } from '@/components/ui/tooltip';
@@ -174,11 +173,12 @@ export function parseAgentReply(raw: string): { body: string; suggestions: strin
   return { body: lines.slice(0, end).join('\n').trim(), suggestions: suggestions.slice(0, MAX_SUGGESTIONS) };
 }
 
-function Turn({ turn, session, agent, jobs, renderJob, last, onPickSuggestion }: {
+export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJob, last, onPickSuggestion }: {
   turn: StudioAgentTurn;
   session: StudioAgentSession;
   agent: Controller;
   jobs: Job[];
+  messages: StudioAgentSession['messages'];
   renderJob: (job: Job) => ReactNode;
   last: boolean;
   onPickSuggestion?: (text: string) => void;
@@ -190,7 +190,6 @@ function Turn({ turn, session, agent, jobs, renderJob, last, onPickSuggestion }:
   const open = awaiting || (override?.status === turn.status ? override.open : false);
   const title = running || awaiting ? '任务响应中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
-  const messages = session.messages.filter(m => m.turn_id === turn.turn_id);
   const user = messages.find(m => m.role === 'user');
   const replies = messages.filter(m => ['assistant', 'system'].includes(m.role));
   const sortedJobs = [...jobs].sort((a, b) => compareTime(a.submitted_at, b.submitted_at) || a.job_id.localeCompare(b.job_id));
@@ -298,30 +297,4 @@ function Turn({ turn, session, agent, jobs, renderJob, last, onPickSuggestion }:
     )}
     {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
   </section>;
-}
-
-export function StudioAgentTimeline({ agent, jobs, renderJob, onPickSuggestion }: {
-  agent: Controller;
-  jobs: Job[];
-  renderJob: (job: Job) => ReactNode;
-  onPickSuggestion?: (text: string) => void;
-}) {
-  const session = agent.session;
-  if (!session || !('turns' in session) || session.turns.length === 0) {
-    return (
-      <div className="mx-auto my-auto flex w-full max-w-[780px] flex-col items-center justify-center gap-2 py-12 text-center">
-        <p className="font-display text-display italic text-foreground/70">今天想一起创作什么？</p>
-        <p className="text-sm text-muted-foreground">描述你的创作构想、上传参考图或输入 @ 引用本机资产，Agent 会为你规划并生成图片与视频</p>
-      </div>
-    );
-  }
-  const usage = agentUsageLabel(agent.usage);
-  return <div className="mx-auto w-full max-w-[1024px] space-y-8 px-2 py-4">
-    {session.turns.map((turn, index) => <Turn key={turn.turn_id} turn={turn} session={session} agent={agent}
-      jobs={jobs.filter(job => job.studio_agent_session_id === session.session_id && job.studio_agent_turn_id === turn.turn_id)}
-      renderJob={renderJob}
-      last={index === session.turns.length - 1}
-      onPickSuggestion={onPickSuggestion} />)}
-    {usage && <Hint label={usage.detail}><span className="text-xs text-muted-foreground">{usage.text}</span></Hint>}
-  </div>;
 }

@@ -86,7 +86,7 @@ function carriedSettings(session: CanvasAgentSession | StudioAgentSession): Canv
   };
 }
 
-export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false, loadControls = open) {
+export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false, loadControls = open, sharedEvents = false) {
   const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
   const [selecting, setSelecting] = useState(false);
   const [restoring, setRestoring] = useState(() => projectId === null && !home && Boolean(readStudioView().activeSessionId));
@@ -212,7 +212,10 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const onAgentEvent = (event: CanvasAgentEventPayload) => {
       if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;
-      if (event.session_id !== sessionIdRef.current) return;
+      if (event.session_id !== sessionIdRef.current) {
+        if (projectId === null && event.kind === 'session') void refreshList().catch(() => undefined);
+        return;
+      }
       if (projectId === null && ['delta', 'tool'].includes(event.kind ?? '') &&
           (!session || !('turns' in session) || session.status !== 'running' || event.turn_id !== session.turns.at(-1)?.turn_id)) return;
       if (event.kind === 'delta' && event.text) { setStreaming(current => current + event.text); setActiveTool(null); }
@@ -236,9 +239,11 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         void refreshList().catch(() => undefined);
       }
     };
-  useSSE({ enabled: open, onConnect: () => {
+  const onReconnect = () => {
     if (projectId === null && sessionIdRef.current) void loadSession(sessionIdRef.current).catch(() => undefined);
-  }, ...(projectId === null ? { onStudioAgent: onAgentEvent } : { onCanvasAgent: onAgentEvent }) });
+  };
+  useSSE({ enabled: open && !sharedEvents, onConnect: onReconnect,
+    ...(projectId === null ? { onStudioAgent: onAgentEvent } : { onCanvasAgent: onAgentEvent }) });
 
   const runningSessionId = session?.status === 'running' ? session.session_id : null;
   useEffect(() => {
@@ -397,7 +402,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending: pending || selecting,
     usage, confirmAbove, plan,
     selectedSessionId: sessionIdRef.current ?? (restoring ? readStudioView().activeSessionId : null),
-    createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
+    onAgentEvent, onReconnect, createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }
