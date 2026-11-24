@@ -378,7 +378,8 @@ def test_approval_resume_keeps_turn_spend_and_answered_calls_with_folded_history
     before = runtime._answered_call_ids(history)
     for index, (pending_id, approve) in enumerate((("gen2", True), ("gen3", False)), start=1):
         paused = settle(api, url)
-        assert paused["status"] == "awaiting_approval"
+        # CI 上偶发 interrupted（本机复现不了）：失败时带上原因，下次能直接定位。
+        assert paused["status"] == "awaiting_approval", (paused.get("error"), paused["messages"][-3:])
         assert [row["call_id"] for row in paused["pending_approvals"]] == [pending_id]
         saved = studio_agent.sessions.read(sid).history
         assert saved[:len(history)] == history

@@ -330,6 +330,9 @@ def serve(
         if preflight:
             (root / "preflight").touch()
         port_file = root / "port"
+        # 启动失败时要能看到原因：子进程的 stderr 留在临时目录，报错时带上末尾几行。
+        stderr_path = root / "server-stderr.log"
+        stderr_file = open(stderr_path, "wb")  # noqa: SIM115 — 交给子进程后立即关闭本端
         proc = subprocess.Popen(
             [
                 str(python if python.is_file() else sys.executable),
@@ -341,15 +344,17 @@ def serve(
             start_new_session=os.name == "posix",
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_file,
         )
+        stderr_file.close()
         api = None
         try:
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
+                    tail = stderr_path.read_text(encoding="utf-8", errors="replace")[-2000:]
                     raise RuntimeError(
-                        f"隔离服务启动失败（退出码 {proc.returncode}），请检查目标检出的依赖"
+                        f"隔离服务启动失败（退出码 {proc.returncode}），请检查目标检出的依赖\n{tail}"
                     )
                 if api is None and port_file.exists():
                     port = port_file.read_text(encoding="ascii")

@@ -19,7 +19,29 @@ def _loopback(host):
         return False
 
 
+_pairing = threading.local()
+
+
+def _allow_socketpair():
+    # Windows has no native socketpair: Python emulates it by listening on a loopback port and
+    # connecting to it, and asyncio needs one per event loop. That in-process connection must
+    # pass; every other loopback port stays limited to the fake upstreams.
+    original = socket.socketpair
+
+    def socketpair(*args, **kwargs):
+        _pairing.active = True
+        try:
+            return original(*args, **kwargs)
+        finally:
+            _pairing.active = False
+
+    socket.socketpair = socketpair
+
+
 def restrict_network(ports, preflight_marker):
+    if os.name == "nt":
+        _allow_socketpair()
+
     # Check DNS too: a refused HTTP connection must not send a public DNS query first.
     def audit(event, args):
         if event not in {
@@ -36,6 +58,8 @@ def restrict_network(ports, preflight_marker):
         if event in {"socket.connect", "socket.sendto"}:
             sock, address = args
             if sock.family not in (socket.AF_INET, socket.AF_INET6):
+                return
+            if getattr(_pairing, "active", False) and _loopback(address[0]):
                 return
             if checking or not _loopback(address[0]) or address[1] not in ports:
                 raise PermissionError("仅允许本次评测的假上游")
