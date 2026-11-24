@@ -19,7 +19,7 @@ from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
-from character_workflow.lib.agent_instructions import CORE
+from character_workflow.lib.agent_instructions import CORE, REPLY_LANGUAGE
 from character_workflow.lib import agent_usage
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_layout as layout
@@ -63,10 +63,13 @@ READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "re
 
 INSTRUCTIONS = CORE + """
 
+## 汇报
+简短，按这个顺序：结果是否符合要求；你补的假设（一行）；所用模型与花费；如果有，1 到 2 个可选的下一步方向。不复述提示词全文，用户可以在结果上看到。
+
 ## 画布操作
 先读 get_canvas 看清已有内容。出图前读类别规范并搜索项目库和团队库。
 用 apply_changes 建节点、写草稿、连接参考，用户明确要求生成时才提交。
-多个节点用 run_generations 一次提交，再用 wait_for_runs 一起等待并查看 checks。"""
+多个节点用 run_generations 一次提交，再用 wait_for_runs 一起等待并查看 checks。""" + REPLY_LANGUAGE
 
 
 @dataclass(frozen=True)
