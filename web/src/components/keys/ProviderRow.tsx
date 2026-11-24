@@ -26,13 +26,17 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
     : days === null || idle ? 'text-muted-foreground' : 'text-[color:var(--status-done)]';
   const used = row.last_used_at ? new Date(row.last_used_at) : null;
   const today = used?.toDateString() === new Date().toDateString();
+  const title = row.provider === 'chatgpt' ? vendor : row.alias;
+  const rawType = row.provider === 'custom' ? '自定义' : vendor;
+  const showType = rawType.trim().toLowerCase() !== title.trim().toLowerCase();
+  const host = providerHost(row);
   return <li className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
     <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
     <Button variant="bare" type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      <span className="block truncate text-sm font-medium">{row.provider === 'chatgpt' ? vendor : row.alias}</span>
+      <span className="block truncate text-sm font-medium">{title}</span>
       <Hint label={row.base_url ?? ''}><span className="mt-1 block truncate text-xs text-muted-foreground">
-        {[row.provider === 'custom' ? '自定义' : vendor, providerHost(row), `${row.models?.length ?? 0} 个${row.provider === 'comfyui' ? '工作流' : '模型'}`].filter(Boolean).join(' · ')}
+        {[showType ? rawType : '', host, `${row.models?.length ?? 0} 个${row.provider === 'comfyui' ? '工作流' : '模型'}`].filter(Boolean).join(' · ')}
       </span></Hint>
     </Button>
     <div className="order-last flex w-full items-center justify-between gap-3 pl-13 text-xs sm:order-none sm:w-auto sm:pl-0">

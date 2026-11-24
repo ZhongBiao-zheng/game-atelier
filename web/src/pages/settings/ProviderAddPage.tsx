@@ -6,10 +6,8 @@ import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, listKeys, type 
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial, providerPresetId, type ProviderPreset } from './providerPresets';
-import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 
 const GROUPS = [
   { kind: 'local', title: '本机', description: '' },
@@ -17,6 +15,7 @@ const GROUPS = [
   { kind: 'relay', title: '中转', description: '一个密钥，多家模型' },
   { kind: 'subscription', title: '订阅', description: '' },
   { kind: 'team', title: '团队', description: '同事开启的局域网共享' },
+  { kind: 'custom', title: '自定义', description: '兼容 OpenAI 或任意第三方接口' },
 ] as const;
 const MODALITIES: Record<string, string> = { image: '图片', video: '视频', audio: '音频', llm: '文本' };
 
@@ -26,7 +25,6 @@ export function ProviderAddPage() {
   const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [address, setAddress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ preset: ProviderPreset; initial: Partial<KeyCreatePayload> } | null>(null);
   useEffect(() => {
@@ -40,16 +38,9 @@ export function ProviderAddPage() {
   const open = (preset: ProviderPreset, baseUrl = preset.defaultBaseUrl) => {
     setSelected({ preset, initial: presetInitial(preset, baseUrl) });
   };
-  const custom = () => {
-    try {
-      const url = new URL(address.trim());
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error();
-      setError(null);
-      open(PROVIDER_PRESETS.find(preset => preset.id === 'custom')!, address.trim());
-    } catch { setError('请输入完整的 HTTP(S) API 请求地址'); }
-  };
-  const visible = PROVIDER_PRESETS.filter(preset => preset.kind !== 'custom'
-    && preset.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = PROVIDER_PRESETS.filter(preset =>
+    [preset.label, preset.kind === 'custom' ? '自定义供应商' : ''].join(' ').toLowerCase().includes(query.trim().toLowerCase()),
+  );
   return <div className="flex min-h-[560px] flex-col gap-7">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
@@ -71,12 +62,15 @@ export function ProviderAddPage() {
           <span className="text-xs text-muted-foreground">{group.description}</span></div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-2">
           {items.map(preset => {
-            const added = preset.id !== 'custom' && keys.some(key => providerPresetId(key) === preset.id);
+            const isCustom = preset.id === 'custom';
+            const added = !isCustom && keys.some(key => providerPresetId(key) === preset.id);
             return <Button variant="bare" key={preset.id} type="button" onClick={() => open(preset)}
               className="flex min-h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
-              <span className="min-w-0 flex-1"><span className="block text-sm">{preset.label}</span>
-                <span className="block text-xs text-muted-foreground">{preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '读取中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
+              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs">
+                {isCustom ? <AddIcon size="sm" /> : <ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />}
+              </span>
+              <span className="min-w-0 flex-1"><span className="block text-sm">{isCustom ? '自定义供应商' : preset.label}</span>
+                <span className="block text-xs text-muted-foreground">{isCustom ? '填写 API 地址与密钥' : preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '读取中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>
               {added && <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[color:var(--status-done)]" />已添加</span>}
             </Button>;
@@ -85,13 +79,6 @@ export function ProviderAddPage() {
       </section>;
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
-    <form autoComplete="off" onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
-      <Label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><AddIcon size="sm" aria-hidden />自定义供应商</Label>
-      <Input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="API 地址，如 https://api.example.com/v1"
-        value={address} onChange={e => setAddress(e.target.value)}
-        className="min-w-0 flex-[1_1_360px] font-mono" />
-      <Button type="submit" disabled={!address.trim()}>继续</Button>
-    </form>
     {selected && <KeyForm presetId={selected.preset.id} initial={selected.initial} onCancel={() => setSelected(null)}
       onCreated={() => { window.dispatchEvent(new Event(KEYS_CHANGED_EVENT)); navigate('/settings/providers'); }} />}
   </div>;

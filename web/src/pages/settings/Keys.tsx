@@ -164,7 +164,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             onChange={event => setQuery(event.target.value)} />
         </InputGroup>}
         {embedded ? <Link href="/settings/providers/new"
-          className="flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <AddIcon size="sm" aria-hidden />添加供应商
         </Link> : <Button variant="default"
           type="button"

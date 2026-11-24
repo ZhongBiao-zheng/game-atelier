@@ -41,20 +41,22 @@ it('局域网排第一且不显示额度', async () => {
   expect(rows[0]).toHaveTextContent('未用过');
   expect(screen.getByRole('link', { name: '添加供应商' })).toHaveAttribute('href', '/settings/providers/new');
 });
-it('添加页按供应商、中转和团队分组，支持查找与地址校验', async () => {
+it('添加页按供应商、中转、团队和自定义分组，支持查找与点击弹窗添加自定义供应商', async () => {
   render(<ProviderAddPage />);
   expect(await screen.findByText('已添加')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '供应商' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '中转' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '团队' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '自定义' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: 'Tuzi' } });
   expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /OpenAI-HK/ })).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole('textbox', { name: '自定义供应商地址' }), { target: { value: 'invalid' } });
-  fireEvent.click(screen.getByRole('button', { name: '继续' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('请输入完整的 HTTP(S) API 请求地址');
+  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: /自定义供应商/ }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByLabelText('API 请求地址')).toBeInTheDocument();
 });
 it('custom 预设按域名识别已添加，不把所有中转都标为已添加', async () => {
   vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '我的兔子', provider: 'custom',
@@ -70,7 +72,7 @@ it('未知自定义供应商不把添加模板标成已添加', async () => {
   render(<ProviderAddPage />);
   await waitFor(() => expect(keys.listKeys).toHaveBeenCalled());
   expect(screen.queryByText('已添加')).not.toBeInTheDocument();
-  expect(screen.getByRole('textbox', { name: '自定义供应商地址' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /自定义供应商/ })).toBeInTheDocument();
 });
 describe('路由成员', () => {
   it('显示欠费时间与全部欠费，恢复后移除状态', async () => {
