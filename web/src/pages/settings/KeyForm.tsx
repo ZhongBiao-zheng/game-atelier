@@ -738,7 +738,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     } finally { if (run === listRun.current) setPendingRequest(null); }
   };
   // 有未保存的输入时点外面不关、Esc 先问（规格 2.1）；只有「取消」直接放弃。
-  const formSnapshot = JSON.stringify([aliasEdited ? aliasInput : '', baseUrl, billingGroup, homepage, accessKey,
+  // 「显示密钥」取回的原值不算改动：按原来的掩码记入快照。
+  const keyForSnapshot = revealedKey !== null && accessKey === revealedKey ? (initial?.access_key ?? '') : accessKey;
+  const formSnapshot = JSON.stringify([aliasEdited ? aliasInput : '', baseUrl, billingGroup, homepage, keyForSnapshot,
     textProtocol, icon, enabled, activePresetId, models, preview ? [...fetchedChecked] : null, modalityPick]);
   const initialSnapshot = useRef(formSnapshot);
   const dirty = !saving && formSnapshot !== initialSnapshot.current;

@@ -8,6 +8,12 @@ import { errorText } from '@/lib/errorText';
 import { notify } from '@/lib/notify';
 import { formatBeijingTime } from '@/lib/time';
 
+/** 删一轮里的单张也记成 round，带 `output_slot`：单独标出来，不然和整轮删除长得一样。 */
+function trashKindLabel(entry: TrashEntry): string {
+  if (entry.kind === 'round' && typeof entry.meta.output_slot === 'number') return '单张结果';
+  return TRASH_KIND_LABEL[entry.kind] ?? entry.kind;
+}
+
 type Pending = { scope: 'one'; entry: TrashEntry } | { scope: 'all' };
 
 function TrashRow({ entry, busy, onRestore, onPurge }: {
@@ -17,7 +23,7 @@ function TrashRow({ entry, busy, onRestore, onPurge }: {
   onPurge: () => void;
 }) {
   return <li className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-    <Badge variant="secondary" className="shrink-0">{TRASH_KIND_LABEL[entry.kind] ?? entry.kind}</Badge>
+    <Badge variant="secondary" className="shrink-0">{trashKindLabel(entry)}</Badge>
     <div className="min-w-0 flex-1 space-y-1">
       <p className="truncate text-sm font-medium">{entry.label}</p>
       <p className="text-xs tabular-nums text-muted-foreground">
