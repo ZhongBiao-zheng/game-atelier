@@ -5961,6 +5961,8 @@ function CanvasEditorInner({
                     zoom: getZoom(),
                     duration: viewportMotionMs(MOTION_DURATION.slow),
                     ease: CANVAS_VIEWPORT_EASE_IN_OUT,
+                    // 只平移：默认的 smooth 插值远距离时会先拉远再推近。
+                    interpolate: 'linear',
                   }));
                 }}
               >{historyHint.label}</Button>
