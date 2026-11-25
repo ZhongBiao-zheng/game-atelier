@@ -39,7 +39,7 @@ export function Home() {
     };
   }, [attempt]);
 
-  const items = state.kind === 'success' ? state.items : [];
+  const items = useMemo(() => (state.kind === 'success' ? state.items : []), [state]);
   // 分列按「取到的那一批」定：撤下或放回一张只影响它所在的那一列，其余卡片不换列、不重挂。
   const [layoutItems, setLayoutItems] = useState<GalleryItem[]>([]);
   const covered = items.every(item => layoutItems.some(row => row.path === item.path));
