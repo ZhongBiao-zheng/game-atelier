@@ -29,7 +29,7 @@ from character_workflow.lib.creation_assets import (
     creation_asset_media_path,
     get_creation_asset,
 )
-from character_workflow.lib.jobs import read_job
+from character_workflow.lib.jobs import output_slots, read_job, removed_output_slots
 from character_workflow.lib.schemas import (
     CANVAS_DRAFT_PARAM_FIELDS,
     CanvasAgentPlan,
@@ -222,16 +222,20 @@ def media_path(sid, ref):
     if not match:
         raise ValueError("无法识别的媒体引用")
     job = job_for(sid, match[1])
-    index = int(match[2])
-    if index >= len(job.output_paths):
+    # 序号是稳定序号：删掉这一轮里的别的单张后，旧引用仍指向原图；指向已删的那张时明确报错。
+    slot = int(match[2])
+    if slot in removed_output_slots(job):
+        raise ValueError("这张结果已删除")
+    path = dict(output_slots(job)).get(slot)
+    if path is None:
         raise ValueError("结果序号超出范围")
-    return Path(job.output_paths[index]), job.kind.value
+    return Path(path), job.kind.value
 
 
 def result_view(sid, job_id, check=False):
     job = job_for(sid, job_id)
     outputs = []
-    for index, output in enumerate(job.output_paths):
+    for index, output in output_slots(job):
         ref = f"output:{job_id}:{index}"
         row = {"index": index, "media_ref": ref, "kind": job.kind.value}
         if check:

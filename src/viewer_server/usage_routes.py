@@ -114,7 +114,8 @@ def _usage_records(scope: str, period: str, now: datetime) -> tuple[list[dict], 
     if scope == "mine":
         projects = canvas_projects.list_canvas_projects()
         names = {project.project_id: project.name for project in projects}
-        records = mine_records(jobs.list_jobs(), names) + _agent_records(projects, names, now)
+        records = mine_records(jobs.list_jobs(), names, jobs.list_usage_archive()) \
+            + _agent_records(projects, names, now)
     else:
         config = gateway_keys.read_config()
         if not config.enabled:

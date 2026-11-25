@@ -1073,6 +1073,33 @@ def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> Cr
         return updated
 
 
+def canvas_project_asset_ids(project_id: str) -> list[str]:
+    """和这个画布项目有关系的个人资产；删除项目时记进回收站条目，还原时接回。"""
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+    return [asset.asset_id for asset in current.assets if project_id in asset.project_ids]
+
+
+def restore_canvas_project_asset_relations(project_id: str, asset_ids: list[str]) -> None:
+    """还原画布项目时把删除前的资产关系接回；已彻底删除的资产跳过，重复执行无副作用。"""
+    wanted = set(asset_ids)
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        if not any(asset.asset_id in wanted and project_id not in asset.project_ids
+                   for asset in current.assets):
+            return
+        assets = [
+            asset.model_copy(update={
+                "project_ids": _normalize_project_ids([*asset.project_ids, project_id]),
+                "updated_at": _now(),
+            })
+            if asset.asset_id in wanted and project_id not in asset.project_ids
+            else asset
+            for asset in current.assets
+        ]
+        _write_catalog_unlocked(current, assets)
+
+
 def remove_canvas_project_asset_relations(project_id: str) -> None:
     """Remove a deleted Canvas project from every global asset relation."""
     with file_lock(_catalog_lock_path()):

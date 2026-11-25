@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, get_args
+from typing import Any, Iterator, get_args
 
 from pydantic import ValidationError
 
@@ -133,8 +133,9 @@ def _load_job(data: Any) -> Job:
                     if key in owner:
                         data[key] = owner[key]
             # 认不出的分类码当作没有：一个坏值不能让整条任务读不出来。
+            # 旧记录或外部写入可能是数组 / 对象：先判类型，不可哈希的值查集合会抛 TypeError 绕过容错。
             code = params.pop(_ERROR_CODE_PARAM, None)
-            if code in _ERROR_CODES:
+            if isinstance(code, str) and code in _ERROR_CODES:
                 data["error_code"] = code
         for field in _RETIRED_FIELDS:
             data.pop(field, None)
@@ -323,11 +324,69 @@ def _round_label(job: Job) -> str:
     return " ".join(job.prompt.split())[:_ROUND_LABEL_LENGTH] or "生成结果"
 
 
+_REMOVED_OUTPUTS_PARAM = "_removed_outputs"
+
+
+def removed_output_slots(job: Job) -> set[int]:
+    """这一轮里已单张删除的结果序号（产出时的位置）。存在 params 里，旧版读到也只是一个扩展字段。"""
+    raw = (job.params.model_extra or {}).get(_REMOVED_OUTPUTS_PARAM)
+    if not isinstance(raw, list):
+        return set()
+    return {value for value in raw if type(value) is int and value >= 0}
+
+
+def output_slots(job: Job) -> list[tuple[int, str]]:
+    """(稳定序号, 路径)：序号是这一份结果在这一轮产出时的位置，删掉别的单张后不变。
+
+    Agent 历史里的 `output:<job_id>:<序号>` 按它解释，旧会话的引用始终指向原图。"""
+    removed = removed_output_slots(job)
+    slots: list[tuple[int, str]] = []
+    slot = 0
+    for path in job.output_paths:
+        while slot in removed:
+            slot += 1
+        slots.append((slot, path))
+        slot += 1
+    return slots
+
+
+def _with_removed_slots(job: Job, removed: set[int], output_paths: list[str]) -> Job:
+    params = job.params.model_copy(update={_REMOVED_OUTPUTS_PARAM: sorted(removed) or None})
+    return job.model_copy(update={"params": params, "output_paths": output_paths})
+
+
+_USAGE_ARCHIVE = "usage-archive"
+
+
+def _usage_archive_dir() -> Path:
+    return _runtime_dir() / _USAGE_ARCHIVE
+
+
+def archive_for_usage(job: Job) -> None:
+    """任务记录离开 `.runtime/jobs/`（进回收站、删除）前留一份到用量侧：已发生的花费不随产物删除、
+    还原或清空回收站而变化。调用方持 job_lock。"""
+    _usage_archive_dir().mkdir(parents=True, exist_ok=True)
+    atomic_write_text(_usage_archive_dir() / f"{job.job_id}.json", _path(job.job_id).read_text("utf-8"))
+
+
+def list_usage_archive() -> list[Job]:
+    """用量侧留存的已删除任务；读不出的跳过。是否仍在 `.runtime/jobs/` 由调用方去重（在的以现存为准）。"""
+    archive = _usage_archive_dir()
+    rows: list[Job] = []
+    for path in sorted(archive.glob("*.json")) if archive.exists() else []:
+        try:
+            rows.append(_load_job(json.loads(read_text_with_retry(path))))
+        except (OSError, json.JSONDecodeError, ValidationError):
+            logger.warning("skipping bad usage archive file: %s", path.name)
+    return rows
+
+
 def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
     """创作台删除：移进回收站（30 天内可还原），返回 trash_id。
 
-    不给 output_path 删整轮（任务文件与产物目录）；给了且这一轮不止一份产物时只删这一份，
-    并从 output_paths 摘掉，还原时按原位置插回。只收创作台自家的、已结束的任务。"""
+    不给 output_path 删整轮（任务文件与产物目录）；给了且这一轮不止一份产物时只删这一份：
+    从 output_paths 摘掉并记下它的稳定序号，其余结果的序号不变，还原时按原位置插回。
+    只收创作台自家的、已结束的任务。"""
     from character_workflow.lib.studio_jobs import studio_root
 
     with job_lock(job_id):
@@ -336,16 +395,16 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
             if output_path not in job.output_paths:
                 raise LookupError("这份结果不在这一轮里")
             if len(job.output_paths) > 1:
-                index = job.output_paths.index(output_path)
-                trash_id = trash.move_to_trash(
+                slot = dict((path, slot) for slot, path in output_slots(job))[output_path]
+                remaining = [path for path in job.output_paths if path != output_path]
+                updated = _with_removed_slots(job, removed_output_slots(job) | {slot}, remaining)
+                # 输出索引的回写与文件移动同一个回收站事务：一起提交，或一起回滚。
+                return trash.move_to_trash(
                     "round", _round_label(job), [_resolve_output(output_path)],
                     {"job_id": job_id, "session_id": job.studio_agent_session_id,
-                     "output_path": output_path, "output_index": index},
+                     "output_path": output_path, "output_slot": slot},
+                    commit=lambda: _write(updated),
                 )
-                _write(job.model_copy(update={
-                    "output_paths": [path for path in job.output_paths if path != output_path],
-                }))
-                return trash_id
         output_dir = studio_root() / job_id
         paths: list[Path] = [_path(job_id)]
         if output_dir.exists():
@@ -354,34 +413,42 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
             path = _resolve_output(raw)
             if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
                 paths.append(path)
+        archive_for_usage(job)
         return trash.move_to_trash(
             "round", _round_label(job), paths,
             {"job_id": job_id, "session_id": job.studio_agent_session_id},
         )
 
 
-def _restore_round(entry: trash.TrashEntry, restore_files: Callable[[], None]) -> None:
+def _reinsert_output(job_id: str, output_path: str, slot: int) -> None:
+    """持 job_lock：把单张删除的结果按稳定序号插回（重复执行无副作用）。"""
+    job = read_job(job_id)
+    removed = removed_output_slots(job)
+    if output_path in job.output_paths:
+        if slot in removed:
+            _write(_with_removed_slots(job, removed - {slot}, list(job.output_paths)))
+        return
+    position = sum(1 for current, _ in output_slots(job) if current < slot)
+    paths = list(job.output_paths)
+    paths.insert(position, output_path)
+    _write(_with_removed_slots(job, removed - {slot}, paths))
+
+
+def _restore_round(entry: trash.TrashEntry, restore_files: trash.RestoreFiles) -> None:
     job_id = entry.meta.get("job_id")
     if not isinstance(job_id, str):
         restore_files()
         return
     with job_lock(job_id):
-        restore_files()
         output_path = entry.meta.get("output_path")
-        if not isinstance(output_path, str):
+        slot = entry.meta.get("output_slot")
+        if not isinstance(output_path, str) or type(slot) is not int:
+            restore_files()
             return
-        # 单张删除：任务还在就把这张插回原位置；任务已整轮删掉时文件留在原处，不复活任务。
-        try:
-            job = read_job(job_id)
-        except FileNotFoundError:
-            return
-        if output_path in job.output_paths:
-            return
-        index = entry.meta.get("output_index")
-        position = index if isinstance(index, int) else len(job.output_paths)
-        paths = list(job.output_paths)
-        paths.insert(min(max(position, 0), len(paths)), output_path)
-        _write(job.model_copy(update={"output_paths": paths}))
+        # 单张：所在的一轮必须还在，否则移回的文件会占住整轮的产物目录，整轮再也还原不了。
+        if not _path(job_id).exists():
+            raise trash.TrashConflict("这张所在的一轮已删除，先还原这一轮")
+        restore_files(lambda: _reinsert_output(job_id, output_path, slot))
 
 
 trash.register_restore_handler("round", _restore_round)
@@ -393,6 +460,7 @@ def delete_failed_job(job_id: str) -> None:
         job = read_job(job_id)
         if job.status not in (JobStatus.FAILED, JobStatus.CANCELED):
             raise ValueError(f"job {job_id} is {job.status.value}, not failed")
+        archive_for_usage(job)
         for image_path in job.output_paths:
             p = Path(image_path)
             if p.exists():
@@ -432,6 +500,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "gateway_cancel_pending": None,
         "gateway_settlement": None,
         "gateway_charged_on": None,
+        _REMOVED_OUTPUTS_PARAM: None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),

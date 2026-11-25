@@ -37,7 +37,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.canvas_thumbnails import discard_canvas_thumbnails
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.jobs import job_lock, new_job_id, read_job
+from character_workflow.lib.jobs import archive_for_usage, job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
     CanvasAgentSession,
     CanvasContentVersion,
@@ -1274,8 +1274,12 @@ def delete_canvas_project(
                 stack.enter_context(job_lock(job.job_id))
             locked_jobs = [read_job(job.job_id) for job in jobs]
             _assert_jobs_are_quiescent(locked_jobs)
+            from character_workflow.lib.creation_assets import canvas_project_asset_ids
             from character_workflow.lib.team_library import list_mounts
             mounts = [mount.model_dump(mode="json") for mount in list_mounts(project_id)]
+            # 花费留在用量侧：任务记录进了回收站（之后可能被清空），已发生的消费照样计入。
+            for job in locked_jobs:
+                archive_for_usage(job)
             trash_id = trash.move_to_trash(
                 "project",
                 project.name,
@@ -1283,9 +1287,10 @@ def delete_canvas_project(
                     canvas_project_dir(project_id),
                     *(data_root.runtime_dir() / "jobs" / f"{job.job_id}.json" for job in locked_jobs),
                 ],
-                {"project_id": project_id, "mounts": mounts},
+                {"project_id": project_id, "mounts": mounts,
+                 "asset_ids": canvas_project_asset_ids(project_id)},
             )
-    # 缩略图是派生缓存，还原后按需重建；资产关系与团队库挂载随删除清掉，挂载在还原时接回。
+    # 缩略图是派生缓存，还原后按需重建；资产关系与团队库挂载随删除清掉，还原时按条目记录接回。
     discard_canvas_thumbnails(project_id)
     from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
     remove_canvas_project_asset_relations(project_id)
@@ -1313,11 +1318,28 @@ def discard_empty_canvas_project(project_id: str) -> bool:
     return True
 
 
-def _restore_canvas_project(entry: trash.TrashEntry, restore_files: Callable[[], None]) -> None:
-    """回收站还原项目：在项目生命周期锁里移回文件，再把删除时记下的团队库挂载接回（库已不在的跳过）。"""
-    with file_lock(_lifecycle_lock_path()):
-        restore_files()
+_TRASHED_JOB = re.compile(r"^\.runtime/jobs/([A-Za-z0-9_-]+)\.json$")
+
+
+def _restore_canvas_project(entry: trash.TrashEntry, restore_files: trash.RestoreFiles) -> None:
+    """回收站还原项目：持项目生命周期锁与清单里每个任务的 job_lock（与删除同一锁顺序；项目锁、
+    Agent 会话锁要求项目已存在，项目在回收站里时无从争用）移回文件，覆盖检查与放回都在锁内。
+    再把删除时记下的个人资产关系与团队库挂载接回（已不在的跳过）。善后可重复执行。"""
     project_id = str(entry.meta.get("project_id") or "")
+    job_ids = sorted({match[1] for item in entry.items
+                      if (match := _TRASHED_JOB.fullmatch(item.original))})
+    with file_lock(_lifecycle_lock_path()), ExitStack() as stack:
+        for job_id in job_ids:
+            stack.enter_context(job_lock(job_id))
+        restore_files()
+    if not project_id:
+        return
+    asset_ids = entry.meta.get("asset_ids")
+    if isinstance(asset_ids, list):
+        from character_workflow.lib.creation_assets import restore_canvas_project_asset_relations
+        restore_canvas_project_asset_relations(
+            project_id, [value for value in asset_ids if isinstance(value, str)],
+        )
     from character_workflow.lib.team_library import mount_library
     for mount in entry.meta.get("mounts") or []:
         try:

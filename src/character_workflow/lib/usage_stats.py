@@ -44,10 +44,14 @@ def user_prompt(job: Job) -> str:
 
 
 def mine_records(
-    jobs: list[Job], canvas_names: dict[str, str],
+    jobs: list[Job], canvas_names: dict[str, str], archived: list[Job] | None = None,
 ) -> list[dict]:
+    """`archived` 是删除时留在用量侧的任务记录：产物已进回收站或已清空，花费照样计入；
+    仍在任务列表里的（已还原）以现存记录为准。"""
+    live = {job.job_id for job in jobs}
+    gone = {job.job_id for job in archived or [] if job.job_id not in live}
     records = []
-    for job in jobs:
+    for job in [*jobs, *(job for job in archived or [] if job.job_id in gone)]:
         assist = job.namespace == "assist"
         # 已停止的任务一般不计；但停止后主机仍跑完并扣了费、回写到这条上的（第 6 批 6-2a）按实际扣费计入。
         settled_charge = job.status == "canceled" and (job.params.actual_cost_cny or 0) > 0
@@ -80,8 +84,8 @@ def mine_records(
             "project": project_key, "source": "lan" if job.provider == "atelier" else "local",
             "failed": job.status == "failed", "prompt": user_prompt(job)[:120],
             "thumb_url": "/api/raw?" + urlencode({"job_id": job.job_id, "path": job.output_paths[0]})
-            if job.output_paths else None,
-            "href": job_location(job),
+            if job.output_paths and job.job_id not in gone else None,
+            "href": job_location(job) if job.job_id not in gone else None,
         })
     return records
 
