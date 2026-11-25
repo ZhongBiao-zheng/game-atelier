@@ -64,7 +64,7 @@ INSTRUCTIONS = CORE + """
 
 ## 画布操作
 先读 get_canvas 看清已有内容。出图前读类别规范并搜索项目库和团队库。
-用 apply_changes 建节点、写草稿、连接参考，再提交生成；多方案的每一条是一个节点。
+用 apply_changes 建节点、写草稿、连接参考，再提交生成；多方案的每一条是一个节点。改已有结果时把那个结果节点连为新节点的参考。
 多个节点用 run_generations 一次提交，再用 wait_for_runs 一起等待并查看 checks。"""
 
 

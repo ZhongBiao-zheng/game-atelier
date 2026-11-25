@@ -40,7 +40,7 @@ from character_workflow.lib.schemas import (
 INSTRUCTIONS = runtime.CORE + """
 
 ## 创作台
-参考素材使用用户附件、资产或本会话结果的 media_ref。
+参考素材使用用户附件、资产或本会话结果的 media_ref；本会话结果写作 `output:<job_id>:<序号>`，序号从 0 起。
 用 run_generation 或 run_generations 提交，设 wait=true 一起等待并看图；超时后按 job_id 继续等待。
 不调用 update_plan。"""
 

@@ -32,3 +32,9 @@ def test_report_budget_applies_across_tool_calls():
     assert "所有 assistant 文字合计不超过 150 字" in CORE
     assert "最多 3 条，每条一行、不超过 25 字" in CORE
     assert "（本张）" in CORE
+
+
+def test_revising_a_result_uses_it_as_reference():
+    assert "把那张结果当参考图，按改图写，不从头重画" in CORE
+    assert "`output:<job_id>:<序号>`" in studio.INSTRUCTIONS
+    assert "把那个结果节点连为新节点的参考" in canvas.INSTRUCTIONS
