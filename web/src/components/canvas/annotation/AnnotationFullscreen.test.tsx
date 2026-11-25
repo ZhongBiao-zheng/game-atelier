@@ -8,7 +8,7 @@ vi.mock('../ImageEditorShell', () => ({ useEditorViewport: () => ({ measure, zoo
 function Harness() {
   const editor = useAnnotationEditor({ enabled: true, elements: [], width: 1024, height: 768,
     onCommit: vi.fn(), onExit: vi.fn(), undo: vi.fn(), redo: vi.fn(), onError: vi.fn() });
-  return <AnnotationFullscreen title="全屏验收" src="/image.png" width={1024} height={768} editor={editor}
+  return <AnnotationFullscreen open title="全屏验收" src="/image.png" width={1024} height={768} editor={editor}
     onCollapse={vi.fn()} undo={vi.fn()} redo={vi.fn()} canUndo={false} canRedo={false} />;
 }
 it('attaches wheel zoom after the dialog portal has mounted', () => {

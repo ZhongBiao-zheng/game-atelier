@@ -1,1 +1,9 @@
-.annotation-active { outline: 1.5px solid var(--primary); outline-offset: 3px; }
+/* 进入标注时主题色外框从透明淡入，不是一下子框住。退出时 class 摘掉、外框直接消失（节点卡片本身没有常驻外框可供过渡）。 */
+@keyframes annotationOutlineIn {
+  from { outline-color: transparent; }
+}
+.annotation-active {
+  outline: 1.5px solid var(--primary);
+  outline-offset: 3px;
+  animation: annotationOutlineIn var(--motion-fast) var(--ease-atelier-subtle);
+}

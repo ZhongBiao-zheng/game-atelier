@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { AnnotationLayer } from './AnnotationLayer';
-import type { AnnotationEditor } from './useAnnotationEditor';
+import { useAnnotationView, type AnnotationEditor } from './useAnnotationEditor';
 import { ANNOTATION_FONT, ANNOTATION_COLORS, ANNOTATION_WHITE, ANNOTATION_INK, ANNOTATION_DARK, annotationUnitScale } from './annotationModel';
 import { Textarea } from '@/components/ui/textarea';
 export function AnnotationEditingLayer({ editor, width, height, fit }: {
@@ -29,14 +29,15 @@ export function AnnotationEditingLayer({ editor, width, height, fit }: {
     element.addEventListener('wheel', listener, { passive: false });
     return () => element.removeEventListener('wheel', listener);
   }, []);
-  const cursor = editor.hoveredId ? 'move' : editor.prefs.tool === 'text' ? 'text' : editor.prefs.tool === 'select' ? 'default' : 'crosshair';
+  const view = useAnnotationView(editor);
+  const cursor = view.hoveredId ? 'move' : editor.prefs.tool === 'text' ? 'text' : editor.prefs.tool === 'select' ? 'default' : 'crosshair';
   const sx = size.width / width, sy = size.height / height;
   const scale = fit === 'cover' ? Math.max(sx, sy) : Math.min(sx, sy);
   const xscale = fit === 'fill' ? sx : scale, yscale = fit === 'fill' ? sy : scale;
   const text = editor.text;
   return <div ref={host} className="pointer-events-none absolute inset-0" data-annotation-surface>
-    <AnnotationLayer elements={editor.elements.filter(item => item.id !== text?.id)}
-      imageWidth={width} imageHeight={height} fit={fit} selectedId={editor.selectedId} screenPixel={editor.screenPixel}
+    <AnnotationLayer elements={view.elements.filter(item => item.id !== text?.id)}
+      imageWidth={width} imageHeight={height} fit={fit} selectedId={editor.selectedId} screenPixel={view.screenPixel}
       className="nodrag nopan absolute inset-0 size-full"
       style={{ pointerEvents: editor.panning ? 'none' : 'auto', cursor, touchAction: 'none' }}
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp}

@@ -1,4 +1,5 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
+import { useAnnotationToolbarSwap } from './annotation/useAnnotationToolbarSwap';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import {
@@ -494,6 +495,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     });
   }
   const annotating = context?.annotationController?.nodeId === node.id;
+  const annotationToolbar = useAnnotationToolbarSwap(annotating);
   const annotation = node.type === 'image' && node.data.annotation?.version_id === node.data.current_version_id ? node.data.annotation : null;
   const annotationEditor = useAnnotationEditor({
     enabled: annotating, elements: annotation?.elements ?? [],
@@ -698,12 +700,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           !context.multiSelectionActive && !(annotating && context.annotationController?.fullscreen)
           && (selected || toolbarOverlayOpen)
         }
-        position={annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
+        position={annotationToolbar.annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
         align="center"
-        offset={annotating ? 12 : 32}
-        className="nodrag"
+        offset={annotationToolbar.annotating ? 12 : 32}
+        className={cn('nodrag', annotationToolbar.className)}
       >
-        {annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
+        {annotationToolbar.annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
           canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
           onExpand={context.annotationController.expand}
@@ -790,7 +792,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           )}
         </div>}
       </NodeToolbar>
-      {annotating && context.annotationController?.fullscreen && content?.kind === 'image' && <AnnotationFullscreen
+      {context.annotationController && content?.kind === 'image' && <AnnotationFullscreen
+        open={annotating && context.annotationController.fullscreen}
         title={node.title} src={canvasMediaUrl(context.projectId, content.version_id)} width={content.width ?? 1024} height={content.height ?? 1024}
         editor={annotationEditor} onCollapse={context.annotationController.collapse}
         undo={context.annotationController.undo} redo={context.annotationController.redo}

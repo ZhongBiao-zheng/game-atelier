@@ -33,6 +33,37 @@ function subscribePreferences(listener: () => void) {
   preferenceListeners.add(listener);
   return () => { preferenceListeners.delete(listener); };
 }
+/** 跟着指针每帧变化的状态（拖动中的预览、悬停的标注、屏幕像素换算）放在节点外的小仓库里：
+ *  只有标注层与工具条订阅，拖一笔不再让整张节点卡片（媒体、工具条、生成面板）跟着每帧重渲。 */
+interface LiveState { preview: AnnotationElement[] | null; hoveredId: string | null; screenPixel: number }
+function createLiveStore() {
+  let value: LiveState = { preview: null, hoveredId: null, screenPixel: 1 };
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set(patch: Partial<LiveState>) {
+      const next = { ...value, ...patch };
+      if (next.preview === value.preview && next.hoveredId === value.hoveredId && next.screenPixel === value.screenPixel) return;
+      value = next;
+      listeners.forEach(listener => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+/** 浏览器把一帧内的多次移动合并成一个事件；取回被合并掉的采样点（不支持时返回 null）。 */
+function coalescedPoints(event: ReactPointerEvent<SVGSVGElement>): AnnotationPoint[] | null {
+  const samples = typeof event.nativeEvent.getCoalescedEvents === 'function' ? event.nativeEvent.getCoalescedEvents() : [];
+  const matrix = samples.length > 1 ? event.currentTarget.getScreenCTM() : null;
+  if (!matrix) return null;
+  const inverse = matrix.inverse();
+  return samples.map(sample => {
+    const point = new DOMPoint(sample.clientX, sample.clientY).matrixTransform(inverse);
+    return [point.x, point.y] as AnnotationPoint;
+  });
+}
 const WHEEL_STEP = 40;
 const WHEEL_COMMIT_DELAY = 350;
 interface Options {
@@ -44,27 +75,25 @@ export function useAnnotationEditor(options: Options) {
   const prefs = useSyncExternalStore(subscribePreferences, readPreferences);
   const setPrefs = writePreferences;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [live] = useState(createLiveStore);
   const wheelState = useRef<{ id: string; remainder: number; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const [preview, setPreview] = useState<AnnotationElement[] | null>(null);
   const [text, setText] = useState<AnnotationText | null>(null);
   const [panning, setPanning] = useState(false);
-  const [screenPixel, setScreenPixel] = useState(1);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composing = useRef(false);
   const gesture = useRef<{ start: AnnotationPoint; pixel: number; element: AnnotationElement; moving: boolean; changed: boolean; endpoint?: 'start' | 'end'; resize?: { corner: number[]; anchor: AnnotationPoint; vector: AnnotationPoint } } | null>(null);
-  const latest = useRef({ options, prefs, selectedId, preview, text });
-  latest.current = { options, prefs, selectedId, preview, text };
+  const latest = useRef({ options, prefs, selectedId, text });
+  latest.current = { options, prefs, selectedId, text };
   const unit = annotationUnitScale(options.width, options.height);
-  const elements = preview ?? options.elements;
-  const selected = elements.find(element => element.id === selectedId);
+  const setPreview = (preview: AnnotationElement[] | null) => live.set({ preview });
+  const setHoveredId = (hoveredId: string | null) => live.set({ hoveredId });
   useEffect(() => {
     if (!options.enabled) {
       actions.current.flushWheel();
-      setPreview(null); setText(null); setSelectedId(null); setHoveredId(null); gesture.current = null;
+      live.set({ preview: null, hoveredId: null }); setText(null); setSelectedId(null); gesture.current = null;
     }
-  }, [options.enabled]);
+  }, [options.enabled, live]);
   function commit(next: AnnotationElement[]) {
     try { serializeElements(next); latest.current.options.onCommit(next); }
     catch (error) { latest.current.options.onError((error as Error).message); }
@@ -87,7 +116,8 @@ export function useAnnotationEditor(options: Options) {
     if (!pending) return;
     clearTimeout(pending.timer);
     wheelState.current = null;
-    if (latest.current.preview) commit(latest.current.preview);
+    const preview = live.get().preview;
+    if (preview) commit(preview);
   }
   function removeSelected() {
     flushWheel();
@@ -120,7 +150,7 @@ export function useAnnotationEditor(options: Options) {
     if (!matrix) return null;
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
     const pixel = 1 / Math.max(.0001, Math.hypot(matrix.a, matrix.b));
-    setScreenPixel(pixel);
+    live.set({ screenPixel: pixel });
     return { point: [point.x, point.y] as AnnotationPoint, pixel };
   }
   function pointerDown(event: ReactPointerEvent<SVGSVGElement>) {
@@ -130,6 +160,7 @@ export function useAnnotationEditor(options: Options) {
     if (text) { finishText(); return; }
     flushWheel();
     const { point, pixel } = at;
+    const selected = (live.get().preview ?? options.elements).find(element => element.id === selectedId);
     const endpointHandle = event.target instanceof Element ? event.target.closest('[data-annotation-endpoint]') : null;
     const endpoint = endpointHandle?.getAttribute('data-annotation-endpoint');
     if (selected?.type === 'arrow' && (endpoint === 'start' || endpoint === 'end')) {
@@ -180,7 +211,7 @@ export function useAnnotationEditor(options: Options) {
     const matrix = svg.getScreenCTM(); if (!matrix) return;
     const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
     const pixel = 1 / Math.max(.0001, Math.hypot(matrix.a, matrix.b));
-    const current = latest.current.preview ?? latest.current.options.elements;
+    const current = live.get().preview ?? latest.current.options.elements;
     const target = hitElement(current, [p.x, p.y], unit, pixel);
     if (!target) return;
     event.preventDefault(); event.stopPropagation();
@@ -194,7 +225,7 @@ export function useAnnotationEditor(options: Options) {
       timer: setTimeout(flushWheel, WHEEL_COMMIT_DELAY) };
     setSelectedId(target.id);
     if (!steps) return;
-    const base = latest.current.preview ?? latest.current.options.elements;
+    const base = live.get().preview ?? latest.current.options.elements;
     const next = base.map(element => {
       if (element.id !== target.id) return element;
       if (element.type === 'text') return { ...element, font_size: Math.min(72, Math.max(12, element.font_size + steps * 2)) };
@@ -202,7 +233,7 @@ export function useAnnotationEditor(options: Options) {
     });
     const changed = next.find(element => element.id === target.id)!;
     setPrefs(prefs => ({ ...prefs, ...(changed.type === 'text' ? { font_size: changed.font_size } : { stroke_width: changed.stroke_width }) }));
-    latest.current.preview = next; setPreview(next);
+    setPreview(next);
   }
   function pointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     const g = gesture.current;
@@ -231,17 +262,24 @@ export function useAnnotationEditor(options: Options) {
     else if (element.type === 'rect') element = { ...element, x: Math.min(p[0], g.start[0]), y: Math.min(p[1], g.start[1]), width: Math.abs(p[0] - g.start[0]), height: Math.abs(p[1] - g.start[1]) };
     else if (element.type === 'arrow') element = { ...element, end: p };
     else if (element.type === 'freedraw') {
-      if (distance(p, element.points[element.points.length - 1]) < 1.5 * g.pixel || element.points.length >= 10000) return;
-      element = { ...element, points: [...element.points, p] }; g.element = element;
+      // 快速划线时一帧只来一个事件，只取它会把曲线画成折线；把合并掉的采样点一起补进来。
+      const samples = coalescedPoints(event) ?? [p];
+      const points = [...element.points];
+      for (const sample of samples) {
+        if (points.length >= 10000) break;
+        if (distance(sample, points[points.length - 1]) >= 1.5 * g.pixel) points.push(sample);
+      }
+      if (points.length === element.points.length) return;
+      element = { ...element, points }; g.element = element;
     }
     g.changed = distance(p, g.start) > 0;
     const next = g.moving ? options.elements.map(item => item.id === element.id ? element : item) : [...options.elements, element];
-    latest.current.preview = next; setPreview(next);
+    setPreview(next);
   }
   function pointerUp(event: ReactPointerEvent<SVGSVGElement>) {
     const g = gesture.current; if (!g) return;
     pointerMove(event);
-    const next = latest.current.preview;
+    const next = live.get().preview;
     gesture.current = null;
     event.stopPropagation();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -256,7 +294,7 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     const matrix = event.currentTarget.getScreenCTM(); if (!matrix) return;
     const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
-    const hit = hitElement(options.elements, [p.x, p.y], unit, screenPixel);
+    const hit = hitElement(options.elements, [p.x, p.y], unit, live.get().screenPixel);
     if (hit?.type === 'text') { setText(hit); setSelectedId(hit.id); }
   }
   const actions = useRef({ chooseTool, finishText, removeSelected, flushWheel });
@@ -296,10 +334,17 @@ export function useAnnotationEditor(options: Options) {
       window.removeEventListener('blur', blur); document.removeEventListener('pointerdown', outside, true);
     };
   }, [options.enabled]);
-  return { prefs, elements, selected, selectedId, hoveredId, text, setText, composing, finishText, panning, screenPixel,
-    svgRef, textareaRef, chooseTool, changeStyle, removeSelected,
+  return { enabled: options.enabled, committedElements: options.elements, live, prefs, selectedId, text, setText, composing,
+    finishText, panning, svgRef, textareaRef, chooseTool, changeStyle, removeSelected,
     pointerDown, pointerMove, pointerUp, doubleClick, wheel,
     pointerLeave: () => setHoveredId(null),
     cancelGesture: () => { gesture.current = null; setPreview(null); } };
 }
 export type AnnotationEditor = ReturnType<typeof useAnnotationEditor>;
+/** 标注层与工具条读当前要画的标注（拖动中是预览）、选中项与悬停项；只有调用它的组件随指针移动重渲。 */
+export function useAnnotationView(editor: AnnotationEditor) {
+  const live = useSyncExternalStore(editor.live.subscribe, editor.live.get);
+  const elements = live.preview ?? editor.committedElements;
+  return { elements, selected: elements.find(element => element.id === editor.selectedId),
+    hoveredId: live.hoveredId, screenPixel: live.screenPixel };
+}
