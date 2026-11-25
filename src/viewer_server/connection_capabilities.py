@@ -48,6 +48,10 @@ POST /api/http-protocols/assist
 GET /api/http-protocols/{identifier}
 PUT /api/http-protocols/{identifier}
 DELETE /api/http-protocols/{identifier}
+GET /api/trash
+POST /api/trash/{trash_id}/restore
+DELETE /api/trash/{trash_id}
+DELETE /api/trash
 GET /api/plugins
 POST /api/plugins/{plugin_id}/enable
 POST /api/plugins/{plugin_id}/disable
@@ -298,6 +302,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/canvas/agent/skills/import", "/api/canvas/agent/skills/{name}",
     # Agent 出图的确认金额是花钱的闸门，只给本机页面。
     "/api/canvas/agent/settings",
+    # 回收站能彻底删除用户数据，只给本机页面。
+    "/api/trash", "/api/trash/{trash_id}", "/api/trash/{trash_id}/restore",
 })
 # 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
 # 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。

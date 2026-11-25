@@ -16,7 +16,8 @@ interface ConfirmDialogProps {
   title: string;
   message: string;
   detail?: string;
-  confirmText?: string;
+  /** 按钮写动作本身（「彻底删除」「清空回收站」「放弃修改」），不写「确认」「确定」。 */
+  confirmText: string;
   cancelText?: string;
   variant?: 'default' | 'destructive';
   onConfirm: () => void;
@@ -28,7 +29,7 @@ export function ConfirmDialog({
   title,
   message,
   detail,
-  confirmText = '确认',
+  confirmText,
   cancelText = '取消',
   variant = 'default',
   onConfirm,

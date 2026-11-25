@@ -8,13 +8,13 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, get_args
 
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_retry
-from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus, Namespace
+from character_workflow.lib.schemas import Job, JobErrorCode, JobKind, JobParams, JobStatus, Namespace
 
 from character_workflow.lib.file_lock import file_lock, try_file_lock
 
@@ -66,14 +66,22 @@ def new_job_id() -> str:
     return f"job-{ts}{secrets.token_hex(4)}"
 
 
+_ERROR_CODE_PARAM = "_error_code"
+_ERROR_CODES = frozenset(get_args(JobErrorCode))
+
+
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
     # 旧版 Job 顶层拒绝未知字段，params 允许扩展。归属只由提交入口写入。
     fields = {"studio_agent_session_id", "studio_agent_turn_id"}
-    payload = job.model_dump(mode="json", exclude=fields)
+    payload = job.model_dump(mode="json", exclude=fields | {"error_code"})
     payload["params"].pop("_studio_agent", None)
+    payload["params"].pop(_ERROR_CODE_PARAM, None)
     if job.studio_agent_session_id:
         payload["params"]["_studio_agent"] = job.model_dump(include=fields, exclude_none=True)
+    # 失败分类码同理放进 params：旧版读到顶层新字段会整条拒收（ADR-0030 数据须可被旧版读取）。
+    if job.error_code and job.error:
+        payload["params"][_ERROR_CODE_PARAM] = job.error_code
     atomic_write_text(p, json.dumps(payload, ensure_ascii=False, indent=2))
     return job
 
@@ -124,6 +132,10 @@ def _load_job(data: Any) -> Job:
                 for key in ("studio_agent_session_id", "studio_agent_turn_id"):
                     if key in owner:
                         data[key] = owner[key]
+            # 认不出的分类码当作没有：一个坏值不能让整条任务读不出来。
+            code = params.pop(_ERROR_CODE_PARAM, None)
+            if code in _ERROR_CODES:
+                data["error_code"] = code
         for field in _RETIRED_FIELDS:
             data.pop(field, None)
     return Job.model_validate(data)
@@ -218,7 +230,9 @@ def update_job_status(
     job_id: str, *, status: JobStatus,
     output_paths: list[str] | None = None,
     error: str | None | object = _UNSET,
+    error_code: JobErrorCode | None = None,
 ) -> Job:
+    """`error_code` 跟着 `error` 走：传了 error 就同时写分类码（缺省清掉），没传 error 两者都不动。"""
     with job_lock(job_id):
         job = read_job(job_id)
         update: dict[str, Any] = {"status": status}
@@ -235,6 +249,7 @@ def update_job_status(
             update["output_paths"] = output_paths
         if error is not _UNSET:
             update["error"] = error
+            update["error_code"] = error_code if error is not None else None
         updated = job.model_copy(update=update)
         return _write(updated)
 
@@ -357,6 +372,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "output_paths": [],
         "status": JobStatus.PENDING_CONFIRM,
         "error": None,
+        "error_code": None,
         "retry_of": job_id,
     })
     return save_job(clone)

@@ -196,7 +196,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dis
         open={confirming !== null}
         title={confirming?.title ?? ''}
         message={confirming?.message ?? ''}
-        confirmText={confirming?.confirmText}
+        confirmText={confirming?.confirmText ?? ''}
         variant={confirming?.destructive ? 'destructive' : 'default'}
         onConfirm={() => settle(true)}
         onCancel={() => settle(false)}

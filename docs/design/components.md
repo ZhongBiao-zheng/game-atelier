@@ -27,9 +27,10 @@
 | 图标 | `ui/icons` 的语义图标（`CloseIcon`…） | `size`：sm / md / lg / xl；新图标先在注册表登记，规则见 DESIGN.md「图标」 |
 | 文字标签 | `Label` | 页面不写原生 `<label>` |
 | 悬停提示 | `Hint`（`ui/tooltip.tsx`） | 替代原生 `title`；测试里用 `test/hint.ts` 的 `hoverHint` |
-| 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`）；一律受控 `open`，内容读 `useRetained` 缓存的最后一份，带表单状态的用 `useRetainedSession` 的会话号作 key（`ui/retained.ts`） |
+| 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`，`confirmText` 必填、写动作本身）；一律受控 `open`，内容读 `useRetained` 缓存的最后一份，带表单状态的用 `useRetainedSession` 的会话号作 key（`ui/retained.ts`）；有未保存输入时给 `DialogContent` 传 `dirty`：点外面不关，Esc 与右上角关闭先问「放弃未保存的修改？」 |
 | 浮层 | `Popover` | 控件 chip 的下拉面板用 `studio/ToolbarPopover`（基于 Popover，锚点移动时逐帧跟随） |
-| 通知提示 | `toast`（`ui/sonner.tsx`） | 全站只有 AppShell 挂的一个 `Toaster`（右上角顶栏下方），页面只调 `toast`，不再各挂一个 |
+| 通知提示 | `notify`（`lib/notify.ts`） | 全站只有 AppShell 挂的一个 `Toaster`（右上角顶栏下方）；页面只调 `notify.error / undo / info`，不直接调 `toast`。异常转文案用 `errorText(e)`（`lib/errorText.ts`），失败任务用 `presentJobError`（`lib/errorPresentation.ts`） |
+| 看大图 | `Lightbox` | 可选动作 `onDownload` / `onUseAsReference` / `onCopyPrompt` / `onDelete`（⌫），不传不显示 |
 | 菜单 | `DropdownMenu` | |
 | 标签 | `Badge` / `MetaTag` | 参数标签用 `MetaTag` |
 | 展开收起 | `Collapse` | 高度 0↔auto，收起播完再卸载，中途反向从当前高度接上；`appear` 挂载即展开（新到的报错条）；`keepMounted` 收起后留在 DOM 里 |

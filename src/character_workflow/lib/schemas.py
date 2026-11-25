@@ -43,6 +43,12 @@ class JobKind(str, Enum):
 
 # assist：「AI 帮我配置」的对话调用，只进用量，不进创作台与画布。
 Namespace = Literal["studio", "canvas", "assist"]
+# 失败分类码：job_runner 写 error 时按 HTTP 状态、异常类型与报文关键词同时写；界面按码选文案与修复动作
+# （web/src/lib/errorPresentation.ts）。service_unavailable 只给前端连接层用，runner 不写。
+JobErrorCode = Literal[
+    "insufficient_balance", "invalid_key", "model_unavailable", "content_rejected",
+    "timeout", "network", "bad_endpoint", "service_unavailable", "unknown",
+]
 ProviderTaskId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
@@ -390,6 +396,8 @@ class Job(BaseModel):
     output_paths: list[str]
     status: JobStatus
     error: str | None
+    # 2026-11-25: 与 error 同时写、同时清；None 时不落盘（旧任务文件不变）。Web 不能改。
+    error_code: JobErrorCode | None = None
     kind: JobKind = JobKind.IMAGE
     namespace: Namespace = "studio"
     source_image: str | None = None  # 参考素材的绝对路径
@@ -422,12 +430,15 @@ class Job(BaseModel):
     cancel_requested_at: str | None = None
 
     @model_serializer(mode="wrap")
-    def _omit_empty_studio_ownership(self, handler):
+    def _omit_empty_optional_fields(self, handler):
         data = handler(self)
         if self.studio_agent_session_id is None:
             data.pop("studio_agent_session_id", None)
         if self.studio_agent_turn_id is None:
             data.pop("studio_agent_turn_id", None)
+        # 分类码只跟着失败原因出现：model_copy 清掉 error 时不跑校验，这里兜住残留。
+        if self.error_code is None or self.error is None:
+            data.pop("error_code", None)
         return data
 
     @model_validator(mode="before")

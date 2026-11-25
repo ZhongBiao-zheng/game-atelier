@@ -24,7 +24,7 @@ from character_workflow.lib.jobs import (
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.schemas import Job, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobErrorCode, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):
@@ -200,6 +200,102 @@ def _friendly_error(err: BaseException) -> str:
     if hint is None:
         return raw
     return f"{hint}（原始报错：{raw}）"
+
+
+def _fail(job_id: str, err: BaseException, status: JobStatus = JobStatus.FAILED) -> Job:
+    """写失败：error 与 error_code 一起落盘，两者不会一个新一个旧。"""
+    return update_job_status(job_id, status=status, error=_friendly_error(err),
+                             error_code=_error_code(err))
+
+
+_HTTP_STATUS = re.compile(r"(?:\bapi|\bHTTP|\bhttp)[ _]?(\d{3})\b")
+_BALANCE_WORDS = ("quota", "insufficient", "accountoverdue", "account is overdue", "balance",
+                  "余额", "额度", "欠费", "payment required")
+_CONTENT_WORDS = ("no_image", "no downloadable image", "content policy", "content_policy",
+                  "moderation", "safety", "sensitive", "inappropriate", "violat", "审核", "违规",
+                  "敏感")
+_MODEL_WORDS = ("no_endpoints_available", "无可用端点", "model_not_found", "model not found",
+                "does not exist", "not support model", "unsupported model", "未开通", "无权访问",
+                "no available channel", "没有可用渠道")
+_KEY_WORDS = ("invalid api key", "incorrect api key", "invalid_api_key", "api key",
+              "unauthorized", "authentication", "invalid token", "无效的令牌", "令牌", "密钥无效")
+
+
+def _http_status(text: str) -> int | None:
+    match = _HTTP_STATUS.search(text)
+    return int(match.group(1)) if match else None
+
+
+def _exception_chain(err: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    current: BaseException | None = err
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def _error_code(err: BaseException) -> JobErrorCode:
+    """失败分类码（规格 2.3）：先看异常类型与 HTTP 状态，再按 `_error_hint` 同一批报文关键词。
+
+    只用于界面选文案与修复动作，不参与「换家 / 重发」判断（那由 failover 与 task_submission 按类型判）。"""
+    import requests
+
+    from character_workflow.lib.callers import NoSuchKeyError
+    from character_workflow.lib.callers.task_submission import SubmissionUnconfirmed
+
+    chain = _exception_chain(err)
+    if any(isinstance(item, NoSuchKeyError) for item in chain):
+        return "invalid_key"
+    if any(isinstance(item, SubmissionUnconfirmed) for item in chain):
+        return "timeout"
+    low = str(err).lower()
+    if any(isinstance(item, requests.exceptions.SSLError) for item in chain):
+        return "bad_endpoint"
+    if any(isinstance(item, requests.exceptions.ConnectTimeout) for item in chain):
+        return "network"
+    if any(isinstance(item, requests.exceptions.Timeout) for item in chain):
+        return "timeout"
+    if any(isinstance(item, requests.exceptions.ConnectionError) for item in chain):
+        return "network"
+
+    status = _http_status(str(err))
+    if status == 401:
+        return "invalid_key"
+    if status == 402:
+        return "insufficient_balance"
+    if status in {408, 504, 524}:
+        return "timeout"
+    if status == 404:
+        return "model_unavailable" if "model" in low or "模型" in low else "bad_endpoint"
+    return _error_code_from_words(low, status)
+
+
+def _error_code_from_words(low: str, status: int | None) -> JobErrorCode:
+    if any(word in low for word in _BALANCE_WORDS):
+        return "insufficient_balance"
+    if any(word in low for word in _CONTENT_WORDS):
+        return "content_rejected"
+    if any(word in low for word in _MODEL_WORDS):
+        return "model_unavailable"
+    if status == 403 or any(word in low for word in _KEY_WORDS):
+        return "invalid_key"
+    if "cors" in low or "cross-origin" in low or "access-control-allow-origin" in low:
+        return "bad_endpoint"
+    if "certificate" in low or "sslerror" in low or "[ssl:" in low or "ssl handshake" in low:
+        return "bad_endpoint"
+    if ("timed out" in low or "timeout" in low or "remote end closed" in low
+            or "remotedisconnected" in low or "connection broken" in low
+            or "incompleteread" in low or "incomplete read" in low or "读取响应体时失败" in low):
+        return "timeout"
+    if ("proxy" in low or "name resolution" in low or "failed to resolve" in low
+            or "getaddrinfo failed" in low or "nodename nor servname" in low
+            or "max retries" in low or "failed to establish" in low
+            or ("connection" in low and ("refused" in low or "reset" in low or "aborted" in low))
+            or "reset by peer" in low or "err_network" in low or "network error" in low
+            or status in {502, 503}):
+        return "network"
+    return "unknown"
 
 
 def _redact_local_paths(message: str) -> str:
@@ -657,7 +753,7 @@ def _park_gateway_wait(job: Job, error: BaseException, park: bool) -> Job | None
                 "params": latest.params.model_copy(update={"gateway_unconfirmed": True})}))
     if gateway_key_expired(current.params.gateway_idempotency_key):
         return None
-    update_job_status(job.job_id, status=JobStatus.PENDING, error=_friendly_error(error))
+    _fail(job.job_id, error, JobStatus.PENDING)
     return update_job_phase(job.job_id, "waiting_gateway")
 
 
@@ -893,6 +989,7 @@ def _run_once(
                 else JobStatus.FAILED
             ),
             error=_friendly_error(e),
+            error_code=_error_code(e),
         )
         # A paid Tuzi task still exists and has a durable provider id. Treat a temporary loss of
         # polling as a normal resumable outcome; bubbling an exception would make outer background
@@ -976,7 +1073,7 @@ def _run_text_job(job: Job, *, should_cancel: Callable[[], bool] | None = None,
     except Exception as error:
         if _switch_route(job.job_id, error):
             raise _RouteSwitched() from error
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        _fail(job.job_id, error)
         if isinstance(error, JobRunnerError):
             raise
         raise JobRunnerError(str(error)) from error
@@ -1032,7 +1129,7 @@ def _run_audio_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
             return parked
         if _switch_route(job.job_id, error):
             raise _RouteSwitched() from error
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        _fail(job.job_id, error)
         if isinstance(error, JobRunnerError):
             raise
         raise JobRunnerError(str(error)) from error
@@ -1117,7 +1214,7 @@ def _run_video_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
             return parked
         if _switch_route(job.job_id, e):
             raise _RouteSwitched() from e
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
+        _fail(job.job_id, e)
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e

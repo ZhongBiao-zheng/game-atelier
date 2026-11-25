@@ -278,6 +278,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             title={shownDialog.title}
             message={shownDialog.message}
             variant={shownDialog.variant}
+            confirmText="删除"
             onConfirm={shownDialog.onConfirm}
             onCancel={() => setDialog(null)}
           />
@@ -295,6 +296,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           title={shownDialog.title}
           message={shownDialog.message}
           variant={shownDialog.variant}
+          confirmText="删除"
           onConfirm={shownDialog.onConfirm}
           onCancel={() => setDialog(null)}
         />

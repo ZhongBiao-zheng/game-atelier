@@ -344,11 +344,13 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 
 `WebEditableJobPatch` = `extra="forbid"`，只有两个字段：`prompt`、`params`。其余一律 Skill / job_runner 独占，Web 改不了也不该试：
 
-- 状态机：`status` `error` `submitted_at` `completed_at` `progress_phase`
+- 状态机：`status` `error` `error_code` `submitted_at` `completed_at` `progress_phase`
 - 产物：`output_paths`
 - 归属：`character_id` `canvas_project_id` `namespace` `kind` `studio_agent_session_id` `studio_agent_turn_id`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
+
+`error_code`（2026-11-25）是失败分类码，取值 `insufficient_balance` / `invalid_key` / `model_unavailable` / `content_rejected` / `timeout` / `network` / `bad_endpoint` / `service_unavailable` / `unknown`（`schemas.JobErrorCode` ↔ `schema/jobs.ts`）。`job_runner` 写 `error` 时同时写（`_fail` / `_error_code`：先看异常类型与 HTTP 状态，再按报文关键词），写别的 `error` 或清空 `error` 时一并清掉；`error` 为空时接口不返回它。落盘位置是 `params._error_code`（读盘时搬回顶层），不进项目包：旧版顶层拒收未知字段，数据须可被旧版读取（ADR-0030）。前端只用它选文案与修复动作（`lib/errorPresentation.ts` 的 `presentJobError`），不参与换家与重发判断。`service_unavailable` 只给前端连接层用，runner 不写。
 
 `POST /api/studio/jobs` 手动提交图片或视频时，可传顶层字段 `studio_agent_session_id`，格式沿用 `CanvasAgentSessionId`。格式无效返回 422，指定的普通会话不存在返回 404。传入有效 ID 时保存会话归属，省略时会话字段留空，查询时计入默认会话。手动任务的 `studio_agent_turn_id` 始终为空。
 
@@ -1656,3 +1658,14 @@ Studio Job 的 API 投影提供可选只读字段 `studio_agent_session_id` 与 
 两个工作区共用的 Agent Skill 列表与导入结果含布尔字段 `builtin`。内置 Skill 同名导入返回 422，删除返回 403。工具 `load_skill({names})` 接受 1–3 个名称，按顺序返回 `skills`，每项含名称和带标签的正文或单项错误。
 
 Auto 确认金额按最近一条用户消息之后已提交的生成估价累计。并行调用预占估价，批量只累计成功提交的项，未计价项不计金额。生成工具结果的可选字段 `submitted_estimate_cny` 供确认后恢复本轮合计。批量确认明细可带 `turn_estimate_cny`（此前已提交估价，元）。
+
+## 回收站
+
+删除项目、对话、已付费的一轮结果时，各功能的删除接口调 `lib/trash.py` 的 `move_to_trash(kind, label, paths, meta)`，把文件或目录整体移进 `<data_root>/.runtime/trash/<trash_id>/items/`，`manifest.json` 记数据目录相对原路径、`kind`（`project` / `conversation` / `round`）、`label`、`deleted_at` 与 `meta`。路径必须在数据目录内（段名按 casefold 比较），数据目录本身、`.config/`、`.runtime/` 顶层、回收站与锁目录不能移；任一步失败全部移回。保留 30 天，服务启动时清理过期条目（读不出清单的按目录修改时间算）。锁在 `.runtime/locks/trash.lock`，调用方的领域锁在外、回收站锁在内；还原需要领域锁或善后的类型用 `register_restore_handler(kind, handler)`。
+
+只给本机页面（manage）：
+
+- `GET /api/trash` → `{items: [{trash_id, kind, label, deleted_at, expires_at, days_left, meta}]}`，新删的在前。
+- `POST /api/trash/{trash_id}/restore` → 还原后的同形条目；原路径被占用 409 `TRASH_CONFLICT`（message 指出哪一项），找不到 404 `TRASH_NOT_FOUND`。
+- `DELETE /api/trash/{trash_id}` → `{ok: true}`，彻底删除。
+- `DELETE /api/trash` → `{purged: n}`，清空。

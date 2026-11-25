@@ -418,6 +418,8 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
             "params": params,
             "output_paths": output_paths,
             "source_image": None,
+            # 分类码只给本机界面选动作；不进项目包，旧版导入时顶层不出现新字段（ADR-0030）。
+            "error_code": None,
         }
     )
     return portable.model_dump_json(indent=2).encode("utf-8")

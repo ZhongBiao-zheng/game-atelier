@@ -1,4 +1,15 @@
 export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'partial' | 'failed' | 'canceled';
+/** 失败分类码（job_runner 写 error 时同时写）— 与 schemas.py `JobErrorCode` 同步。界面按码选文案与动作，见 lib/errorPresentation.ts。 */
+export type JobErrorCode =
+  | 'insufficient_balance'
+  | 'invalid_key'
+  | 'model_unavailable'
+  | 'content_rejected'
+  | 'timeout'
+  | 'network'
+  | 'bad_endpoint'
+  | 'service_unavailable'
+  | 'unknown';
 
 // 2026-05-25 重构: 原 JobKind 改名为 AssetSlot
 
@@ -228,6 +239,8 @@ export interface Job {
   output_paths: string[];
   status: JobStatus;
   error: string | null;
+  // 2026-11-25: 失败分类码，与 error 同时写、同时清；没有失败或旧任务时缺省 — 与 schemas.py 同步
+  error_code?: JobErrorCode | null;
   kind?: JobKind;
   namespace?: Namespace;
   studio_agent_session_id?: string | null;

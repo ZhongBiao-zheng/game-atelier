@@ -51,6 +51,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/jobs/<job_id>.json` | Job Runner / Web 提交 | Canvas / Studio |
 | `canvases/<project_id>/` | Web / Canvas MCP | 项目画布、规范与经验 |
 | `.config/http-protocols/<id>.json` | Web (`/api/http-protocols`) | 自定义接口执行器（`callers/declarative.py`，ADR-0036） |
+| `.runtime/trash/<trash_id>/`（`items/` + `manifest.json`） | 各功能删除时经 `lib/trash.py` 移入（锁 `.runtime/locks/trash.lock`）；启动时清理超过 30 天的条目 | 控制台「回收站」（`/api/trash*`）还原 / 彻底删除 |
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
 | `.runtime/server.{pid,port,log}` | viewer-server CLI（log 为后台服务本次运行的 stdout/stderr，含 500 traceback） | viewer-server CLI / 排障 |
 | `.runtime/host-lifecycle.jsonl`（+ `.1.jsonl`、`.alive`） | 服务启动（lifespan）/ `server.py stop` / 更新执行器 / 常驻看护（无应答重启）追加启停；1 MiB 轮转留一份 | `gateway_stats` 汇总在线时长、异常结束与无应答重启 |

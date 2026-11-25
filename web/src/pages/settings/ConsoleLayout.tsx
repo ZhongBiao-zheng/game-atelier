@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
-import { AgentIcon, BackIcon, HelpIcon, KeyIcon, LibraryIcon, PluginIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
+import { AgentIcon, BackIcon, DeleteIcon, HelpIcon, KeyIcon, LibraryIcon, PluginIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
@@ -16,6 +16,7 @@ import { LibrariesPage } from './LibrariesPage';
 import { AgentPage } from './AgentPage';
 import { PluginsPage } from './PluginsPage';
 import { PreferencesPage } from './PreferencesPage';
+import { TrashPage } from './TrashPage';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
@@ -32,7 +33,10 @@ export const CONSOLE_NAV: {
     { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: ServerIcon, hint: GATEWAY_HINT },
   ] },
   { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: UsageIcon }] },
-  { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage, icon: LibraryIcon, hint: SYNC_HINT }] },
+  { group: '资源', items: [
+    { path: '/settings/libraries', label: '团队库', page: LibrariesPage, icon: LibraryIcon, hint: SYNC_HINT },
+    { path: '/settings/trash', label: '回收站', page: TrashPage, icon: DeleteIcon },
+  ] },
   { group: '扩展', items: [
     { path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: AgentIcon },
     { path: '/settings/plugins', label: '插件', page: PluginsPage, icon: PluginIcon },

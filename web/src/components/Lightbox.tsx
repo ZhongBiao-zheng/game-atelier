@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, DownloadIcon } from '@/components/ui/icons';
+import { AddImageIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, DeleteIcon, DownloadIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { RevealImage } from '@/components/ui/reveal-image';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { Hint } from '@/components/ui/tooltip';
+import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { animate, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 
 // 遮罩已是不透明度足够的纯色 bg-scrim，按钮不再叠毛玻璃：全屏 backdrop-filter 每帧重算模糊，开合与翻页都卡。
 const CONTROL_CLASS = 'absolute size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 border-0 disabled:pointer-events-none disabled:opacity-30';
 // 箭头走 ghost 配方（bare 控件只减不增），这里把它的悬停底色与描边压回大图层的样式。
 const ARROW_CLASS = 'top-1/2 -translate-y-1/2 [&_svg]:size-5 hover:border-transparent hover:text-white';
+// 右上角动作组里的按钮：与关闭按钮同一外观，但排在 flex 行里，不各自绝对定位。
+// 走 ghost 配方（bare 控件只减不增），悬停描边与文字色压回大图层的样式。
+const ACTION_CLASS = 'size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 hover:border-transparent hover:text-white [&_svg]:size-6';
 const IMAGE_SCALE_FROM = 0.96;
 
 type Layer = { src: string; phase: 'incoming' | 'shown' | 'leaving' };
+
+/** 焦点在可输入元素里时，⌫ 是删字，不是删图。 */
+function isTypingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+}
 
 
 /** 全屏大图层：点遮罩 / 右上角 / Esc 关闭。
@@ -24,6 +36,12 @@ type Layer = { src: string; phase: 'incoming' | 'shown' | 'leaving' };
  * 传了 onPrevious / onNext 任意一个就显示左右箭头；缺的那一侧表示已到头，箭头置灰。
  * 传 downloadName 时右上角多一个下载按钮。
  *
+ * 可选动作（规格 2.5，不传就不显示，图标按钮 + Hint）：onDownload（优先于 downloadName 的直链下载）、
+ * onUseAsReference「设为参考」、onCopyPrompt（返回要复制的提示词，按钮原位换勾）、onDelete。
+ * onDelete 由「删除」按钮或 ⌫ / Delete 键触发：先翻到下一张（没有下一张翻上一张，都没有就关闭），
+ * 再调 onDelete —— 调用方须按身份（id / src）记当前项、不按下标，删掉的那张从列表里消失后才不会错位；
+ * 撤销 toast 由调用方发（notify.undo）。
+ *
  * portal 到 body 是硬要求，不是洁癖：`backdrop-filter` 会给 fixed 后代造一个 containing block，
  * 挂在输入壳（bg-glass backdrop-blur-glass）里的 fixed inset-0 会缩到壳那一小条里。
  * 首页/工坊那两处原本就在顶层，portal 对它们无副作用。
@@ -34,6 +52,7 @@ export function Lightbox({
   onPrevious,
   onNext,
   downloadName, details, preloadSrcs,
+  onDownload, onUseAsReference, onCopyPrompt, onDelete,
 }: {
   src: string;
   onClose: () => void;
@@ -43,6 +62,11 @@ export function Lightbox({
   details?: ReactNode;
   /** 前后相邻图片的地址：后台预加载，翻页时直接可显示。 */
   preloadSrcs?: readonly string[];
+  onDownload?: () => void;
+  onUseAsReference?: () => void;
+  /** 返回当前这张的提示词；由 Lightbox 写剪贴板并原位换勾。 */
+  onCopyPrompt?: () => string;
+  onDelete?: () => void;
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
@@ -53,8 +77,11 @@ export function Lightbox({
   const onPreviousRef = useRef(onPrevious);
   const onNextRef = useRef(onNext);
   onCloseRef.current = onClose;
+  const onDeleteRef = useRef(onDelete);
   onPreviousRef.current = onPrevious;
   onNextRef.current = onNext;
+  onDeleteRef.current = onDelete;
+  const [copyState, copy] = useCopyFeedback();
 
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
@@ -72,6 +99,15 @@ export function Lightbox({
     window.setTimeout(() => onCloseRef.current(), MOTION_DURATION.fast * 1000);
   }, []);
 
+  const deleteCurrent = useCallback(() => {
+    const remove = onDeleteRef.current;
+    if (!remove || closingRef.current) return;
+    const advance = onNextRef.current ?? onPreviousRef.current;
+    if (advance) advance();
+    else requestClose();
+    remove();
+  }, [requestClose]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (closingRef.current) return;
@@ -84,10 +120,14 @@ export function Lightbox({
         e.preventDefault();
         onNextRef.current();
       }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && onDeleteRef.current && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        deleteCurrent();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [requestClose]);
+  }, [requestClose, deleteCurrent]);
 
   // 换图：还没显示出来的新图直接作废，只叠最新这张；已显示的旧图留着垫底，等新图就绪。
   useLayoutEffect(() => {
@@ -188,17 +228,40 @@ export function Lightbox({
       >
         <CloseIcon size="lg" />
       </Button>
-      {downloadName && (
-        <a
-          href={src}
-          download={downloadName}
-          aria-label="下载图片"
-          onClick={(e) => e.stopPropagation()}
-          className={`${CONTROL_CLASS} desktop-clear-top right-20 top-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
-        >
-          <DownloadIcon size="lg" aria-hidden />
-        </a>
-      )}
+      <div className="desktop-clear-top absolute right-20 top-6 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        {onCopyPrompt && <Hint label={copyState === 'failed' ? '复制失败' : '复制提示词'}>
+          <Button variant="ghost" size="icon" type="button" aria-label="复制提示词" onClick={() => copy(onCopyPrompt())}
+            className={ACTION_CLASS}>
+            <SwapIcon swapKey={copyState === 'copied'} variant="pop">
+              {copyState === 'copied' ? <CheckIcon size="lg" aria-hidden /> : <CopyIcon size="lg" aria-hidden />}
+            </SwapIcon>
+          </Button>
+        </Hint>}
+        {onUseAsReference && <Hint label="设为参考">
+          <Button variant="ghost" size="icon" type="button" aria-label="设为参考" onClick={onUseAsReference} className={ACTION_CLASS}>
+            <AddImageIcon size="lg" aria-hidden />
+          </Button>
+        </Hint>}
+        {onDownload ? <Hint label="下载">
+          <Button variant="ghost" size="icon" type="button" aria-label="下载图片" onClick={onDownload} className={ACTION_CLASS}>
+            <DownloadIcon size="lg" aria-hidden />
+          </Button>
+        </Hint> : downloadName && (
+          <a
+            href={src}
+            download={downloadName}
+            aria-label="下载图片"
+            className={`${ACTION_CLASS} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+          >
+            <DownloadIcon size="lg" aria-hidden />
+          </a>
+        )}
+        {onDelete && <Hint label="删除（⌫）">
+          <Button variant="ghost" size="icon" type="button" aria-label="删除" onClick={deleteCurrent} className={ACTION_CLASS}>
+            <DeleteIcon size="lg" aria-hidden />
+          </Button>
+        </Hint>}
+      </div>
       {(onPrevious || onNext) && (
         <>
           <Button variant="ghost" size="icon"

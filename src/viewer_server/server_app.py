@@ -271,6 +271,15 @@ async def normal_lifespan(app: FastAPI):
     from character_workflow.lib import canvas_run_queue
 
     maintain_canvas_package_lifecycle()
+    from character_workflow.lib.trash import purge_expired
+
+    # 回收站保留 30 天：启动时清一次过期条目；失败只记日志，不挡服务启动。
+    try:
+        purged = purge_expired()
+        if purged:
+            logging.getLogger(__name__).info("purged %d expired trash entries", purged)
+    except OSError as error:
+        logging.getLogger(__name__).warning("trash cleanup failed: %s", error)
     canvas_projects = list_canvas_projects()
     for project in canvas_projects:
         recover_canvas_transactions(project.project_id)
@@ -453,6 +462,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(comfyui_router)
     from viewer_server.http_protocol_routes import router as http_protocol_router
     app.include_router(http_protocol_router)
+    from viewer_server.trash_routes import router as trash_router
+    app.include_router(trash_router)
     from viewer_server.plugin_routes import grants_router as plugin_grants_router, router as plugin_router
     app.include_router(plugin_router)
     app.include_router(plugin_grants_router)

@@ -82,7 +82,7 @@ export function CustomInterfacesSection() {
         identifier={null} kind={shownCreating.value}
         onClose={() => setCreating(null)} onSaved={() => setCreating(null)} />}
       {shownDeleting && <ConfirmDialog open={Boolean(deleting)} title={`删除「${shownDeleting.name}」？`} message="删除后不能恢复。"
-        variant="destructive" onConfirm={() => void remove(shownDeleting)} onCancel={() => setDeleting(null)} />}
+        confirmText="删除" variant="destructive" onConfirm={() => void remove(shownDeleting)} onCancel={() => setDeleting(null)} />}
     </section>
   );
 }
