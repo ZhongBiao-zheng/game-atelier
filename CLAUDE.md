@@ -59,6 +59,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/gateway-charges/<幂等键>.json` | 成员端：`job_runner` 记网关扣费、停止补发线程回写结算（`lib/gateway_charges.py`，先到先登记，48 小时清理） | 同一把网关幂等键的主机扣费只记一次：后到的任务读它，记 `gateway_charged_on` |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/accent-themes.json` | Web (`PUT /api/accent-themes`) | Web 外观设置（主题色；localStorage 只缓存首帧镜像） |
+| `.config/ui-prefs.json` | Web (`PUT /api/ui-prefs/{key}`) | 公告、更新日志已读等界面记录（不放 localStorage：端口顺延会换 origin） |
 | `.config/provider-icons/<sha256>.png` | Web（`POST /api/provider-icons` 上传、`POST /api/provider-icons/fetch` 按网址获取；重新编码后的 128×128 PNG，按内容 sha256 命名；写 keys.json 时清理超过 1 小时未被引用的文件） | viewer-server（`GET /api/provider-icons/{sha}`，只走本地会话）；`KeySpec.icon` 的 `file:` 引用 |
 | `.config/canvas-agent.json` | Web (`PUT /api/canvas/agent/settings`) | 画布 Agent（生成估价超过确认金额时 Auto 下也先确认） |
 | `.runtime/agent-usage/YYYY-MM.jsonl` | 画布 Agent、创作台 Agent（每次调对话模型追加一行；创作台行带 `workspace=studio`，缺省按画布读） | 面板会话花费、用量页「我的」 |

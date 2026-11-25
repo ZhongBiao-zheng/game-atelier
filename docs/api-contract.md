@@ -391,7 +391,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 参考路径必须位于允许的数据根范围，否则返回 422。
 
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
-`POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
+`POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /data-root` `POST /folder-picker`
 `POST /onboarding/events` `POST /onboarding/key-probe`
 `POST /clipboard-attempt`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
@@ -417,9 +417,10 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
 `PUT /accent-themes`
+`PUT /ui-prefs/{key}`
 
 **只读**
-`GET /jobs` `/jobs/{id}` `/config` `/keys` `/onboarding/status` `/onboarding/metrics`
+`GET /jobs` `/jobs/{id}` `/config` `/keys` `/onboarding/status` `/onboarding/metrics` `/data-root` `/ui-prefs`
 `GET /gallery/{recent,hidden,favorites,ratings,image}` `GET /raw`
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
@@ -1629,7 +1630,9 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 
 ## 首次启动引导（2026-11-17）
 
-- `GET /onboarding/status` 在 bootstrap 结果上多带 `onboarding_skipped: bool`：`needs_first_key` 且未跳过时前端显示「连接一个模型」整页，跳过后进首页。
+- `GET /onboarding/status` 在 bootstrap 结果上多带 `onboarding_skipped: bool` 与 `keys_recovered: {backup, at} | null`：`needs_first_key` 且未跳过（或刚备份过损坏配置）时前端显示「连接一个模型」整页，跳过后进首页。服务端把 `needs_data_root` 静默补成默认目录 `~/game-atelier`、把 `needs_keys_repair` 的 keys.json 改名备份为 `keys.json.corrupt-<时间>` 后按 `needs_first_key` 返回，前端只见 `ready | needs_first_key`。更新信息只读缓存，源码版在后台联网刷新缓存。
+- `GET /data-root` → `{data_root, move}`；`POST /data-root {path}` 更换数据目录（规格 D1）：目标与当前相同不动；目标不存在或为空 → 后台复制（跳过 `.venv/` 与 `.runtime/` 下本次服务的运行文件，JSON 里的旧目录绝对路径前缀改写为新目录）、逐文件校验后切换指针，原目录保留；目标已有 `.config/` 或 `canvases/` → 直接切换；其他非空目录、当前目录的上级或子目录 → 409。有进行中的生成时 409。`move = {phase: idle|copying|verifying|done|failed, mode: copy|switch|null, source, target, total_bytes, copied_bytes, total_files, copied_files, error, detail, started_at, finished_at}`；复制期间除 `/api/connection/*` 外的写请求一律 503 `code=moving_data_root`（未受理，可原样重发）。
+- `GET /ui-prefs` → `{prefs}`；`PUT /ui-prefs/{key} {value}`（`value: null` 删除）。存 `.config/ui-prefs.json`，键名 `[a-z0-9][a-z0-9_.-]{0,63}`，整份 ≤ 64 KiB。当前用到 `announcements-seen: string[]`、`changelog-seen: string`；不随端口变化丢失。
 - `POST /onboarding/events`（204）：本机度量，只收枚举。`event ∈ guide_opened | path_selected | step_opened | models_detected | key_probed | provider_saved | skipped | closed`；可选 `source ∈ first_run | model_chip | providers`、`path ∈ key | chatgpt | comfyui | gateway | other`、`vendor ∈ tuzi | tokendance`、`step ∈ signup | topup | key_page | key_form`、`count`（0–10000）、`result ∈ ok | invalid | unknown`。其他字段或取值返回 422。`skipped` 同时写入跳过时间。
 - `GET /onboarding/metrics`：`first_seen_at`、`data_root_set_at`、`skipped_at`、`paths_tried`（`key:tuzi` 形式）、`completed_path`、`last_event`、`first_generation`（`.runtime/jobs/` 里 `completed_at ≥ data_root_set_at` 的第一条 DONE）、`seconds_to_first_generation`、`event_count`。
 - 存储：`<data_root>/.runtime/onboarding.json`，事件最多 500 条，只存本机、不上报。`first_seen_at` 为服务进程首次回 `needs_data_root` 的时间，选定数据目录时落盘，复用旧目录不覆盖。

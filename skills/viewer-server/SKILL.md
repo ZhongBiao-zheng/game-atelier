@@ -26,11 +26,11 @@ python "$BOOT" --check
 按 status 字段分流：
 
 - `ready` → 启动或检查本机服务
-- `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
+- `needs_data_root` → 不问用户，跑 `<bootstrap.py> --init-data-root ~/game-atelier` 用默认目录；要换目录让用户在 Web「设置 → 通用 → 数据目录」里换（会把数据一起搬过去）
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
 - `needs_venv` → 按当前模式跑 `<bootstrap.py> --ensure-venv`；Dev mode 前缀为 `uv run python`，Installed Plugin mode 前缀为 `python3`
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
-- `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
+- `needs_keys_repair` → 启 viewer-server 打开 Web：服务会把损坏的 `keys.json` 改名备份并引导重新添加供应商
 
 ## 插件更新提醒（--check 顺路返回，不阻断流程）
 
