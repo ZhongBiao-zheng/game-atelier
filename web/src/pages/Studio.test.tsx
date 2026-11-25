@@ -287,8 +287,8 @@ describe('Studio', () => {
     expect(await screen.findByText('当前模式不支持音频参考')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-bgm/content')).toBe(false);
 
-    fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.mouseDown(await screen.findByRole('tab', { name: /媒体/ }));
+    // 用完面板不关（规格 2.5）：回到列表接着用下一项。
+    fireEvent.click(screen.getByRole('button', { name: '返回资产列表' }));
     fireEvent.click(await screen.findByRole('button', { name: /城堡/ }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-img/content')).toBe(true));
