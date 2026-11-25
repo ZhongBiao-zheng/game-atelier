@@ -118,6 +118,8 @@ interface Props {
   guided?: boolean;
   /** 已有供应商的名称：新建时据此给同一预置的第二把密钥自动编号（D15）、提前拦下重名。 */
   existingAliases?: readonly string[];
+  /** 从用量页「未计价」进来：展开模型详情，把这个模型的单价框带到眼前。 */
+  focusPriceModel?: string;
 }
 
 /** 只有文本模型的预置（如 Anthropic），手动添加的模型默认就是文本。 */
@@ -150,7 +152,7 @@ const AGENT_UNVERIFIED_HELP = '经中转站走 Gemini 格式时工具调用未�
 const AUTO_DETECT_DELAY_MS = 500;
 const MIN_KEY_LENGTH = 8;
 
-export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create', autoDetect = false, guided = false, existingAliases }: Props) {
+export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create', autoDetect = false, guided = false, existingAliases, focusPriceModel }: Props) {
   const initialPreset = PROVIDER_PRESETS.find(p => p.id === presetId) ?? providerByValue(providerPresetId(initial ?? { provider: 'openai' }));
   const [activePresetId, setActivePresetId] = useState(initialPreset.id);
   const [enabled, setEnabled] = useState(initial?.enabled !== false);
@@ -694,6 +696,17 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     textProtocol, icon, enabled, activePresetId, models, preview ? [...fetchedChecked] : null, modalityPick]);
   const initialSnapshot = useRef(formSnapshot);
   const dirty = !saving && formSnapshot !== initialSnapshot.current;
+  useEffect(() => {
+    const index = focusPriceModel ? models.findIndex(model => model.id === focusPriceModel) : -1;
+    if (index < 0) return;
+    setDetailsOpen(true);
+    const timer = window.setTimeout(() => {
+      const field = formBodyRef.current?.querySelector<HTMLElement>(`[aria-label="单价 ${index + 1}"], [aria-label="输入单价 ${index + 1}"]`);
+      field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      field?.focus({ preventScroll: true });
+    }, MOTION_DURATION.slow * 1000);
+    return () => window.clearTimeout(timer);
+  }, [focusPriceModel]); // eslint-disable-line react-hooks/exhaustive-deps
   const typeDot = (modality?: ModelModality | null) => ({ image: 'bg-brand-2', video: 'bg-brand-3', text: 'bg-brand-4', audio: 'bg-muted-foreground' }[modality ?? 'image']);
   const title = editing ? `编辑 ${initial?.alias && initial.alias !== provider ? initial.alias : (PROVIDER_PRESETS.find(p => p.value === provider)?.label ?? initial?.alias ?? '')}` : preset.label;
   const addManualModel = () => {

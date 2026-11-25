@@ -4,6 +4,7 @@ import { requestJson } from '@/api/http';
 import { date } from './shared';
 import { Button } from '@/components/ui/button';
 import { Disclosure } from '@/components/ui/disclosure';
+import { errorText } from '@/lib/errorText';
 interface Entry { time: string; actor_name: string; action: string; target_id: string; summary: Record<string, unknown> }
 const actions: Record<string, string> = { 'member.create': '新建成员', 'member.update': '修改成员', 'member.revoke': '撤销成员', 'member.reset': '重置密钥', 'upstream.restore': '恢复供应商', 'route.reorder': '调整路由' };
 export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
@@ -14,7 +15,7 @@ export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
     let active = true;
     requestJson<{ entries: Entry[] }>(`${gatewayAlias ? adminBase(gatewayAlias) : '/api/gateway'}/audit`, '读取操作日志')
       .then(data => { if (active) { setEntries(data.entries); setError(''); } })
-      .catch(e => { if (active) setError(String(e)); });
+      .catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
   }, [gatewayAlias, revision]);
   return <section className="space-y-3" aria-label="操作日志">

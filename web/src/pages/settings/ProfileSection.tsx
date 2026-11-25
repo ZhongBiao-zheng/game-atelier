@@ -4,6 +4,7 @@ import { fetchProfile, saveProfile } from '@/api/teamLibraries';
 import { Button } from '@/components/ui/button';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Label } from '@/components/ui/label';
+import { errorText } from '@/lib/errorText';
 
 /** 显示名：分享到团队库的资产用它署名。 */
 export function ProfileSection() {
@@ -17,7 +18,7 @@ export function ProfileSection() {
       if (!active) return;
       setName(profile.display_name ?? '');
       setSavedName(profile.display_name ?? '');
-    }).catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    }).catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
   }, []);
   const changed = savedName !== null && name.trim() !== savedName;
@@ -30,7 +31,7 @@ export function ProfileSection() {
       const profile = await saveProfile(value);
       setName(profile.display_name ?? value);
       setSavedName(profile.display_name ?? value);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errorText(e)); }
     finally { setSaving(false); }
   }
   return <section id="profile" aria-labelledby="profile-title" className="scroll-mt-6 space-y-2">

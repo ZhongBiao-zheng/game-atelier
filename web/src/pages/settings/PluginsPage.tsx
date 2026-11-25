@@ -7,6 +7,7 @@ import { Hint } from '@/components/ui/tooltip';
 import { useHostPlugins } from '@/plugin-host/hostPlugins';
 import { getPluginsSnapshot, setPluginsSnapshot } from '@/plugin-host/registry';
 import type { PluginEntry } from '@/schema/plugins';
+import { errorText } from '@/lib/errorText';
 
 /** 只换掉这一个插件的条目，别的插件保持原样：并发的启停各自只认自己那一行的结果。 */
 function mergeEntry(list: readonly PluginEntry[], entry: PluginEntry): PluginEntry[] {
@@ -53,7 +54,7 @@ export function PluginsPage() {
   useEffect(() => {
     let active = true;
     fetchPlugins().then(listing => { if (active) setPlugins(listing.plugins); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+      .catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
   }, []);
 
@@ -72,7 +73,7 @@ export function PluginsPage() {
       const entry = (await setPluginEnabled(id, enabled)).plugins.find(plugin => plugin.id === id);
       if (entry) confirm(entry);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       // 以服务端为准：启用可能已被别处改过，或插件在这期间变得不可用。读不回来就退回点击前。
       try {
         const entry = (await fetchPlugins()).plugins.find(plugin => plugin.id === id);

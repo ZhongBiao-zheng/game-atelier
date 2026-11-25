@@ -5,10 +5,10 @@ import { requestJson } from '@/api/http';
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
 vi.mock('@/api/gatewayLibraries', () => ({ getManagedGatewayShares: vi.fn().mockResolvedValue({ libraries: [], size_bytes: 0 }), stopManagedGatewayShare: vi.fn() }));
-vi.mock('@/api/http', () => ({ requestJson: vi.fn() }));
+vi.mock('@/api/http', async original => ({ ...await original<typeof import('@/api/http')>(), requestJson: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
-vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
+vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(), installGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   resetGatewayKey: vi.fn(), revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', quota: null, scope: null,
@@ -23,12 +23,13 @@ beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGatewayService).mockResolvedValue({ state: 'unsupported', install_command: null });
 });
 describe('LAN sharing', () => {
-  it('shows the pending system credential step without installing from the page', async () => {
+  it('shows the pending system credential step as one actionable sentence', async () => {
     vi.mocked(api.fetchGatewayService).mockResolvedValue(
       { state: 'needs_credentials', install_command: 'powershell -File scripts/windows-service.ps1 install' });
     render(<LanSharingSection />);
-    expect(await screen.findByText('常驻服务：待设置系统凭据')).toBeInTheDocument();
-    expect(screen.getByText('powershell -File scripts/windows-service.ps1 install')).toBeInTheDocument();
+    // 状态不写内部词，给一句照着做的话；已装好任务时不再给「安装」。
+    expect(await screen.findByText('常驻服务：还差一步')).toBeInTheDocument();
+    expect(screen.getByText(/不管用户是否登录都要运行/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '安装' })).not.toBeInTheDocument();
   });
   it('内嵌创建默认成员并支持自定义后缀，Esc 取消', async () => {
@@ -39,6 +40,8 @@ describe('LAN sharing', () => {
     const name = screen.getByLabelText('名称');
     expect(name).toHaveFocus();
     fireEvent.change(name, { target: { value: '小李' } });
+    // 自定义密钥收在「更多」里。
+    fireEvent.click(screen.getByRole('button', { name: '更多' }));
     fireEvent.change(screen.getByLabelText('自定义密钥（可选）'), { target: { value: 'test_only_custom' } });
     fireEvent.submit(name.closest('form')!);
     await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom' }));
@@ -70,7 +73,7 @@ it('网关只保留密钥和运行中任务，花费链接定位团队成员', a
 it('网关关闭时隐藏密钥和端口', async () => {
   vi.mocked(api.fetchGateway).mockResolvedValue({ ...state, enabled: false });
   render(<LanSharingSection />);
-  await waitFor(() => expect(screen.getByRole('switch', { name: '开启局域网共享' })).not.toBeDisabled());
+  await waitFor(() => expect(screen.getByRole('switch', { name: '开启团队网关' })).not.toBeDisabled());
   expect(screen.queryByRole('button', { name: '新建成员密钥' })).not.toBeInTheDocument();
   expect(screen.queryByLabelText('端口')).not.toBeInTheDocument();
 });
@@ -121,7 +124,7 @@ it('关闭后仅状态卡显示摘要，开启继续沿用原操作', async () =
   expect(screen.queryByRole('button', { name: '改端口' })).not.toBeInTheDocument();
   expect(api.fetchGatewayTasks).not.toHaveBeenCalled();
   vi.mocked(api.fetchGateway).mockResolvedValue(state);
-  fireEvent.click(screen.getByRole('switch', { name: '开启局域网共享' }));
+  fireEvent.click(screen.getByRole('switch', { name: '开启团队网关' }));
   await waitFor(() => expect(api.updateGateway).toHaveBeenCalledWith({ enabled: true }));
   expect(await screen.findByRole('region', { name: '成员' })).toBeInTheDocument();
 });
@@ -170,7 +173,7 @@ it('远程复用成员编辑且不显示本机开关，角色通过代理保存'
   render(<LanSharingSection gatewayAlias="relay" />);
   await screen.findByText('小王');
   expect(api.fetchGateway).toHaveBeenCalledWith('relay');
-  expect(screen.queryByRole('switch', { name: '开启局域网共享' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: '开启团队网关' })).not.toBeInTheDocument();
   await chooseOption(screen.getByLabelText('小王 的角色'), '管理员');
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ role: 'admin' }), 'relay'));
 });
@@ -241,14 +244,14 @@ async function memberMenu(item: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name: item }));
 }
 
-it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', async () => {
+it('模型勾选即时保存、额度点保存才存，失败后回滚到服务器值', async () => {
   vi.mocked(api.updateGatewayKey).mockRejectedValue(new Error('保存失败'));
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '全部模型' }));
   fireEvent.click(screen.getByRole('switch', { name: '全部模型' }));
   fireEvent.click(within(screen.getByRole('region', { name: 'HK' })).getAllByRole('checkbox')[1]);
-  fireEvent.keyDown(screen.getByLabelText('可用模型'), { key: 'Escape' });
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { scope: [{ alias: 'HK', models: ['gpt'] }] }));
+  fireEvent.keyDown(screen.getByLabelText('可用模型'), { key: 'Escape' });
   expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
   fireEvent.click(screen.getByRole('button', { name: '全部模型' }));
   expect(screen.getByRole('switch', { name: '全部模型' })).toBeChecked();
@@ -257,22 +260,22 @@ it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', a
   fireEvent.click(screen.getByRole('button', { name: '额度' }));
   fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '10' } });
   await chooseOption(screen.getByLabelText('额度周期'), '每天');
-  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { quota: { cap_cny: 10, period: 'day' } }));
 });
 
-it('非法额度保留弹层和输入，修正后才允许关闭并保存', async () => {
+it('非法额度保留弹层和输入，修正后才保存并关闭', async () => {
   vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '额度' }));
   fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '0' } });
   await chooseOption(screen.getByLabelText('额度周期'), '每天');
-  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
   expect(screen.getByRole('alert')).toHaveTextContent('额度须大于 0 且不超过 100 万');
   expect(screen.getByLabelText('额度金额')).toHaveValue(0);
   expect(api.updateGatewayKey).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '25' } });
-  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { quota: { cap_cny: 25, period: 'day' } }));
   expect(screen.queryByLabelText('额度金额')).toBeNull();
 });
@@ -282,6 +285,7 @@ it('自定义密钥可见，创建错误只展示消息并保留草稿', async (
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '新建成员密钥' }));
   fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试' } });
+  fireEvent.click(screen.getByRole('button', { name: '更多' }));
   const suffix = screen.getByLabelText('自定义密钥（可选）');
   expect(suffix).toHaveAttribute('type', 'text');
   fireEvent.change(suffix, { target: { value: 'test_only_custom' } });
@@ -297,7 +301,7 @@ it('配置文件损坏时显示原因并锁住开关', async () => {
   render(<LanSharingSection />);
   expect(await screen.findByText(/网关配置文件损坏/)).toBeInTheDocument();
   expect(screen.getByText('配置损坏')).toBeInTheDocument();
-  expect(screen.getByRole('switch', { name: '开启局域网共享' })).toBeDisabled();
+  expect(screen.getByRole('switch', { name: '开启团队网关' })).toBeDisabled();
 });
 
 it('有被隔离的损坏任务时在摘要里给出数量', async () => {

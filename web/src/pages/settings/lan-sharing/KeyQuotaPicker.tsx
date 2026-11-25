@@ -21,18 +21,23 @@ export function KeyQuotaPicker({ record, busy, onSave }: {
   const [error, setError] = useState('');
   const errorId = `quota-error-${record.id}`;
   const amountRef = useRef<HTMLInputElement>(null);
+  // 金额 + 周期两个字段：点「保存」（或回车）才存，关闭弹层 = 放弃（规格 2.5：弹层不做隐式保存）。
+  const save = async () => {
+    const cap = Number(amount);
+    // 输入了读不成数字的内容（如「1e」「-」）时 value 是空串：按无效处理，不能当成「清空即不限」。
+    const unreadable = amountRef.current?.validity.badInput ?? false;
+    if (unreadable || (amount.trim() && (!Number.isFinite(cap) || cap <= 0 || cap > 1000000))) { setError('额度须大于 0 且不超过 100 万'); return; }
+    const quota = amount.trim() ? { cap_cny: cap, period } : null;
+    if (quota?.cap_cny !== record.quota?.cap_cny || quota?.period !== record.quota?.period) {
+      if (!(await onSave({ quota }))) return;
+    }
+    setOpen(false);
+  };
   return <Popover open={open} onOpenChange={next => {
     if (next) {
       setAmount(record.quota ? String(record.quota.cap_cny) : '');
       setPeriod(record.quota?.period ?? 'month');
       setError('');
-    } else if (record.quota !== undefined) {
-      const cap = Number(amount);
-      // 输入了读不成数字的内容（如「1e」「-」）时 value 是空串：按无效处理，不能当成「清空即不限」。
-      const unreadable = amountRef.current?.validity.badInput ?? false;
-      if (unreadable || (amount.trim() && (!Number.isFinite(cap) || cap <= 0 || cap > 1000000))) { setError('额度须大于 0 且不超过 100 万'); return; }
-      const quota = amount.trim() ? { cap_cny: cap, period } : null;
-      if (quota?.cap_cny !== record.quota?.cap_cny || quota?.period !== record.quota?.period) void onSave({ quota });
     }
     setOpen(next);
   }}>
@@ -45,7 +50,7 @@ export function KeyQuotaPicker({ record, busy, onSave }: {
       <Label className="flex items-center gap-1.5">额度（元）
         <Hint label="按主机时间计算；每周从周一起算"><span tabIndex={0} aria-label="额度说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
       </Label>
-      <div className="flex items-center gap-2">
+      <form autoComplete="off" className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); void save(); }}>
         <Input ref={amountRef} aria-label="额度金额" type="number" min="0.000001" max="1000000" step="any" placeholder="不限" className="min-w-0 flex-1"
           value={amount} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
           onChange={event => { setAmount(event.target.value); setError(''); }} />
@@ -54,7 +59,8 @@ export function KeyQuotaPicker({ record, busy, onSave }: {
           <SelectContent>{(Object.keys(QUOTA_PERIODS) as QuotaPeriod[]).map(value =>
             <SelectItem key={value} value={value}>{QUOTA_PERIODS[value]}</SelectItem>)}</SelectContent>
         </Select>
-      </div>
+      </form>
+      <div className="flex justify-end"><Button size="sm" type="button" disabled={busy} onClick={() => void save()}>保存</Button></div>
       {error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>}
       </>}
     </PopoverContent>

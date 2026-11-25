@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
-import { AgentIcon, BackIcon, DeleteIcon, HelpIcon, KeyIcon, LibraryIcon, PluginIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
+import { AgentIcon, BackIcon, DeleteIcon, HelpIcon, KeyIcon, LibraryIcon, ParamsIcon, PluginIcon, RouteIcon, ServerIcon, ShareIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
@@ -28,9 +28,9 @@ export const CONSOLE_NAV: {
 }[] = [
   { group: '模型', items: [
     { path: '/settings/providers', label: '供应商', page: ProvidersPage, icon: KeyIcon },
-    { path: '/settings/relay-admin', label: '中转管理', page: RelayAdminPage, icon: ServerIcon },
+    { path: '/settings/relay-admin', label: '团队网关管理', page: RelayAdminPage, icon: ServerIcon },
     { path: '/settings/routes', label: '智能路由', page: RoutesPage, icon: RouteIcon },
-    { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: ServerIcon, hint: GATEWAY_HINT },
+    { path: '/settings/gateway', label: '团队网关', page: GatewayPage, icon: ShareIcon, hint: GATEWAY_HINT },
   ] },
   { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: UsageIcon }] },
   { group: '资源', items: [
@@ -41,7 +41,8 @@ export const CONSOLE_NAV: {
     { path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: AgentIcon },
     { path: '/settings/plugins', label: '插件', page: PluginsPage, icon: PluginIcon },
   ] },
-  { group: '', items: [{ path: '/settings/preferences', label: '设置', page: PreferencesPage, icon: SettingsIcon }] },
+  // 顶栏齿轮叫「设置」，这里叫「通用」并换图标，避免进来后看到两个同名同图标的入口。
+  { group: '', items: [{ path: '/settings/preferences', label: '通用', page: PreferencesPage, icon: ParamsIcon }] },
 ];
 let lastCreativeLocation = '/';
 export function rememberCreativeLocation(path: string) {
@@ -67,21 +68,25 @@ function LocalGatewayStatus() {
     className="content-swap-in mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${state.status.running
       ? 'bg-status-done' : state.status.error ? 'bg-destructive' : 'bg-status-pending'}`} />
-    <span>局域网共享 · {state.config_error ? '配置损坏' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
+    <span>团队网关 · {state.config_error ? '配置损坏' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
   </Link></Hint>;
 }
 
-const PREFERENCE_SECTIONS = [['appearance', '外观'], ['storage', '存储'], ['profile', '个人']] as const;
+const PREFERENCE_SECTIONS = [['appearance', '外观'], ['storage', '存储'], ['profile', '个人'], ['updates', '更新']] as const;
 function PreferenceLinks() {
   const [hash, setHash] = useState(() => window.location.hash);
+  // 「版本更新」只在安装包版本出现：页面里有这一节才给锚点。
+  const [sections, setSections] = useState<readonly (typeof PREFERENCE_SECTIONS)[number][]>(
+    () => PREFERENCE_SECTIONS.filter(([id]) => id !== 'updates'));
   useEffect(() => {
     const update = () => setHash(window.location.hash);
     window.addEventListener('hashchange', update);
+    if (document.getElementById('updates')) setSections(PREFERENCE_SECTIONS);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  const selected = PREFERENCE_SECTIONS.some(([id]) => hash === `#${id}`) ? hash : '#appearance';
-  return <div aria-label="设置分组" className="flex shrink-0 gap-1 md:ml-5 md:flex-col md:border-l md:border-border md:pl-3">
-    {PREFERENCE_SECTIONS.map(([id, label]) => <a key={id} href={`#${id}`}
+  const selected = sections.some(([id]) => hash === `#${id}`) ? hash : '#appearance';
+  return <div aria-label="通用分组" className="flex shrink-0 gap-1 md:ml-5 md:flex-col md:border-l md:border-border md:pl-3">
+    {sections.map(([id, label]) => <a key={id} href={`#${id}`}
       aria-current={selected === `#${id}` ? 'location' : undefined}
       onClick={() => setHash(`#${id}`)}
       className={`rounded-md px-3 py-2 text-xs whitespace-nowrap ${selected === `#${id}`
@@ -148,7 +153,7 @@ export function ConsoleLayout() {
                   <item.icon size="sm" aria-hidden />
                 </span>{item.label}
               </Link>;
-              // 中转管理要等身份查回来才知道显不显示：展开着长出来，不把下面的项一下顶开。
+              // 团队网关管理要等身份查回来才知道显不显示：展开着长出来，不把下面的项一下顶开。
               return item.path === '/settings/relay-admin'
                 ? <Collapse key={item.path} open={adminAliases.length > 0} appear className="shrink-0">{link}</Collapse>
                 : link;

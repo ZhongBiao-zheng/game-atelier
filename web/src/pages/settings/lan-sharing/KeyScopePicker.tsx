@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type { GatewayKey, GatewayKeyInput, GatewayOptions } from '@/api/gateway';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { HelpIcon } from '@/components/ui/icons';
+import { CheckIcon, HelpIcon } from '@/components/ui/icons';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
@@ -20,16 +20,24 @@ export function KeyScopePicker({ record, options, busy, onSave }: {
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Scope>(null);
+  const [saved, setSaved] = useState(false);
   const allRef = useRef<HTMLButtonElement>(null);
   // 旧主机（远程管理）不回 scope / providers：只提示更新，不发新字段。
   const providers = record.scope === undefined ? undefined : options.providers;
-  // 新保存不允许空范围：草稿取消到空时提示，关闭 = 放弃这次修改（不保存）。旧数据转换出的空范围原样打开再关上不提示。
+  // 每次勾选即时保存（和角色下拉一致，规格 2.5），存好原位打勾。新保存不允许空范围：取消到空时原位提示、不让关闭。
+  // 旧数据转换出的空范围原样打开再关上不提示。
   const empty = Boolean(providers) && draft !== null && draft.length === 0 && !sameScope(draft, record.scope ?? null);
+  const change = (next: Scope) => {
+    setDraft(next);
+    setSaved(false);
+    if (!providers || (next !== null && next.length === 0) || sameScope(next, record.scope ?? null)) return;
+    void onSave({ scope: next }).then(ok => setSaved(ok));
+  };
   const label = !providers ? '模型' : record.scope === null ? '全部模型'
     : record.scope.length === 0 ? '未选择模型' : `${scopeModelCount(record.scope, providers)} 个模型`;
   return <Popover open={open} onOpenChange={next => {
-    if (next) setDraft(record.scope ?? null);
-    else if (providers && !empty && !sameScope(draft, record.scope ?? null)) void onSave({ scope: draft });
+    if (!next && empty) return;
+    if (next) { setDraft(record.scope ?? null); setSaved(false); }
     setOpen(next);
   }}>
     <Hint label="选择此密钥可用的模型"><PopoverTrigger asChild>
@@ -40,9 +48,10 @@ export function KeyScopePicker({ record, options, busy, onSave }: {
       {!providers ? <p className="text-xs text-muted-foreground">主机版本较旧，更新主机后才能设置</p> : <>
         <div className="flex items-center justify-between">
           <Label className="flex items-center gap-1.5">全部模型
+            {saved && <CheckIcon size="sm" role="img" aria-label="已保存" className="content-swap-in text-[color:var(--status-done)]" />}
             <Hint label="勾选供应商即包含它以后新增的模型"><span tabIndex={0} aria-label="范围说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
           </Label>
-          <Switch ref={allRef} aria-label="全部模型" checked={draft === null} onCheckedChange={all => setDraft(all ? null : [])} />
+          <Switch ref={allRef} aria-label="全部模型" checked={draft === null} onCheckedChange={all => change(all ? null : [])} />
         </div>
         {draft !== null && scopeGroups(draft, providers).map(group => {
           const whole = entryOf(draft, group.alias)?.models === null;
@@ -54,14 +63,14 @@ export function KeyScopePicker({ record, options, busy, onSave }: {
               </span>
               <Label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">全部
                 <Checkbox aria-label={`${group.alias} 的全部模型`} checked={whole} disabled={!group.enabled && !whole}
-                  onCheckedChange={() => setDraft(toggleProvider(draft, group.alias))} />
+                  onCheckedChange={() => change(toggleProvider(draft, group.alias))} />
               </Label>
             </div>
             {group.models.map(model => {
               const checked = whole || listed.includes(model.id);
               return <Label key={model.id} className="flex items-center gap-2 pl-1">
                 <Checkbox checked={checked} disabled={whole || (!group.enabled && !checked)}
-                  onCheckedChange={() => setDraft(toggleModel(draft, group.alias, model.id))} />
+                  onCheckedChange={() => change(toggleModel(draft, group.alias, model.id))} />
                 <span className="min-w-0 flex-1 truncate">{model.name}</span>
                 {model.route_id && <KindBadge kind={model.modality} />}
               </Label>;

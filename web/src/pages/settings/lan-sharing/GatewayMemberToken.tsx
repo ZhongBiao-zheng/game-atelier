@@ -1,29 +1,37 @@
 import { useEffect, useState } from 'react';
 import { Toggle } from '@/components/ui/toggle';
-import { CheckIcon, CopyIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
+import { CheckIcon, CopyIcon, HideIcon, LinkIcon, ShowIcon } from '@/components/ui/icons';
+import { formatGatewayInvite } from './invite';
 import { GATEWAY_TOKEN_LENGTH, revealGatewayKey } from '@/api/gateway';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
+import { errorText } from '@/lib/errorText';
 
-export function GatewayMemberToken({ id, name, knownToken, onError }: {
-  id: string; name: string; knownToken?: string; onError: (message: string) => void;
+export function GatewayMemberToken({ id, name, knownToken, inviteAddress = null, onError }: {
+  id: string; name: string; knownToken?: string;
+  /** 本机网关的地址：有就给「复制邀请」（地址 + 密钥一段文字，同事粘贴到表单任一框自动拆开）。 */
+  inviteAddress?: string | null;
+  onError: (message: string) => void;
 }) {
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // 复制成功的勾 1.5 秒后退回复制图标，不永远停在「已复制」。
   const [copyState, copyText] = useCopyFeedback();
   const copied = copyState === 'copied';
+  const [inviteState, copyInvite] = useCopyFeedback();
+  useEffect(() => { if (inviteState === 'failed') onError('复制失败，请手动复制'); }, [inviteState, onError]);
   useEffect(() => { if (copyState === 'failed') onError('复制失败，请手动复制'); }, [copyState, onError]);
-  async function read(copy: boolean) {
+  async function read(copy: boolean | 'invite') {
     setBusy(true);
     onError('');
     try {
       const result = knownToken ? { token: knownToken } : await revealGatewayKey(id);
-      if (copy) copyText(result.token);
+      if (copy === 'invite' && inviteAddress) copyInvite(formatGatewayInvite(inviteAddress, result.token));
+      else if (copy) copyText(result.token);
       else setToken(result.token);
-    } catch (error) { onError(String(error)); }
+    } catch (error) { onError(errorText(error)); }
     finally { setBusy(false); }
   }
   return <>
@@ -37,5 +45,9 @@ export function GatewayMemberToken({ id, name, knownToken, onError }: {
       aria-label={`复制 ${name} 的密钥`} onClick={() => void read(true)}>
       <SwapIcon swapKey={copied} variant={copied ? 'pop' : 'subtle'}>{copied ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}</SwapIcon>
     </Button></Hint>
+    {inviteAddress && <Hint label={inviteState === 'copied' ? '已复制邀请' : '复制邀请（地址 + 密钥）'}><Button variant="ghost" size="icon" className="size-7" type="button" disabled={busy}
+      aria-label={`复制给 ${name} 的邀请`} onClick={() => void read('invite')}>
+      <SwapIcon swapKey={inviteState === 'copied'} variant={inviteState === 'copied' ? 'pop' : 'subtle'}>{inviteState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <LinkIcon size="sm" aria-hidden />}</SwapIcon>
+    </Button></Hint>}
   </>;
 }

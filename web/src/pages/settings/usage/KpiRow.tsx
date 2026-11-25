@@ -1,9 +1,20 @@
 import type { ReactNode } from 'react';
+import { useLocation, useSearch } from 'wouter';
+import { Button } from '@/components/ui/button';
 import type { UsageResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KindBadge } from './KindBadge';
 export function KpiRow({ data, children }: { data: UsageResponse; children?: ReactNode }) {
   const totals = data.totals;
+  const search = useSearch();
+  const [location, navigate] = useLocation();
+  // 点「未计价」：下面的任务表筛到未计价，每行的「未计价」能直接打开供应商表单补单价。
+  const showUnpriced = () => {
+    const next = new URLSearchParams(search);
+    next.set('task_status', 'unpriced');
+    navigate(`${location}?${next}`);
+    window.requestAnimationFrame(() => document.querySelector('section[aria-label="任务"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
   const previous = totals.previous_cost_cny;
   const change = previous ? ((totals.cost_cny - previous) / previous) * 100 : null;
   return (
@@ -31,11 +42,12 @@ export function KpiRow({ data, children }: { data: UsageResponse; children?: Rea
         </p>
         <p className="inline-flex rounded-full bg-secondary px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{totals.failed} 次失败</p>
       </div>
-      {totals.unpriced > 0 && <div className="space-y-2 rounded-xl border border-[color:var(--status-running)] bg-card p-5">
+      {totals.unpriced > 0 && <Button variant="ghost" type="button" onClick={showUnpriced} aria-label={`未计价 ${totals.unpriced} 次，查看这些任务`}
+        className="flex h-auto flex-col items-start justify-start gap-2 whitespace-normal rounded-xl border border-[color:var(--status-running)] bg-card p-5 text-left font-normal">
         <p className="text-xs text-muted-foreground">未计价</p>
         <p className="text-base font-semibold tabular-nums text-[color:var(--status-running)]">{totals.unpriced}<span className="ml-1 text-xs font-normal">次</span></p>
         <p className="text-xs tabular-nums text-muted-foreground">占 {totals.count ? (totals.unpriced / totals.count * 100).toFixed(1) : '0'}%</p>
-      </div>}
+      </Button>}
       {data.scope === 'team' ? (
         <div className="space-y-2 rounded-xl border border-border bg-card p-5">
           <p className="text-xs text-muted-foreground">活跃成员</p>

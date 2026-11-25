@@ -17,6 +17,7 @@ import { FileInput } from '@/components/ui/file-input';
 import { AiIcon, CheckIcon, CopyIcon, HelpIcon } from '@/components/ui/icons';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
+import { errorText } from '@/lib/errorText';
 
 const VALIDATE_DELAY_MS = 400;
 const COPIED_MS = 2000;
@@ -98,7 +99,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
     let active = true;
     getHttpProtocol(identifier)
       .then(detail => { if (active) setText(pretty(detail.document)); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); })
+      .catch(e => { if (active) setError(errorText(e)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [identifier]);
@@ -110,7 +111,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
       parsed = JSON.parse(text);
       setParseIssue(null);
     } catch (e) {
-      setParseIssue({ path: 'JSON', message: e instanceof Error ? e.message : String(e) });
+      setParseIssue({ path: 'JSON', message: errorText(e) });
       setValidation(null);
       return;
     }
@@ -118,7 +119,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
     const timer = window.setTimeout(() => {
       validateHttpProtocol(parsed, { baseUrl, model })
         .then(result => { if (active) setValidation(result); })
-        .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+        .catch(e => { if (active) setError(errorText(e)); });
     }, VALIDATE_DELAY_MS);
     return () => { active = false; window.clearTimeout(timer); };
   }, [text, loading, baseUrl, model]);
@@ -135,7 +136,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
       window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
       onSaved(saved);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
+import { errorText } from '@/lib/errorText';
 
 // Agent 一开会话就会连过来，开着设置页时轮询，状态自己亮。
 const POLL_MS = 5000;
@@ -21,7 +22,7 @@ export function AgentSection() {
   useEffect(() => {
     let active = true;
     const load = () => fetchAgentStatus().then(next => { if (active) setStatus(next); });
-    load().catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    load().catch(e => { if (active) setError(errorText(e)); });
     const timer = window.setInterval(() => { load().catch(() => {}); }, POLL_MS);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
@@ -32,7 +33,7 @@ export function AgentSection() {
     try {
       setStatus(await (next ? enableAgent() : disableAgent()));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       // 开关的服务端状态可能已经变了（例如凭据写好了、Codex 配置写失败），以服务端为准。
       fetchAgentStatus().then(setStatus).catch(() => {});
     } finally {
@@ -46,7 +47,7 @@ export function AgentSection() {
     try {
       setStatus(await writeAgentClientConfig(client));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

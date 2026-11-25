@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Link, useLocation } from 'wouter';
+import { Link, useLocation, useSearch } from 'wouter';
 import { fetchUsageTasks } from '@/api/usage';
 import type { UsageRange, UsageScope, UsageSource, UsageTask, UsageTaskFilter, UsageTaskFields, UsageTasksResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { SwapLabel } from '@/components/ui/swap-label';
 import type { TaskFilterChanges, TaskFilterName } from './useTaskFilters';
 import { useDelayedFlag } from './useDelayedFlag';
+import { errorText } from '@/lib/errorText';
 
 type Filters = UsageTaskFields & {
   gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string;
@@ -36,8 +37,13 @@ function time(value: string) {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+const isStatus = (value: string | null): value is UsageTaskFilter => statuses.some(item => item.value === value);
+
 export function TaskTable(filters: Filters) {
-  const [status, setStatus] = useState<UsageTaskFilter>('all');
+  // 用量卡片「未计价」点进来时带 task_status=unpriced，直接筛到未计价的任务。
+  const urlStatus = new URLSearchParams(useSearch()).get('task_status');
+  const [status, setStatus] = useState<UsageTaskFilter>(isStatus(urlStatus) ? urlStatus : 'all');
+  useEffect(() => { if (isStatus(urlStatus)) setStatus(urlStatus); }, [urlStatus]);
   const [data, setData] = useState<UsageTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   // 换筛选时旧行留在原地，请求慢于 150ms 才降透明度，新数据到达再淡回；「加载更多」不算刷新。
@@ -58,7 +64,7 @@ export function TaskTable(filters: Filters) {
     setError('');
     fetchUsageTasks({ scope, range, source, member, status, offset: 0, ...fields }, ...(gatewayAlias ? [gatewayAlias] as const : []))
       .then(next => { if (request.current === current) setData(next); })
-      .catch(e => { if (request.current === current) setError(e instanceof Error ? e.message : String(e)); })
+      .catch(e => { if (request.current === current) setError(errorText(e)); })
       .finally(() => { if (request.current === current) { setLoading(false); setRefreshing(false); } });
     return () => { request.current = current + 1; };
   }, [scope, range, source, member, status, gatewayAlias, fields]);
@@ -71,7 +77,7 @@ export function TaskTable(filters: Filters) {
     try {
       const next = await fetchUsageTasks({ scope, range, source, member, status, offset: data.next_offset, ...fields }, ...(gatewayAlias ? [gatewayAlias] as const : []));
       if (current === request.current) setData(previous => ({ ...next, rows: [...(previous?.rows ?? []), ...next.rows] }));
-    } catch (e) { if (current === request.current) setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { if (current === request.current) setError(errorText(e)); }
     finally { if (current === request.current) setLoading(false); }
   }
 
@@ -115,7 +121,13 @@ export function TaskTable(filters: Filters) {
       <td className={`${cell} whitespace-nowrap`}>{tag('kind', ['image_edit', 'layer_split'].includes(task.kind) ? 'image' : task.kind,
         kindLabels[['image_edit', 'layer_split'].includes(task.kind) ? 'image' : task.kind] ?? task.kind, <KindBadge kind={task.kind} />)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${slow ? warning : 'text-muted-foreground'}`}>{duration(task.duration_s)}</td>
-      <td className={`${cell} whitespace-nowrap text-right tabular-nums ${task.cost_cny === null ? warning : ''}`}>{task.cost_cny === null ? '未计价' : formatGenerationCost(task.cost_cny)}</td>
+      <td className={`${cell} whitespace-nowrap text-right tabular-nums ${task.cost_cny === null ? warning : ''}`}>{task.cost_cny === null
+        ? (scope !== 'team' && !gatewayAlias && task.alias && task.model
+          // 本机供应商的未计价任务：直接打开那个供应商的表单，展开到该模型的单价框。
+          ? <Hint label="去补单价"><Link href={`/settings/providers?edit=${encodeURIComponent(task.alias)}&price=${encodeURIComponent(task.model)}`}
+            onClick={event => event.stopPropagation()} className={`${warning} underline decoration-dotted underline-offset-4`}>未计价</Link></Hint>
+          : '未计价')
+        : formatGenerationCost(task.cost_cny)}</td>
       <td className={`${cell} whitespace-nowrap`}>{statusCell(task)}</td>
     </tr>;
   }

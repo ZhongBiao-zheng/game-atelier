@@ -9,6 +9,7 @@ import { HelpIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { Disclosure } from '@/components/ui/disclosure';
 import { Lightbox } from '@/components/Lightbox';
+import { errorText } from '@/lib/errorText';
 
 export const isActive = (task: GatewayTask) => task.status === 'pending' || task.status === 'running';
 export function mergeTask(rows: GatewayTask[], next: GatewayTask) {
@@ -67,7 +68,7 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
       if (ended.length) finishedRef.current();
       linger(ended.map(row => finished.find(next => next.task_id === row.task_id) ?? row));
       setActive(running); setRecent(finished); setError('');
-    } catch (e) { if (mounted.current) setError(String(e)); }
+    } catch (e) { if (mounted.current) setError(errorText(e)); }
   }, [gatewayAlias, linger]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {

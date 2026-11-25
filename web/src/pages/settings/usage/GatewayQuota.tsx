@@ -34,7 +34,7 @@ export function GatewayQuota({ alias }: { alias: string }) {
   // 新主机回 quota（一条，可能不重置）；旧主机只回 limits（可能多条）。
   const rows = me.quota !== undefined ? (me.quota ? [me.quota] : []) : me.limits;
   return (
-    <div className="space-y-1 text-xs tabular-nums text-muted-foreground" aria-label="中转额度">
+    <div className="space-y-1 text-xs tabular-nums text-muted-foreground" aria-label="团队网关额度">
       {rows.map((limit) => (
         <p
           key={limit.period}

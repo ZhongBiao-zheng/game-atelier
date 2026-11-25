@@ -7,6 +7,7 @@ import {
   fetchGateway,
   fetchGatewayOptions,
   fetchGatewayService,
+  installGatewayService,
   revokeGatewayKey,
   resetGatewayKey,
   updateGateway,
@@ -18,6 +19,7 @@ import {
 } from '@/api/gateway';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Input } from '@/components/ui/input';
+import { Disclosure } from '@/components/ui/disclosure';
 import { Switch } from '@/components/ui/switch';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KeyInlineCreate } from './lan-sharing/KeyInlineCreate';
@@ -30,9 +32,10 @@ import { Button } from '@/components/ui/button';
 import { useRetained } from '@/components/ui/retained';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
+import { errorText } from '@/lib/errorText';
 
 export const GATEWAY_HINT =
-  '同事在「添加供应商 → Remote Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
+  '在成员行点「复制邀请」发给同事，同事在「添加供应商 → 团队网关」任一框里粘贴即可连接。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);
@@ -40,6 +43,12 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [options, setOptions] = useState<GatewayOptions>({ providers: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // 开关、端口这类网关设置的报错挂在状态卡片里，紧挨开关；成员操作的报错仍在成员表下面。
+  const [settingsError, setSettingsError] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [installIssue, setInstallIssue] = useState<string | null>(null);
+  const [installStarted, setInstallStarted] = useState(false);
+  const [commandCopy, copyCommand] = useCopyFeedback();
   const [port, setPort] = useState('');
   const [editingPort, setEditingPort] = useState(false);
   // 复制地址：「已复制」1.5 秒后自动退回「复制」，失败给出可照做的提示。
@@ -61,28 +70,43 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
     setOptions(choices);
   }, [gatewayAlias]);
   useEffect(() => {
-    void reload().catch((e) => setError(String(e)));
+    void reload().catch((e) => setError(errorText(e)));
   }, [reload]);
   useEffect(() => {
     if (gatewayAlias) return;
-    void fetchGatewayService().then(setService).catch((e) => setError(String(e)));
+    void fetchGatewayService().then(setService).catch((e) => setError(errorText(e)));
   }, [gatewayAlias]);
-  async function run(action: () => Promise<unknown>) {
+  async function run(action: () => Promise<unknown>, target: 'members' | 'settings' = 'members') {
+    const report = target === 'settings' ? setSettingsError : setError;
     setBusy(true);
     setError('');
+    setSettingsError('');
     try {
       await action();
       await reload();
       return true;
     } catch (e) {
-      setError(String(e));
+      report(errorText(e));
       return false;
     } finally {
       setBusy(false);
     }
   }
+  const refreshService = () => { void fetchGatewayService().then(setService).catch((e) => setSettingsError(errorText(e))); };
+  const installService = async () => {
+    setInstalling(true);
+    setInstallIssue(null);
+    try {
+      await installGatewayService();
+      setInstallStarted(true);
+    } catch (e) {
+      setInstallIssue(errorText(e));
+    } finally {
+      setInstalling(false);
+    }
+  };
   const finished = useCallback(() => {
-    void reload().catch((e) => setError(String(e)));
+    void reload().catch((e) => setError(errorText(e)));
   }, [reload]);
   const address =
     state?.enabled && state.status.running && state.status.addresses[0]
@@ -95,7 +119,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${state?.enabled && state.status.running ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
           <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">共享本机供应商</h2>
+            <h2 className="text-sm font-semibold">团队网关</h2>
             <span className={`rounded-full px-2 py-0.5 text-xs ${state?.enabled && state.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
               {!state ? '加载中…' : state.config_error ? '配置损坏' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
             </span>
@@ -105,6 +129,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             : '开启后，同事可以用你的供应商出图，按成员限额记账'}</p>}
           {state?.config_error && <p className="break-all text-sm text-destructive">{state.config_error}</p>}
           {state?.enabled && state.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
+          {settingsError && <p role="alert" className="text-sm text-destructive">{settingsError}</p>}
           </div>
         </div>
         {address && <div role="status" className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs">
@@ -118,7 +143,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           <form autoComplete="off" className="flex flex-wrap items-center gap-2" onSubmit={event => {
             event.preventDefault();
             if (busy || !(Number(port) >= 1024 && Number(port) <= 65535)) return;
-            void run(() => updateGateway({ port: Number(port) })).then(saved => {
+            void run(() => updateGateway({ port: Number(port) }), 'settings').then(saved => {
               if (saved) setEditingPort(false);
             });
           }}>
@@ -134,16 +159,31 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             setEditingPort(true);
           }}>改端口</Button>
         ))}
-        <Switch size="sm" aria-label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy || Boolean(state.config_error)}
-          onCheckedChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
+        <Switch size="sm" aria-label="开启团队网关" checked={Boolean(state?.enabled)} disabled={!state || busy || Boolean(state.config_error)}
+          onCheckedChange={enabled => void run(() => updateGateway({ enabled }), 'settings').then(saved => {
             if (saved) setEditingPort(false);
           })} />
       </section>}
-      {!gatewayAlias && service && service.state !== 'unsupported' && <section className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
-        <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[service.state]}</p>
-        {service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{service.install_command}</code>}
+      {!gatewayAlias && service && service.state !== 'unsupported' && <section aria-label="常驻服务" className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p>常驻服务：{{ installed: '已安装，开机自动运行', not_installed: '未安装', needs_credentials: '还差一步', unknown: '状态读取失败' }[service.state]}</p>
+          {service.state === 'not_installed' && !installStarted && <Button variant="outline" size="sm" disabled={installing} onClick={() => void installService()}>
+            <SwapLabel active={installing} on="等待授权…" off="安装" /></Button>}
+          {(installStarted || service.state === 'needs_credentials') && <Button variant="outline" size="sm" onClick={refreshService}>刷新状态</Button>}
+        </div>
+        {installStarted && service.state === 'not_installed' && <p className="text-muted-foreground">已打开安装窗口，按窗口提示完成</p>}
+        {service.state === 'needs_credentials' && <p className="text-muted-foreground">在任务计划程序里打开 GameAtelier 的属性，选「不管用户是否登录都要运行」，保存时输入本机登录密码</p>}
+        {installIssue && <p role="alert" className="text-destructive">{installIssue}</p>}
+        {service.install_command && service.state !== 'installed' && (installIssue || service.state === 'unknown') && <Disclosure summary="复制命令手动安装">
+          <div className="mt-2 flex items-start gap-2">
+            <code className="block min-w-0 flex-1 break-all select-all text-muted-foreground">{service.install_command}</code>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => copyCommand(service.install_command!)}>
+              <SwapLabel active={commandCopy === 'copied'} on="已复制" off="复制" /></Button>
+          </div>
+        </Disclosure>}
       </section>}
-      {!gatewayAlias && <Tabs value={tab} onValueChange={setTab}>
+      {/* 网关从没开过时没有成员和日志可看，不给页签。 */}
+      {!gatewayAlias && (state?.enabled || (state?.keys.length ?? 0) > 0) && <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="成员管理页签">{[['members', '成员与任务'], ['audit', '操作日志']].map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}</TabsList>
       </Tabs>}
       {tab === 'audit' ? <AuditLog gatewayAlias={gatewayAlias} /> : <div className="min-w-0 space-y-6">
@@ -177,7 +217,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                         </td>
                         <td className="px-4 py-3 align-middle">
                           {(!gatewayAlias || createdTokens[key.id]) && !key.revoked_at
-                            ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken key={`${key.id}:${tokenVersion}`} knownToken={createdTokens[key.id]} id={key.id} name={key.name} onError={setError} /></div>
+                            ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken key={`${key.id}:${tokenVersion}`} knownToken={createdTokens[key.id]} id={key.id} name={key.name} inviteAddress={gatewayAlias ? null : address} onError={setError} /></div>
                             : '—'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 align-middle"><KeyRoleCell record={key} busy={busy} onSave={patch => run(() => updateGatewayKey(key.id, patch, ...(gatewayAlias ? [gatewayAlias] as const : [])))} /></td>
@@ -236,7 +276,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
       <ConfirmDialog
         open={pendingRevoke !== null}
         title={`撤销 ${pendingRevoke?.name ?? ''} 的网关密钥？`}
-        message="撤销后立即失效，对方会改用自己的 KEY。"
+        message="撤销后立即失效，对方会改用自己的供应商。"
         confirmText="撤销"
         variant="destructive"
         onCancel={() => setPendingRevoke(null)}

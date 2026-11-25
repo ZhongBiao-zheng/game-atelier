@@ -8,6 +8,7 @@ import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Hint } from '@/components/ui/tooltip';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
+import { errorText } from '@/lib/errorText';
 
 const KIND_LABELS = { image: '图片', video: '视频', audio: '音频' } as const;
 
@@ -27,7 +28,7 @@ export function CustomInterfacesSection() {
     let active = true;
     const load = () => listHttpProtocols()
       .then(result => { if (active) setRows(result.protocols); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+      .catch(e => { if (active) setError(errorText(e)); });
     void load();
     window.addEventListener(KEYS_CHANGED_EVENT, load);
     return () => { active = false; window.removeEventListener(KEYS_CHANGED_EVENT, load); };
@@ -40,7 +41,7 @@ export function CustomInterfacesSection() {
       await deleteHttpProtocol(row.id);
       window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   };
 

@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { ThemeGrid } from './ThemeGrid';
 import { ThemeEditor } from './ThemeEditor';
 import { ThemeDialog } from './ThemeDialog';
+import { errorText } from '@/lib/errorText';
 
 const BRAND_ICON_MODES: { value: BrandIconMode; label: string }[] = [
   { value: 'mono', label: '黑白' }, { value: 'color', label: '彩色' },
@@ -25,7 +26,7 @@ const MODES: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: '深色' }, { value: 'light', label: '浅色' }, { value: 'system', label: '跟随系统' },
 ];
 const body = (doc: AccentDoc): AccentThemesBody => ({ active: doc.active, overrides: doc.overrides, custom: doc.custom });
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const message = (error: unknown) => errorText(error);
 
 export function AppearanceSection() {
   const doc = useAccent();

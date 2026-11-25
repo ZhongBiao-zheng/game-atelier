@@ -14,6 +14,8 @@ function key(overrides: Partial<GatewayKey> = {}): GatewayKey {
 }
 
 const close = (label: string) => fireEvent.keyDown(screen.getByLabelText(label), { key: 'Escape' });
+// 弹层不做隐式保存（规格 2.5）：点「保存」才存。
+const save = () => fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
 describe('成员行「额度」弹层', () => {
   function openQuota(record: GatewayKey) {
@@ -23,32 +25,32 @@ describe('成员行「额度」弹层', () => {
     return onSave;
   }
 
-  it('填金额、选周期，关闭时保存一条额度', async () => {
+  it('填金额、选周期，点保存存一条额度', async () => {
     const onSave = openQuota(key());
     fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '10' } });
     await chooseOption(screen.getByLabelText('额度周期'), '每天');
-    close('额度');
+    save();
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ quota: { cap_cny: 10, period: 'day' } }));
   });
 
   it('只改周期为不重置', async () => {
     const onSave = openQuota(key({ quota: { cap_cny: 10, period: 'day' } }));
     await chooseOption(screen.getByLabelText('额度周期'), '不重置');
-    close('额度');
+    save();
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ quota: { cap_cny: 10, period: 'none' } }));
   });
 
   it('清空金额保存为不限额', async () => {
     const onSave = openQuota(key({ quota: { cap_cny: 10, period: 'week' } }));
     fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '' } });
-    close('额度');
+    save();
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ quota: null }));
   });
 
   it('非法金额留在弹层并提示', () => {
     const onSave = openQuota(key());
     fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '0' } });
-    close('额度');
+    save();
     expect(screen.getByRole('alert')).toHaveTextContent('额度须大于 0 且不超过 100 万');
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -59,7 +61,7 @@ describe('成员行「额度」弹层', () => {
     const input = screen.getByLabelText('额度金额') as HTMLInputElement;
     Object.defineProperty(input, 'validity', { configurable: true, value: { ...input.validity, badInput: true } });
     fireEvent.change(input, { target: { value: '' } });
-    close('额度');
+    save();
     expect(screen.getByRole('alert')).toHaveTextContent('额度须大于 0 且不超过 100 万');
     expect(screen.getByLabelText('额度')).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();

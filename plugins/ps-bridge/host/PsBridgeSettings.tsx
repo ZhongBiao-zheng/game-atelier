@@ -1,3 +1,4 @@
+import { errorText } from '@/lib/errorText';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,7 @@ function statusText(status: PsBridgeStatus): string {
 }
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorText(error);
 }
 
 /** 连接状态行：打开时不和 Photoshop 说话；点「检测」才读版本（第一次会弹系统授权框）。 */

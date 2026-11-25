@@ -13,6 +13,7 @@ import { Collapse } from '@/components/ui/collapse';
 import { Disclosure } from '@/components/ui/disclosure';
 import { useRetained } from '@/components/ui/retained';
 import { MOTION_SPRING } from '@/lib/motion';
+import { errorText } from '@/lib/errorText';
 
 const MODALITY_LABELS: Record<ModelRoute['modality'], string> = {
   image: '图片', video: '视频', text: '文本', audio: '音频',
@@ -41,7 +42,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     setError(null);
     Promise.all([listModelRoutes(), fetchGatewayMembers()])
       .then(([rows, members]) => { if (!cancelled) { setRoutes(rows); setStatus(members); } })
-      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .catch((e: unknown) => { if (!cancelled) setError(errorText(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [reloadToken]);
@@ -58,10 +59,10 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     setError(null);
     try {
       for (const member of members) setStatus(await restoreGatewayMember(member.modality, member.alias));
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errorText(e)); }
     finally {
       try { setRoutes(await listModelRoutes()); }
-      catch (e) { setError(current => current ?? (e instanceof Error ? e.message : String(e))); }
+      catch (e) { setError(current => current ?? (errorText(e))); }
       setRestoring(false);
     }
   }
@@ -72,7 +73,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     try {
       const saved = await operation();
       setRoutes(current => current.map(item => routeKey(item) === routeKey(saved) ? saved : item));
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errorText(e)); }
     finally { setSavingId(null); }
   }
 
@@ -111,7 +112,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
         target = takeNext();
         if (!target) apply(saved);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
         let fresh: ModelRoute | undefined;
         try { fresh = (await listModelRoutes()).find(item => routeKey(item) === key); }
         catch { /* 读不回来就保留当前顺序，报错已经显示 */ }

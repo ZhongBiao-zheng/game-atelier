@@ -79,24 +79,21 @@ describe('成员行「模型」弹层', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('至少选一个模型');
   });
 
-  // R7：草稿为空时关闭 = 放弃修改，不保存，下次打开回到已保存的范围。
+  // 每次勾选即时保存（规格 2.5）；取消到空时原位提示、不让关闭，也不保存。
   it.each([
     ['Esc', async () => close('可用模型')],
     ['点外面', async () => {
       await act(() => new Promise(resolve => setTimeout(resolve, 0)));  // Radix 挂载后下一拍才监听外部点击
       fireEvent.pointerDown(document.body);
     }],
-  ])('草稿为空时%s关闭弹层：放弃修改、不保存', async (_way, dismiss) => {
+  ])('草稿为空时%s关闭弹层：留在弹层、不保存', async (_way, dismiss) => {
     const saved = [{ alias: 'HK', models: ['gpt-image-2'] }];
     const onSave = openScope(key({ scope: saved }));
     fireEvent.click(within(screen.getByRole('region', { name: 'HK' })).getAllByRole('checkbox')[1]);
     await dismiss();
-    expect(screen.queryByLabelText('可用模型')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('可用模型')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('至少选一个模型');
     expect(onSave).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '1 个模型' }));
-    const hk = screen.getByRole('region', { name: 'HK' });
-    expect(within(hk).getAllByRole('checkbox')[1]).toBeChecked();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('旧数据转换出的空范围显示「未选择模型」；原样关上不报错也不保存', () => {

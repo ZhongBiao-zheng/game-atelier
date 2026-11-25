@@ -17,6 +17,7 @@ import { ProfileRequiredError, fetchProfile, listTeamLibraries, mountTeamLibrary
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
 import { Hint } from '@/components/ui/tooltip';
+import { errorText } from '@/lib/errorText';
 
 export const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
 const BAD_PAYLOAD = '读取列表失败：返回格式不对';
@@ -48,7 +49,7 @@ function groupByLibrary(views: TeamLibraryView[]): LibraryGroup[] {
 }
 
 function message(cause: unknown) {
-  return cause instanceof ProfileRequiredError ? '先设置署名' : cause instanceof Error ? cause.message : String(cause);
+  return cause instanceof ProfileRequiredError ? '先设置署名' : errorText(cause);
 }
 
 /** 署名就地改：挂载与分享都要求先有署名，碰到缺署名时由调用方直接打开。 */

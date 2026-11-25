@@ -12,6 +12,7 @@ import { useTaskFilters } from './useTaskFilters';
 import { QuotaCard } from './QuotaCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDelayedFlag } from './useDelayedFlag';
+import { errorText } from '@/lib/errorText';
 
 /** Select 不接受空字符串选项值，「全部成员」用这个占位。 */
 const ALL_MEMBERS = '__all__';
@@ -44,7 +45,7 @@ export function UsagePage() {
         if (active) setEnabled(state.enabled);
       })
       .catch((e) => {
-        if (active) setError(String(e));
+        if (active) setError(errorText(e));
       });
     return () => {
       active = false;
@@ -68,7 +69,7 @@ export function UsagePage() {
         if (active) setData(next);
       })
       .catch((e) => {
-        if (active) setError(e instanceof Error ? e.message : String(e));
+        if (active) setError(errorText(e));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -110,8 +111,8 @@ export function UsagePage() {
           {(
             [
               ['all', '全部'],
-              ['local', '本机 KEY'],
-              ['lan', '局域网'],
+              ['local', '本机供应商'],
+              ['lan', '团队网关'],
             ] as const
           ).map(([value, label]) => <ToggleGroupItem key={value} value={value}>{label}</ToggleGroupItem>)}
         </ToggleGroup>

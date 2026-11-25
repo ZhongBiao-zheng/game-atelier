@@ -70,7 +70,7 @@ describe('用量筛选', () => {
   it('来源根据区间内 sources 显示', async () => {
     vi.mocked(fetchUsage).mockResolvedValue({ ...empty, sources: ['local', 'lan'] });
     setup();
-    fireEvent.click(await screen.findByRole('radio', { name: '局域网' }));
+    fireEvent.click(await screen.findByRole('radio', { name: '团队网关' }));
     await waitFor(() =>
       expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ source: 'lan' })),
     );
@@ -78,7 +78,7 @@ describe('用量筛选', () => {
   it('没有局域网来源时隐藏来源，并显示空数据', async () => {
     setup();
     expect(await screen.findByText('暂无用量记录')).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: '局域网' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '团队网关' })).not.toBeInTheDocument();
   });
   it('网关关闭时隐藏团队并纠正 URL', async () => {
     vi.mocked(fetchGateway).mockResolvedValue({ enabled: false } as Awaited<ReturnType<typeof fetchGateway>>);

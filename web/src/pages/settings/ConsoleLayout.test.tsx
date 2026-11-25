@@ -93,30 +93,30 @@ it('本机网关响应事件刷新且旧慢响应不能覆盖更新状态', asyn
   render(<Router hook={hook}><ConsoleLayout /></Router>);
   vi.mocked(fetchGateway).mockResolvedValue(gateway);
   act(() => publishGatewayConnected());
-  expect(await screen.findByRole('link', { name: '局域网共享 · 运行中' })).toHaveAttribute('href', '/settings/gateway');
+  expect(await screen.findByRole('link', { name: '团队网关 · 运行中' })).toHaveAttribute('href', '/settings/gateway');
   await act(async () => resolveOld({ ...gateway, enabled: false }));
-  expect(screen.getByText('局域网共享 · 运行中')).toBeInTheDocument();
+  expect(screen.getByText('团队网关 · 运行中')).toBeInTheDocument();
   vi.mocked(fetchGateway).mockResolvedValue({ ...gateway, status: { ...gateway.status, running: false, error: '端口占用' } });
   act(() => publishGatewayConnected());
-  expect(await hoverHint(await screen.findByRole('link', { name: '局域网共享 · 启动失败' }))).toHaveTextContent('端口占用');
-  expect(screen.queryByText('局域网共享 · 运行中')).not.toBeInTheDocument();
+  expect(await hoverHint(await screen.findByRole('link', { name: '团队网关 · 启动失败' }))).toHaveTextContent('端口占用');
+  expect(screen.queryByText('团队网关 · 运行中')).not.toBeInTheDocument();
   vi.mocked(fetchGateway).mockRejectedValue(new Error('offline'));
   act(() => publishGatewayConnected());
   await waitFor(() => expect(screen.queryByText(/局域网共享 ·/)).not.toBeInTheDocument());
 });
 
 
-it('仅管理员连接显示中转管理，降级后隐藏', async () => {
+it('仅管理员连接显示团队网关管理，降级后隐藏', async () => {
   vi.mocked(listKeys).mockResolvedValue({ keys: [{ alias: 'relay', provider: 'atelier', enabled: true }] } as never);
   vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'member', limits: [] } as never);
   const { hook } = memoryLocation({ path: '/settings/providers' });
   render(<Router hook={hook}><ConsoleLayout /></Router>);
   await waitFor(() => expect(fetchGatewayProviderMe).toHaveBeenCalledWith('relay'));
-  expect(screen.queryByRole('link', { name: '中转管理' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: '团队网关管理' })).not.toBeInTheDocument();
   vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'admin', limits: [] } as never);
   act(() => publishGatewayConnected());
-  expect(await screen.findByRole('link', { name: '中转管理' })).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: '团队网关管理' })).toBeInTheDocument();
   vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'member', limits: [] } as never);
   act(() => publishGatewayConnected());
-  await waitFor(() => expect(screen.queryByRole('link', { name: '中转管理' })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole('link', { name: '团队网关管理' })).not.toBeInTheDocument());
 });

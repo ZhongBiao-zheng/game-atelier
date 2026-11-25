@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
+import { errorText } from '@/lib/errorText';
 
 const TYPES: WorkflowInput['type'][] = ['prompt', 'text', 'int', 'float', 'boolean', 'select', 'seed', 'image', 'mask'];
 const LABELS = ['提示词', '文本', '整数', '小数', '开关', '下拉', '种子', '图片', '遮罩'];
@@ -27,10 +28,10 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
   const upload = useRef<HTMLInputElement>(null);
   const replacing = useRef<ComfyWorkflow | null>(null);
   const reload = async () => setItems((await listWorkflows(alias)).workflows);
-  useEffect(() => { void reload().catch(e => setError(String(e))); }, [alias]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload().catch(e => setError(errorText(e))); }, [alias]); // eslint-disable-line react-hooks/exhaustive-deps
   const act = async (task: () => Promise<void>) => {
     setError(''); setBusy(true);
-    try { await task(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try { await task(); } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   };
   const patch = (index: number, update: Partial<WorkflowInput>) => setDraft(current => current && ({

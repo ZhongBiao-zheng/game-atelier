@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { errorText } from '@/lib/errorText';
 
 const LAST_MODEL = 'atelier.interface-assist-model';
 const MAX_URLS = 3;
@@ -66,7 +67,7 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
         const remembered = rows.find(row => modelKey(row) === last);
         setSelected(remembered ? modelKey(remembered) : rows[0] ? modelKey(rows[0]) : '');
       })
-      .catch(e => { if (active) { setModels([]); setError(e instanceof Error ? e.message : String(e)); } });
+      .catch(e => { if (active) { setModels([]); setError(errorText(e)); } });
     return () => { active = false; };
   }, []);
 
@@ -86,7 +87,7 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
       setResult(draft);
       onDraft(draft.document);
     } catch (e) {
-      setError(e instanceof ApiError && e.reason ? e.reason : e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setErrorRaw(e instanceof ApiError ? e.raw : null);
     } finally {
       setRunning(false);

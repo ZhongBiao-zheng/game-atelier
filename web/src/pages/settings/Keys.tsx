@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AddIcon, ChevronRightIcon, SearchIcon } from '@/components/ui/icons';
 import { Link } from 'wouter';
 
@@ -52,6 +52,12 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [deleting, setDeleting] = useState<{ row: KeyRow; fromForm: boolean } | null>(null);
   const shownDeleting = useRetained(deleting);
   const formView = useRetained(showForm ? { session: formSession, editing: editingKey } : null);
+  // 用量页「未计价」带 ?edit=<供应商>&price=<模型> 进来：列表读回后直接打开那条，展开到单价框。
+  const [deepLink] = useState(() => {
+    const query = new URLSearchParams(window.location.search);
+    return { edit: query.get('edit'), price: query.get('price') };
+  });
+  const deepLinkOpened = useRef(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -80,6 +86,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    if (deepLinkOpened.current || !deepLink.edit) return;
+    const target = keys.find(key => key.alias === deepLink.edit);
+    if (!target) return;
+    deepLinkOpened.current = true;
+    openEdit(target);
+  }, [keys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSaved = (alias: string) => {
     window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
@@ -221,6 +234,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           mode={formView.editing ? 'edit' : 'create'}
           autoDetect
           existingAliases={keys.map(key => key.alias)}
+          focusPriceModel={formView.editing && formView.editing.alias === deepLink.edit ? deepLink.price ?? undefined : undefined}
           onCreated={onSaved}
           onCancel={closeForm}
           onDelete={formView.editing ? () => setDeleting({ row: formView.editing!, fromForm: true }) : undefined}
