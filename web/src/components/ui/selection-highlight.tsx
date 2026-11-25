@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { gsap, MOTION_DURATION, MOTION_EASE, prefersReducedMotion } from '@/lib/motion';
+import { animate, MOTION_SPRING, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 const SELECTED = '[aria-selected="true"], [aria-pressed="true"], [aria-checked="true"]';
@@ -16,36 +16,36 @@ export function SelectionHighlight({ className }: { className?: string }) {
     const group = highlight?.parentElement;
     if (!highlight || !group) return;
     let placed = false;
-    const place = () => {
+    let running: AnimationPlaybackControls | null = null;
+    // 选中项变化时滑过去（弹簧，连点时带速度接上）；容器尺寸变化只是重新对齐，直接到位，不追着跑。
+    const place = (glide: boolean) => {
       const target = group.querySelector<HTMLElement>(SELECTED);
       const offset = target ? offsetWithin(target, group) : null;
+      // 不先 stop：新动画接管同一组值时，motion 会沿用正在跑的速度。
       if (!target || !offset) {
-        gsap.set(highlight, { opacity: 0 });
+        running = animate(highlight, { opacity: 0 }, { duration: 0 });
         placed = false;
         return;
       }
       const vars = { x: offset.x, y: offset.y, width: target.offsetWidth, height: target.offsetHeight, opacity: 1 };
-      if (!placed || prefersReducedMotion()) {
-        gsap.set(highlight, vars);
-        placed = true;
-        return;
-      }
-      gsap.to(highlight, { ...vars, duration: MOTION_DURATION.base, ease: MOTION_EASE.out, overwrite: true });
+      const instant = !placed || !glide || prefersReducedMotion();
+      running = animate(highlight, vars, instant ? { duration: 0 } : MOTION_SPRING.snappy);
+      placed = true;
     };
-    place();
-    const mutations = new MutationObserver(place);
+    place(false);
+    const mutations = new MutationObserver(() => place(true));
     mutations.observe(group, {
       subtree: true,
       childList: true,
       attributes: true,
       attributeFilter: ['aria-selected', 'aria-pressed', 'aria-checked'],
     });
-    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place(false));
     resizes?.observe(group);
     return () => {
       mutations.disconnect();
       resizes?.disconnect();
-      gsap.killTweensOf(highlight);
+      running?.stop();
     };
   }, []);
 

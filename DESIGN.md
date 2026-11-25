@@ -180,13 +180,24 @@
 ## Motion
 
 - **Approach**: minimal-functional —— 只用帮助理解的过渡，不堆装饰动画
-- **Easing**: `ease-out`（进入） / `ease-in`（离开） / `ease-in-out`（位置移动）
+- **唯一来源**：CSS 侧 `tokens.css`（`--motion-*`、`--ease-atelier-*`），JS 侧 `lib/motion.ts`（同值，外加弹簧）。Tailwind 的 `transition-*` / `ease-*` 默认值已指向这里，散写的类自动对齐；JS 动画只用 motion（`motion/react`），不另引动画库
+- **Easing**（不用 ease-in：原地关闭时前几帧几乎不动，像卡住）:
+  - out `cubic-bezier(0.22,1,0.36,1)`（`--ease-atelier-out`）：200–300ms 的空间进场——面板滑入、弹窗放大、大图展开
+  - subtle `cubic-bezier(0.2,0,0,1)`（`--ease-atelier-subtle`）：150ms 的颜色、透明度、4px 微位移，以及所有退场；Tailwind 过渡类默认
+  - in-out `cubic-bezier(0.65,0,0.35,1)`（`--ease-atelier-in-out`）：屏上 A→B 位移、展开收起、视口平移
 - **Duration**:
-  - fast `150ms`（`--motion-fast` / `duration-150`）：hover、聚焦环、浮层进出
-  - base `200ms`（`--motion-base` / `duration-200`）：遮罩、展开
-  - slow `300ms`（`--motion-slow` / `duration-300`）：输入壳收放、位置移动
-- **Hover 准则**：图片卡片可以 `scale-[1.02]`（微妙提示可点击）；按钮只换颜色，不换大小
-- **不用**：自动 loop 动画、装饰性渐入、scroll-driven 效果（这是工具不是营销页）
+  - fast `150ms`（`--motion-fast` / `duration-150`）：hover、聚焦环、浮层进出、图标与文案换态
+  - base `200ms`（`--motion-base` / `duration-200`）：遮罩、弹窗进场、内容交叉淡化
+  - slow `300ms`（`--motion-slow` / `duration-300`）：展开收起、输入壳收放、位置移动
+  - 跟手的操作（拖动、调整大小、滑杆）不加过渡
+- **弹簧**（`MOTION_SPRING`）：`snappy` 无回弹，给选中滑块、布局移动、拖拽让位，中途打断时带速度接上；`pop`（轻回弹）只给 24px 以内的正向确认图标（喜欢、复制成功、保存成功的勾），功能开关的图标换态用平稳版
+- **退场**：一律 fast 150ms + subtle，比进场短
+- **出入方向**：浮层从触发器一侧滑出（读 Radix `data-side` 与 `--radix-popper-transform-origin`）；居中弹窗以中心从 96% 放大淡入（`.dialog-in`）
+- **按下**：紧凑按钮按住缩到 97%；撑满容器的按钮（`w-full` / `h-full` / `flex-1`、列表选项、单选项、菜单项）不缩，反馈交给底色，其他大卡片式按钮加 `data-press="none"`
+- **Hover 准则**：图片卡片可以 `scale-[1.02]`（微妙提示可点击）；按钮悬停只换颜色，不换大小
+- **数字**：价格、用量、计数、耗时变化时直接换数，靠 `tabular-nums` 防抖，不做数字滚动
+- **减弱动态效果**：去掉位移、缩放、尺寸动画，保留 150ms 以内的透明度与颜色淡变；表示进行中的转圈照转（停了分不清卡死还是在跑）
+- **不用**：自动 loop 动画（进行中指示除外）、装饰性渐入、scroll-driven 效果（这是工具不是营销页）
 
 ## 标志性细节（让产品有"自己的脸"）
 
@@ -243,3 +254,4 @@
 | 2026-10-30 | 原生 button / label 与 `title` 提示清零后改为硬禁止；Select / Checkbox / Slider / Switch 换成 Radix，补 Tooltip（`Hint`）/ Tabs / ToggleGroup / RadioGroup / Popover / AlertDialog / InputGroup / EditableText；任意值间距清零后禁写 | 原生 select 箭头与 range 进度条靠 tokens.css 全局样式兜底，各平台外观不一；原生 title 提示延迟长、样式不可控；263 处原生 button 各写一套焦点环 |
 | 2026-11-16 | 浅色主题统一为「白面 + 发丝边 + 柔和投影」：border 黑 12%→8%、input 黑 20%→10%；导航选中药丸改白底 + 发丝边 + `--elevation-raised`，去掉金属描边环与斜面；`shell-glow` 与浮层在浅色下用 `--elevation-float`；主色 / 危险按钮平涂 100% 实色，outline 四边同色发丝边；深色不变 | 深色的顶部高光、斜面、描边环在浅色下只是被翻转，出现灰环、上亮下暗和偏黑粗框（飙哥反馈）。参考 Luma、Recraft、Canva、Base44 的浅色界面与 shadcn new-york 默认值；input 先取 12%，与导航胶囊并排后仍明显偏重，降到 10%。规格与截图在 `.scratch/light-theme/` |
 | 2026-11-13 | 作品图透明区域显示棋盘格：`.media-checker` 挂在 `<img>` 自身背景上（创作台卡片、大图、首页作品墙、画布图片节点），格子色 = 前景 10% 混进 `--card`，深色主题深底浅格、浅色主题自动白底浅灰格，格子 10px | 透明 PNG 放在深色卡片上看不出透明（飙哥反馈）；Mobbin 参考 Leonardo（深色）、Canva / Adobe Express（浅色）；不透明图会整块盖住背景，所以不用逐张判断是否透明 |
+| 2026-11-25 | 动效统一：JS 动画只留 motion（移除 GSAP 与未使用的 tw-animate-css）；Tailwind 过渡类默认值指向 `--motion-*` / `--ease-atelier-*`，曲线改为 out（quint）/ subtle / in-out 三条并取消 ease-in，新增弹簧 `snappy` / `pop`；浮层按弹出方向滑入，居中弹窗改中心放大；按下缩放只给紧凑按钮且不再覆盖按钮自带过渡；减弱动态效果改为只去位移缩放、保留淡变；主题色卡去掉无限漂移；提示共用一个 Provider | 全项目按「状态变化」审查：四套动画来源节奏不一；全局按下规则吃掉按钮的尺寸与焦点环过渡；向上弹的浮层从反方向掉下；散写过渡不响应减弱动态效果 |

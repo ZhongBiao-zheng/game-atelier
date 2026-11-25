@@ -1,7 +1,9 @@
 import { StrictMode } from 'react';
+import { MotionConfig } from 'motion/react';
 import { createRoot } from 'react-dom/client';
 import './styles/tokens.css';
 import { App } from './App';
+import { TooltipProvider } from './components/ui/tooltip';
 import { applyTheme, loadTheme, startThemeSync } from './lib/theme';
 import { startAccentSync } from './lib/accentTheme';
 
@@ -13,6 +15,11 @@ startAccentSync();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* 系统开了「减弱动态效果」时，motion 的位移与缩放动画一律直接到位。 */}
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    </MotionConfig>
   </StrictMode>,
 );

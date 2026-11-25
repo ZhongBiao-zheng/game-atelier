@@ -6,11 +6,18 @@
 @import "@fontsource/instrument-serif/latin-400-italic.css";
 @import "@fontsource-variable/jetbrains-mono/wght.css";
 @import "tailwindcss";
-@import "tw-animate-css";
 /* 宿主插件（ADR-0039）的界面源码在 web/ 之外，类名也要扫进来。 */
 @source "../../../plugins/*/host/**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Tailwind 过渡类的默认时长与曲线指向动效 token：散写的 transition-colors、ease-out 等与 lib/motion.ts 同一节奏。 */
+@theme inline {
+  --default-transition-duration: var(--motion-fast);
+  --default-transition-timing-function: var(--ease-atelier-subtle);
+  --ease-out: var(--ease-atelier-out);
+  --ease-in-out: var(--ease-atelier-in-out);
+}
 
 @theme inline {
   --color-panel: var(--panel);
@@ -133,12 +140,16 @@
   --status-done: #52AB69;
   --status-failed: #E5534B;
 
-  /* 动效：时长三档与缓动，与 lib/motion.ts 同值（GSAP 侧）；Tailwind 类侧对应 duration-150/200/300 */
+  /* 动效：时长三档与缓动，与 lib/motion.ts 同值；Tailwind 的 transition-* / ease-* / duration-* 也指向这里（见文件开头的 @theme）。 */
   --motion-fast: 150ms;
   --motion-base: 200ms;
   --motion-slow: 300ms;
-  --ease-atelier-out: cubic-bezier(0.215, 0.61, 0.355, 1); /* = GSAP power2.out */
-  --ease-atelier-in: cubic-bezier(0.55, 0.055, 0.675, 0.19); /* = GSAP power2.in */
+  /* out：200–300ms 的空间进场（面板滑入、弹窗放大、大图展开），起步快、收尾长。
+     subtle：150ms 的颜色 / 透明度 / 4px 微位移，以及所有退场；Tailwind 过渡类默认也用它。
+     不设 ease-in：原地关闭用 ease-in 前几帧几乎不动，点了像卡住。 */
+  --ease-atelier-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-atelier-subtle: cubic-bezier(0.2, 0, 0, 1);
+  --ease-atelier-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* 屏上 A→B 位移、展开收起、视口平移 */
 
 }
 
@@ -251,13 +262,12 @@
      = 持续抽搐（工坊列数 2-3 列实测）。scrollbar-gutter:stable 让内宽恒定，斩断这条反馈环。 */
   .stable-scroll { scrollbar-gutter: stable; }
 
-  /* 浮层进入：从触发器方向轻微下沉 + 淡入。与 ConfirmDialog 的 dialogIn 同一动效语言
-     （150ms ease-out），但走工具类而不是 tsx 内联 style，浮层各处能共用。
-     reduced-motion 下整条关掉——动效只是空间提示，不携带信息。 */
+  /* 浮层进入：从触发器一侧轻微滑出 + 淡入。方向读 Radix 的 data-side（在上方弹出就从下往上），
+     缩放原点取 Radix 算好的触发器方位。reduced-motion 下整条关掉——动效只是空间提示，不携带信息。 */
   @keyframes popoverIn {
     from {
       opacity: 0;
-      transform: translateY(-4px) scale(0.98);
+      transform: translate(var(--popover-shift-x), var(--popover-shift-y)) scale(var(--popover-scale));
     }
     to {
       opacity: 1;
@@ -265,18 +275,47 @@
     }
   }
   .popover-in {
-    animation: popoverIn var(--motion-fast) var(--ease-atelier-out);
-    transform-origin: top center;
+    --popover-shift-x: 0px;
+    --popover-shift-y: -4px;
+    --popover-scale: 0.98;
+    animation: popoverIn var(--motion-fast) var(--ease-atelier-subtle);
+    transform-origin: var(--radix-popper-transform-origin, top center);
   }
-  /* Radix 浮层（Dialog / DropdownMenu）关闭时带 data-state=closed，Presence 会等这段动画播完再卸载。 */
+  .popover-in[data-side='top'] { --popover-shift-y: 4px; }
+  .popover-in[data-side='left'] { --popover-shift-x: 4px; --popover-shift-y: 0px; }
+  .popover-in[data-side='right'] { --popover-shift-x: -4px; --popover-shift-y: 0px; }
+  /* 相邻提示之间移动（Radix 跳过延迟直接打开）时不再播进场，扫过一排按钮不闪。 */
+  .popover-in[data-state='instant-open'] { animation: none; }
+  /* Radix 浮层关闭时带 data-state=closed，Presence 会等这段动画播完再卸载。 */
   @keyframes popoverOut {
     to {
       opacity: 0;
-      transform: translateY(-4px) scale(0.98);
+      transform: translate(var(--popover-shift-x), var(--popover-shift-y)) scale(var(--popover-scale));
     }
   }
   .popover-in[data-state='closed'] {
-    animation: popoverOut var(--motion-fast) var(--ease-atelier-in) forwards;
+    animation: popoverOut var(--motion-fast) var(--ease-atelier-subtle) forwards;
+  }
+  /* 居中弹窗：以自身中心从 96% 放大淡入，不位移（弹窗没有触发器方向可言）。 */
+  @keyframes dialogIn {
+    from {
+      opacity: 0;
+      transform: scale(var(--dialog-scale-in));
+    }
+  }
+  @keyframes dialogOut {
+    to {
+      opacity: 0;
+      transform: scale(var(--dialog-scale-out));
+    }
+  }
+  .dialog-in {
+    --dialog-scale-in: 0.96;
+    --dialog-scale-out: 0.98;
+    animation: dialogIn var(--motion-base) var(--ease-atelier-out);
+  }
+  .dialog-in[data-state='closed'] {
+    animation: dialogOut var(--motion-fast) var(--ease-atelier-subtle) forwards;
   }
   @keyframes scrimIn {
     from { opacity: 0; }
@@ -285,17 +324,21 @@
     to { opacity: 0; }
   }
   .scrim-fade {
-    animation: scrimIn var(--motion-base) var(--ease-atelier-out);
+    animation: scrimIn var(--motion-base) var(--ease-atelier-subtle);
   }
   .scrim-fade[data-state='closed'] {
-    animation: scrimOut var(--motion-fast) var(--ease-atelier-in) forwards;
+    animation: scrimOut var(--motion-fast) var(--ease-atelier-subtle) forwards;
   }
+  /* 减弱动态效果：去掉位移与缩放，只留透明度淡入淡出——前庭不适来自空间运动，硬切反而丢了连续性。 */
   @media (prefers-reduced-motion: reduce) {
-    .popover-in,
-    .popover-in[data-state='closed'],
-    .scrim-fade,
-    .scrim-fade[data-state='closed'] {
-      animation: none;
+    .popover-in {
+      --popover-shift-x: 0px;
+      --popover-shift-y: 0px;
+      --popover-scale: 1;
+    }
+    .dialog-in {
+      --dialog-scale-in: 1;
+      --dialog-scale-out: 1;
     }
   }
 
@@ -527,7 +570,7 @@
     z-index: 30;
     opacity: 0;
     pointer-events: none !important;
-    transition: opacity var(--motion-fast) ease;
+    transition: opacity var(--motion-fast) var(--ease-atelier-subtle);
   }
   .canvas-flow .react-flow__handle.canvas-node-handle::before {
     position: absolute;
@@ -571,7 +614,7 @@
     background: var(--card);
     pointer-events: none;
     transform: translate(-50%, -50%);
-    transition: border-color var(--motion-fast) ease;
+    transition: border-color var(--motion-fast) var(--ease-atelier-subtle);
   }
   .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
     border-color: var(--primary);
@@ -595,7 +638,7 @@
     color: var(--foreground);
     pointer-events: none;
     transform: translate(-50%, -50%);
-    transition: border-color var(--motion-fast) ease;
+    transition: border-color var(--motion-fast) var(--ease-atelier-subtle);
   }
   .canvas-flow .canvas-group-add svg {
     width: 1rem;
@@ -716,8 +759,8 @@
     animation: canvasGenerationSpin 900ms linear infinite;
   }
   @media (prefers-reduced-motion: reduce) {
-    .canvas-generation-indicator::before,
-    .canvas-generation-indicator svg {
+    /* 呼吸是缩放，关掉；转圈表示仍在运行，保留。 */
+    .canvas-generation-indicator::before {
       animation: none;
     }
   }
@@ -888,25 +931,45 @@
   transform: none;
 }
 
-/* 按下反馈：可点按钮按住时缩到 97%。不进 @layer，才能压过按钮自带的 transition-colors 等工具类。
-   用独立的 scale 属性，不碰 transform / translate：Tailwind 的 -translate-* 定位与 GSAP 的 transform 补间都不受影响。
-   transition-property 要把 scale 并进去，否则按钮自带的 transition-colors 会让缩放瞬切；
-   没写任何 transition 类的按钮时长为 0，缩放瞬切，同样有反馈。
-   不需要的元素加 data-press="none"；Button asChild 渲染成链接时靠 .press 类接入。 */
-:where(button, .press):not(:disabled):not([data-press='none']) {
-  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, transform, translate, scale, rotate;
+/* 按下反馈：紧凑按钮按住时缩到 97%。用独立的 scale 属性，不碰 transform / translate。
+   撑满容器的按钮（w-full / h-full / flex-1、列表选项、单选项、菜单项）不缩：大面积缩 3% 会整体内缩好几像素，
+   反馈改由底色承担；其他大卡片式按钮加 data-press="none"。
+   不需要的元素加 data-press="none"；Button asChild 渲染成链接时靠 .press 类接入。
+   过渡属性只补不覆盖：不进 @layer 的规则总压过工具类，所以只在按钮没写过渡类、或只写了
+   transition-colors / transition-opacity 时补上 scale；transition-all、transition-[...] 等由按钮自己的列表说了算，
+   否则写在按钮上的尺寸、位置、焦点环过渡会被静默吃掉。 */
+:where(button, .press):not(:disabled):not([data-press='none']):not([class*='transition']) {
+  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, scale;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-atelier-subtle);
 }
-:where(button, .press):not(:disabled):not([data-press='none']):active {
+:where(button, .press).transition-colors:not(:disabled):not([data-press='none']) {
+  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, scale;
+}
+:where(button, .press).transition-opacity:not(:disabled):not([data-press='none']) {
+  transition-property: opacity, scale;
+}
+:where(button, .press):not(:disabled):not([data-press='none']):not(.w-full, .h-full, .flex-1):not([role='option'], [role='radio'], [role^='menuitem']):active {
   scale: 0.97;
 }
+
+/* 减弱动态效果：兜住散写在各处的 Tailwind 过渡——只让颜色、透明度、阴影继续淡变，
+   位移、缩放、尺寸一律直接到位（前庭不适来自空间运动，不来自淡入淡出）。
+   表示「正在进行」的转圈照转：它携带进度信息，停了分不清是卡死还是在跑。 */
 @media (prefers-reduced-motion: reduce) {
-  :where(button, .press):not(:disabled):not([data-press='none']):active {
+  *,
+  ::before,
+  ::after {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow !important;
+    scroll-behavior: auto !important;
+  }
+  :where(button, .press):active {
     scale: none;
   }
 }
 
 /* 主题预设只在色卡内使用原始色；实际界面由当前模式派生。 */
-/* 色卡＝主色铺底的柔和渐变，三个副色作模糊色团慢慢漂移，再叠一层颗粒噪点做磨砂感。 */
+/* 色卡＝主色铺底的柔和渐变，三个副色作模糊色团，再叠一层颗粒噪点做磨砂感。色团静止，悬停时才轻移一下。 */
 .accent-swatch {
   position: relative;
   overflow: hidden;
@@ -934,9 +997,7 @@
     radial-gradient(circle at 72% 86%, color-mix(in srgb, var(--preset-3) 80%, transparent), transparent 28%),
     radial-gradient(ellipse at 45% 55%, var(--preset-primary), transparent 55%);
   filter: blur(12px) saturate(1.2);
-  animation: accent-drift 24s ease-in-out infinite alternate;
-  animation-delay: calc(var(--i, 0) * -3.5s);
-  transition: translate 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: translate var(--motion-slow) var(--ease-atelier-out);
 }
 .accent-swatch::after {
   content: '';
@@ -949,13 +1010,8 @@
   pointer-events: none;
 }
 .accent-preset:hover .accent-swatch::before { translate: 6% -6%; }
-@keyframes accent-drift {
-  0% { transform: translate(-6%, -4%) scale(1); }
-  50% { transform: translate(5%, 6%) scale(1.12); }
-  100% { transform: translate(-3%, 5%) scale(1.04) rotate(8deg); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .accent-swatch::before { animation: none; transition: none; }
+  .accent-swatch::before { transition: none; }
 }
 .accent-preset[data-state='on'] { border-color: var(--preset-primary); color: var(--foreground); }
 .accent-pill { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }

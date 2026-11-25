@@ -34,7 +34,7 @@ import {
   type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
-import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_STAGGER, prefersReducedMotion, stagger, useAnimateOnChange } from '@/lib/motion';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -461,9 +461,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   }, [completeNodeResize, node.id]);
 
   // 出了新结果（版本变化）时媒体淡入；首次挂载与平移回视口重新挂载都不播。
-  useAnimateOnChange(nodeContent?.version_id ?? null, contentSurfaceRef, versionId => {
+  useAnimateOnChange(nodeContent?.version_id ?? null, versionId => {
     const media = versionId ? contentSurfaceRef.current?.querySelector('[data-canvas-media]') : null;
-    if (media) gsap.from(media, { opacity: 0, scale: 0.985, duration: MOTION_DURATION.slow, clearProps: 'opacity,transform' });
+    if (!media) return;
+    clearOnFinish(animate(media, { opacity: [0, 1], scale: [0.985, 1] }, { duration: MOTION_DURATION.slow, ease: MOTION_EASE.out }), media);
   });
 
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
@@ -1258,8 +1259,10 @@ function CanvasNodeFloatingPanel({
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
   const side = placement?.side;
   // 定位完成（visibility 解除）那一刻进场；left/top 管位置，动画只动 transform。
-  useAnimateOnChange(placement !== null, panelRef, placed => {
-    if (placed) gsap.from(panelRef.current, { opacity: 0, y: 6, duration: MOTION_DURATION.base, clearProps: 'opacity,transform' });
+  useAnimateOnChange(placement !== null, placed => {
+    const panel = panelRef.current;
+    if (!placed || !panel) return;
+    clearOnFinish(animate(panel, { opacity: [0, 1], y: [6, 0] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), panel);
   });
   useEffect(() => {
     if (side) onSideChange?.(side);
@@ -1316,7 +1319,7 @@ function CanvasNodeFloatingPanel({
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
-      // 进场动画由 gsap 写内联 transform 并在结束时清掉，与这里的拖动收起不重叠。
+      // 进场动画写内联 transform 并在结束时清掉，与这里的拖动收起不重叠。
       className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
@@ -1408,8 +1411,13 @@ function MediaCandidateBatch({
   const primaryNumber = primary.candidate.index + 1;
   const stackRef = useRef<HTMLDivElement>(null);
   // 展开时候选卡从主结果背后依次滑出。
-  useAnimateOnChange(expanded, stackRef, open => {
-    if (open) gsap.from('[data-candidate-card]', { x: -24, opacity: 0, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
+  useAnimateOnChange(expanded, open => {
+    const cards = open ? stackRef.current?.querySelectorAll<HTMLElement>('[data-candidate-card]') : null;
+    if (!cards?.length) return;
+    clearOnFinish(
+      animate(cards, { opacity: [0, 1], x: [-24, 0] }, { duration: MOTION_DURATION.slow, ease: MOTION_EASE.out, delay: stagger(MOTION_STAGGER) }),
+      cards,
+    );
   });
 
   return (
@@ -3251,15 +3259,19 @@ function CandidateGrid({
   const readyKey = entries.filter(({ candidate }) => candidate.version_id).map(({ candidate }) => candidate.candidate_id).join('|');
   const seenReady = useRef<Set<string> | null>(null);
   // 候选出图完成时依次浮现；打开面板时已有的结果不播。
-  useGSAP(() => {
+  useLayoutEffect(() => {
     const ready = readyKey ? readyKey.split('|') : [];
     const seen = seenReady.current;
     seenReady.current = new Set(ready);
     if (!seen || prefersReducedMotion()) return;
     const fresh = Array.from(gridRef.current?.querySelectorAll<HTMLElement>('[data-candidate-id]') ?? [])
       .filter(element => ready.includes(element.dataset.candidateId ?? '') && !seen.has(element.dataset.candidateId ?? ''));
-    if (fresh.length) gsap.from(fresh, { opacity: 0, scale: 0.96, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
-  }, { dependencies: [readyKey], scope: gridRef });
+    if (!fresh.length) return;
+    clearOnFinish(
+      animate(fresh, { opacity: [0, 1], scale: [0.96, 1] }, { duration: MOTION_DURATION.slow, ease: MOTION_EASE.out, delay: stagger(MOTION_STAGGER) }),
+      fresh,
+    );
+  }, [readyKey]);
 
   return (
     <div ref={gridRef} className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>

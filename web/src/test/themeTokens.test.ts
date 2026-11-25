@@ -70,8 +70,9 @@ const DARK_TOKENS: Record<string, string> = {
   '--motion-fast': '150ms',
   '--motion-base': '200ms',
   '--motion-slow': '300ms',
-  '--ease-atelier-out': 'cubic-bezier(0.215, 0.61, 0.355, 1)',
-  '--ease-atelier-in': 'cubic-bezier(0.55, 0.055, 0.675, 0.19)',
+  '--ease-atelier-out': 'cubic-bezier(0.22, 1, 0.36, 1)',
+  '--ease-atelier-subtle': 'cubic-bezier(0.2, 0, 0, 1)',
+  '--ease-atelier-in-out': 'cubic-bezier(0.65, 0, 0.35, 1)',
 };
 
 describe('深色主题守卫', () => {

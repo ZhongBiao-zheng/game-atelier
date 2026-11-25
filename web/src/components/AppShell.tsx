@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
+import { MOTION_SPRING } from '@/lib/motion';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon } from '@/components/ui/icons';
 
@@ -69,7 +70,7 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
           // 定位走 className：framer-motion 会吞掉 style 里的 position/inset（它自管 layout 元素的盒定位），
           // 但不碰 className；.nav-active-ring 已去掉 position，absolute 不再被覆盖，稳定铺满整颗 tab
           className="absolute inset-0 -z-10 rounded-full border border-input bg-glass nav-tab-glass nav-active-ring backdrop-blur-glass"
-          transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+          transition={MOTION_SPRING.snappy}
         />
       )}
       <Icon size="lg" />

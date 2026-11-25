@@ -3,10 +3,24 @@ import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 
 import { cn } from '@/lib/utils';
 
-/** 每个 Tooltip 自带 Provider（同 shadcn/ui），不依赖应用根节点挂载。 */
-export function Tooltip({ delayDuration = 300, ...props }: React.ComponentProps<typeof TooltipPrimitive.Root> & { delayDuration?: number }) {
+const TOOLTIP_DELAY_MS = 300;
+const InSharedTooltipProvider = React.createContext(false);
+
+/** 应用根部挂一次。所有提示共用一个 Provider，相邻按钮间移动时跳过等待、直接切换（不再逐个等 300ms）。 */
+export function TooltipProvider({ children }: { children: React.ReactNode }) {
   return (
-    <TooltipPrimitive.Provider delayDuration={delayDuration}>
+    <TooltipPrimitive.Provider delayDuration={TOOLTIP_DELAY_MS} skipDelayDuration={TOOLTIP_DELAY_MS}>
+      <InSharedTooltipProvider.Provider value>{children}</InSharedTooltipProvider.Provider>
+    </TooltipPrimitive.Provider>
+  );
+}
+
+/** 在共享 Provider 里直接挂 Root；单独渲染（组件测试、插件宿主）时自带一个 Provider 兜底。 */
+export function Tooltip({ delayDuration, ...props }: React.ComponentProps<typeof TooltipPrimitive.Root> & { delayDuration?: number }) {
+  const shared = React.useContext(InSharedTooltipProvider);
+  if (shared) return <TooltipPrimitive.Root delayDuration={delayDuration} {...props} />;
+  return (
+    <TooltipPrimitive.Provider delayDuration={delayDuration ?? TOOLTIP_DELAY_MS}>
       <TooltipPrimitive.Root {...props} />
     </TooltipPrimitive.Provider>
   );
