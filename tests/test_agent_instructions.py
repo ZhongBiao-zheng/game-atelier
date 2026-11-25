@@ -20,3 +20,9 @@ def test_core_ends_every_turn_with_output_and_leaves_confirmation_to_permissions
     assert "## 每一轮都要有产出" in CORE
     assert "不要问「要不要生成」" in CORE
     assert "以 `→ ` 开头" in CORE
+
+
+def test_only_explicit_requests_trigger_multiple_images():
+    assert "没说张数就出 1 张" in CORE
+    assert "明确要比较但没给数字时出 3 张" in CORE
+    assert "需求适合探索多个方向" not in CORE
