@@ -18,6 +18,7 @@ import { AiIcon, CheckIcon, CopyIcon, HelpIcon } from '@/components/ui/icons';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 import { errorText } from '@/lib/errorText';
+import { UNDO_DURATION_MS } from '@/lib/notify';
 
 const VALIDATE_DELAY_MS = 400;
 const COPIED_MS = 2000;
@@ -78,6 +79,15 @@ interface Props {
   onClose: () => void;
 }
 
+/** JSON.parse 的报错（Unexpected token… at position 123）→「第 N 行附近 JSON 格式有误」。 */
+function jsonErrorText(text: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  const line = message.match(/line (\d+)/)?.[1];
+  const position = message.match(/position (\d+)/)?.[1];
+  const row = line ? Number(line) : position ? text.slice(0, Number(position)).split('\n').length : null;
+  return row ? `第 ${row} 行附近 JSON 格式有误` : 'JSON 格式有误';
+}
+
 export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, model, onSaved, onClose }: Props) {
   const kindExamples = examplesFor(kind);
   const [exampleId, setExampleId] = useState(kindExamples[0]?.id ?? '');
@@ -91,6 +101,22 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
   const [assistOpen, setAssistOpen] = useState(false);
   // 生成前的模板正文：草稿直接填进编辑区，撤销回到这份。
   const [beforeDraft, setBeforeDraft] = useState<string | null>(null);
+  // 打开时（或换示例前没动过时）的正文：和它不同就算有未保存的修改。
+  const [pristine, setPristine] = useState<string | null>(() => identifier ? null : text);
+  // 换示例 / 导入覆盖了手写内容：编辑区上方内联「已替换当前输入 · 撤销」8 秒（规格 2.1）。
+  const [replaced, setReplaced] = useState(false);
+  useEffect(() => {
+    if (!replaced) return;
+    const timer = window.setTimeout(() => setReplaced(false), UNDO_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [replaced]);
+  const dirty = !saving && !loading && pristine !== null && text !== pristine;
+  /** 用新正文覆盖编辑区；手写过的内容先存进 beforeDraft，可撤销。 */
+  const replaceText = (next: string) => {
+    if (text === pristine) setPristine(next);
+    else { setBeforeDraft(text); setReplaced(true); }
+    setText(next);
+  };
   const editor = useRef<HTMLTextAreaElement>(null);
   const [manualCopied, setManualCopied] = useState(false);
 
@@ -98,7 +124,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
     if (!identifier) return;
     let active = true;
     getHttpProtocol(identifier)
-      .then(detail => { if (active) setText(pretty(detail.document)); })
+      .then(detail => { if (active) { setText(pretty(detail.document)); setPristine(pretty(detail.document)); } })
       .catch(e => { if (active) setError(errorText(e)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -111,7 +137,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
       parsed = JSON.parse(text);
       setParseIssue(null);
     } catch (e) {
-      setParseIssue({ path: 'JSON', message: errorText(e) });
+      setParseIssue({ path: 'JSON', message: jsonErrorText(text, e) });
       setValidation(null);
       return;
     }
@@ -166,7 +192,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!next && !saving) onClose(); }}>
-      <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] max-w-5xl flex-col gap-4"
+      <DialogContent dirty={dirty} aria-describedby={undefined} className="flex max-h-[90dvh] max-w-5xl flex-col gap-4"
         // 默认焦点会落到「?」上并弹出说明；打开即聚焦模板正文。
         onOpenAutoFocus={event => { event.preventDefault(); editor.current?.focus(); }}>
         <div className="flex items-center gap-2">
@@ -180,7 +206,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
             const example = kindExamples.find(item => item.id === value);
             if (!example) return;
             setExampleId(value);
-            setText(pretty(example.document));
+            replaceText(pretty(example.document));
           }}>
             <SelectTrigger size="sm" aria-label="从示例开始" className="ml-auto mr-8 w-auto"><SelectValue /></SelectTrigger>
             <SelectContent>{kindExamples.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
@@ -191,6 +217,10 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
           onUndo={beforeDraft === null ? null : () => { setText(beforeDraft); setBeforeDraft(null); }} />}
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
           <div className="flex min-h-0 flex-col gap-2">
+            {replaced && beforeDraft !== null && !assistOpen && <p role="status" className="content-swap-in flex items-center gap-2 text-xs text-muted-foreground">
+              已替换当前输入
+              <Button variant="link" size="sm" type="button" className="h-auto px-0 text-xs" onClick={() => { setText(beforeDraft); setBeforeDraft(null); setReplaced(false); }}>撤销</Button>
+            </p>}
             <Textarea ref={editor} aria-label="接口模板" value={text} disabled={loading} spellCheck={false}
               onChange={e => setText(e.target.value)}
               className="min-h-80 flex-1 font-mono text-xs" />
@@ -211,7 +241,7 @@ export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, 
         <footer className="flex items-center gap-2">
           <FileInput ref={upload} accept=".json,application/json" onChange={e => {
             const file = e.target.files?.[0]; e.target.value = '';
-            if (file) void file.text().then(setText);
+            if (file) void file.text().then(replaceText);
           }} />
           <Button variant="ghost" size="sm" type="button" disabled={loading || saving} onClick={() => upload.current?.click()}>导入</Button>
           <Button variant="ghost" size="sm" type="button" disabled={loading || Boolean(parseIssue)} onClick={exportDocument}>导出</Button>

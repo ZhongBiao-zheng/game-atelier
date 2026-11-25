@@ -101,16 +101,15 @@ export function PsAgentScripts() {
   }
 
   return <div className="space-y-1">
+    {/* 开关靠右，和插件行、全站其他开关一致。 */}
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <Label className="flex items-center gap-2 text-xs font-normal leading-normal">
-        <Switch size="sm" checked={allowed === true} disabled={allowed === null || saving}
-          onCheckedChange={next => void toggle(next)} />
-        允许 Agent 执行脚本
-      </Label>
+      <Label htmlFor="ps-allow-scripts" className="text-xs font-normal leading-normal">允许 Agent 执行脚本</Label>
       {allowed && <p className="text-xs text-destructive">脚本可以读写本机文件</p>}
       {entries.length > 0 && <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(value => !value)}>
         最近执行 {entries.length}
       </Button>}
+      <Switch id="ps-allow-scripts" size="sm" className="ml-auto" checked={allowed === true} disabled={allowed === null || saving}
+        onCheckedChange={next => void toggle(next)} />
     </div>
     <Collapse open={open && entries.length > 0}>
       <ul aria-label="最近执行" className="space-y-0.5">

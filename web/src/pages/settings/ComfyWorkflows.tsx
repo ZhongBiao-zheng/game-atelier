@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { errorText } from '@/lib/errorText';
 
 const TYPES: WorkflowInput['type'][] = ['prompt', 'text', 'int', 'float', 'boolean', 'select', 'seed', 'image', 'mask'];
@@ -63,14 +64,13 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
       <Button variant="ghost" size="sm" disabled={busy} onClick={() => setPendingDelete(item)}>删除</Button>
     </li>)}</ul>
     {error && !draft && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <Dialog open={Boolean(pendingDelete)} onOpenChange={open => { if (!open) setPendingDelete(null); }}>
-      <DialogContent><DialogTitle>删除工作流「{pendingDelete?.name}」？</DialogTitle>
-        <Button variant="destructive" disabled={busy} onClick={() => void act(async () => {
-          await deleteWorkflow(alias, pendingDelete!.id); setPendingDelete(null); await reload();
-          window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
-        })}>删除</Button>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog open={Boolean(pendingDelete)} title={`删除工作流「${pendingDelete?.name ?? ''}」？`}
+      message="删除后不能恢复，用到它的节点需要换一个工作流。" confirmText="删除" variant="destructive"
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { const target = pendingDelete; setPendingDelete(null); if (target) void act(async () => {
+        await deleteWorkflow(alias, target.id); await reload();
+        window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
+      }); }} />
     <Dialog open={Boolean(draft)} onOpenChange={open => { if (!open && !busy) setDraft(null); }}>
       <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col">
         <DialogTitle>{draft?.id ? '编辑工作流' : '导入工作流'}</DialogTitle>

@@ -1198,7 +1198,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         keys.add_key(spec)
     except keys.DuplicateAliasError:
         raise HTTPException(
-            409, f"别名「{payload.alias}」已经存在：换个别名，或直接改那条已有的密钥"
+            409, f"名称「{payload.alias}」已被另一个供应商使用：换个名称，或直接编辑那一个"
         ) from None
     if spec.provider == "atelier":
         # 局域网网关接进来就排在每个路由组的第一位，本机 KEY 作兜底（ADR-0025）。
