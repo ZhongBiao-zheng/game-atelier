@@ -124,15 +124,32 @@ export function Lightbox({
     }
   }, []);
 
-  const leaving = layers.some(layer => layer.phase === 'leaving');
+  // 每个离场层各按自己的截止时间移走：旧图与新图同步淡出淡入（duration-200），从它开始离场算起播完再卸载。
+  // 连翻三张时第二张不会跟着第一张的计时被提前拿掉；回到某张正在离场的图，取消它的清理。
+  const leaveTimers = useRef(new Map<string, number>());
   useEffect(() => {
-    if (!leaving) return;
-    // 旧图与新图同步淡出淡入（duration-200），播完再移走。
-    const timer = window.setTimeout(() => {
-      setLayers(current => current.filter(layer => layer.phase !== 'leaving'));
-    }, MOTION_DURATION.base * 1000);
-    return () => window.clearTimeout(timer);
-  }, [leaving]);
+    const timers = leaveTimers.current;
+    for (const [leavingSrc, timer] of timers) {
+      if (layers.some(layer => layer.src === leavingSrc && layer.phase === 'leaving')) continue;
+      window.clearTimeout(timer);
+      timers.delete(leavingSrc);
+    }
+    for (const layer of layers) {
+      if (layer.phase !== 'leaving' || timers.has(layer.src)) continue;
+      const leavingSrc = layer.src;
+      timers.set(leavingSrc, window.setTimeout(() => {
+        timers.delete(leavingSrc);
+        setLayers(current => current.filter(item => !(item.src === leavingSrc && item.phase === 'leaving')));
+      }, MOTION_DURATION.base * 1000));
+    }
+  }, [layers]);
+  useEffect(() => {
+    const timers = leaveTimers.current;
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     for (const next of preloadSrcs ?? []) {

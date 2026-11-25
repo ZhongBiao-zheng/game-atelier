@@ -339,8 +339,14 @@
     .dialog-in {
       --dialog-scale-in: 1;
       --dialog-scale-out: 1;
+      animation-duration: var(--motion-fast);
     }
     .scrim-fade {
+      animation-duration: var(--motion-fast);
+    }
+    /* 只剩淡入的内容出现，同样封顶 150ms。 */
+    .content-reveal,
+    .delayed-reveal {
       animation-duration: var(--motion-fast);
     }
   }
@@ -398,6 +404,9 @@
   [data-sonner-toaster] [data-sonner-toast][data-removed='true'] {
     transition-duration: var(--motion-fast);
     transition-timing-function: var(--ease-atelier-subtle);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-sonner-toaster] [data-sonner-toast] { transition-duration: var(--motion-fast); }
   }
 
   /* 桌面版窗口失焦：顶栏整体降对比度，像原生窗口一样表明「不是当前窗口」；150ms 淡变。
@@ -1008,13 +1017,18 @@
 :where(button, .press).transition-opacity:not(:disabled):not([data-press='none']) {
   transition-property: opacity, scale;
 }
-:where(button, .press):not(:disabled):not([data-press='none']):not(.w-full, .h-full, .flex-1):not([role='option'], [role='radio'], [role^='menuitem']):active {
-  scale: 0.97;
+/* 缩放是空间运动：只在没开减弱动态效果时生效（写在 no-preference 里，不靠 reduce 分支复位——这条选择器优先级更高，复位压不住）。 */
+@media (prefers-reduced-motion: no-preference) {
+  :where(button, .press):not(:disabled):not([data-press='none']):not(.w-full, .h-full, .flex-1):not([role='option'], [role='radio'], [role^='menuitem']):active {
+    scale: 0.97;
+  }
 }
 
 /* 减弱动态效果：兜住散写在各处的 Tailwind 过渡——只让颜色、透明度、阴影继续淡变，
    位移、缩放、尺寸一律直接到位（前庭不适来自空间运动，不来自淡入淡出）。
-   表示「正在进行」的转圈照转：它携带进度信息，停了分不清是卡死还是在跑。 */
+   表示「正在进行」的转圈照转：它携带进度信息，停了分不清是卡死还是在跑。
+   留下的淡变封顶 150ms：只压写了 duration-200 / duration-300 的元素（图片淡入、输入壳、列表收起等），
+   不给所有元素统一设时长——没写时长的元素本来就是瞬切（菜单高亮之类），统一设会让它们也开始淡变。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
@@ -1022,8 +1036,8 @@
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow !important;
     scroll-behavior: auto !important;
   }
-  :where(button, .press):active {
-    scale: none;
+  :is(.duration-200, .duration-300) {
+    transition-duration: var(--motion-fast) !important;
   }
 }
 

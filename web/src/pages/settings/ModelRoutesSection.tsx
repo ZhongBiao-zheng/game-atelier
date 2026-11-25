@@ -29,8 +29,11 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const shownError = useRetained(error);
-  // 「提前」乐观换位：每条路由只认最后一次请求的结果，连点几下不会被先回来的旧响应覆盖。
-  const reorderSeq = useRef(new Map<string, number>());
+  // 「提前」每条路由串行写入：同一时间只有一个请求在途，等待期间的换位只记最新目标顺序，回来后接着写。
+  // 键在表里 = 这条路由有写入在途；值 = 排队等写的最新顺序（没有为 null）。
+  const orderQueue = useRef(new Map<string, string[] | null>());
+  // 有顺序写入在途的路由：这期间不切路由方式，「全部恢复」也等写完再刷新，免得旧快照盖住本地顺序。
+  const [ordering, setOrdering] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,9 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     finally { setSavingId(null); }
   }
 
-  /** 「提前」先在本地换位（成员行带布局动画滑到新位置），再保存；失败退回服务端最后确认的顺序。不禁用按钮，可以连点。 */
+  /** 「提前」先在本地换位（成员行带布局动画滑到新位置），再保存；不禁用按钮，可以连点。
+   *  写入按路由串行：请求在途时再点只更新本地顺序并记成下一次要写的目标，请求回来后写最新目标，
+   *  直到没有新目标才用服务端结果落位。失败报错并退回服务端当前顺序（期间又点了就接着写新目标）。 */
   async function moveEarlier(route: ModelRoute, index: number) {
     const key = routeKey(route);
     const aliases = route.members.map(member => member.alias);
@@ -84,21 +89,42 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
       members: aliases.map(alias => route.members.find(member => member.alias === alias)!),
       candidate_alias: route.mode === 'order' ? aliases.find(alias => !unavailable.has(alias)) ?? null : route.candidate_alias,
     };
-    const seq = (reorderSeq.current.get(key) ?? 0) + 1;
-    reorderSeq.current.set(key, seq);
-    setRoutes(current => current.map(item => routeKey(item) === key ? optimistic : item));
+    const apply = (next: ModelRoute) => setRoutes(current => current.map(item => routeKey(item) === key ? next : item));
+    apply(optimistic);
     setError(null);
-    try {
-      const saved = await setModelRouteOrder(route.modality, route.id, aliases);
-      if (reorderSeq.current.get(key) === seq) setRoutes(current => current.map(item => routeKey(item) === key ? saved : item));
-    } catch (e) {
-      if (reorderSeq.current.get(key) !== seq) return;
-      setError(e instanceof Error ? e.message : String(e));
-      try {
-        const fresh = (await listModelRoutes()).find(item => routeKey(item) === key);
-        if (fresh && reorderSeq.current.get(key) === seq) setRoutes(current => current.map(item => routeKey(item) === key ? fresh : item));
-      } catch { /* 读不回来就保留当前顺序，报错已经显示 */ }
+    const queue = orderQueue.current;
+    if (queue.has(key)) {
+      queue.set(key, aliases);
+      return;
     }
+    queue.set(key, null);
+    setOrdering(current => new Set(current).add(key));
+    const takeNext = () => {
+      const next = queue.get(key) ?? null;
+      queue.set(key, null);
+      return next;
+    };
+    let target: string[] | null = aliases;
+    while (target) {
+      try {
+        const saved = await setModelRouteOrder(route.modality, route.id, target);
+        target = takeNext();
+        if (!target) apply(saved);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        let fresh: ModelRoute | undefined;
+        try { fresh = (await listModelRoutes()).find(item => routeKey(item) === key); }
+        catch { /* 读不回来就保留当前顺序，报错已经显示 */ }
+        target = takeNext();
+        if (!target && fresh) apply(fresh);
+      }
+    }
+    queue.delete(key);
+    setOrdering(current => {
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
   }
 
   return <section aria-label="智能路由" className="space-y-5">
@@ -120,7 +146,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     {overdue.length > 0 && <div role="status" className="flex flex-wrap items-center gap-2.5 rounded-md border border-destructive/35 bg-destructive/10 px-3.5 py-2.5 text-sm">
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
       <span className="min-w-0 flex-1">{overdueAliases.join('、')} 欠费，已从 {affected} 条路由摘除</span>
-      <Button variant="outline" size="sm" type="button" disabled={restoring || savingId !== null} onClick={() => void restore(overdue)} className="shrink-0">全部恢复</Button>
+      <Button variant="outline" size="sm" type="button" disabled={restoring || savingId !== null || ordering.size > 0} onClick={() => void restore(overdue)} className="shrink-0">全部恢复</Button>
     </div>}
     {loading ? <p role="status" className="text-sm text-muted-foreground">加载中…</p> : <>
       {shared.length > 0 && <div aria-label="路由列表" className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
@@ -130,7 +156,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
             <p className="text-xs text-muted-foreground">{route.members.length} 家供应商</p>
             {status.unavailable_routes.some(item => item.id === route.id && item.modality === route.modality) && <p className="text-xs text-destructive">全部成员欠费</p>}
           </div>
-          <Select value={route.mode} disabled={savingId !== null || restoring}
+          <Select value={route.mode} disabled={savingId !== null || restoring || ordering.has(routeKey(route))}
             onValueChange={value => { const mode = value as RouteMode; void save(route, () => setModelRouteMode(route.modality, route.id, mode)); }}>
             <SelectTrigger size="sm" aria-label={`${route.name} 的路由方式`} className="w-auto"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -149,7 +175,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
                   <span className="break-all text-sm">{member.alias}</span>
                   {unavailable && <span className="flex flex-wrap items-center gap-2 text-xs text-destructive">
                     {unavailable.reason === 'unavailable' ? '暂时不可用' : `欠费已摘除 · ${date(unavailable.since)}`}
-                    {unavailable.reason !== 'unavailable' && <Button variant="bare" type="button" disabled={restoring || savingId !== null} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</Button>}
+                    {unavailable.reason !== 'unavailable' && <Button variant="bare" type="button" disabled={restoring || savingId !== null || ordering.size > 0} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</Button>}
                   </span>}
                   {route.mode === 'order' && index > 0 && <Button variant="bare" type="button" aria-label={`把 ${member.alias} 提前`} disabled={savingId !== null || restoring}
                     onClick={() => void moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeftIcon size="sm" aria-hidden /></Button>}

@@ -5,8 +5,15 @@ import { pluginIcon, PluginIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
 import { useHostPlugins } from '@/plugin-host/hostPlugins';
-import { setPluginsSnapshot } from '@/plugin-host/registry';
+import { getPluginsSnapshot, setPluginsSnapshot } from '@/plugin-host/registry';
 import type { PluginEntry } from '@/schema/plugins';
+
+/** 只换掉这一个插件的条目，别的插件保持原样：并发的启停各自只认自己那一行的结果。 */
+function mergeEntry(list: readonly PluginEntry[], entry: PluginEntry): PluginEntry[] {
+  return list.some(plugin => plugin.id === entry.id)
+    ? list.map(plugin => plugin.id === entry.id ? entry : plugin)
+    : [...list, entry];
+}
 
 function PluginRow({ plugin, busy, onToggle, Settings }: {
   plugin: PluginEntry; busy: boolean; onToggle: (enabled: boolean) => void; Settings?: ComponentType;
@@ -37,7 +44,8 @@ export function PluginsPage() {
   const [plugins, setLocalPlugins] = useState<PluginEntry[] | null>(null);
   // 画布的添加菜单与插件节点读的是全局注册表，这里的变化要同步过去。
   const setPlugins = (next: PluginEntry[]) => { setLocalPlugins(next); setPluginsSnapshot(next); };
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // 在途的插件 ID：每行各管各的，两个开关可以同时在请求。
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   // 已启用的宿主插件（ADR-0039 / ADR-0041）在这里加载分块，渲染它们的设置区；关闭的不加载。
   const hostPlugins = useHostPlugins();
   const [error, setError] = useState<string | null>(null);
@@ -50,18 +58,34 @@ export function PluginsPage() {
   }, []);
 
   // 乐观切换：开关立刻到位，只有这一行在请求期间禁用；失败以服务端为准拉回。
+  // 响应是整份清单，但只合入这一个插件的条目（本地列表和画布读的注册表都是），
+  // 不然后发先至的响应会把另一行在途或已确认的状态盖回旧值。
   async function toggle(id: string, enabled: boolean) {
-    setBusyId(id);
+    setBusyIds(current => new Set(current).add(id));
     setError(null);
     setLocalPlugins(current => current?.map(plugin => plugin.id === id ? { ...plugin, enabled } : plugin) ?? current);
+    const confirm = (entry: PluginEntry) => {
+      setLocalPlugins(current => current ? mergeEntry(current, entry) : current);
+      setPluginsSnapshot(mergeEntry(getPluginsSnapshot(), entry));
+    };
     try {
-      setPlugins((await setPluginEnabled(id, enabled)).plugins);
+      const entry = (await setPluginEnabled(id, enabled)).plugins.find(plugin => plugin.id === id);
+      if (entry) confirm(entry);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      // 以服务端为准：启用可能已被别处改过，或插件在这期间变得不可用。
-      fetchPlugins().then(listing => setPlugins(listing.plugins)).catch(() => {});
+      // 以服务端为准：启用可能已被别处改过，或插件在这期间变得不可用。读不回来就退回点击前。
+      try {
+        const entry = (await fetchPlugins()).plugins.find(plugin => plugin.id === id);
+        if (entry) confirm(entry);
+      } catch {
+        setLocalPlugins(current => current?.map(plugin => plugin.id === id ? { ...plugin, enabled: !enabled } : plugin) ?? current);
+      }
     } finally {
-      setBusyId(null);
+      setBusyIds(current => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -70,7 +94,7 @@ export function PluginsPage() {
       <p className="font-display text-display italic text-foreground/70">暂无插件</p>
     </div>}
     {plugins && plugins.length > 0 && <ul aria-label="插件" className="divide-y divide-border rounded-xl border border-border bg-card p-5">
-      {plugins.map(plugin => <PluginRow key={plugin.id} plugin={plugin} busy={busyId === plugin.id}
+      {plugins.map(plugin => <PluginRow key={plugin.id} plugin={plugin} busy={busyIds.has(plugin.id)}
         Settings={hostPlugins.get(plugin.id)?.Settings} onToggle={enabled => void toggle(plugin.id, enabled)} />)}
     </ul>}
     {!plugins && !error && <p role="status" className="text-xs text-muted-foreground">加载中…</p>}

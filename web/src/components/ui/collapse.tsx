@@ -5,11 +5,14 @@ import { animate, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, type Anima
 /** 高度 0 ↔ auto 的展开区。收起时等动画播完再卸载子树；首次挂载默认不播，appear 时挂载即从 0 展开
  *  （新到达、需要交代「从这里长出来」的内容，比如刚出现的报错条、确认卡明细）。
  *  keepMounted：收起后子树留在 DOM 里、只是不显示（同原生 <details>），表单字段的值不丢。
- *  收起途中再展开（或反过来）从当前高度接着走，不归零重来。 */
-export function Collapse({ open, appear = false, keepMounted = false, className, children }: {
+ *  收起途中再展开（或反过来）从当前高度接着走，不归零重来。
+ *  收起那一刻内容就 inert（不能聚焦、点击、读屏），只留视觉退场；焦点原在里面时调 onFocusEscape 交给调用方接回
+ *  （通常是触发器），不传则由浏览器落回 body。 */
+export function Collapse({ open, appear = false, keepMounted = false, onFocusEscape, className, children }: {
   open: boolean;
   appear?: boolean;
   keepMounted?: boolean;
+  onFocusEscape?: () => void;
   className?: string;
   children: ReactNode;
 }) {
@@ -17,6 +20,8 @@ export function Collapse({ open, appear = false, keepMounted = false, className,
   const previous = useRef(appear ? false : open);
   const lastElement = useRef<HTMLDivElement | null>(null);
   const running = useRef<AnimationPlaybackControls | null>(null);
+  const latestFocusEscape = useRef(onFocusEscape);
+  latestFocusEscape.current = onFocusEscape;
   const [mounted, setMounted] = useState(open || keepMounted);
   const [hidden, setHidden] = useState(!open);
   // 上一次提交时是否藏着：从 hidden 恢复的元素和刚挂上的一样，从 0 高度长出来。
@@ -30,6 +35,12 @@ export function Collapse({ open, appear = false, keepMounted = false, className,
     const freshlyMounted = element !== lastElement.current || wasHidden.current;
     lastElement.current = element;
     wasHidden.current = false;
+    if (element) {
+      // inert 前先看焦点在不在里面：inert 之后浏览器会把焦点扔回 body。
+      const hadFocus = !open && element.contains(document.activeElement);
+      element.inert = !open;
+      if (hadFocus) latestFocusEscape.current?.();
+    }
     if (previous.current === open) return;
     previous.current = open;
     running.current?.stop();
