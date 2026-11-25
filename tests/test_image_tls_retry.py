@@ -42,7 +42,7 @@ def server_tls(tmp_path, monkeypatch):
 
 
 @contextmanager
-def upstream(ctx, actions, *, tunnel=False):
+def upstream(ctx, actions, *, tunnel=False, body_received=None):
     connections, bodies = [], []
 
     class Handler(socketserver.BaseRequestHandler):
@@ -64,6 +64,8 @@ def upstream(ctx, actions, *, tunnel=False):
                 stream.readline()
                 headers = parse_headers(stream)
                 bodies.append(stream.read(int(headers["Content-Length"])))
+                if body_received is not None:
+                    body_received.set()
                 if action == "success":
                     conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
                 elif action == "redirect":
@@ -153,11 +155,17 @@ def test_tls_diagnostics_stay_out_of_user_visible_warnings(server_tls, tmp_path,
 def test_response_status_tls_eof_with_received_body_is_not_replayed(server_tls, monkeypatch, caplog):
     from http.client import HTTPResponse
 
+    body_received = threading.Event()
+
     def read_status(_self):
+        # Raise only after the server holds the body. Raising at once closes the client socket
+        # while the server thread may not have read the request yet; on Windows the reset then
+        # discards the buffered request and the server sees no headers.
+        assert body_received.wait(3)
         raise ssl.SSLEOFError(8, "test peer closed TLS")
 
     monkeypatch.setattr(HTTPResponse, "_read_status", read_status)
-    with upstream(server_tls, ["sent"]) as (url, connections, bodies):
+    with upstream(server_tls, ["sent"], body_received=body_received) as (url, connections, bodies):
         with pytest.raises(openai_image.OpenAIImageError):
             openai_image._post_json(url, "fake", {"prompt": "test"}, timeout=3)
     warnings = _tls_log(caplog)
