@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion, type Transition } from 'motion/react';
 import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, SearchIcon, UploadIcon } from '@/components/ui/icons';
 
 import {
@@ -13,6 +14,7 @@ import {
   renameCanvasProject,
 } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +37,8 @@ import { Label } from '@/components/ui/label';
 import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { FileInput } from '@/components/ui/file-input';
+import { RevealImage } from '@/components/ui/reveal-image';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, shakeOnError } from '@/lib/motion';
 
 
 type EditorState =
@@ -48,6 +52,17 @@ type DeleteState =
 type ImportState =
   | { open: false }
   | { open: true; filename: string; inspection: CanvasPackageInspection };
+
+/** 读取超过这么久才出骨架：快的时候直接出卡片，不闪一下骨架。 */
+const SKELETON_DELAY_MS = 300;
+/** 首屏卡片错峰淡入，总时长封顶。 */
+const ENTRANCE_STAGGER_CAP = 0.15;
+
+const CARD_ENTER: Transition = { duration: MOTION_DURATION.base, ease: MOTION_EASE.out };
+const CARD_EXIT: Transition = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
+
+/** 卡片列表怎么动：读取、删除、重命名后重排时淡入淡出加让位（reveal）；按搜索词筛选是逐字的高频操作，直接换（instant）。 */
+type ListMotion = 'reveal' | 'instant';
 
 
 export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectId: string) => void }) {
@@ -66,6 +81,29 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const createSubmitRef = useRef<HTMLButtonElement>(null);
+  const importSubmitRef = useRef<HTMLButtonElement>(null);
+  const deleteSubmitRef = useRef<HTMLButtonElement>(null);
+  const [listMotion, setListMotion] = useState<ListMotion>('reveal');
+  // 加载中与为空是两态：读取超过 300ms 才出骨架，之前保持空白。
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setShowSkeleton(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowSkeleton(true), SKELETON_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+  // 首屏一批卡片错峰淡入；之后再出现的卡片（导入、重新读取）各自淡入，不再错峰。
+  const firstReveal = useRef(true);
+  useEffect(() => {
+    if (!loading && projects.length > 0) firstReveal.current = false;
+  }, [loading, projects.length]);
+  // 错误条收回途中仍显示最后一条。
+  const bannerError = actionError ?? loadError;
+  const lastBannerError = useRef<string | null>(null);
+  if (bannerError) lastBannerError.current = bannerError;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,6 +135,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       onOpenProject(project.project_id);
     } catch (error) {
       setEditorError((error as Error).message);
+      shakeOnError(createSubmitRef.current);
     } finally {
       setSaving(false);
     }
@@ -104,6 +143,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
 
   async function renameProjectInline(project: CanvasProjectSummary, name: string) {
     const renamed = await renameCanvasProject(project.project_id, name);
+    setListMotion('reveal');
     setProjects(current => current
       .map(item => item.project_id === project.project_id ? { ...item, ...renamed } : item)
       .sort((left, right) => right.updated_at.localeCompare(left.updated_at)));
@@ -133,10 +173,12 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
         deleteState.project.project_id,
         deleteState.revision,
       );
+      setListMotion('reveal');
       setProjects(current => current.filter(item => item.project_id !== deleteState.project.project_id));
       setDeleteState({ open: false });
     } catch (error) {
       setDeleteError((error as Error).message);
+      shakeOnError(deleteSubmitRef.current);
     } finally {
       setBusyProjectId(null);
     }
@@ -175,9 +217,11 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     try {
       await commitCanvasPackage(importState.inspection.token);
       setImportState({ open: false });
+      setListMotion('reveal');
       await load();
     } catch (error) {
       setImportError((error as Error).message);
+      shakeOnError(importSubmitRef.current);
     } finally {
       setImporting(false);
     }
@@ -205,7 +249,10 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                   aria-label="搜索画布项目"
                   placeholder="搜索画布项目"
                   value={query}
-                  onChange={event => setQuery(event.target.value)}
+                  onChange={event => {
+                    setListMotion('instant');
+                    setQuery(event.target.value);
+                  }}
                 />
               </InputGroup>
             )}
@@ -234,19 +281,22 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           />
         </header>
 
-        {(loadError || actionError) && (
-          <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <span>{actionError ?? loadError}</span>
-            {loadError && (
-              <Button variant="outline" size="sm" onClick={() => void load()}>
-                <RetryIcon aria-hidden="true" />重试
-              </Button>
-            )}
+        {/* 错误条从 0 高度展开、收回；外边距改成内层 padding，展开到底高度不跳。 */}
+        <Collapse open={Boolean(bannerError)}>
+          <div className="pb-6">
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <span>{bannerError ?? lastBannerError.current}</span>
+              {loadError && (
+                <Button variant="outline" size="sm" onClick={() => void load()}>
+                  <RetryIcon aria-hidden="true" />重试
+                </Button>
+              )}
+            </div>
           </div>
-        )}
+        </Collapse>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
-          {loading && <span role="status" className="sr-only">正在加载画布项目</span>}
+        <div className="relative grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
+          {loading && <span role="status" className="sr-only">加载中…</span>}
           {!loading && !loadError && projects.length === 0 && (
             <Button
               variant="ghost"
@@ -260,19 +310,36 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           {!loading && !loadError && projects.length > 0 && filteredProjects.length === 0 && (
             <p className="col-span-full py-12 text-center text-sm text-muted-foreground">没有匹配的画布项目</p>
           )}
-          {loading && projects.length === 0
-            ? Array.from({ length: 3 }, (_, index) => <CanvasCardSkeleton key={index} />)
-            : filteredProjects.map(project => (
-              <CanvasProjectCard
+          {loading && projects.length === 0 && showSkeleton
+            && Array.from({ length: 3 }, (_, index) => <CanvasCardSkeleton key={index} />)}
+          {/* 删除：被删的卡 150ms 淡出并让出位置（popLayout），其余卡片同时滑过去补位；按搜索词筛选直接换。 */}
+          <AnimatePresence mode="popLayout" initial={false} custom={listMotion}>
+            {filteredProjects.map((project, index) => (
+              <motion.div
                 key={project.project_id}
-                project={project}
-                onOpen={() => onOpenProject(project.project_id)}
-                onInlineRename={name => renameProjectInline(project, name)}
-                onExport={() => void handleExport(project)}
-                onDelete={() => void prepareDelete(project)}
-                disabled={busyProjectId === project.project_id}
-              />
+                layout={listMotion === 'reveal' ? 'position' : false}
+                custom={listMotion}
+                variants={CARD_VARIANTS}
+                initial={listMotion === 'reveal' && motionAvailable() ? 'hidden' : false}
+                animate="shown"
+                exit="gone"
+                transition={{
+                  ...CARD_ENTER,
+                  layout: MOTION_SPRING.snappy,
+                  delay: firstReveal.current ? Math.min(index * MOTION_STAGGER, ENTRANCE_STAGGER_CAP) : 0,
+                }}
+              >
+                <CanvasProjectCard
+                  project={project}
+                  onOpen={() => onOpenProject(project.project_id)}
+                  onInlineRename={name => renameProjectInline(project, name)}
+                  onExport={() => void handleExport(project)}
+                  onDelete={() => void prepareDelete(project)}
+                  disabled={busyProjectId === project.project_id}
+                />
+              </motion.div>
             ))}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -301,8 +368,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setEditor({ open: false })}>取消</Button>
-                <Button type="submit" disabled={saving}>
-                  <SwapLabel active={Boolean(saving)} on="保存中…" off="创建并进入" />
+                <Button ref={createSubmitRef} type="submit" disabled={saving}>
+                  <SwapLabel active={Boolean(saving)} on="创建中…" off="创建并进入" />
                 </Button>
               </DialogFooter>
             </form>
@@ -328,8 +395,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             {importError && <p role="alert" className="text-xs text-destructive">{importError}</p>}
             <DialogFooter>
               <Button variant="outline" disabled={importing} onClick={() => setImportState({ open: false })}>取消</Button>
-              <Button disabled={importing} onClick={() => void commitImport()}>
-                {importing ? '导入中…' : `导入 ${importState.inspection.projects.length} 个项目`}
+              <Button ref={importSubmitRef} disabled={importing} onClick={() => void commitImport()}>
+                <SwapLabel active={importing} on="导入中…" off={`导入 ${importState.inspection.projects.length} 个项目`} />
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -349,8 +416,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={Boolean(busyProjectId)} onClick={() => setDeleteState({ open: false })}>取消</Button>
-                <Button type="submit" variant="destructive" disabled={Boolean(busyProjectId)}>
-                  <SwapLabel active={Boolean(busyProjectId)} on="正在删除…" off="确认删除" />
+                <Button ref={deleteSubmitRef} type="submit" variant="destructive" disabled={Boolean(busyProjectId)}>
+                  <SwapLabel active={Boolean(busyProjectId)} on="删除中…" off="确认删除" />
                 </Button>
               </DialogFooter>
             </form>
@@ -360,6 +427,16 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     </section>
   );
 }
+
+
+/** 卡片进出场：进场 200ms 淡入上移 8px；删除 150ms 淡出微缩；筛选掉的直接消失。减弱动态效果时 MotionConfig 去掉位移与缩放。 */
+const CARD_VARIANTS = {
+  hidden: { opacity: 0, y: 8 },
+  shown: { opacity: 1, y: 0 },
+  gone: (mode: ListMotion) => mode === 'reveal'
+    ? { opacity: 0, scale: 0.96, transition: CARD_EXIT }
+    : { opacity: 0, transition: { duration: 0 } },
+};
 
 
 function CanvasProjectCard({
@@ -393,8 +470,8 @@ function CanvasProjectCard({
         className="block w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
       >
         {project.cover ? (
-          <div className="media-edge overflow-hidden border-b border-border">
-            <img
+          <div className="media-edge overflow-hidden border-b border-border bg-secondary/30">
+            <RevealImage
               src={canvasMediaUrl(project.project_id, project.cover.version_id, 360)}
               alt=""
               loading="lazy"

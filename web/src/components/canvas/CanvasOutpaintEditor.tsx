@@ -1,5 +1,5 @@
 import { AddIcon, MinusIcon, MoveIcon, OutpaintIcon } from '@/components/ui/icons';
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { selectionImageCaps } from '@/lib/modelRoutes';
 import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
@@ -10,9 +10,14 @@ import { editModelChoices, editSize, EXPAND_RATIOS, EXPAND_SCALES, presetFrame, 
 import { EditorComposer, ImageEditorShell, editorIconButton, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
 import { Button } from '@/components/ui/button';
+import { MOTION_DURATION } from '@/lib/motion';
+import { cn } from '@/lib/utils';
 
 type DragKind = 'image' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const HANDLES: DragKind[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+/** 点比例、倍数预设时画框与原图 200ms 变形到新尺寸；拖手柄、平移视口时不挂，0ms 跟手。
+ *  画框按像素 left / top / width / height 定位、手柄按百分比挂在画框上，改 transform 要连同视口换算一起改，这里直接过渡这几个属性。 */
+const FRAME_MORPH_CLASS = 'transition-[left,top,width,height] duration-200 ease-out';
 const choiceId = (alias: string, model: string) => `${alias}\u0000${model}`;
 
 function RatioIcon({ ratio, width, height }: { ratio: ExpandRatio; width: number; height: number }) {
@@ -55,6 +60,9 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const viewport = useEditorViewport(frame);
   const { scale, origin } = viewport;
   const drag = useRef<{ kind: DragKind; x: number; y: number; frame: EditFrame } | null>(null);
+  const [morph, setMorph] = useState(false);
+  const morphTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(morphTimer.current), []);
   const size = editSize(choice?.key, choice?.model ?? '', frame.width, frame.height);
   const contains = frame.x >= 0 && frame.y >= 0 && frame.x + source.width <= frame.width && frame.y + source.height <= frame.height;
   const expanded = frame.width > source.width || frame.height > source.height;
@@ -62,10 +70,14 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const savedFingerprint = useRef(fingerprint);
   const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
     { ...size.params, n: candidates, quality, resolution, image_edit: { mode: 'outpaint' } }, open);
-  const blocker = !choice ? '需要可用的图片编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
+  const blocker = !choice ? '需要可用的图片编辑模型' : !ready ? '图片加载中…' : initialData?.active_run_id ? '生成中…'
     : !contains || !expanded ? '画框需要比原图大' : size.error ? size.error : mj && !prompt.trim() ? '写下扩出来的画面' : null;
 
   function applyPreset(nextRatio: ExpandRatio, nextScale: number) {
+    // 过渡只挂一次变形的时长，之后视口平移、缩放照常跟手。
+    setMorph(true);
+    window.clearTimeout(morphTimer.current);
+    morphTimer.current = window.setTimeout(() => setMorph(false), MOTION_DURATION.base * 1000);
     setRatio(nextRatio); setScaleStep(nextScale);
     setFrame(presetFrame(source.width, source.height, nextRatio, nextScale));
   }
@@ -78,6 +90,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     if (busy || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    window.clearTimeout(morphTimer.current);
+    setMorph(false);
     drag.current = { kind, x: event.clientX, y: event.clientY, frame };
   }
   function moveDrag(event: ReactPointerEvent) {
@@ -135,9 +149,9 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     stage={<div className="relative size-full"
       onPointerDown={event => { if (event.target === event.currentTarget) viewport.startPan(event); }}
       onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
-      <div aria-label="扩图画框" className="edit-dot-grid-dense absolute bg-card outline outline-1 outline-foreground/35"
+      <div aria-label="扩图画框" className={cn('edit-dot-grid-dense absolute bg-card outline outline-1 outline-foreground/35', morph && FRAME_MORPH_CLASS)}
         style={{ left: origin.x, top: origin.y, width: frame.width * scale, height: frame.height * scale }}>
-        <div className="group absolute cursor-move outline outline-1 outline-foreground/50" onPointerDown={event => startDrag(event, 'image')}
+        <div className={cn('group absolute cursor-move outline outline-1 outline-foreground/50', morph && FRAME_MORPH_CLASS)} onPointerDown={event => startDrag(event, 'image')}
           style={{ left: frame.x * scale, top: frame.y * scale, width: source.width * scale, height: source.height * scale }}>
           <img src={mediaUrl} alt={title} draggable={false} className="block size-full select-none"
             onLoad={() => setReady(true)} onError={() => { setReady(false); setLocalError('源图片加载失败'); }} />
@@ -149,7 +163,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
           const corner = direction.length === 2;
           const vertical = direction === 'e' || direction === 'w';
           return <Button variant="bare" key={direction} type="button" aria-label={`扩展画框 ${direction}`} onPointerDown={event => startDrag(event, direction)}
-            className="absolute grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            data-press="none"
+            className={cn('absolute grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary', morph && FRAME_MORPH_CLASS)}
             style={handleStyle(direction)}>
             {corner
               ? <span aria-hidden className="size-4 border-foreground" style={{

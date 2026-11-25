@@ -1,5 +1,5 @@
 import { AiIcon, AngleIcon, ResetIcon } from '@/components/ui/icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -14,6 +14,8 @@ import { SwapLabel } from '@/components/ui/swap-label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+import { shakeOnError } from '@/lib/motion';
 
 
 export interface CanvasAngleParams {
@@ -50,6 +52,12 @@ export function CanvasAngleDialog({
   onSubmit: (params: CanvasAngleParams) => void;
 }) {
   const [params, setParams] = useState(DEFAULT_ANGLE);
+  // 拖滑杆时预览 0ms 跟手；点「重置」、切镜头这类一步跳变时 200ms 转过去。
+  const [sliding, setSliding] = useState(false);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (error) shakeOnError(submitRef.current);
+  }, [error]);
 
   useEffect(() => {
     if (open) setParams(DEFAULT_ANGLE);
@@ -83,7 +91,7 @@ export function CanvasAngleDialog({
                 src={mediaUrl}
                 alt={title}
                 draggable={false}
-                className="max-h-64 max-w-full rounded-lg object-contain transition-transform duration-200"
+                className={cn('max-h-64 max-w-full rounded-lg object-contain', !sliding && 'transition-transform duration-200 ease-out')}
                 style={{ transform: previewTransform }}
               />
             </div>
@@ -94,9 +102,9 @@ export function CanvasAngleDialog({
           </div>
 
           <div className="space-y-5 rounded-lg border border-border bg-secondary/20 p-4">
-            <AngleSlider label="水平角" value={params.horizontalAngle} min={-60} max={60} step={1} suffix="°" disabled={busy} onChange={value => update('horizontalAngle', value)} />
-            <AngleSlider label="俯仰" value={params.pitchAngle} min={-45} max={45} step={1} suffix="°" disabled={busy} onChange={value => update('pitchAngle', value)} />
-            <AngleSlider label="距离" value={params.cameraDistance} min={1} max={10} step={0.1} disabled={busy} onChange={value => update('cameraDistance', value)} />
+            <AngleSlider label="水平角" onSlide={setSliding} value={params.horizontalAngle} min={-60} max={60} step={1} suffix="°" disabled={busy} onChange={value => update('horizontalAngle', value)} />
+            <AngleSlider label="俯仰" onSlide={setSliding} value={params.pitchAngle} min={-45} max={45} step={1} suffix="°" disabled={busy} onChange={value => update('pitchAngle', value)} />
+            <AngleSlider label="距离" onSlide={setSliding} value={params.cameraDistance} min={1} max={10} step={0.1} disabled={busy} onChange={value => update('cameraDistance', value)} />
             <fieldset disabled={busy}>
               <legend className="mb-2 text-xs text-muted-foreground">镜头</legend>
               <div className="grid grid-cols-2 gap-2">
@@ -118,7 +126,7 @@ export function CanvasAngleDialog({
 
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
-          <Button type="button" disabled={busy} onClick={() => onSubmit(params)}>
+          <Button ref={submitRef} type="button" disabled={busy} onClick={() => onSubmit(params)}>
             <AiIcon /><SwapLabel active={Boolean(busy)} on="提交中…" off="生成新角度" />
           </Button>
         </DialogFooter>
@@ -136,6 +144,7 @@ function AngleSlider({
   suffix = '',
   disabled,
   onChange,
+  onSlide,
 }: {
   label: string;
   value: number;
@@ -145,12 +154,15 @@ function AngleSlider({
   suffix?: string;
   disabled: boolean;
   onChange: (value: number) => void;
+  onSlide: (sliding: boolean) => void;
 }) {
   return (
     <Label className="grid grid-cols-[4rem_1fr_4rem] items-center gap-3 text-xs text-muted-foreground">
       {label}
-      <Slider aria-label={label} min={min} max={max} step={step} value={[value]} disabled={disabled} onValueChange={([next]) => onChange(next)} />
-      <span className="text-right text-foreground">{Number.isInteger(value) ? value : value.toFixed(1)}{suffix}</span>
+      <Slider aria-label={label} min={min} max={max} step={step} value={[value]} disabled={disabled}
+        onPointerDown={() => onSlide(true)} onValueCommit={() => onSlide(false)} onPointerUp={() => onSlide(false)}
+        onValueChange={([next]) => onChange(next)} />
+      <span className="text-right tabular-nums text-foreground">{Number.isInteger(value) ? value : value.toFixed(1)}{suffix}</span>
     </Label>
   );
 }

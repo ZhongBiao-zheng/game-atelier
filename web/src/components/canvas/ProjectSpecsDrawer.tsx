@@ -42,7 +42,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
   const [preview, setPreview] = useState(false);
   const [lessons, setLessons] = useState<CanvasLessons>({pending: [], adopted: []});
   const [error, setError] = useState('');
-  const [status, setStatus] = useState('加载中');
+  const [status, setStatus] = useState('加载中…');
   const [ready, setReady] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const drafts = useRef<Record<string, string>>({});
@@ -58,7 +58,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
       if (composing.current) return false;
       const pending = Object.entries(drafts.current);
       if (!pending.length) return true;
-      setStatus('保存中');
+      setStatus('保存中…');
       try {
         for (const [key, text] of pending) {
           await saveKey(projectId, key, text);

@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 import type { CanvasImageEditNode, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
@@ -103,8 +105,10 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
         {size && <span className={`${chip} shrink-0 tabular-nums`}>{size.replace('x', '×')}</span>}
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
           onClick={() => void generate()}>
-          {running || submitting ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
-          {running || submitting ? '生成中…' : '开始生成'}
+          <SwapIcon swapKey={running || submitting}>
+            {running || submitting ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
+          </SwapIcon>
+          <SwapLabel active={running || submitting} on="生成中…" off="开始生成" />
         </Button>
       </div>
     </section>

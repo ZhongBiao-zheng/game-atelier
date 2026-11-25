@@ -1,7 +1,10 @@
+import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { AudioFileIcon, ImageFileIcon, VideoFileIcon } from '@/components/ui/icons';
 
+import { RevealImage } from '@/components/ui/reveal-image';
 import { mentionKindLabel, type CanvasMaterialReference } from '@/lib/canvasMentions';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable } from '@/lib/motion';
 
 export interface CanvasMaterialHoverState {
   reference: CanvasMaterialReference;
@@ -14,8 +17,20 @@ export function CanvasMaterialHoverDetail({
   left,
   top,
 }: CanvasMaterialHoverState) {
+  // 出现时 150ms 淡入（只动透明度，定位用的 transform 不碰）；在相邻素材间移动时同一张卡原地换内容，不重播。
+  const figureRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const element = figureRef.current;
+    if (!element || !motionAvailable()) return;
+    clearOnFinish(
+      animate(element, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }),
+      element,
+      ['opacity'],
+    );
+  }, []);
   return createPortal(
     <figure
+      ref={figureRef}
       id={`canvas-material-detail-${reference.nodeId}`}
       role="tooltip"
       aria-label={`素材详情 ${reference.title}`}
@@ -24,11 +39,14 @@ export function CanvasMaterialHoverDetail({
       style={{ left, top, transform: 'translate(-50%, -100%)' }}
     >
       {reference.kind === 'image' && reference.previewUrl ? (
-        <img
-          src={reference.previewUrl}
-          alt={reference.title}
-          className="h-40 w-full bg-background object-contain"
-        />
+        // 底色先占位，解码完再淡入：大图不再先空一下再整张弹出。
+        <div className="h-40 w-full bg-background">
+          <RevealImage
+            src={reference.previewUrl}
+            alt={reference.title}
+            className="size-full object-contain"
+          />
+        </div>
       ) : reference.kind === 'video' && reference.previewUrl ? (
         <video
           src={reference.previewUrl}

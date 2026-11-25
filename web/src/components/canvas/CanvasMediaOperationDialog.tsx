@@ -2,6 +2,9 @@ import { AddIcon, MinusIcon, RedoIcon, UndoIcon } from '@/components/ui/icons';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { shakeOnError } from '@/lib/motion';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Dialog,
@@ -86,6 +89,14 @@ export function CanvasMediaOperationDialog({
   const [splitLines, setSplitLines] = useState<SplitLines>(() => evenSplit(2, 2));
   const splitPast = useRef<SplitLines[]>([]);
   const splitFuture = useRef<SplitLines[]>([]);
+  // 点预设、改尺寸、重置、撤销重做时，裁剪框 / 切线 200ms 变形过去；在舞台上拖手柄、方向键微调时 0ms 跟手。
+  const [stageMorph, setStageMorph] = useState(false);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  const lastError = useRef<string | null>(null);
+  if (error) lastError.current = error;
+  useEffect(() => {
+    if (error) shakeOnError(submitRef.current);
+  }, [error]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,6 +119,7 @@ export function CanvasMediaOperationDialog({
     setCropRatio('free');
     setCropRect(centeredCrop(width, height, 'free'));
     setSplitLines(evenSplit(2, 2));
+    setStageMorph(false);
     splitPast.current = [];
     splitFuture.current = [];
   }, [height, open, version.version_id, width]);
@@ -147,9 +159,8 @@ export function CanvasMediaOperationDialog({
   }
 
   const splitCount = (splitLines.horizontal.length + 1) * (splitLines.vertical.length + 1);
-  const submitLabel = busy ? '处理中…'
-    : tool === 'split' ? `生成 ${splitCount} 个节点`
-      : updatesMaterial ? '更新图层素材' : '生成裁剪节点';
+  const submitLabel = tool === 'split' ? `生成 ${splitCount} 个节点`
+    : updatesMaterial ? '更新图层素材' : '生成裁剪节点';
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }}>
@@ -167,7 +178,11 @@ export function CanvasMediaOperationDialog({
                 sourceHeight={height}
                 rect={cropRect}
                 ratio={cropRatio}
-                onRectChange={setCropRect}
+                morph={stageMorph}
+                onRectChange={next => {
+                  setStageMorph(false);
+                  setCropRect(next);
+                }}
               />
             )}
             {tool === 'split' && (
@@ -176,8 +191,15 @@ export function CanvasMediaOperationDialog({
                 sourceWidth={width}
                 sourceHeight={height}
                 lines={splitLines}
-                onCommit={commitSplit}
-                onChange={setSplitLines}
+                morph={stageMorph}
+                onCommit={next => {
+                  setStageMorph(false);
+                  commitSplit(next);
+                }}
+                onChange={next => {
+                  setStageMorph(false);
+                  setSplitLines(next);
+                }}
               />
             )}
           </div>
@@ -196,14 +218,17 @@ export function CanvasMediaOperationDialog({
               rect={cropRect}
               ratio={cropRatio}
               onRatioChange={next => {
+                setStageMorph(true);
                 setCropRatio(next);
                 setCropRect(centeredCrop(width, height, next));
               }}
               onSizeChange={next => {
+                setStageMorph(true);
                 setCropRatio('free');
                 setCropRect(next);
               }}
               onReset={() => {
+                setStageMorph(true);
                 setCropRatio('free');
                 setCropRect({ x: 0, y: 0, width: 1, height: 1 });
               }}
@@ -216,9 +241,18 @@ export function CanvasMediaOperationDialog({
               lines={splitLines}
               canUndo={splitPast.current.length > 0}
               canRedo={splitFuture.current.length > 0}
-              onCommit={commitSplit}
-              onUndo={undoSplit}
-              onRedo={redoSplit}
+              onCommit={next => {
+                setStageMorph(true);
+                commitSplit(next);
+              }}
+              onUndo={() => {
+                setStageMorph(true);
+                undoSplit();
+              }}
+              onRedo={() => {
+                setStageMorph(true);
+                redoSplit();
+              }}
             />
           )}
 
@@ -226,17 +260,20 @@ export function CanvasMediaOperationDialog({
             <p className="text-xs tabular-nums text-muted-foreground">
               原图 {width} × {height}{tool === 'split' && ` · ${splitCount} 个结果`}
             </p>
-            {error && <p id="canvas-media-operation-error" role="alert" className="text-sm text-destructive">{error}</p>}
-            {busy && <p role="status" className="text-xs text-muted-foreground">正在处理图片并提交画布…</p>}
+            <Collapse open={Boolean(error)}>
+              <p id="canvas-media-operation-error" role="alert" className="text-sm text-destructive">{error ?? lastError.current}</p>
+            </Collapse>
+            {busy && <p role="status" className="text-xs text-muted-foreground">提交画布中…</p>}
             <div className="flex gap-2">
               <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
               <Button
-                className="flex-1"
+                ref={submitRef}
+                className="flex-1 tabular-nums"
                 disabled={busy || (tool === 'split' && splitCount < 2)}
                 aria-describedby={error ? 'canvas-media-operation-error' : undefined}
                 onClick={submit}
               >
-                {submitLabel}
+                <SwapLabel active={busy} on="处理中…" off={submitLabel} />
               </Button>
             </div>
           </div>
@@ -245,6 +282,10 @@ export function CanvasMediaOperationDialog({
     </Dialog>
   );
 }
+
+/** 舞台上的框与线按百分比定位（left / top / width / height），改成 transform 要把四块遮罩、手柄、编号全部换算一遍；
+ *  这里直接对这几个属性做 200ms 过渡，只在右栏触发的跳变时挂上，拖动期间不挂。减弱动态效果时 tokens.css 会把尺寸过渡去掉。 */
+const STAGE_MORPH_CLASS = 'transition-[left,top,width,height] duration-200 ease-out';
 
 /** 图片在舞台里等比铺到最大：宽、高谁先碰到舞台边就以谁为准。舞台外壳声明了 container-type: size。 */
 function stageFrameStyle(sourceWidth: number, sourceHeight: number) {
@@ -258,6 +299,7 @@ function CropStage({
   sourceHeight,
   rect,
   ratio,
+  morph,
   onRectChange,
 }: {
   mediaUrl: string;
@@ -265,8 +307,11 @@ function CropStage({
   sourceHeight: number;
   rect: NormalizedRect;
   ratio: CropRatio;
+  /** 这次变化来自右栏（预设、尺寸、重置）：裁剪框与遮罩 200ms 变形过去；来自拖动与方向键时直接跟手。 */
+  morph: boolean;
   onRectChange: (rect: NormalizedRect) => void;
 }) {
+  const morphClass = morph ? STAGE_MORPH_CLASS : undefined;
   const previewRef = useRef<HTMLDivElement>(null);
   const pointer = useRef<{ handle: CropHandle; x: number; y: number; rect: NormalizedRect } | null>(null);
   const lockedRatio = ratioValue(ratio, sourceWidth / sourceHeight);
@@ -305,14 +350,15 @@ function CropStage({
     <div ref={previewRef} className="relative overflow-hidden" style={stageFrameStyle(sourceWidth, sourceHeight)}>
       <img src={mediaUrl} alt="裁剪预览" className="absolute inset-0 size-full object-contain" draggable={false} />
       {/* 裁剪框外压暗：四块遮罩围住选区。 */}
-      <span aria-hidden="true" className="absolute inset-x-0 top-0 bg-background/60" style={{ height: `${rect.y * 100}%` }} />
-      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 bg-background/60" style={{ height: `${(1 - bottom) * 100}%` }} />
-      <span aria-hidden="true" className="absolute left-0 bg-background/60" style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${rect.x * 100}%` }} />
-      <span aria-hidden="true" className="absolute right-0 bg-background/60" style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${(1 - right) * 100}%` }} />
+      <span aria-hidden="true" className={cn('absolute inset-x-0 top-0 bg-background/60', morphClass)} style={{ height: `${rect.y * 100}%` }} />
+      <span aria-hidden="true" className={cn('absolute inset-x-0 bottom-0 bg-background/60', morphClass)} style={{ height: `${(1 - bottom) * 100}%` }} />
+      <span aria-hidden="true" className={cn('absolute left-0 bg-background/60', morphClass)} style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${rect.x * 100}%` }} />
+      <span aria-hidden="true" className={cn('absolute right-0 bg-background/60', morphClass)} style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${(1 - right) * 100}%` }} />
       <Button variant="bare"
         type="button"
         aria-label="移动裁剪框"
-        className="absolute z-20 cursor-move border border-foreground bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        data-press="none"
+        className={cn('absolute z-20 cursor-move border border-foreground bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary', morphClass)}
         style={rectStyle(rect)}
         onPointerDown={event => begin('move', event)}
         onPointerMove={move}
@@ -343,7 +389,8 @@ function CropStage({
           key={handle}
           type="button"
           aria-label={`调整裁剪框${cropHandleLabel(handle)}`}
-          className={cn('absolute z-20 size-6 -translate-x-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary', cropHandleCursor(handle))}
+          data-press="none"
+          className={cn('absolute z-20 size-6 -translate-x-1/2 -translate-y-1/2 opacity-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary', cropHandleCursor(handle), morphClass)}
           style={cropHandleButtonStyle(handle, rect)}
           onPointerDown={event => begin(handle, event)}
           onPointerMove={move}
@@ -470,6 +517,7 @@ function SplitStage({
   sourceWidth,
   sourceHeight,
   lines,
+  morph,
   onCommit,
   onChange,
 }: {
@@ -477,9 +525,12 @@ function SplitStage({
   sourceWidth: number;
   sourceHeight: number;
   lines: SplitLines;
+  /** 这次变化来自右栏（预设、行列步进、撤销重做）：切线与编号 200ms 滑到新位置；拖动与方向键时直接跟手。 */
+  morph: boolean;
   onCommit: (lines: SplitLines) => void;
   onChange: (lines: SplitLines) => void;
 }) {
+  const morphClass = morph ? STAGE_MORPH_CLASS : undefined;
   const previewRef = useRef<HTMLDivElement>(null);
   const pointer = useRef<{ axis: SplitAxis; index: number } | null>(null);
   // 正在拖动或聚焦的切线：只有它显示离边缘的像素距离。手柄在切线的下端 / 右端，避开每块左上角的编号。
@@ -527,7 +578,7 @@ function SplitStage({
         <span
           key={tile.number}
           aria-hidden="true"
-          className={cn(STAGE_BADGE_CLASS, 'absolute m-2')}
+          className={cn(STAGE_BADGE_CLASS, 'absolute m-2', morphClass)}
           style={{ left: `${tile.left * 100}%`, top: `${tile.top * 100}%` }}
         >{tile.number}</span>
       ))}
@@ -536,7 +587,8 @@ function SplitStage({
           key={`vertical-${index}`}
           type="button"
           aria-label={`调整第 ${index + 1} 条竖向切线`}
-          className="group absolute top-0 z-20 flex h-full w-4 -translate-x-1/2 cursor-col-resize justify-center focus-visible:outline-none"
+          data-press="none"
+          className={cn('group absolute top-0 z-20 flex h-full w-4 -translate-x-1/2 cursor-col-resize justify-center focus-visible:outline-none', morphClass)}
           style={{ left: `${value * 100}%` }}
           onPointerDown={event => begin('vertical', index, event)}
           onPointerMove={move}
@@ -562,7 +614,8 @@ function SplitStage({
           key={`horizontal-${index}`}
           type="button"
           aria-label={`调整第 ${index + 1} 条横向切线`}
-          className="group absolute left-0 z-20 flex h-4 w-full -translate-y-1/2 cursor-row-resize items-center focus-visible:outline-none"
+          data-press="none"
+          className={cn('group absolute left-0 z-20 flex h-4 w-full -translate-y-1/2 cursor-row-resize items-center focus-visible:outline-none', morphClass)}
           style={{ top: `${value * 100}%` }}
           onPointerDown={event => begin('horizontal', index, event)}
           onPointerMove={move}

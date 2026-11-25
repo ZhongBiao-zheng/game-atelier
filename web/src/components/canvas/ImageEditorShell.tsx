@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import type { CanvasGenerationDraft, CanvasImageEditEditorState, CanvasImageEditNode, CanvasImageEditSettings, CanvasMediaVersion } from '@/schema/canvas';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export interface CanvasMaskEditSubmission {
   mask: Blob | null;
@@ -137,7 +138,7 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
       <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
       <Button variant="bare" type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
-        {busy && <LoadingIcon className="animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}
+        {busy && <LoadingIcon className="animate-spin" aria-hidden />}<SwapLabel active={busy} on="提交中…" off={generateLabel} />
         {!busy && <span className="font-mono text-xs opacity-65" aria-hidden>⌘↵</span>}
       </Button>
     </div>

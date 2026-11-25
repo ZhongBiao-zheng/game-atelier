@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
   type CanvasMentionReference,
 } from '@/lib/canvasMentions';
 import { clamp, cn } from '@/lib/utils';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
@@ -484,6 +486,20 @@ function CanvasMentionMenu({
     activeRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [activeIndex]);
 
+  // 出现时从输入光标一侧 4px 淡入（150ms）；选中后直接收起，不拖慢插入。
+  // 只在挂载时播：之后候选变化、位置变化都原地更新。
+  const menuRef = useRef<HTMLDivElement>(null);
+  const openedAbove = useRef(above);
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!element || !motionAvailable()) return;
+    const offset = prefersReducedMotion() ? 0 : openedAbove.current ? 4 : -4;
+    clearOnFinish(
+      animate(element, { opacity: [0, 1], y: [offset, 0] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }),
+      element,
+    );
+  }, []);
+
   function select(reference: CanvasMentionReference) {
     if (selectedRef.current) return;
     selectedRef.current = true;
@@ -492,6 +508,7 @@ function CanvasMentionMenu({
 
   return createPortal(
     <div
+      ref={menuRef}
       data-canvas-prompt-menu="true"
       className="fixed z-20 max-h-60 w-72 overflow-y-auto rounded-xl border border-border bg-card p-1"
       style={{ left, top }}

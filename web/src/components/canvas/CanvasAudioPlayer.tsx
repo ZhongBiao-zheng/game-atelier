@@ -229,7 +229,7 @@ export function CanvasAudioPlayer({
           <span
             className={cn(
               'absolute top-full mt-1 whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-xs tabular-nums text-primary-foreground transition-opacity',
-              playing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+              playing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100',
             )}
           >
             {formatClock(currentTime)}/{formatClock(duration)}
