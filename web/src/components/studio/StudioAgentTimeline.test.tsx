@@ -11,11 +11,11 @@ import { StudioAgentTurnCard } from './StudioAgentTimeline';
 import { mixedTimeline } from '@/lib/historyFilters';
 import type { ComponentProps } from 'react';
 
-function TurnCards({agent, jobs, renderJob, onPickSuggestion}: Pick<ComponentProps<typeof StudioAgentTurnCard>, 'agent' | 'jobs' | 'renderJob' | 'onPickSuggestion'>) {
+function TurnCards({agent, jobs, renderJobs, onPickSuggestion}: Pick<ComponentProps<typeof StudioAgentTurnCard>, 'agent' | 'jobs' | 'renderJobs' | 'onPickSuggestion'>) {
   const session = agent.session as StudioAgentSession;
   const timeline = mixedTimeline([], session, jobs);
   return timeline.map((entry, i) => entry.kind === 'agent' && <StudioAgentTurnCard key={entry.turn.turn_id}
-    agent={agent} session={session} {...entry} renderJob={renderJob} last={i === timeline.length - 1} onPickSuggestion={onPickSuggestion} />);
+    agent={agent} session={session} {...entry} renderJobs={renderJobs} last={i === timeline.length - 1} onPickSuggestion={onPickSuggestion} />);
 }
 
 const makeMessage = (role: CanvasAgentMessage['role'], text: string, sequence: number): CanvasAgentMessage => ({
@@ -43,7 +43,7 @@ it('默认收起工具过程，说明文案在上、产出的作品在回合底�
   const pick = vi.fn();
   const agent = makeAgent('idle');
   agent.session!.messages[2].text = '成片已就绪\n→ 换成侧身眨眼的表情';
-  const { container } = render(<TurnCards agent={agent} jobs={jobs} renderJob={j => j.job_id} onPickSuggestion={pick} />);
+  const { container } = render(<TurnCards agent={agent} jobs={jobs} renderJobs={items => items.map(j => j.job_id)} onPickSuggestion={pick} />);
   expect(screen.getByRole('button', { name: '已完成' })).toHaveAttribute('aria-expanded', 'false');
   expect(container.textContent).toMatch(/准备草图.*成片已就绪.*job-0/);
   expect(container.textContent).not.toContain('job-1');
@@ -67,16 +67,16 @@ it('推荐追问只在最后一轮正常结束时出现，没有约定格式就�
   session.turns = [{ ...session.turns[0], turn_id: 't0' }, session.turns[0]];
   session.messages = [...session.messages, { ...makeMessage('assistant', '旧回合\n→ 旧追问', 0), turn_id: 't0' }];
   session.messages[2].text = '成片已就绪\n→ 新追问';
-  const view = render(<TurnCards agent={agent} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
+  const view = render(<TurnCards agent={agent} jobs={[]} renderJobs={() => null} onPickSuggestion={vi.fn()} />);
   expect(screen.getByRole('button', { name: /新追问/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /旧追问/ })).toBeNull();
   session.messages[2].text = '成片已就绪';
-  view.rerender(<TurnCards agent={{ ...agent }} jobs={[]} renderJob={() => null} onPickSuggestion={vi.fn()} />);
+  view.rerender(<TurnCards agent={{ ...agent }} jobs={[]} renderJobs={() => null} onPickSuggestion={vi.fn()} />);
   expect(screen.queryByText('继续探索')).toBeNull();
 });
 
 it('运行时默认收起工具步骤，待确认强制展开，停止后能展开查看步骤', () => {
-  const view = (status: StudioAgentTurn['status']) => <TurnCards agent={makeAgent(status)} jobs={[]} renderJob={() => null} />;
+  const view = (status: StudioAgentTurn['status']) => <TurnCards agent={makeAgent(status)} jobs={[]} renderJobs={() => null} />;
   const tree = render(view('running'));
   const running = screen.getByRole('button', { name: '任务响应中…' });
   expect(running).toHaveAttribute('aria-expanded', 'false');
@@ -105,16 +105,13 @@ it('对话菜单可直接切换、新建和按 revision 删除', () => {
   expect(agent.removeSession).toHaveBeenCalledWith('s2', 2);
 });
 
-it('多方案的每条提示词只在对应的作品卡片里出现一次', () => {
-  const batch = ['松林', '落日'].map((prompt, i) => ({
-    ...jobs[0], job_id: 'batch-' + i, prompt,
-  }));
-  render(<TurnCards agent={makeAgent('idle')} jobs={batch} renderJob={j => <p>{j.prompt}</p>} />);
-  const cards = within(screen.getByTestId('agent-multi-job-batch'));
-  batch.forEach((job, i) => {
-    expect(cards.getByText(String(i + 1))).toBeVisible();
-    expect(cards.getAllByText(job.prompt)).toHaveLength(1);
-  });
+it('多方案只向作品区传入一批有序任务', () => {
+  const batch = ['松林', '落日'].map((prompt, i) => ({ ...jobs[0], job_id: 'batch-' + i, prompt }));
+  const renderJobs = vi.fn(() => <div>缩略图</div>);
+  render(<TurnCards agent={makeAgent('idle')} jobs={batch} renderJobs={renderJobs} />);
+  expect(renderJobs).toHaveBeenCalledTimes(1);
+  expect(renderJobs).toHaveBeenCalledWith(batch);
+  expect(screen.getByTestId('agent-multi-job-batch').textContent).toBe('缩略图');
 });
 
 it('新建对话用主色浅底并排在对话标题前，标题不再套胶囊', () => {
