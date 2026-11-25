@@ -4027,7 +4027,13 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     """
     sid = body.studio_agent_session_id
     request_id = body.client_request_id
-    with studio_agent_sessions.locked_session(sid) if sid else nullcontext():
+    # 核对与新建放在同一把按请求 ID 的锁里：首个请求还在路上时的重发不能两边都建任务、都排运行。
+    # 不复用 job_lock：save_job 内部会再拿同一个 job_lock。
+    request_lock = (
+        file_lock(data_root.runtime_dir() / "locks" / f"studio-request-{request_id}.lock")
+        if request_id else nullcontext()
+    )
+    with request_lock, (studio_agent_sessions.locked_session(sid) if sid else nullcontext()):
         # 同一请求 ID 重发（上次回包途中断开）：返回已建的任务，不再下单、不再排一次运行。
         if request_id and (existing := _studio_job_for_request(request_id)) is not None:
             return existing.model_dump(mode="json")
