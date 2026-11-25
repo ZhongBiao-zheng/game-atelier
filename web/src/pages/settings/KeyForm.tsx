@@ -706,7 +706,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                 <ul aria-label="网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
               </> : <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <ToggleGroup type="single" size="sm" variant="outline" aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
+                  <ToggleGroup type="single" size="sm" variant="outline" sliding aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
                     onValueChange={value => { if (value === 'selected') applyFetchedSelection(); else if (value === 'all') void fetchModels(); }}>
                     <ToggleGroupItem value="selected" disabled={unresolvedChecked.length > 0}>已选 {mergedModels().filter(m => m.id.trim()).length}</ToggleGroupItem>
                     <ToggleGroupItem value="all" disabled={fetching || testing}>全部</ToggleGroupItem>
@@ -732,7 +732,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                     </>}
                   </div>
                   <Input aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} />
-                  <ToggleGroup type="single" size="sm" aria-label="模型类型筛选" className="flex-wrap" value={pickerFilter}
+                  <ToggleGroup type="single" size="sm" sliding aria-label="模型类型筛选" className="flex-wrap" value={pickerFilter}
                     onValueChange={value => { if (value) setPickerFilter(value as typeof pickerFilter); }}>
                     {pickerFilters.map(filter => <ToggleGroupItem key={filter} value={filter}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</ToggleGroupItem>)}
                   </ToggleGroup>

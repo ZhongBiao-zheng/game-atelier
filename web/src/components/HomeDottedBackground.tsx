@@ -36,8 +36,9 @@ export function HomeDottedBackground({ className }: { className?: string }) {
     const rect = root.getBoundingClientRect();
     const mx = pt ? pt.cx - rect.left : -1;
     const my = pt ? pt.cy - rect.top : -1;
+    // 指针离开 / 回来时光斑 150ms 淡出淡入（tokens 过渡），不是一下有一下没。
     if (!pt || mx < 0 || my < 0 || mx > rect.width || my > rect.height) {
-      canvas.style.visibility = 'hidden';
+      canvas.style.opacity = '0';
       return;
     }
 
@@ -50,7 +51,7 @@ export function HomeDottedBackground({ className }: { className?: string }) {
     const x0 = mx - SPOT_REACH_PX;
     const y0 = my - SPOT_REACH_PX;
     canvas.style.transform = `translate(${x0}px, ${y0}px)`;
-    canvas.style.visibility = 'visible';
+    canvas.style.opacity = '1';
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, SPOT_SIZE_PX, SPOT_SIZE_PX);
@@ -114,7 +115,7 @@ export function HomeDottedBackground({ className }: { className?: string }) {
     >
       <canvas
         ref={canvasRef}
-        className="invisible absolute left-0 top-0"
+        className="absolute left-0 top-0 opacity-0 transition-opacity duration-150"
         style={{ width: SPOT_SIZE_PX, height: SPOT_SIZE_PX }}
       />
     </div>

@@ -16,7 +16,7 @@ export function OnboardingFrame({ step, title, children, footer }: {
         <header className="flex flex-col gap-4">
           <ol aria-label={`第 ${step} 步，共 ${FIRST_RUN_STEPS} 步`} className="flex gap-1.5">
             {Array.from({ length: FIRST_RUN_STEPS }, (_, index) => (
-              <li key={index} className={cn('h-1 w-8 rounded-full', index < step ? 'bg-primary' : 'bg-secondary')} />
+              <li key={index} className={cn('h-1 w-8 rounded-full transition-colors duration-300', index < step ? 'bg-primary' : 'bg-secondary')} />
             ))}
           </ol>
           <h1 className="font-display text-display text-foreground">{title}</h1>

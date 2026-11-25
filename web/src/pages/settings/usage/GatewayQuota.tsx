@@ -4,9 +4,11 @@ import { formatGenerationCost } from '@/lib/generationCost';
 const PERIODS = { day: '今日', week: '本周', month: '本月', none: '累计' };
 export function GatewayQuota({ alias }: { alias: string }) {
   const [me, setMe] = useState<GatewayMe | null>(null);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let active = true;
     setMe(null);
+    setLoaded(false);
     const refresh = () => {
       void fetchGatewayProviderMe(alias)
         .then((data) => {
@@ -14,6 +16,9 @@ export function GatewayQuota({ alias }: { alias: string }) {
         })
         .catch(() => {
           if (active) setMe(null);
+        })
+        .finally(() => {
+          if (active) setLoaded(true);
         });
     };
     refresh();
@@ -23,6 +28,8 @@ export function GatewayQuota({ alias }: { alias: string }) {
       clearInterval(timer);
     };
   }, [alias]);
+  // 第一次读取前占一行骨架，额度到了原位换上，不顶开下方内容；读不到就不显示。
+  if (!loaded) return <div data-skeleton aria-hidden className="h-4 w-32 rounded bg-secondary/60" />;
   if (!me) return null;
   // 新主机回 quota（一条，可能不重置）；旧主机只回 limits（可能多条）。
   const rows = me.quota !== undefined ? (me.quota ? [me.quota] : []) : me.limits;

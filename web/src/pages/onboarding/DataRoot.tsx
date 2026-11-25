@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { FolderOpenIcon } from '@/components/ui/icons';
 import { cn } from '@/lib/utils';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
 import { OnboardingFrame } from './OnboardingFrame';
 
 interface Props {
@@ -30,6 +32,7 @@ export function DataRootPage({ onComplete }: Props) {
   const [saving, setSaving] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const shownError = useRetained(error);
 
   const save = async () => {
     setSaving(true);
@@ -81,14 +84,14 @@ export function DataRootPage({ onComplete }: Props) {
             <span className="flex-1 text-sm">自定义</span>
           </Label>
         </RadioGroup>
-        {isCustom && <div className="flex gap-2">
+        <Collapse open={isCustom}><div className="flex gap-2">
           <Label htmlFor="path-input" className="sr-only">数据目录路径</Label>
           <Input id="path-input" value={path} readOnly placeholder="选择一个文件夹" className="min-w-0 flex-1 font-mono" />
           <Button variant="outline" type="button" onClick={() => { void pickFolder(); }} disabled={saving || choosing}>
-            <FolderOpenIcon aria-hidden />{choosing ? '选择中…' : '选择文件夹'}
+            <FolderOpenIcon aria-hidden /><SwapLabel active={choosing} on="选择中…" off="选择文件夹" />
           </Button>
-        </div>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        </div></Collapse>
+        <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
       </div>
     </OnboardingFrame>
   );

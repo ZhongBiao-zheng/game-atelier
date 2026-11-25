@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
-import { MOTION_SPRING } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, useAnimateOnChange } from '@/lib/motion';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon } from '@/components/ui/icons';
 
@@ -132,6 +132,12 @@ function AppShellContent() {
   });
 
   const ContentTag = onSettings ? 'div' : 'main';
+  // 进出沉浸式画布时顶栏卸载 / 挂回，内容区上下跳 80px：内容区 150ms 淡入，盖住这一帧的布局变化与视口恢复。
+  const contentRef = useRef<HTMLElement>(null);
+  useAnimateOnChange(immersiveCanvas, () => {
+    const content = contentRef.current;
+    if (content) clearOnFinish(animate(content, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), content, ['opacity']);
+  }, { keepWhenReduced: true });
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
@@ -168,7 +174,7 @@ function AppShellContent() {
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
-      <ContentTag className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
+      <ContentTag ref={contentRef as React.RefObject<HTMLDivElement>} className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>

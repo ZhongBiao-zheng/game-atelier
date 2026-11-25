@@ -10,6 +10,7 @@ import { useRetained } from '@/components/ui/retained';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { RECOMMENDED_PROVIDERS, hasUsableModel, type GuideSource, type GuideStepId, type GuideVendor, type RecommendedProvider } from '@/lib/onboardingGuide';
 import { cn } from '@/lib/utils';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 import { KeyForm } from '@/pages/settings/KeyForm';
 import { PROVIDER_PRESETS, presetInitial } from '@/pages/settings/providerPresets';
 
@@ -44,6 +45,14 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
   const formSession = useRef<{ form: FormState | null; n: number }>({ form: null, n: 0 });
   if (form && form !== formSession.current.form) formSession.current = { form, n: formSession.current.n + 1 };
   const [opened, setOpened] = useState<Set<GuideStepId>>(new Set());
+  // 选了供应商往里走：新内容从右侧滑入；返回从左侧滑入。
+  const stepRef = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(vendor !== null, (inside, _was, reduced) => {
+    const element = stepRef.current;
+    if (!element) return;
+    clearOnFinish(animate(element, reduced ? { opacity: [0, 1] } : { x: [inside ? 12 : -12, 0], opacity: [0, 1] },
+      { duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out }), element);
+  }, { keepWhenReduced: true });
   const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null | 'error'>(null);
   const [comfy, setComfy] = useState<'checking' | 'running' | 'stopped'>('checking');
 
@@ -97,10 +106,10 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
 
   const subscriptionLine = subscription === null ? '加载中…' : subscription === 'error' || !subscription.available
     ? '未登录' : subscription.email ?? '已登录';
-  const comfyLine = { checking: '检测中…', running: '运行中', stopped: '未运行' }[comfy];
+  const comfyLine = { checking: '检查中…', running: '运行中', stopped: '未运行' }[comfy];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div ref={stepRef} className="flex flex-col gap-6">
       {!vendor ? <>
         <ul aria-label="推荐" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {RECOMMENDED_PROVIDERS.map(item => {

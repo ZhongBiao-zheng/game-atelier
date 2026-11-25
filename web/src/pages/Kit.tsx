@@ -15,6 +15,16 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Collapse } from '@/components/ui/collapse';
+import { Disclosure } from '@/components/ui/disclosure';
+import { HideIcon, PauseIcon, PlayIcon, ShowIcon } from '@/components/ui/icons';
+import { RevealImage } from '@/components/ui/reveal-image';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { shakeOnError } from '@/lib/motion';
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['sm', 'default', 'lg'] as const;
@@ -44,6 +54,12 @@ export function Kit() {
   const [size, setSize] = useState(40);
   const [radio, setRadio] = useState('a');
   const file = useRef<HTMLInputElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState('a');
+  const [imageKey, setImageKey] = useState(0);
+  const failing = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 p-6">
@@ -61,7 +77,9 @@ export function Kit() {
         <Row label="Input"><Input placeholder="名称" /></Row>
         <Row label="SecretInput">
           <SecretInput className="flex-1" revealed={revealed} placeholder="粘贴密钥" />
-          <Button variant="outline" size="sm" onClick={() => setRevealed(!revealed)}>{revealed ? '隐藏' : '显示'}</Button>
+          <Button variant="outline" size="icon" aria-label={revealed ? '隐藏' : '显示'} onClick={() => setRevealed(!revealed)}>
+            <SwapIcon swapKey={revealed}>{revealed ? <HideIcon aria-hidden /> : <ShowIcon aria-hidden />}</SwapIcon>
+          </Button>
         </Row>
         <Row label="Textarea"><Textarea placeholder="提示词" /></Row>
         <Row label="Select">
@@ -96,6 +114,46 @@ export function Kit() {
           {(['default', 'secondary', 'outline', 'success', 'warning', 'destructive'] as const).map(variant => <Badge key={variant} variant={variant}>{variant}</Badge>)}
         </Row>
         <Row label="MetaTag"><MetaTag>1024×1024</MetaTag><MetaTag>20s</MetaTag></Row>
+      </Section>
+
+      <Section title="动效">
+        <Row label="Collapse">
+          <Button variant="outline" size="sm" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起' : '展开'}</Button>
+          <Collapse open={expanded} className="basis-full"><Card className="p-4 text-sm">高度 0 ↔ auto，收起播完再卸载，中途反向从当前高度接上。</Card></Collapse>
+        </Row>
+        <Row label="Disclosure">
+          <Disclosure summary="高级设置"><p className="pt-2 text-sm text-muted-foreground">替代原生 details，收起后内容仍在 DOM 里。</p></Disclosure>
+        </Row>
+        <Row label="SwapIcon">
+          <Button variant="outline" size="icon" aria-label={playing ? '暂停' : '播放'} onClick={() => setPlaying(!playing)}>
+            <SwapIcon swapKey={playing}>{playing ? <PauseIcon aria-hidden /> : <PlayIcon aria-hidden />}</SwapIcon>
+          </Button>
+        </Row>
+        <Row label="SwapLabel">
+          <Button onClick={() => { setSaving(true); window.setTimeout(() => setSaving(false), 1200); }} disabled={saving}>
+            <SwapLabel active={saving} on="保存中…" off="保存" />
+          </Button>
+        </Row>
+        <Row label="SelectionHighlight">
+          <Segmented aria-label="样例分段" className="grid-cols-3">
+            {['a', 'b', 'c'].map(value => <SegmentedItem key={value} value={value} selected={mode === value} onSelect={() => setMode(value)}>选项 {value.toUpperCase()}</SegmentedItem>)}
+          </Segmented>
+          <ToggleGroup type="single" variant="outline" sliding aria-label="样例按钮组" value={mode} onValueChange={value => { if (value) setMode(value); }}>
+            {['a', 'b', 'c'].map(value => <ToggleGroupItem key={value} value={value}>{value.toUpperCase()}</ToggleGroupItem>)}
+          </ToggleGroup>
+          <Tabs value={mode} onValueChange={setMode}>
+            <TabsList variant="line" aria-label="样例页签">
+              {['a', 'b', 'c'].map(value => <TabsTrigger key={value} variant="line" value={value}>页签 {value.toUpperCase()}</TabsTrigger>)}
+            </TabsList>
+          </Tabs>
+        </Row>
+        <Row label="RevealImage">
+          <RevealImage key={imageKey} src={`/favicon.svg?v=${imageKey}`} alt="" className="size-16 rounded-md border border-border" />
+          <Button variant="outline" size="sm" onClick={() => setImageKey(imageKey + 1)}>重新载入</Button>
+        </Row>
+        <Row label="失败微抖">
+          <Button ref={failing} variant="destructive" onClick={() => shakeOnError(failing.current)}>保存失败</Button>
+        </Row>
       </Section>
 
       <Section title="表面">

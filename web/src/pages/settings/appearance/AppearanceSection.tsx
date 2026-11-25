@@ -69,14 +69,14 @@ export function AppearanceSection() {
     <div className="divide-y divide-border rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
         <span className="text-sm">模式</span>
-        <ToggleGroup type="single" variant="outline" aria-label="外观模式" value={preference}
+        <ToggleGroup type="single" variant="outline" sliding aria-label="外观模式" value={preference}
           onValueChange={value => { if (value) setTheme(value as typeof preference); }}>
           {MODES.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
         </ToggleGroup>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
         <span className="text-sm">品牌图标</span>
-        <ToggleGroup type="single" variant="outline" aria-label="品牌图标" value={brandIcons}
+        <ToggleGroup type="single" variant="outline" sliding aria-label="品牌图标" value={brandIcons}
           onValueChange={value => { if (value) setBrandIconMode(value as BrandIconMode); }}>
           {BRAND_ICON_MODES.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
         </ToggleGroup>

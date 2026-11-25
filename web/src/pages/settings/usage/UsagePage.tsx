@@ -92,18 +92,20 @@ export function UsagePage() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {enabled && <ToggleGroup type="single" variant="outline" aria-label="用量范围" value={scope}
+        {/* 团队开关要等网关状态读回来才知道有没有：读的期间先占位（不可见），出现时不把时间范围挤到下一行。 */}
+        {enabled !== false && <ToggleGroup type="single" variant="outline" sliding aria-label="用量范围" value={scope}
+          className={enabled ? undefined : 'invisible'}
           onValueChange={value => { if (value) change('scope', value); }}>
           <ToggleGroupItem value="mine">我的</ToggleGroupItem>
           <ToggleGroupItem value="team">团队</ToggleGroupItem>
         </ToggleGroup>}
-        <ToggleGroup type="single" variant="outline" aria-label="时间范围" className="max-w-full overflow-x-auto" value={range}
+        <ToggleGroup type="single" variant="outline" sliding aria-label="时间范围" className="max-w-full overflow-x-auto" value={range}
           onValueChange={value => { if (value) change('range', value); }}>
           {ranges.map((item) => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
         </ToggleGroup>
       </div>
       {scope === 'mine' && data?.sources.includes('lan') && (
-        <ToggleGroup type="single" variant="outline" aria-label="来源" value={source}
+        <ToggleGroup type="single" variant="outline" sliding aria-label="来源" value={source}
           onValueChange={value => { if (value) change('source', value); }}>
           {(
             [

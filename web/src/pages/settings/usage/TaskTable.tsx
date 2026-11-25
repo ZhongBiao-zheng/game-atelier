@@ -123,7 +123,7 @@ export function TaskTable(filters: Filters) {
   return <section aria-label="任务" aria-busy={loading} className="min-w-0 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2.5">
       <h2 className="text-sm font-semibold">任务 {data && <span className="font-normal tabular-nums text-muted-foreground">{data.total}</span>}</h2>
-      <ToggleGroup type="single" variant="outline" aria-label="状态筛选" value={status}
+      <ToggleGroup type="single" variant="outline" sliding aria-label="状态筛选" value={status}
         onValueChange={value => { if (!value || value === status) return; request.current++; setStatus(value as typeof status); }}>
         {statuses.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
       </ToggleGroup>

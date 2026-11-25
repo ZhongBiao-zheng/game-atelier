@@ -11,7 +11,7 @@ export function RankingCard({ ranking }: { ranking: UsageResponse['rankings'][nu
       {ranking.rows.map((row, index) => <Hint key={row.key} label={`${row.label} · ${row.count} 次`}><div
         className="col-span-3 grid grid-cols-subgrid items-center text-sm">
         <span className="flex min-w-0 items-center gap-2"><span aria-hidden className={`size-2 shrink-0 rounded-full ${chartColors[index % 5]}`} /><span className="min-w-0 truncate">{row.label}</span></span>
-        <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={`h-full rounded-full ${chartColors[index % 5]}`} style={{ width: `${row.cost_cny / max * 100}%` }} /></div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={`h-full w-full origin-left rounded-full transition-transform duration-300 ease-in-out ${chartColors[index % 5]}`} style={{ transform: `scaleX(${row.cost_cny / max})` }} /></div>
         <Hint label={row.unpriced ? `${row.unpriced} 次未计价，未计入金额` : undefined}><span className="whitespace-nowrap text-right tabular-nums">
           {formatGenerationCost(row.cost_cny)}{row.unpriced > 0 && <span className="text-muted-foreground"> +未计价</span>}
         </span></Hint>

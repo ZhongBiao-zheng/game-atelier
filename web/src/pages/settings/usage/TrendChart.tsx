@@ -1,6 +1,9 @@
 import type { UsageResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { Hint } from '@/components/ui/tooltip';
+
+/** 零花费的柱子也留一条细线（约 2px），看得出这一格存在。 */
+const MIN_BAR = 0.012;
 export function TrendChart({ data }: { data: UsageResponse }) {
   const max = Math.max(...data.trend.map((row) => row.cost_cny), 1);
   return (
@@ -17,8 +20,9 @@ export function TrendChart({ data }: { data: UsageResponse }) {
                 <Hint label={`${row.start} · ${formatGenerationCost(row.cost_cny)}`}><div
                   role="img"
                   aria-label={`${row.start} ${formatGenerationCost(row.cost_cny)}`}
-                  className={`w-full rounded-sm ${isCurrentBucket(row.start, data.bucket) ? 'bg-primary' : row.cost_cny === 0 ? 'bg-border' : 'trend-history'}`}
-                  style={{ height: `${(row.cost_cny / max) * 100}%`, minHeight: 2 }}
+                  // 柱高用 scaleY（自底向上）而不是 height：切范围时柱子在合成层上平滑伸缩，不逐帧重排。最矮留一条细线。
+                  className={`h-full w-full origin-bottom rounded-sm transition-transform duration-300 ease-in-out ${isCurrentBucket(row.start, data.bucket) ? 'bg-primary' : row.cost_cny === 0 ? 'bg-border' : 'trend-history'}`}
+                  style={{ transform: `scaleY(${Math.max(row.cost_cny / max, MIN_BAR)})` }}
                 /></Hint>
               </div>
             </div>

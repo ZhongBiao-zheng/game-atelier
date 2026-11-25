@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AddIcon, AudioIcon, CopyIcon, HelpIcon, LoadingIcon, RetryIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
+import { AddIcon, AudioIcon, CheckIcon, CopyIcon, HelpIcon, LoadingIcon, RetryIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { gatewayContentUrl, gatewayThumbUrl, listGatewayAssets, listGatewayLibraries, type GatewayLibraryEntry,
   type GatewayLibrarySelection, type GatewayLibrarySource } from '@/api/gatewayLibraries';
 import { Button } from '@/components/ui/button';
@@ -75,7 +77,8 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
   const [query, setQuery] = useState('');
   const [type, setType] = useState('all');
   const [loading, setLoading] = useState(true);
-  const [copyError, setCopyError] = useState(false);
+  // 复制提示词：勾 1.5 秒后退回复制图标；浏览器拒绝剪贴板时提示失败。
+  const [copyState, copyPrompt] = useCopyFeedback();
   const unavailable = useRef(onUnavailable);
   unavailable.current = onUnavailable;
   const { sizes, measure } = useMediaSizes();
@@ -120,7 +123,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
         <AssetMasonry items={visible} itemKey={entry => entry.entry_id} ratio={entry => mediaRatio(sizes[entry.entry_id] ?? entry)}>
           {entry => <div className="group min-w-0" draggable={false}>
             <div className="relative">
-              <Button variant="ghost" aria-label={`查看 ${entry.title}`} className="block h-auto w-full p-0 text-left font-normal" onClick={() => { setViewing(entry); setPreview(0); setCopyError(false); }}>
+              <Button variant="ghost" aria-label={`查看 ${entry.title}`} className="block h-auto w-full p-0 text-left font-normal" onClick={() => { setViewing(entry); setPreview(0); }}>
                 {thumb(entry) ? <RevealImage src={thumb(entry)!} draggable={false} alt={entry.title} className="w-full rounded-md border border-border object-contain"
                   onError={onUnavailable} onLoad={event => measure(entry.entry_id, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
                   : entry.kind !== 'prompt' ? placeholder(entry) : null}
@@ -152,9 +155,11 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
           </div>}
           {shownViewing.kind === 'prompt' && <>
             <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">提示词</span>
-              <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard.writeText(shownViewing.prompt_text ?? '').catch(() => setCopyError(true)); }}><CopyIcon />复制</Button>
+              <Button variant="ghost" size="sm" onClick={() => copyPrompt(shownViewing.prompt_text ?? '')}>
+                <SwapIcon swapKey={copyState === 'copied'} variant={copyState === 'copied' ? 'pop' : 'subtle'}>{copyState === 'copied' ? <CheckIcon /> : <CopyIcon />}</SwapIcon>复制
+              </Button>
             </div><p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{shownViewing.prompt_text}</p>
-            {copyError && <p role="alert" className="text-xs text-destructive">复制失败</p>}
+            {copyState === 'failed' && <p role="alert" className="text-xs text-destructive">复制失败</p>}
           </>}
         </div>
         <div className="flex justify-end">{actionButton(shownViewing)}</div>
