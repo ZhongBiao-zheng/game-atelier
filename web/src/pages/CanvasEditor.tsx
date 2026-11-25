@@ -7,6 +7,7 @@ import { pluginIcon } from '@/components/ui/icons';
 import { CanvasCopyForAgentItem } from '@/components/canvas/CanvasCopyForAgentItem';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
 import { flushSync } from 'react-dom';
+import { markUnsavedChanges } from '@/api/connection';
 import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
 import { useCanvasAnnotation } from '@/components/canvas/annotation/useCanvasAnnotation';
 import '@xyflow/react/dist/style.css';
@@ -587,6 +588,11 @@ function CanvasEditorInner({
   // 只对当前这条 error 生效：message 不匹配就不渲染按钮，换了别的错误自然失效。
   const [errorAction, setErrorAction] = useState<{ message: string; label: string; run: () => void } | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  // 服务换新版本时，有未落盘的画布改动就不自动刷新页面（规格 D3）。
+  useEffect(() => {
+    markUnsavedChanges('canvas-editor', saveState !== 'saved');
+    return () => markUnsavedChanges('canvas-editor', false);
+  }, [saveState]);
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   // 自动保存失败后的退避重试（规格 2.4）：0–1.5s 静默；之后显示中性胶囊「保存重试中…」；
   // 超过 15s 或连续失败 4 次转警示色并给「立即重试」，后台每 10s 继续试。
