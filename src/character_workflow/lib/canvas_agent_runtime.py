@@ -1647,16 +1647,20 @@ def resolve_workspace_approvals(workspace, decisions, items=None):
         if set(decisions) != {approval.call_id for approval in current.pending_approvals}:
             raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
         claimed["rejected"] = _rejected_items(current.pending_approvals, items)
+        if _missing_dependencies(current.pending_approvals, decisions, claimed["rejected"]):
+            raise CanvasToolError("INVALID_PARAMETERS", "生成要用到的画布修改需要一起执行", 422)
         claimed["session"] = current
         return {"status": "running", "pending_approvals": []}
 
     workspace.mutate(claim)
     session: CanvasAgentSession = claimed["session"]
     rejected_items: dict[str, frozenset[int]] = claimed["rejected"]
-    outputs: list[dict] = []
-    results: list[CanvasAgentMessageCreate] = []
+    outputs: dict[str, dict] = {}
+    results: dict[str, CanvasAgentMessageCreate] = {}
     created: set[str] = set()
-    for approval in session.pending_approvals:
+    # 生成排在最后执行：确认卡按同批修改预览生成的提示词、模型与参考，执行也要先让修改落地。
+    # 输出与执行记录仍按调用原顺序写回。
+    for approval in sorted(session.pending_approvals, key=lambda item: item.tool in cost.GENERATION_TOOLS):
         record = None
         if decisions[approval.call_id]:
             # 执行记录的估价取执行这一刻的（等待确认期间 draft 可能改过），不复用卡片上的数。
@@ -1671,17 +1675,18 @@ def resolve_workspace_approvals(workspace, decisions, items=None):
             text, label = "用户拒绝了这个操作。", "已拒绝"
         if record_decision := getattr(workspace, "record_decision", None):
             record_decision(approval, decisions[approval.call_id], text)
-        outputs.append({"type": "function_call_output", "call_id": approval.call_id,
-                        "output": text})
-        results.append(CanvasAgentMessageCreate(role="tool", title=approval.tool, text=redact(
-            record if record is not None else f"{label}\n{approval.summary}")))
+        outputs[approval.call_id] = {"type": "function_call_output", "call_id": approval.call_id,
+                                     "output": text}
+        results[approval.call_id] = CanvasAgentMessageCreate(role="tool", title=approval.tool, text=redact(
+            record if record is not None else f"{label}\n{approval.summary}"))
+    order = [approval.call_id for approval in session.pending_approvals]
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         # 认领之后状态应仍是 running；万一已被别处改掉，也要把输出写回，不能留下没有输出的调用。
         answered = _answered_call_ids(current.history)
-        return {**with_appended_messages(current, results, now),
+        return {**with_appended_messages(current, [results[call_id] for call_id in order], now),
                 "history": [*current.history,
-                            *(item for item in outputs if item["call_id"] not in answered)],
+                            *(outputs[call_id] for call_id in order if call_id not in answered)],
                 **workspace.created_fields(current, created)}
 
     return workspace.mutate(update)
@@ -1698,6 +1703,41 @@ def _rejected_items(approvals: list, items: dict[str, list[int]]) -> dict[str, f
             raise CanvasToolError("INVALID_PARAMETERS", "逐项选择只适用于批量生成，且至少选一项", 422)
         rejected[approval.call_id] = frozenset(set(range(total)) - chosen)
     return rejected
+
+
+def _feeds_generation(change, node_id: str) -> bool:
+    """这条修改会改变节点 node_id 上生成的输入：确认卡按它预览提示词、模型（set_draft）与参考（connect），
+    见 _generation_preview 与 cost.generation_estimate。"""
+    return isinstance(change, dict) and (
+        (change.get("op") == "set_draft" and change.get("node_id") == node_id)
+        or (change.get("op") == "connect" and change.get("target_node_id") == node_id))
+
+
+def generation_dependencies(approvals: list, call_id: str,
+                            rejected: frozenset[int] = frozenset()) -> set[str]:
+    """生成调用 call_id（批量时只算没被去掉的项）依赖的同批 apply_changes 调用。确认卡按同批修改预览，
+    所以执行这个生成必须连同这些修改一起执行。前端 CanvasAgentApprovalCard 的 generationDependencies
+    是同一条规则。"""
+    approval = next(item for item in approvals if item.call_id == call_id)
+    arguments = _arguments(approval.arguments)
+    if approval.tool == "run_generation":
+        targets = [str(arguments.get("surface_node_id", ""))]
+    else:
+        targets = [item["surface_node_id"] for index, item in enumerate(_generation_items(arguments))
+                   if index not in rejected]
+    return {item.call_id for item in approvals if item.tool == "apply_changes"
+            and any(_feeds_generation(change, node) for node in targets
+                    for change in _arguments(item.arguments).get("changes") or [])}
+
+
+def _missing_dependencies(approvals: list, decisions: dict[str, bool],
+                          rejected: dict[str, frozenset[int]]) -> set[str]:
+    """执行了的生成所依赖、却被拒绝的修改。"""
+    return {dependency for approval in approvals
+            if approval.tool in cost.GENERATION_TOOLS and decisions.get(approval.call_id)
+            for dependency in generation_dependencies(approvals, approval.call_id,
+                                                      rejected.get(approval.call_id, frozenset()))
+            if not decisions.get(dependency)}
 
 
 def _answered_call_ids(history: list) -> set[str]:
