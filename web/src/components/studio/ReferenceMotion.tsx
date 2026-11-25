@@ -31,28 +31,45 @@ export function useArrivingKeys(keys: readonly string[]): ReadonlySet<string> {
   return arriving;
 }
 
-/** 删除参考素材：被删的那张先淡出缩小 150ms，再真正移除，其余各张随后顺移。
- *  拿不到动画环境（jsdom）时当场删除。删除时按 File 身份找，等待期间别的素材增删不会删错。 */
-export function useLeavingFiles(remove: (file: File) => void) {
-  const [leaving, setLeaving] = useState<ReadonlySet<File>>(() => new Set());
-  const latestRemove = useRef(remove);
-  latestRemove.current = remove;
-  const removeAfterFade = (file: File) => {
+/** 正在退场的参考素材副本：slot 是删除那一刻它在显示列表里的位置。 */
+export interface LeavingRef<T> {
+  slot: number;
+  snapshot: T;
+}
+
+/** 删除参考素材的退场副本：业务引用由调用方当场移除（提交与 @ 编号立即生效），
+ *  这里只保留缩略图副本在原位淡出缩小 150ms 再卸载，其余各张随后顺移。
+ *  拿不到动画环境（jsdom）时不留副本，直接 release。 */
+export function useLeavingRefs<T>(release: (snapshot: T) => void) {
+  const [leaving, setLeaving] = useState<readonly LeavingRef<T>[]>([]);
+  const latestRelease = useRef(release);
+  latestRelease.current = release;
+  const timers = useRef(new Set<number>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(timer => window.clearTimeout(timer));
+  }, []);
+  const keep = (entry: LeavingRef<T>) => {
     if (!motionAvailable()) {
-      remove(file);
+      latestRelease.current(entry.snapshot);
       return;
     }
-    setLeaving(current => new Set(current).add(file));
-    window.setTimeout(() => {
-      latestRemove.current(file);
-      setLeaving(current => {
-        const nextLeaving = new Set(current);
-        nextLeaving.delete(file);
-        return nextLeaving;
-      });
+    setLeaving(current => [...current, entry]);
+    const timer = window.setTimeout(() => {
+      timers.current.delete(timer);
+      setLeaving(current => current.filter(item => item !== entry));
+      latestRelease.current(entry.snapshot);
     }, MOTION_DURATION.fast * 1000);
+    timers.current.add(timer);
   };
-  return [leaving, removeAfterFade] as const;
+  return [leaving, keep] as const;
+}
+
+/** 把退场副本按删除时的位置插回当前列表；位置越界时排到末尾。 */
+export function withLeaving<T>(live: readonly T[], leaving: readonly LeavingRef<T>[]): T[] {
+  const display = [...live];
+  for (const entry of leaving) display.splice(Math.min(entry.slot, display.length), 0, entry.snapshot);
+  return display;
 }
 
 /** 删掉或加入一张后，同一行里其余各张从原位置滑到新位置（FLIP，snappy 弹簧）。

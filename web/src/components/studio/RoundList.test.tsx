@@ -3,6 +3,8 @@ import { hoverHint } from '@/test/hint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MJ_DEFAULTS } from '@/lib/mjParams';
 import { RoundList, type RoundState } from './RoundList';
+import { useEffect } from 'react';
+import type { AgentRound } from '@/lib/historyFilters';
 
 const videoDone: RoundState = {
   kind: 'done',
@@ -468,6 +470,23 @@ describe('RoundList 深链定位锚点', () => {
     const anchor = container.querySelector('[data-round-job="job-focus-1"]');
     expect(anchor).not.toBeNull();
     expect(anchor!.className ?? '').not.toContain('ring-primary');
+  });
+
+  it('对话轮从乐观占位换成服务端正式轮（turn_id 变、client_message_id 不变）时不重挂', () => {
+    const mounts = vi.fn();
+    function TurnProbe({ turnId }: { turnId: string }) {
+      useEffect(() => { mounts(); }, []);
+      return <p>{turnId}</p>;
+    }
+    const agentRound = (turnId: string): AgentRound => ({
+      kind: 'agent', submittedAt: new Date().toISOString(), messages: [], jobs: [],
+      turn: { turn_id: turnId, client_message_id: 'client-1', status: 'running', attachment_ids: [], asset_ids: [], steps: [] },
+    });
+    const renderAgent = (round: AgentRound) => <TurnProbe turnId={round.turn.turn_id} />;
+    const view = render(<RoundList rounds={[imageDone, agentRound('outgoing-1')]} renderAgent={renderAgent} />);
+    view.rerender(<RoundList rounds={[imageDone, agentRound('turn-1')]} renderAgent={renderAgent} />);
+    expect(screen.getByText('turn-1')).toBeInTheDocument();
+    expect(mounts).toHaveBeenCalledTimes(1);
   });
 });
 

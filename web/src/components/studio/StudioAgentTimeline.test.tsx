@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { CanvasAgentMessage, StudioAgentSession, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
@@ -91,6 +91,36 @@ it('运行时默认收起工具步骤，待确认强制展开，停止后能展�
   fireEvent.click(screen.getByRole('button', { name: '已停止' }));
   fireEvent.click(screen.getByRole('button', { name: '查看可用模型' }));
   expect(screen.getByText('列出可用模型')).toBeInTheDocument();
+});
+
+it('确认第一批后同一轮紧接着来第二批：新确认卡立即可操作，只提交自己的 call_id', async () => {
+  vi.useFakeTimers();
+  try {
+    const agent = makeAgent('awaiting_approval');
+    const session = agent.session as StudioAgentSession;
+    let resolveFirst: (value: unknown) => void = () => {};
+    const decide = vi.fn()
+      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve; }))
+      .mockReturnValue(new Promise(() => {}));
+    const view = (next: StudioAgentSession) => <TurnCards agent={{ ...agent, decide, session: next }} jobs={[]} renderJobs={() => null} />;
+    const tree = render(view(session));
+    fireEvent.click(screen.getByRole('button', { name: '执行' }));
+    expect(decide.mock.calls[0][0]).toEqual(new Set(['call-2']));
+    expect(screen.getByText('执行中…')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '待确认的操作' })).toBeNull();
+    // 第一批的请求返回前，服务端已推来同一轮的第二批。
+    const second: StudioAgentSession = { ...session, pending_approvals: [
+      { call_id: 'call-3', tool: 'run_generation', summary: '预计 8 元' }] };
+    tree.rerender(view(second));
+    expect(screen.getByRole('group', { name: '待确认的操作' })).toBeInTheDocument();
+    await act(async () => { resolveFirst(second); });
+    await act(async () => { vi.advanceTimersByTime(900); });
+    expect(screen.queryByText('执行中…')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '执行' }));
+    expect(decide.mock.calls[1][0]).toEqual(new Set(['call-3']));
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('对话菜单可直接切换、新建和按 revision 删除', () => {

@@ -54,7 +54,7 @@ import { FileInput } from '@/components/ui/file-input';
 import { Hint } from '@/components/ui/tooltip';
 import { Collapse } from '@/components/ui/collapse';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, shakeOnError, useAnimateOnChange, motionAvailable, prefersReducedMotion } from '@/lib/motion';
-import { ReferenceItemMotion, useArrivingKeys, useFileKeys, useLeavingFiles, useSlideOnReorder } from './ReferenceMotion';
+import { ReferenceItemMotion, useArrivingKeys, useFileKeys, useLeavingRefs, useSlideOnReorder, withLeaving } from './ReferenceMotion';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -150,6 +150,17 @@ function providerName(provider?: KeyView) {
 
 /** @引用的素材类目标签。契约（seedance 官方 / happyhorse [Image N]）按「类型 + 序号」指代素材。 */
 const MENTION_LABELS = { image: '图', video: '视频', audio: '音频' } as const;
+
+/** 参考区显示的一张素材。live 是它在当前素材里的下标；为 null 时是删除后正在退场的缩略图副本。 */
+interface ReferenceEntry {
+  key: string;
+  kind: keyof typeof MENTION_LABELS;
+  file: File;
+  thumb: string | null;
+  url: string;
+  label: string | undefined;
+  live: number | null;
+}
 
 /** 删除素材后重写 prompt 里的 @引用：被删序号的引用移除，更大序号依次前移。 */
 export function renumberMentions(input: string, label: string, removed: number): string {
@@ -395,7 +406,13 @@ export function PromptInput({
   }, [isOmni, referenceImages, referenceVideos, referenceAudios]);
   // 全类型素材都建 objectURL：图片直接当缩略图，视频喂给抽帧 + hover 预览播放，音频留给预览卡。
   const mediaUrls = useMemo(() => stackItems.map((item) => URL.createObjectURL(item.file)), [stackItems]);
-  useEffect(() => () => mediaUrls.forEach((u) => URL.revokeObjectURL(u)), [mediaUrls]);
+  // 退场副本还在用的地址先不回收，副本卸载时再回收（见 removeRef）。
+  const heldRefUrls = useRef(new Set<string>());
+  useEffect(() => () => mediaUrls.forEach((u) => { if (!heldRefUrls.current.has(u)) URL.revokeObjectURL(u); }), [mediaUrls]);
+  useEffect(() => {
+    const held = heldRefUrls.current;
+    return () => held.forEach((u) => URL.revokeObjectURL(u));
+  }, []);
   // 视频首帧缩略图（异步抽帧，按 objectURL 缓存）；抽不出来退回 Film 图标
   const [videoThumbs, setVideoThumbs] = useState<Record<string, string>>({});
   const thumbRequested = useRef(new Set<string>());
@@ -883,13 +900,34 @@ export function PromptInput({
     if (stackItems.length === 0) setRefDrawerOpen(false);
   }, [stackItems.length]);
 
-  // 参考素材按 File 身份取稳定 key：删中间一张时其余各张不重挂，被删的淡出缩小后再移除，新加的淡入放大。
+  // 参考素材按 File 身份取稳定 key：删中间一张时其余各张不重挂，新加的淡入放大。
+  // 删除时业务引用当场移除（提交与 @ 编号立即生效），显示列表里留一份缩略图副本在原位淡出缩小。
   const fileKey = useFileKeys();
-  const stackKeys = stackItems.map(item => fileKey(item.file));
-  const arrivingRefs = useArrivingKeys(stackKeys);
-  const [leavingRefs, removeRefAfterFade] = useLeavingFiles(handleRefRemove);
+  const [leavingRefs, keepLeavingRef] = useLeavingRefs<ReferenceEntry>((entry) => {
+    heldRefUrls.current.delete(entry.url);
+    URL.revokeObjectURL(entry.url);
+  });
+  const imageInputLabels = workflowInputs?.filter(input => input.type === 'image');
+  const liveRefs: ReferenceEntry[] = stackItems.map((item, i) => ({
+    key: fileKey(item.file), kind: item.kind, file: item.file, thumb: thumbFor(i), url: mediaUrls[i],
+    label: imageInputLabels?.[i]?.label ?? mentionItems[i]?.label, live: i,
+  }));
+  const displayRefs = withLeaving(liveRefs, leavingRefs.filter(entry => !stackItems.some(item => item.file === entry.snapshot.file)));
+  const displayKeys = displayRefs.map(entry => entry.key);
+  const arrivingRefs = useArrivingKeys(displayKeys);
   const drawerRowRef = useRef<HTMLDivElement>(null);
-  useSlideOnReorder(drawerRowRef, stackKeys, refDrawerTab);
+  useSlideOnReorder(drawerRowRef, displayKeys, refDrawerTab);
+  const hoveredSlot = refHovered === null ? 0 : Math.max(0, displayRefs.findIndex(entry => entry.live === refHovered));
+
+  function removeRef(file: File) {
+    const slot = displayRefs.findIndex(entry => entry.live !== null && entry.file === file);
+    if (slot < 0) return;
+    const entry = displayRefs[slot];
+    handleRefRemove(file);
+    setRefHovered(null);
+    heldRefUrls.current.add(entry.url);
+    keepLeavingRef({ slot, snapshot: { ...entry, live: null } });
+  }
 
   const showRefPanel = !isMj && (isOmni || (!isVideo && onReferenceImagesChange && maxRef > 0));
   const hoveredRefItem = refHovered !== null ? stackItems[refHovered] : null;
@@ -928,7 +966,7 @@ export function PromptInput({
           data-testid="reference-hover-preview"
           className="shell-glow pointer-events-none absolute -top-3 z-50 w-[168px] -translate-y-full overflow-hidden rounded-xl transition-[left] duration-200 ease-out"
           style={{
-            left: `${16 + (refDrawerOpen ? (refHovered ?? 0) * (REF_W + 8) : (refHovered ?? 0) * REF_STEP)}px`,
+            left: `${16 + (refDrawerOpen ? hoveredSlot * (REF_W + 8) : hoveredSlot * REF_STEP)}px`,
           }}
         >
           {hoveredRefItem.kind === 'video' && hoveredRefUrl ? (
@@ -992,25 +1030,26 @@ export function PromptInput({
             </div>
           </div>
           <div ref={drawerRowRef} key={refDrawerTab} className="thin-scrollbar flex items-center gap-2 overflow-x-auto pb-1 pt-1">
-            {stackItems.map((item, i) => {
+            {displayRefs.map((item) => {
               if (refDrawerTab !== 'all' && item.kind !== refDrawerTab) return null;
-              const thumb = thumbFor(i);
-              const label = workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label;
-              const leaving = leavingRefs.has(item.file);
+              const i = item.live;
+              const { thumb, label } = item;
+              const leaving = i === null;
               return (
                 <div
-                  key={stackKeys[i]}
-                  data-ref-key={stackKeys[i]}
-                  data-testid="reference-drawer-item"
+                  key={item.key}
+                  data-ref-key={item.key}
+                  data-testid={leaving ? undefined : 'reference-drawer-item'}
+                  aria-hidden={leaving || undefined}
                   className="group relative shrink-0"
                   style={{ width: REF_W, height: REF_H }}
-                  onMouseEnter={() => setRefHovered(i)}
-                  onMouseLeave={() => setRefHovered(null)}
+                  onMouseEnter={leaving ? undefined : () => setRefHovered(i)}
+                  onMouseLeave={leaving ? undefined : () => setRefHovered(null)}
                 >
-                  <ReferenceItemMotion appear={arrivingRefs.has(stackKeys[i])} leaving={leaving}>
+                  <ReferenceItemMotion appear={arrivingRefs.has(item.key)} leaving={leaving}>
                   <div
                     role={item.kind === 'image' ? 'button' : undefined}
-                    tabIndex={item.kind === 'image' ? 0 : undefined}
+                    tabIndex={item.kind === 'image' && !leaving ? 0 : undefined}
                     aria-label={item.kind === 'image' ? '查看参考图大图' : undefined}
                     onClick={item.kind === 'image' && thumb ? () => setSlotLightbox(thumb) : undefined}
                     onKeyDown={item.kind === 'image' && thumb
@@ -1040,9 +1079,9 @@ export function PromptInput({
                     variant="secondary"
                     size="icon"
                     type="button"
-                    aria-label={`移除参考素材 ${i + 1}`}
+                    aria-label={`移除参考素材 ${(i ?? 0) + 1}`}
                     disabled={leaving}
-                    onClick={(e) => { e.stopPropagation(); removeRefAfterFade(item.file); }}
+                    onClick={(e) => { e.stopPropagation(); removeRef(item.file); }}
                     className="absolute -right-1.5 -top-1.5 z-10 flex size-[18px] items-center justify-center rounded-full border border-border bg-scrim p-0 text-foreground/80 opacity-0 transition-[opacity,background-color,color] duration-150 before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <CloseIcon size="sm" />
@@ -1073,7 +1112,7 @@ export function PromptInput({
             className={`shrink-0 relative h-[60px] overflow-visible origin-left transition-[transform,translate,scale,outline-color] duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'} rounded-lg outline-2 outline-offset-4 ${flashArea === 'references' ? 'outline-primary' : 'outline-transparent'}`}
             style={{ width: REF_W + 14 }}
           >
-            {stackItems.length === 0 ? (
+            {displayRefs.length === 0 ? (
               <Label
                 htmlFor={refInputId}
                 aria-label={isOmni ? '添加参考内容' : '添加参考图'}
@@ -1089,39 +1128,43 @@ export function PromptInput({
                   className="absolute inset-y-0 left-0 overflow-visible transition-[width] duration-300 ease-in-out"
                   style={{
                     width: refExpanded
-                      ? `${(stackItems.length > 1 ? 2 : 1) * REF_STEP + REF_W + 14}px`
+                      ? `${(displayRefs.length > 1 ? 2 : 1) * REF_STEP + REF_W + 14}px`
                       : `${REF_W + 14}px`,
                   }}
                   onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
                 >
-                  {stackItems.map((item, i) => {
-                    // 展开时：若只有 2 张图则第 2 张直接显示；若 ≥3 张图则第 2 个槽位留给 ⤢ 展开卡，隐藏 i >= 1
-                    const hideInExpanded = refExpanded && (stackItems.length > 2 ? i >= 1 : i >= 2);
+                  {displayRefs.map((item, slot) => {
+                    // 展开时：若只有 2 张图则第 2 张直接显示；若 ≥3 张图则第 2 个槽位留给 ⤢ 展开卡，隐藏 slot >= 1。
+                    // 排布按显示位置（含正在退场的副本）算，副本卸载后其余各张再顺移。
+                    const hideInExpanded = refExpanded && (displayRefs.length > 2 ? slot >= 1 : slot >= 2);
                     if (hideInExpanded) return null;
-                    const hovered = refHovered === i;
-                    const angle = refExpanded ? (i === 0 ? -6 : 4) : collapseAngle(i);
-                    const thumb = thumbFor(i);
+                    const i = item.live;
+                    const leaving = i === null;
+                    const hovered = !leaving && refHovered === i;
+                    const angle = refExpanded ? (slot === 0 ? -6 : 4) : collapseAngle(slot);
+                    const { thumb } = item;
                     // 展开后右侧始终压左侧（哪怕 hover 左卡也不越级盖住右卡）；折叠时首图在最上
-                    const zIndex = refExpanded ? 10 + i * 10 : stackItems.length - i;
+                    const zIndex = refExpanded ? 10 + slot * 10 : displayRefs.length - slot;
                     return (
                       <div
-                        key={stackKeys[i]}
-                        data-testid="reference-stack-item"
+                        key={item.key}
+                        data-testid={leaving ? undefined : 'reference-stack-item'}
+                        aria-hidden={leaving || undefined}
                         className="absolute top-1/2 left-0 transition-[left,transform] duration-300 ease-in-out"
                         style={{
                           width: REF_W,
                           height: REF_H,
                           zIndex,
-                          left: refExpanded ? `${i * REF_STEP}px` : '0px',
+                          left: refExpanded ? `${slot * REF_STEP}px` : '0px',
                           transform: `translateY(calc(-50% + ${hovered ? REF_HOVER_LIFT : 0}px)) rotate(${angle}deg) scale(${hovered ? REF_HOVER_SCALE : 1})`,
                         }}
-                        onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(i); } }}
-                        onMouseLeave={() => setRefHovered(null)}
+                        onMouseEnter={leaving ? undefined : () => { if (!collapsed) { setRefExpanded(true); setRefHovered(i); } }}
+                        onMouseLeave={leaving ? undefined : () => setRefHovered(null)}
                       >
-                        <ReferenceItemMotion appear={arrivingRefs.has(stackKeys[i])} leaving={leavingRefs.has(item.file)}>
+                        <ReferenceItemMotion appear={arrivingRefs.has(item.key)} leaving={leaving}>
                         <div
                           role={item.kind === 'image' ? 'button' : undefined}
-                          tabIndex={item.kind === 'image' ? 0 : undefined}
+                          tabIndex={item.kind === 'image' && !leaving ? 0 : undefined}
                           aria-label={item.kind === 'image' ? '查看参考图大图' : undefined}
                           onClick={item.kind === 'image' && thumb ? () => setSlotLightbox(thumb) : undefined}
                           onKeyDown={item.kind === 'image' && thumb
@@ -1141,7 +1184,7 @@ export function PromptInput({
                           )}
                           {mentionsEnabled && (
                             <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
-                              {workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label}
+                              {item.label}
                             </span>
                           )}
                         </div>
@@ -1149,23 +1192,23 @@ export function PromptInput({
                       </div>
                     );
                   })}
-                  {refHovered !== null && stackItems[refHovered] && !leavingRefs.has(stackItems[refHovered].file) && (
+                  {refHovered !== null && stackItems[refHovered] && (
                     <Button
                       variant="bare"
                       type="button"
                       aria-label={`移除参考素材 ${refHovered + 1}`}
                       onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(refHovered); } }}
-                      onClick={(e) => { e.stopPropagation(); removeRefAfterFade(stackItems[refHovered].file); }}
+                      onClick={(e) => { e.stopPropagation(); removeRef(stackItems[refHovered].file); }}
                       className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 transition-[left,background-color,color,scale] duration-200 before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground"
                       style={{
-                        left: `${(refExpanded ? refHovered * REF_STEP : 0) + REF_W - 11}px`,
+                        left: `${(refExpanded ? hoveredSlot * REF_STEP : 0) + REF_W - 11}px`,
                         top: `calc(50% - ${REF_H / 2 + 11}px)`,
                       }}
                     >
                       <CloseIcon size="sm" />
                     </Button>
                   )}
-                  {refExpanded && stackItems.length > 2 && (
+                  {refExpanded && displayRefs.length > 2 && (
                     <div
                       role="button"
                       tabIndex={0}
@@ -1189,8 +1232,8 @@ export function PromptInput({
                         transform: 'translateY(-50%) rotate(4deg)',
                       }}
                     >
-                      {thumbFor(1) && (
-                        <img src={thumbFor(1)!} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40 blur-[1px]" />
+                      {displayRefs[1]?.thumb && (
+                        <img src={displayRefs[1].thumb} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40 blur-[1px]" />
                       )}
                       <span className="relative z-10 flex h-full w-full items-center justify-center bg-scrim/70 backdrop-blur-glass">
                         <ExpandIcon size="md" />
@@ -1206,7 +1249,7 @@ export function PromptInput({
                       style={{
                         width: refExpanded ? REF_W : 26,
                         height: refExpanded ? REF_H : 26,
-                        left: refExpanded ? `${(stackItems.length > 1 ? 2 : 1) * REF_STEP}px` : `${REF_W - 14}px`,
+                        left: refExpanded ? `${(displayRefs.length > 1 ? 2 : 1) * REF_STEP}px` : `${REF_W - 14}px`,
                         top: refExpanded ? '50%' : `calc(50% + ${REF_H / 2 - 8}px)`,
                         borderRadius: refExpanded ? '8px' : '9999px',
                         zIndex: 30,

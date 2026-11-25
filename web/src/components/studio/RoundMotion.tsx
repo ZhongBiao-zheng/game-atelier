@@ -43,14 +43,21 @@ function currentScaleX(element: HTMLElement): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** 占位卡底部 2px 渐近进度条。只动 transform: scaleX，零重排；complete 时 200ms 冲满。 */
-export function ProgressLine({ startedAt, expectedMs, phase, held = false, complete = false }: {
+/** 每轮细条最后画到的位置（按轮次 key）：占位卡换成完成交接层时细条是新挂的元素，
+ *  读不到旧条的 transform，从这里接上旧条的实际进度。完成层卸载时清掉。 */
+const drawnProgress = new Map<string, number>();
+
+/** 占位卡底部 2px 渐近进度条。只动 transform: scaleX，零重排；complete 时 200ms 冲满。
+ *  进度只增不减：换阶段、换卡都从已画到的位置接着走。 */
+export function ProgressLine({ startedAt, expectedMs, phase, held = false, complete = false, progressKey }: {
   startedAt: number;
   expectedMs: number;
   phase?: Job['progress_phase'];
   /** 还没提交上游（视频素材准备中）：停在起点。 */
   held?: boolean;
   complete?: boolean;
+  /** 所属轮次的稳定 key：占位与完成交接层传同一个，完成层从占位细条画到的位置起冲。 */
+  progressKey?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -58,13 +65,20 @@ export function ProgressLine({ startedAt, expectedMs, phase, held = false, compl
     if (!element) return;
     const setScale = (value: number) => { element.style.transform = `scaleX(${value})`; };
     const elapsed = Date.now() - startedAt;
+    const carried = (progressKey && drawnProgress.get(progressKey)) || 0;
     const estimate = held ? 0 : estimatedProgress(elapsed, expectedMs);
-    const target = complete ? 1 : phase === 'downloading' ? PROGRESS_DOWNLOADING : estimate;
+    const target = Math.max(carried, complete ? 1 : phase === 'downloading' ? PROGRESS_DOWNLOADING : estimate);
+    // 卸载或换阶段时记下画到的位置；value 要在停动画之前读，停了之后读到的是内联终值。
+    const remember = (value: number | null) => {
+      if (!progressKey) return;
+      if (complete) drawnProgress.delete(progressKey);
+      else if (value != null) drawnProgress.set(progressKey, Math.max(drawnProgress.get(progressKey) ?? 0, value));
+    };
     if (!motionAvailable()) {
       setScale(target);
       return;
     }
-    const from = currentScaleX(element) ?? estimate;
+    const from = Math.max(carried, currentScaleX(element) ?? estimate);
     // 写 transform 整串而不是 scaleX 简写：走 WAAPI 在合成线程跑，长达几分钟的推进不占主线程。
     // 终值先写进内联样式，动画播完（或中途被下一段接管）后停在原处。
     const scales = (values: number[]) => values.map(value => `scaleX(${value})`);
@@ -79,12 +93,12 @@ export function ProgressLine({ startedAt, expectedMs, phase, held = false, compl
       const settle = progressSettleMs(expectedMs);
       const start = Math.max(elapsed, 0);
       if (held || start >= settle) {
-        setScale(target);
-        return;
+        setScale(Math.max(from, target));
+        return () => remember(currentScaleX(element));
       }
       const span = settle - start;
       const times = Array.from({ length: PROGRESS_SAMPLES + 1 }, (_, index) => index / PROGRESS_SAMPLES);
-      const values = times.map((time, index) => index === 0 ? from : estimatedProgress(start + time * span, expectedMs));
+      const values = times.map((time, index) => index === 0 ? from : Math.max(from, estimatedProgress(start + time * span, expectedMs)));
       setScale(values[values.length - 1]);
       controls = animate(element, { transform: scales(values) }, { duration: span / 1000, times, ease: 'linear' });
     }
@@ -92,8 +106,9 @@ export function ProgressLine({ startedAt, expectedMs, phase, held = false, compl
       const value = currentScaleX(element);
       controls.stop();
       if (value != null) setScale(value);
+      remember(value);
     };
-  }, [startedAt, expectedMs, phase, held, complete]);
+  }, [startedAt, expectedMs, phase, held, complete, progressKey]);
   return (
     <div
       ref={ref}
@@ -115,10 +130,11 @@ export function stageLabel(phase: Job['progress_phase'] | undefined, isVideo: bo
 
 /** 完成交接层：结果卡在占位的同一个比例框里挂上，先垫着占位的转圈与冲满的细条，
  *  结果解码后在它上面淡入（200ms），淡入播完再卸掉这一层，全程不露空白。 */
-export function CompletionUnderlay({ revealed, startedAt, expectedMs }: {
+export function CompletionUnderlay({ revealed, startedAt, expectedMs, progressKey }: {
   revealed: boolean;
   startedAt: number;
   expectedMs: number;
+  progressKey?: string;
 }) {
   const [gone, setGone] = useState(false);
   useEffect(() => {
@@ -130,7 +146,7 @@ export function CompletionUnderlay({ revealed, startedAt, expectedMs }: {
   return (
     <div aria-hidden data-testid="completion-underlay" className="absolute inset-0 flex items-center justify-center bg-card/40">
       <div className={ROUND_SPINNER_CLASS} />
-      <ProgressLine startedAt={startedAt} expectedMs={expectedMs} complete />
+      <ProgressLine startedAt={startedAt} expectedMs={expectedMs} progressKey={progressKey} complete />
     </div>
   );
 }

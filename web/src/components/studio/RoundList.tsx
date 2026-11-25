@@ -129,9 +129,11 @@ export type RoundState = (
   clientKey?: string;
 };
 
-/** 一轮记录的稳定 key：客户端 id 优先，其次 job_id。 */
+/** 一轮记录的稳定 key：客户端 id 优先，其次 job_id。
+ *  对话轮用 client_message_id：乐观轮与服务端确认后的正式轮共用它（turn_id 会从占位 id 换成正式 id），
+ *  确认时整轮不重挂、不重播入场；正式 turn_id 仍只用于服务端操作。会话维度由 Studio 按会话 ID 给整个列表上 key。 */
 function roundKey(round: TimelineRound): string {
-  if (round.kind === 'agent') return round.turn.turn_id;
+  if (round.kind === 'agent') return `agent:${round.turn.client_message_id}`;
   if (round.clientKey) return round.clientKey;
   if (round.jobId) return round.jobId;
   return round.kind === 'pending' ? `pending-${round.startedAt}` : `${round.kind}-${round.submittedAt}`;
@@ -612,6 +614,7 @@ function PendingBatch({
               </span>
               <div className={ROUND_SPINNER_CLASS} />
               <ProgressLine
+                progressKey={roundKey(round)}
                 startedAt={round.startedAt}
                 expectedMs={expectedMs}
                 phase={round.progressPhase}
@@ -1215,6 +1218,7 @@ function DoneBatch({
                   config={round.config}
                   justCompleted={justCompleted}
                   startedAt={startedAt}
+                  progressKey={roundKey(round)}
                   roundJob={embedded && index === 0 ? round.jobId : undefined}
                   testId={`studio-result-video-${index + 1}`}
                   className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
@@ -1270,6 +1274,7 @@ function DoneBatch({
                   config={round.config}
                   justCompleted={justCompleted}
                   startedAt={startedAt}
+                  progressKey={roundKey(round)}
                   roundJob={embedded && index === 0 ? round.jobId : undefined}
                   testId={`studio-result-thumb-${index + 1}`}
                   className="media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
@@ -1387,10 +1392,12 @@ function DoneBatch({
 
 /** 结果卡：与占位卡同一个按目标比例的框（读到真实尺寸后改用真实比例）。
  *  刚生成完的结果先垫着占位交接层，媒体解码后在它上面淡入；历史结果直接在卡片底色上淡入。 */
-function ResultFrame({ config, justCompleted, startedAt, roundJob, testId, className, onClick, media, children }: {
+function ResultFrame({ config, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
   config: RoundConfig;
   justCompleted: boolean;
   startedAt: number;
+  /** 所属轮次的 key：交接层细条从占位细条画到的位置起冲。 */
+  progressKey: string;
   roundJob?: string;
   testId: string;
   className: string;
@@ -1406,6 +1413,7 @@ function ResultFrame({ config, justCompleted, startedAt, roundJob, testId, class
         <CompletionUnderlay
           revealed={revealed}
           startedAt={startedAt}
+          progressKey={progressKey}
           expectedMs={expectedDurationMs(config.kind, config.duration)}
         />
       )}

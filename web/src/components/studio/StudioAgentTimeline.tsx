@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
@@ -82,6 +82,27 @@ function SuggestionsFade({ shown, children }: { shown: boolean; children: ReactN
       { duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out }), element);
   }, { keepWhenReduced: true });
   return <div ref={ref}>{children}</div>;
+}
+
+/** 一轮刚结束：暂存的流式尾帧盖在最终回复上同位淡出，最终回复淡入（底边对齐——流式文字的末段就是最终回复）。
+ *  旧层从第一帧起不进读屏、不接收交互。 */
+function SettlingReply({ streamed, children }: { streamed: string; children: ReactNode }) {
+  const replyRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!replyRef.current || !streamRef.current) return;
+    streamRef.current.inert = true;
+    clearOnFinish(animate(replyRef.current, { opacity: [0, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), replyRef.current);
+    animate(streamRef.current, { opacity: [1, 0] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle });
+  }, []);
+  return (
+    <div className="grid">
+      <div ref={replyRef} className="col-start-1 row-start-1 self-end">{children}</div>
+      <div ref={streamRef} aria-hidden="true" className="pointer-events-none col-start-1 row-start-1 self-end">
+        <AgentStreamingMarkdown text={parseAgentReply(streamed).body || streamed} />
+      </div>
+    </div>
+  );
 }
 
 function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: boolean }) {
@@ -189,20 +210,27 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   const [override, setOverride] = useState<{ status: string; open: boolean } | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const toolLabels = useAgentToolLabels();
-  // 确认执行后先把确认卡换成「执行中…」，等这一轮离开待确认、再停一下才收起过程区；拒绝时直接收起。
-  const [executing, setExecuting] = useState(false);
+  // 确认执行后先把确认卡换成「执行中…」，等这一批离开待确认、再停一下才收起过程区；拒绝时直接收起。
+  // 执行态按本次裁决的 call_id 集合记：同一轮紧接着来的下一批是另一组 call_id，立即显示新确认卡，
+  // 上一批的「执行中…」照常停够再退场，两者互不等待。
+  const batchKey = session.pending_approvals.map(a => a.call_id).join();
+  const [executingKey, setExecutingKey] = useState<string | null>(null);
+  const executing = executingKey !== null;
+  const batchLeft = !awaiting || batchKey !== executingKey;
   useEffect(() => {
-    if (!executing || awaiting) return;
-    const timer = window.setTimeout(() => setExecuting(false), EXECUTING_HOLD_MS);
+    if (executingKey === null || !batchLeft) return;
+    const timer = window.setTimeout(() => setExecutingKey(current => current === executingKey ? null : current), EXECUTING_HOLD_MS);
     return () => window.clearTimeout(timer);
-  }, [executing, awaiting]);
+  }, [executingKey, batchLeft]);
   const decide: Controller['decide'] = (approved, items) => {
-    setExecuting(approved.size > 0);
+    const decided = batchKey;
+    setExecutingKey(approved.size > 0 ? decided : null);
     const result = agent.decide(approved, items);
-    // 请求失败时这一轮还在待确认：把确认卡还回来，可以重新裁决。
-    void result.then(updated => { if (!updated) setExecuting(false); });
+    // 请求失败时这一批还在待确认：把确认卡还回来，可以重新裁决。
+    void result.then(updated => { if (!updated) setExecutingKey(current => current === decided ? null : current); });
     return result;
   };
+  const showApproval = awaiting && batchKey !== executingKey;
   const open = awaiting || executing || (override?.status === turn.status ? override.open : false);
   const title = running || awaiting ? '处理中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
@@ -215,6 +243,26 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   // 只有整条时间线的最后一轮、且已正常结束，才显示它的推荐追问。
   const suggestions = last && turn.status === 'idle' ? parsedReplies.at(-1)?.suggestions ?? [] : [];
   const errors = messages.filter(m => m.role === 'error');
+  // 一轮结束：流式尾帧与最终回复同位交叉淡化（见 SettlingReply）。尾帧按本轮与最终回复的 message_id 暂存：
+  // 只有流式期间还不存在、结束时新出现的那条助手回复才接这一帧。
+  const lastReplyId = visibleReplies.at(-1)?.message.message_id;
+  const lastStreamed = useRef<{ text: string; before: string | undefined } | null>(null);
+  useEffect(() => {
+    if (running && agent.streaming) lastStreamed.current = { text: agent.streaming, before: lastReplyId };
+  }, [running, agent.streaming, lastReplyId]);
+  const [settling, setSettling] = useState<{ text: string; messageId: string } | null>(null);
+  useAnimateOnChange(running, nowRunning => {
+    const streamed = lastStreamed.current;
+    lastStreamed.current = null;
+    const final = visibleReplies.at(-1)?.message;
+    if (nowRunning || !streamed || final?.role !== 'assistant' || final.message_id === streamed.before) return;
+    setSettling({ text: streamed.text, messageId: final.message_id });
+  });
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setTimeout(() => setSettling(null), MOTION_DURATION.base * 1000);
+    return () => window.clearTimeout(timer);
+  }, [settling]);
   const attachmentUrls = [
     ...turn.attachment_ids.map(id => ({
       src: agentSessionPath(null, session.session_id) + '/attachments/' + encodeURIComponent(id),
@@ -251,7 +299,7 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
         {executing && <p className="flex items-center gap-1.5 text-muted-foreground">
           <LoadingIcon size="sm" className="animate-spin" />执行中…
         </p>}
-        {awaiting && !executing && <CanvasAgentApprovalCard unit="份" key={session.pending_approvals.map(a => a.call_id).join()} approvals={session.pending_approvals} labels={TOOL_LABELS}
+        {showApproval && <CanvasAgentApprovalCard unit="份" key={batchKey} approvals={session.pending_approvals} labels={TOOL_LABELS}
           disabled={agent.pending} onDecide={decide}
           loadBatchItems={id => getCanvasAgentBatchItems(null, session.session_id, id)} />}
       </div></Collapse>
@@ -259,9 +307,9 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
     </div>
     {visibleReplies.length > 0 && (
       <div className="space-y-2 text-muted-foreground">
-        {visibleReplies.map(item => <div key={item.message.message_id}>
-          <AgentMarkdown text={item.body} />
-        </div>)}
+        {visibleReplies.map(item => settling?.messageId === item.message.message_id
+          ? <SettlingReply key={item.message.message_id} streamed={settling.text}><AgentMarkdown text={item.body} /></SettlingReply>
+          : <div key={item.message.message_id}><AgentMarkdown text={item.body} /></div>)}
       </div>
     )}
     {running && agent.streaming && (
