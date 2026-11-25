@@ -81,6 +81,24 @@ export async function resolveImageReferencePaths({
   return { referenceImages: paths, mjRefPaths };
 }
 
+/** 「删除这一轮」（给 path 时只删这一张）：移进回收站，返回 trash_id（撤销时 restoreTrash）。 */
+export async function deleteStudioRound(jobId: string, path?: string): Promise<string> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  const body = await requestJson<{ trash_id: string }>(
+    `/api/studio/jobs/${encodeURIComponent(jobId)}${query}`, '删除', { method: 'DELETE' },
+  );
+  return body.trash_id;
+}
+
+/** 结果卡「加入画布」：在目标画布新建图片 / 视频节点。 */
+export async function addStudioResultToCanvas(jobId: string, outputIndex: number, projectId: string): Promise<void> {
+  await requestJson(`/api/studio/jobs/${encodeURIComponent(jobId)}/canvas`, '加入画布', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, output_index: outputIndex }),
+  });
+}
+
 export async function getStudioJob(jobId: string): Promise<Job | null> {
   const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
   if (!resp.ok) return null;

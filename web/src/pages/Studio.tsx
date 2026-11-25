@@ -7,7 +7,14 @@ import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable }
 import { useLocation, useSearch } from 'wouter';
 import { ScrollBottomIcon } from '@/components/ui/icons';
 
-import { createStudioJob, getStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
+import { addStudioResultToCanvas, createStudioJob, deleteStudioRound, getStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
+import { restoreTrash } from '@/api/trash';
+import { agentSessionPath } from '@/api/canvas';
+import { notify, clipName, UNDO_DURATION_MS } from '@/lib/notify';
+import { errorText } from '@/lib/errorText';
+import { presentJobError, type JobErrorAction } from '@/lib/errorPresentation';
+import { maxReferenceImages } from '@/lib/referenceLimits';
+import { modelDisplayName } from '@/lib/modelCatalog';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
@@ -24,12 +31,12 @@ import {
   type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
-import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
+import { MAX_REF_IMAGES, type FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
-import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
+import { RoundList, type CanvasTarget, type RoundConfig, type RoundFailure, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
+import type { StudioAgentSession, StudioAgentTurn } from '@/schema/canvas';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily, isEvolinkMidjourney } from '@/lib/modelFamily';
@@ -44,10 +51,14 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
-import { DEFAULT_STUDIO_SESSION_ID, readStudioDraft, writeStudioDraft } from './studioDraft';
-import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
+import {
+  DEFAULT_STUDIO_SESSION_ID, NEW_SESSION_DRAFT_KEY, deleteSessionInput, readSessionInput, readStudioDraft,
+  writeSessionInput, writeStudioDraft, type StudioInputMode, type StudioSessionInput,
+} from './studioDraft';
+import { clampImageCount, configForJob, isOmniVideoConfig } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
+import { costLabel, referenceImageLimit, studioEstimateLabel } from './studioEstimate';
 import { creationAssetInputUrl, readCreationMediaFile, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
@@ -99,6 +110,57 @@ interface RoundReferenceFiles {
   sref: File[];
   cref: File[];
   oref: File[];
+}
+
+/** 一次提交要上传的本地素材：上传失败时留着，「再次生成」用它们重新上传。 */
+interface SubmissionFiles {
+  images: File[];
+  mjRefs: MjRefSlots;
+  frames: File[] | null;
+  videos: File[];
+  audios: File[];
+}
+
+/** 覆盖输入前的整套编辑器状态：「已替换当前输入 · 撤销」按它还原。 */
+interface EditorSnapshot {
+  mode: StudioInputMode;
+  providerAlias: string;
+  model: string;
+  sizeParams: JobParams;
+  count: number;
+  quality: Quality;
+  mjParams: MjParams;
+  videoMode: VideoMode;
+  duration: number;
+  videoResolution: string;
+  videoRatio: string;
+  videoQuality: VideoQuality;
+  videoCount: number;
+  generateAudio: boolean;
+  input: StudioSessionInput;
+}
+
+const EMPTY_SESSION_INPUT: StudioSessionInput = {
+  promptText: '', promptAssetSourceTitle: null, promptAssetId: null,
+  referenceImages: [], referenceVideos: [], referenceAudios: [],
+  videoFrames: { first: null, last: null }, mjRefs: EMPTY_MJ_REFS, agentText: '', agentFiles: [],
+};
+
+/** 历史配置 → 估价用的任务参数（与提交时写进 params 的字段同名）。 */
+function configCostParams(config: RoundConfig): JobParams {
+  if (config.kind === 'video') {
+    return {
+      duration: config.duration, resolution: config.videoResolution, ratio: config.ratio, n: config.n,
+      ...(config.videoQuality ? { mode: config.videoQuality } : {}),
+      generate_audio: config.generateAudio,
+      reference_images: config.referenceImages, reference_videos: config.referenceVideos ?? [],
+    };
+  }
+  return {
+    size_mode: config.sizeMode, size: config.size, ratio: config.ratio, resolution: config.resolution,
+    n: config.n, ...(config.quality ? { quality: config.quality } : {}),
+    reference_images: config.referenceImages,
+  };
 }
 
 /** 复刻后输入框上方的常驻提示：本机缺的模型 + 配方还原时丢掉的东西。 */
@@ -193,7 +255,9 @@ function StudioFull() {
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [location, setLocation] = useLocation();
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
-  const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
+  // 覆盖了非空输入（重新编辑 / 使用提示词 / 复用参考 / 复刻）：输入壳上方给 8 秒「撤销」。
+  const [replacedInput, setReplacedInput] = useState<{ id: number; snapshot: EditorSnapshot } | null>(null);
+  const [replacedPaused, setReplacedPaused] = useState(false);
   const [recipeNotice, setRecipeNotice] = useState<RecipeNotice | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
@@ -226,10 +290,10 @@ function StudioFull() {
   const usage = session && agentUsageLabel(composer.agent.usage);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  // 尺寸模式和自定义草稿一起恢复；质量与数量仍在刷新时回默认。
+  // 尺寸、质量、张数都记住（与视频参数一致）：刷新后回到上次的选择。
   const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
-  const [count, setCount] = useState(draft?.count ?? 1);
-  const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
+  const [count, setCount] = useState(draft?.count ?? clampImageCount(saved.count ?? 1));
+  const [quality, setQuality] = useState<Quality>(draft?.quality ?? saved.quality ?? 'low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
   // MJ 四个语义参考组；每组允许多图，垫图最终仍落 reference_images。
@@ -244,6 +308,8 @@ function StudioFull() {
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
+  const canvasTargetOptions = useMemo<CanvasTarget[]>(
+    () => canvasTargets.map(target => ({ projectId: target.project_id, name: target.name })), [canvasTargets]);
   const [assetsRevision, setAssetsRevision] = useState(0);
   const [promptPreviewRequest, setPromptPreviewRequest] = useState<PromptPreviewRequest | null>(null);
   const [promptAssetId, setPromptAssetId] = useState<string | null>(draft?.promptAssetId ?? null);
@@ -302,11 +368,98 @@ function StudioFull() {
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
+  // ---- 草稿按对话存：切走时留在原对话，切回来原样恢复；新对话发出第一条建了会话时，输入跟着走。 ----
+  const { setText: setAgentText, setFiles: setAgentFilesRaw } = composer;
+  const sessionInput: StudioSessionInput = {
+    promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
+    videoFrames, mjRefs, agentText: composer.text, agentFiles: composer.files,
+  };
+  const editor: EditorSnapshot = {
+    mode: composer.mode, providerAlias, model, sizeParams, count, quality, mjParams,
+    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+    input: sessionInput,
+  };
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
+  const draftKey = scopedId ?? NEW_SESSION_DRAFT_KEY;
+  const draftKeyRef = useRef(draftKey);
+  const applySessionInput = useCallback((input: StudioSessionInput) => {
+    sourceTitleFile.current = null;
+    setPromptText(input.promptText);
+    setPromptAssetSourceTitle(input.promptAssetSourceTitle);
+    setPromptAssetId(input.promptAssetId);
+    setReferenceImages(input.referenceImages);
+    setReferenceVideos(input.referenceVideos);
+    setReferenceAudios(input.referenceAudios);
+    setVideoFrames(input.videoFrames);
+    setMjRefs(input.mjRefs);
+    setAgentText(input.agentText);
+    setAgentFilesRaw(input.agentFiles);
+  }, [setAgentText, setAgentFilesRaw]);
   useEffect(() => {
-    if (!assetPanelOpen) return;
+    const previous = draftKeyRef.current;
+    if (previous === draftKey) return;
+    draftKeyRef.current = draftKey;
+    const current = editorRef.current.input;
+    const stored = readSessionInput(draftKey);
+    if (!stored && previous === NEW_SESSION_DRAFT_KEY) {
+      writeSessionInput(draftKey, current);
+      deleteSessionInput(NEW_SESSION_DRAFT_KEY);
+      return;
+    }
+    writeSessionInput(previous, current);
+    setReplacedInput(null);
+    applySessionInput(stored ?? EMPTY_SESSION_INPUT);
+  }, [draftKey, applySessionInput]);
+  useEffect(() => {
+    writeSessionInput(draftKeyRef.current, sessionInput);
+    // sessionInput 每次渲染都是新对象：按它的各字段写。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
+    videoFrames, mjRefs, composer.text, composer.files]);
+
+  // ---- 覆盖输入：直接覆盖，输入壳上方给 8 秒「已替换当前输入 · 撤销」（悬停暂停）。 ----
+  function snapshotIfFilled(): EditorSnapshot | null {
+    return hasEditorInput() ? editorRef.current : null;
+  }
+  function offerUndo(before: EditorSnapshot | null) {
+    if (!before) return;
+    setReplacedPaused(false);
+    setReplacedInput(current => ({ id: (current?.id ?? 0) + 1, snapshot: before }));
+  }
+  function undoReplace() {
+    const snapshot = replacedInput?.snapshot;
+    setReplacedInput(null);
+    if (!snapshot) return;
+    reEditSequence.current += 1;
+    setRecipeNotice(null);
+    setKind(snapshot.mode);
+    setProviderAlias(snapshot.providerAlias);
+    setModel(snapshot.model);
+    setSizeParams(snapshot.sizeParams);
+    setCount(snapshot.count);
+    setQuality(snapshot.quality);
+    setMjParams(snapshot.mjParams);
+    setVideoMode(snapshot.videoMode);
+    setDuration(snapshot.duration);
+    setVideoResolution(snapshot.videoResolution);
+    setVideoRatio(snapshot.videoRatio);
+    setVideoQuality(snapshot.videoQuality);
+    setVideoCount(snapshot.videoCount);
+    setGenerateAudio(snapshot.generateAudio);
+    applySessionInput(snapshot.input);
+  }
+  useEffect(() => {
+    if (!replacedInput || replacedPaused) return;
+    const timer = window.setTimeout(() => setReplacedInput(null), UNDO_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [replacedInput, replacedPaused]);
+
+  // 资产面板与结果卡「加入画布」共用这份画布列表：挂载时读一次，打开面板时刷新。
+  useEffect(() => {
     let cancelled = false;
     void listCanvasProjects(true)
-      .then(projects => { if (!cancelled) setCanvasTargets(projects); })
+      .then(projects => { if (!cancelled) setCanvasTargets(Array.isArray(projects) ? projects : []); })
       .catch(() => { if (!cancelled) setCanvasTargets([]); });
     return () => { cancelled = true; };
   }, [assetPanelOpen]);
@@ -315,6 +468,17 @@ function StudioFull() {
   const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
   const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
   const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol, selectedModelObj?.declared);
+  const imageCaps = sizeContext(providers, providers.find(item => item.alias === providerAlias), model).caps;
+  // 切模型不截参考：超出新模型上限的留在输入里置灰，提交时只发前 N 张；换回模型自动恢复。
+  const imageReferenceLimit = referenceImageLimit({
+    agent: composer.mode === 'agent', kind, videoMode, imageCaps, videoCaps, model,
+  });
+  const overLimit = imageReferenceLimit !== null && referenceImages.length > imageReferenceLimit;
+  const estimateLabel = composer.mode === 'agent' || !model ? null : studioEstimateLabel({
+    key: channel.key, modelId: channel.modelId, kind, imageCaps, sizeParams, count, quality,
+    referenceImages: referenceImages.length, videoCaps, videoCount, duration, videoResolution, videoRatio,
+    videoQuality, generateAudio, referenceVideos: referenceVideos.length,
+  });
   // 切换生成类型 / keys 加载时把 alias、model 收敛到本类模型（规则见 convergeModelSelection）：
   // 界面显示的模型就是提交的模型；复刻缺模型（model 为空）时只换 key，模型位留空。
   useEffect(() => {
@@ -375,15 +539,25 @@ function StudioFull() {
   };
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
-  const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
-    const { images, videos, audios, sref, cref, oref } = await fetchRoundReferences(config, jobId);
+  const handleReuseReferences = async (config: RoundConfig, jobId?: string) => {
+    let files: RoundReferenceFiles;
+    try {
+      files = await fetchRoundReferences(config, jobId);
+    } catch (error) {
+      setAssetNotice(errorText(error, '参考素材恢复失败'));
+      return;
+    }
+    const { images, videos, audios, sref, cref, oref } = files;
+    const before = snapshotIfFilled();
     const routed = routeReusedImageFiles(model, config.model, { image: images, sref, cref, oref });
     setReferenceImages(routed.referenceImages);
     setReferenceVideos(videos);
     setReferenceAudios(audios);
     setMjRefs(routed.mjRefs);
     setReuseLimitNotice(routed.droppedCount > 0);
-  }, [model]);
+    flashInput('references');
+    offerUndo(before);
+  };
 
   useEffect(() => {
     if (!reuseLimitNotice) return;
@@ -658,10 +832,13 @@ function StudioFull() {
     return created.session_id;
   }
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
+  const onSubmit = async (
+    prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string,
+    overrideFiles?: SubmissionFiles,
+  ) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig, promptTemplate, reattachJobId);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate, reattachJobId, overrideFiles);
       return;
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
@@ -682,7 +859,7 @@ function StudioFull() {
       : sizeParams;
     const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
-      alert(preparedSize.error);
+      setAssetNotice(preparedSize.error);
       return;
     }
     const effectiveSizeParams = preparedSize.params!;
@@ -710,30 +887,48 @@ function StudioFull() {
     try {
       sessionId = await submissionSession(prompt);
     } catch (error) {
-      setAssetNotice(error instanceof Error ? error.message : String(error));
+      setAssetNotice(errorText(error));
       setPending(false);
       return;
     }
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
-    // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
+    // 再次生成（overrideConfig）携带的已是服务器路径，直接复用；本地失败卡的再次生成带着当时的文件重新上传。
+    // 超出本模型上限的参考留在输入里（置灰），只发前 N 张。
+    const files: SubmissionFiles = overrideFiles ?? {
+      images: referenceImages.slice(0, caps.maxRefImages ?? maxReferenceImages(effectiveModel)),
+      mjRefs, frames: null, videos: [], audios: [],
+    };
+    const uploadsFiles = !overrideConfig || Boolean(overrideFiles);
+    const baseConfig: RoundConfig = {
+      prompt, alias: effectiveAlias, provider: effectiveProvider, model: effectiveModel,
+      modelName: selectedModel?.name ?? overrideConfig?.modelName,
+      ratio: effectiveRatio, resolution: caps.showResolution ? effectiveResolution : undefined,
+      size: effectiveSize, sizeMode: effectiveMode, n: effectiveCount, quality: effectiveQuality,
+      referenceImages: overrideConfig && !overrideFiles ? overrideConfig.referenceImages : [],
+      ...(caps.family === 'midjourney' ? { mjParams: effectiveMjParams } : {}),
+    };
+    const startedAt = Date.now();
+    const clientKey = `local-${crypto.randomUUID()}`;
+    // 先放占位卡再上传：大参考上传期间历史区就有反馈，失败时这张卡原地变成失败卡。
+    const placeholder = {
+      kind: 'pending' as const, sessionId, startedAt, config: baseConfig, clientKey,
+      uploading: uploadsFiles && hasFiles(files),
+    };
+    setRounds((rs) => [placeholder, ...rs]);
+    scrollToBottom();
     let refPaths: string[];
     let mjRefPaths: { sref?: string[]; cref?: string[]; oref?: string[] } = {};
     try {
       ({ referenceImages: refPaths, mjRefPaths } = await resolveImageReferencePaths({
-        midjourney: caps.family === 'midjourney', referenceImages,
-        mjRefs: evoMj ? { ...mjRefs, cref: [], oref: [] } : mjRefs,
-        overrideReferenceImages: overrideConfig?.referenceImages,
-        overrideMjRefPaths: evoMj && overrideConfig?.mjRefPaths
+        midjourney: caps.family === 'midjourney', referenceImages: files.images,
+        mjRefs: evoMj ? { ...files.mjRefs, cref: [], oref: [] } : files.mjRefs,
+        overrideReferenceImages: uploadsFiles ? undefined : overrideConfig?.referenceImages,
+        overrideMjRefPaths: uploadsFiles ? undefined : evoMj && overrideConfig?.mjRefPaths
           ? { sref: overrideConfig.mjRefPaths.sref } : overrideConfig?.mjRefPaths,
         srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
-    } catch (e: any) {
-      setSubmitFailures(count => count + 1);
-      setPending(false);
-      setRounds((rs) => [
-        { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
-        ...rs,
-      ]);
+    } catch (e) {
+      failLocally(placeholder, baseConfig, e, files);
       return;
     }
 
@@ -792,12 +987,8 @@ function StudioFull() {
     );
     if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
-    const startedAt = Date.now();
-    const clientKey = `local-${crypto.randomUUID()}`;
     const myRound = { kind: 'pending' as const, sessionId, startedAt, config, clientKey };
-    setRounds((rs) => [myRound, ...rs]);
-    // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
-    scrollToBottom();
+    setRounds((rs) => rs.map(r => r === placeholder ? myRound : r));
 
     let job: Job;
     try {
@@ -810,14 +1001,8 @@ function StudioFull() {
         params: jobParams,
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
-    } catch (e: any) {
-      setSubmitFailures(count => count + 1);
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
-        ),
-      );
-      setPending(false);
+    } catch (e) {
+      failLocally(myRound, config, e);
       return;
     }
     setPending(false);
@@ -829,7 +1014,10 @@ function StudioFull() {
     setRounds(rs => rs.filter(r => r !== myRound));
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
+  const onSubmitVideo = async (
+    prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string,
+    overrideFiles?: SubmissionFiles,
+  ) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = providers.filter((item) => videoModelsOf(item).length > 0);
@@ -853,7 +1041,7 @@ function StudioFull() {
     try {
       sessionId = await submissionSession(prompt);
     } catch (error) {
-      setAssetNotice(error instanceof Error ? error.message : String(error));
+      setAssetNotice(errorText(error));
       setPending(false);
       return;
     }
@@ -868,22 +1056,36 @@ function StudioFull() {
     const frameFiles = videoMode === 'firstlast'
       ? [firstFrame, lastFrame].filter((f): f is File => f !== null)
       : null;
+    // 超出上限的参考留在输入里（置灰），只发前 N 张。
+    const files: SubmissionFiles = overrideFiles ?? {
+      images: referenceImages.slice(0, effectiveCaps.maxRefImages ?? MAX_REF_IMAGES), mjRefs: EMPTY_MJ_REFS,
+      frames: frameFiles, videos: referenceVideos, audios: referenceAudios,
+    };
+    const uploadsFiles = !overrideConfig || Boolean(overrideFiles);
+    const upload = (list: File[]) => list.length > 0 ? Promise.all(list.map(uploadReferenceImage)) : Promise.resolve([]);
+    const baseConfig: RoundConfig = {
+      prompt, kind: 'video', alias: effectiveAlias, provider: effectiveProvider, model: effectiveModel,
+      modelName: selectedModel?.name ?? overrideConfig?.modelName,
+      ratio: overrideConfig?.ratio ?? videoRatio, n: clampImageCount(overrideConfig?.n ?? videoCount),
+      duration: overrideConfig?.duration ?? duration,
+      referenceImages: uploadsFiles ? [] : overrideConfig?.referenceImages ?? [],
+    };
+    const startedAt = Date.now();
+    const clientKey = `local-${crypto.randomUUID()}`;
+    const placeholder = {
+      kind: 'pending' as const, sessionId, startedAt, config: baseConfig, clientKey,
+      uploading: uploadsFiles && hasFiles(files),
+    };
+    setRounds((rs) => [placeholder, ...rs]);
+    scrollToBottom();
     try {
-      imgPaths = overrideConfig?.referenceImages
-        ?? (frameFiles
-          ? await Promise.all(frameFiles.map(uploadReferenceImage))
-          : referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
-      vidPaths = overrideConfig?.referenceVideos
-        ?? (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
-      audPaths = overrideConfig?.referenceAudios
-        ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
-    } catch (e: any) {
-      setSubmitFailures(count => count + 1);
-      setPending(false);
-      setRounds((rs) => [
-        { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
-        ...rs,
-      ]);
+      imgPaths = !uploadsFiles && overrideConfig?.referenceImages
+        ? overrideConfig.referenceImages
+        : await upload(files.frames ?? files.images);
+      vidPaths = !uploadsFiles && overrideConfig?.referenceVideos ? overrideConfig.referenceVideos : await upload(files.videos);
+      audPaths = !uploadsFiles && overrideConfig?.referenceAudios ? overrideConfig.referenceAudios : await upload(files.audios);
+    } catch (e) {
+      failLocally(placeholder, baseConfig, e, files);
       return;
     }
 
@@ -962,12 +1164,8 @@ function StudioFull() {
       ...(effectivePromptAssetId ? { promptAssetId: effectivePromptAssetId } : {}),
     };
 
-    const startedAt = Date.now();
-    const clientKey = `local-${crypto.randomUUID()}`;
     const myRound = { kind: 'pending' as const, sessionId, startedAt, config, clientKey };
-    setRounds((rs) => [myRound, ...rs]);
-    // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
-    scrollToBottom();
+    setRounds((rs) => rs.map(r => r === placeholder ? myRound : r));
 
     let job: Job;
     try {
@@ -981,14 +1179,8 @@ function StudioFull() {
         kind: 'video',
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
-    } catch (e: any) {
-      setSubmitFailures(count => count + 1);
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
-        ),
-      );
-      setPending(false);
+    } catch (e) {
+      failLocally(myRound, config, e);
       return;
     }
     setPending(false);
@@ -999,6 +1191,25 @@ function StudioFull() {
     setRounds(rs => rs.filter(r => r !== myRound));
   };
 
+  // 提交前就失败（上传参考或创建任务失败）：占位卡原地变成失败卡，带着配置与客户端 id，
+  // 可删、可重新编辑；上传失败时留下当时的文件，「再次生成」重新上传。
+  const localSubmissionFiles = useRef(new Map<string, SubmissionFiles>());
+  function failLocally(
+    round: RoundState & { sessionId: string; clientKey: string }, config: RoundConfig, error: unknown,
+    files?: SubmissionFiles,
+  ) {
+    const clientKey = round.clientKey;
+    if (files) localSubmissionFiles.current.set(clientKey, files);
+    setSubmitFailures(count => count + 1);
+    setPending(false);
+    const message = errorText(error, '生成没有提交成功');
+    setRounds(rs => rs.map(r => r === round ? {
+      kind: 'failed' as const, sessionId: round.sessionId, clientKey, submittedAt: new Date().toISOString(),
+      reason: error instanceof Error ? error.message : message, config,
+      failure: { message, action: { label: '重试', kind: 'retry' as const } },
+    } : r));
+  }
+
   const renderRounds = (items: TimelineRound[], embedded = false): React.ReactNode => (
         <RoundList
           key={scopedId}
@@ -1007,6 +1218,7 @@ function StudioFull() {
             agent={composer.agent} messages={entry.messages} jobs={entry.jobs}
             renderJobs={jobs => renderRounds(studioJobsToRounds(jobs, keys), true)}
             last={!pending && !hasHistoryFilters(historyFilters) && timeline.at(-1) === entry}
+            onRetry={() => void retryAgentTurn(entry.turn, entry.messages)}
             onPickSuggestion={text => {
               composer.switchMode('agent');
               composer.setText(text);
@@ -1020,11 +1232,18 @@ function StudioFull() {
           hiddenPaths={hiddenPaths}
           onToggleHidden={toggleHidden}
           onDeleteFailed={deleteFailedRound}
+          onDismissLocal={dismissLocalRound}
           onCancel={cancelRound}
           onReEdit={(config, id) => { return reEdit(config, id); }}
+          onUsePrompt={usePrompt}
           reuseParameter={reuseParameter}
           onRegenerate={regenerate}
-          onDeleteBatch={deleteDoneBatch}
+          regenerateHint={regenerateHint}
+          onDeleteBatch={jobId => trashRound(jobId)}
+          onDeleteResult={(jobId, path) => trashRound(jobId, path)}
+          onFailureAction={handleFailureAction}
+          canvasTargets={canvasTargetOptions}
+          onAddToCanvas={addResultToCanvas}
           onReuseReferences={embedded ? undefined : handleReuseReferences}
           onEditAsReference={handleEditAsReference}
           onShareResult={(jobId, index, path, config) => setShareRequest({
@@ -1056,17 +1275,7 @@ function StudioFull() {
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
         <div className="mx-auto flex w-full max-w-[1024px] items-center justify-between gap-2">
-          <StudioSessionControls agent={composer.agent} disabled={pending} clearDraft={() => {
-            composer.clearDraft();
-            setPromptText('');
-            setReferenceImages([]);
-            setReferenceVideos([]);
-            setReferenceAudios([]);
-            setVideoFrames({ first: null, last: null });
-            setMjRefs(EMPTY_MJ_REFS);
-            setPromptAssetId(null);
-            setPromptAssetSourceTitle(null);
-          }} />
+          <StudioSessionControls agent={composer.agent} disabled={pending} />
           <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
         </div>
       </div>
@@ -1111,6 +1320,32 @@ function StudioFull() {
         {/* 提示条贴着输入壳上沿：出现时从下方 4px 淡入（150ms），消失时原位淡出，不硬切。 */}
         <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
           <AnimatePresence initial={false}>
+          {replacedInput && (
+            <motion.div
+              key="replaced"
+              {...NOTICE_MOTION}
+              role="status"
+              data-testid="studio-replaced-notice"
+              onMouseEnter={() => setReplacedPaused(true)}
+              onMouseLeave={() => setReplacedPaused(false)}
+              className="pointer-events-auto flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              <span>已替换当前输入</span>
+              <Button variant="link" size="sm" type="button" onClick={undoReplace}
+                className="h-auto p-0 text-xs text-primary">撤销</Button>
+            </motion.div>
+          )}
+          {overLimit && (
+            <motion.span
+              key="over-limit"
+              {...NOTICE_MOTION}
+              role="status"
+              data-testid="studio-over-limit-notice"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              本模型只用前 {imageReferenceLimit} 张参考图
+            </motion.span>
+          )}
           {recipeNotice && (
             <motion.div
               key="recipe"
@@ -1152,6 +1387,9 @@ function StudioFull() {
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
           onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
+          estimateLabel={estimateLabel}
+          onNotice={setAssetNotice}
+          onOpenProviders={() => setLocation('/settings/providers')}
           disabled={pending || composer.agent.pending || composer.agent.waitingForSession}
           value={promptText}
           onValueChange={setPromptText}
@@ -1227,10 +1465,7 @@ function StudioFull() {
           initialKind={assetPanelKind}
           initialTeamProjectId={teamPanelTarget?.projectId}
           initialTeamLibraryId={teamPanelTarget?.libraryId}
-          canvasTargets={canvasTargets.map(target => ({
-            projectId: target.project_id,
-            name: target.name,
-          }))}
+          canvasTargets={canvasTargetOptions}
           saveRequest={assetSaveRequest}
           onSaveRequestHandled={(requestId) => {
             setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
@@ -1265,18 +1500,6 @@ function StudioFull() {
         request={shareRequest}
         onClose={() => setShareRequest(null)}
         onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
-      />
-      <ConfirmDialog
-        open={reproduceConfirm !== null}
-        title="覆盖当前输入？"
-        message=""
-        confirmText="覆盖"
-        onConfirm={() => {
-          const asset = reproduceConfirm;
-          setReproduceConfirm(null);
-          if (asset) void reproduce(asset);
-        }}
-        onCancel={() => setReproduceConfirm(null)}
       />
     </div>
   );
@@ -1322,7 +1545,7 @@ function StudioFull() {
       // 与面板里的「复刻」一致：先记一次使用。
       requestReproduceRef.current(await markCreationAssetUsed(asset.asset_id));
     } catch (error) {
-      setAssetNotice(error instanceof Error ? error.message : '复刻失败');
+      setAssetNotice(errorText(error, '复刻失败'));
     }
   }
 
@@ -1338,7 +1561,7 @@ function StudioFull() {
       projects = canvases;
       projectId = mounts.find(mount => mount.library_id === libraryId)?.project_id;
     } catch (error) {
-      setAssetNotice(error instanceof Error ? error.message : '读取团队库失败');
+      setAssetNotice(errorText(error, '读取团队库失败'));
       return;
     }
     if (!projectId || !projects.some(project => project.project_id === projectId)) {
@@ -1357,15 +1580,11 @@ function StudioFull() {
     else show();
   }
 
-  // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
+  // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；覆盖非空输入时给撤销，不弹确认。
   function requestReproduce(asset: CreationAsset) {
     // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填：先记下，加载完补做（为空则照常按缺模型填）。
     if (!keysLoaded) {
       pendingReproduceRef.current = asset;
-      return;
-    }
-    if (hasEditorInput()) {
-      setReproduceConfirm(asset);
       return;
     }
     void reproduce(asset);
@@ -1391,10 +1610,12 @@ function StudioFull() {
         fetchGroup(inputs.mj.oref),
       ]);
       if (requestSequence !== reEditSequence.current) return;
+      const before = snapshotIfFilled();
       applyRoundConfig(
         { ...recipeDraft.config, sourceAssetTitle: asset.title },
         { images, videos, audios, sref, cref, oref },
       );
+      offerUndo(before);
       // 缺模型：alias 不动（配置里本就为空），模型位空着等用户选；MJ 参考分组仍按配方模型路由。
       if (!recipeDraft.model) setModel('');
       const warnings = recipeDraft.config.warnings ?? [];
@@ -1402,7 +1623,7 @@ function StudioFull() {
       setRecipeNotice(missingModel || warnings.length > 0 ? { missingModel, warnings } : null);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
-      alert(error instanceof Error ? error.message : '参考素材恢复失败');
+      setAssetNotice(errorText(error, '参考素材恢复失败'));
     }
   }
 
@@ -1455,20 +1676,25 @@ function StudioFull() {
     try {
       const file = await readCreationMediaFile(asset.asset_id, content);
       addReferenceFile(file, content.mime_type, asset.title);
-    } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setAssetNotice(errorText(error)); }
   }
 
   async function deleteFailedRound(jobId: string) {
     const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
     // 删不掉要说话：静默 return 的话画师点了删除、记录还在，只能当成界面卡了。
-    if (!resp.ok) { alert((await apiError(resp, '删除这条失败记录')).message); return; }
+    if (!resp.ok) { notify.error(errorText(await apiError(resp, '删除这条失败记录'))); return; }
     setPersistedJobs((jobs) => jobs.filter((j) => j.job_id !== jobId));
     setRounds((items) => items.filter((item) => item.kind !== 'failed' || item.jobId !== jobId));
   }
 
+  function dismissLocalRound(clientKey: string) {
+    localSubmissionFiles.current.delete(clientKey);
+    setRounds(items => items.filter(item => item.clientKey !== clientKey));
+  }
+
   async function cancelRound(jobId: string) {
     const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
-    if (!resp.ok) { alert((await apiError(resp, '停止生成')).message); return; }
+    if (!resp.ok) { notify.error(errorText(await apiError(resp, '停止生成'))); return; }
     // 后端只登记停止请求，status 仍是 pending；本地先把按钮翻成「正在停止」，终态由 SSE 带回。
     setPersistedJobs((jobs) => jobs.map((j) => (
       j.job_id === jobId && !j.cancel_requested_at ? { ...j, cancel_requested_at: new Date().toISOString() } : j
@@ -1481,12 +1707,30 @@ function StudioFull() {
     try {
       const refs = await fetchRoundReferences(config, jobId);
       if (requestSequence !== reEditSequence.current) return;
+      const before = snapshotIfFilled();
       applyRoundConfig(config, refs);
       flashInput('prompt');
+      offerUndo(before);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
-      alert(error instanceof Error ? error.message : '参考素材恢复失败');
+      setAssetNotice(errorText(error, '参考素材恢复失败'));
     }
+  }
+
+  // 「使用提示词」只填正文（与提示词资产一致），不换模型、参数和参考。
+  function usePrompt(config: RoundConfig) {
+    setClickPinned(true);
+    if (composer.mode === 'agent') {
+      composer.setText(config.prompt);
+      return;
+    }
+    const before = snapshotIfFilled();
+    setPromptText(config.prompt);
+    sourceTitleFile.current = null;
+    setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+    setPromptAssetId(config.promptAssetId ?? null);
+    flashInput('prompt');
+    offerUndo(before);
   }
 
   // 素材全部取回后再一次性替换编辑器快照（重新编辑 / 复刻共用）；取回失败时调用方不会走到这里，
@@ -1550,38 +1794,85 @@ function StudioFull() {
     setPromptAssetId(config.promptAssetId ?? null);
   }
 
-  async function regenerate(config: RoundConfig, failedJobId?: string) {
-    setRecipeNotice(null);
-    if (config.alias) setProviderAlias(config.alias);
-    setModel(config.model);
-    // 提交本身走 overrideConfig（不依赖表单态）；这里只是把表单同步成原 job 参数，便于继续微调。
-    if (config.kind === 'video') {
-      if (config.ratio) setVideoRatio(config.ratio);
-      if (config.videoResolution) setVideoResolution(config.videoResolution);
-      if (config.duration) setDuration(config.duration);
-      if (config.videoQuality) setVideoQuality(config.videoQuality);
-      if (config.n) setVideoCount(clampImageCount(config.n));
-      // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
-      // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
-      setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
-      setGenerateAudio(!!config.generateAudio);
-    } else {
-      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms, background: config.background });
-      if (config.n) setCount(clampImageCount(config.n));
-      if (config.mjParams) setMjParams(config.mjParams);
-    }
-    await onSubmit(config.prompt, config, undefined, failedJobId);
+  // 「再次生成」按旧配置直接提交，不改输入壳（D6）。本地失败卡带着当时的文件重新上传，旧卡换成新的一轮。
+  async function regenerate(config: RoundConfig, failedJobId?: string, clientKey?: string) {
+    const files = clientKey ? localSubmissionFiles.current.get(clientKey) : undefined;
+    if (clientKey) dismissLocalRound(clientKey);
+    await onSubmit(config.prompt, config, undefined, failedJobId, files);
   }
 
-  async function deleteDoneBatch(jobId: string, imagePaths: string[]) {
-    const responses = await Promise.all(
-      imagePaths.map((path) =>
-        connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
-      ),
-    );
-    const failed = responses.find((resp) => !resp.ok);
-    if (failed) { alert((await apiError(failed, '删除这批结果')).message); return; }
-    setPersistedJobs(jobs => jobs.filter(job => job.job_id !== jobId));
+  function regenerateHint(config: RoundConfig): string {
+    const name = config.provider === 'chatgpt' ? 'GPT Image' : modelDisplayName({ id: config.model, name: config.modelName });
+    const channel = resolveChannel(keys, providers.find(item => item.alias === config.alias), config.model);
+    const cost = channel.key && config.sizeMode !== 'auto'
+      ? estimateGenerationCostForSubmission(channel.key, channel.modelId, config.kind === 'video' ? 'video' : 'image', configCostParams(config))
+      : null;
+    return cost != null ? `${name} · ${costLabel(cost)}` : name;
+  }
+
+  // 删除不确认：进回收站，右上角 8 秒撤销。多张的一轮里删一张只摘这一张。
+  async function trashRound(jobId: string, path?: string) {
+    const job = latestJobs.current.find(item => item.job_id === jobId);
+    const single = Boolean(path && job && job.output_paths.length > 1);
+    let trashId: string;
+    try {
+      trashId = await deleteStudioRound(jobId, single ? path : undefined);
+    } catch (error) {
+      notify.error(errorText(error));
+      return;
+    }
+    setPersistedJobs(jobs => single
+      ? jobs.map(item => item.job_id === jobId ? { ...item, output_paths: item.output_paths.filter(output => output !== path) } : item)
+      : jobs.filter(item => item.job_id !== jobId));
+    notify.undo(single ? (job?.kind === 'video' ? '已删除这条视频' : '已删除这张图') : '已删除这一轮', () => {
+      void restoreTrash(trashId)
+        .then(() => refreshPersistedJobs())
+        .catch(error => notify.error(errorText(error)));
+    });
+  }
+
+  function handleFailureAction(action: JobErrorAction, round: Extract<RoundState, { kind: 'failed' }>) {
+    const { config } = round;
+    if (action.kind === 'topup' && action.href) {
+      window.open(action.href, '_blank', 'noopener,noreferrer');
+    } else if (action.kind === 'topup' || action.kind === 'open_provider' || action.kind === 'edit_endpoint') {
+      setLocation('/settings/providers');
+    } else if (action.kind === 'reconnect') {
+      window.location.reload();
+    } else if (action.kind === 'retry' && config) {
+      void regenerate(config, round.jobId, round.jobId ? undefined : round.clientKey);
+    } else if ((action.kind === 'change_model' || action.kind === 'edit_prompt') && config) {
+      void reEdit(config, round.jobId);
+    }
+  }
+
+  async function addResultToCanvas(jobId: string, index: number, projectId: string) {
+    try {
+      await addStudioResultToCanvas(jobId, index, projectId);
+    } catch (error) {
+      notify.error(errorText(error));
+      return;
+    }
+    const name = canvasTargets.find(target => target.project_id === projectId)?.name;
+    setAssetNotice(name ? `已加入画布「${clipName(name)}」` : '已加入画布');
+  }
+
+  // Agent 一轮出错或被停止：用同一条消息和附件重发一次。
+  async function retryAgentTurn(turn: StudioAgentTurn, messages: StudioAgentSession['messages']) {
+    const text = messages.find(message => message.role === 'user')?.text ?? '';
+    const sessionId = session?.session_id;
+    if (!sessionId) return;
+    try {
+      const files = await Promise.all(turn.attachment_ids.map(async (id, index) => {
+        const response = await connectionFetch(`${agentSessionPath(null, sessionId)}/attachments/${encodeURIComponent(id)}`);
+        if (!response.ok) throw await apiError(response, '取回附件');
+        const blob = await response.blob();
+        return new File([blob], `attachment-${index + 1}.${(blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: blob.type || 'image/png' });
+      }));
+      await composer.agent.sendStudio(text, files, turn.asset_ids, null, crypto.randomUUID());
+    } catch (error) {
+      notify.error(errorText(error));
+    }
   }
 }
 
@@ -1598,7 +1889,7 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
         ? `/api/gallery/image?path=${encodeURIComponent(path)}`
         : `/api/raw?path=${encodeURIComponent(path)}`;
   const resp = await (url.startsWith('http') ? fetch(url, { credentials: 'omit' }) : connectionFetch(url));
-  if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
+  if (!resp.ok) throw await apiError(resp, '取回参考图');
   const blob = await resp.blob();
   const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
   return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
@@ -1682,6 +1973,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           reason: job.error ?? (canceled ? '已停止' : '生成失败'),
           canceled,
           config: configForJob(job, keys),
+          ...(canceled ? {} : { failure: jobFailure(job, keys) }),
         }];
       }
       return [{
@@ -1694,6 +1986,17 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
         config: configForJob(job, keys),
       }];
     });
+}
+
+/** 失败任务 → 一句原因 + 修复动作。「重新查询」还没有对应接口，先只给原因（原文在技术详情里）。 */
+function jobFailure(job: Job, keys: KeyView[]): RoundFailure {
+  const presentation = presentJobError(job, keys.find(key => key.alias === job.alias));
+  return presentation.action?.kind === 'requery' ? { message: presentation.message } : presentation;
+}
+
+function hasFiles(files: SubmissionFiles): boolean {
+  return [files.images, files.frames ?? [], files.videos, files.audios, ...Object.values(files.mjRefs)]
+    .some(list => list.length > 0);
 }
 
 function frozenGenerationCost(job: Job): number | undefined {

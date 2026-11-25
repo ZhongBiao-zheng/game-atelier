@@ -73,11 +73,12 @@ describe('RoundList video', () => {
     await waitFor(() => expect(screen.queryByTestId('round-prompt-expanded')).toBeNull());
     unmount();
 
-    const onReEdit = vi.fn();
-    render(<RoundList rounds={[videoDone]} onReEdit={onReEdit} />);
+    // 「使用提示词」只填正文：走 onUsePrompt，不走整套重新编辑。
+    const onUsePrompt = vi.fn();
+    render(<RoundList rounds={[videoDone]} onUsePrompt={onUsePrompt} />);
     fireEvent.mouseEnter(screen.getByTestId('round-prompt-container'));
     fireEvent.click(await screen.findByTestId('round-use-prompt'));
-    expect(onReEdit).toHaveBeenCalledWith(videoDone.config, videoDone.jobId);
+    expect(onUsePrompt).toHaveBeenCalledWith(videoDone.config);
   });
 
   it('shows the frozen creation asset title without an interactive reference', () => {
@@ -405,7 +406,7 @@ describe('RoundList 单图隐藏', () => {
   it('传了 onToggleHidden 时每张图渲染隐藏按钮，点击回传该图 path', () => {
     const onToggleHidden = vi.fn();
     render(<RoundList rounds={[imageDone]} hiddenPaths={[]} onToggleHidden={onToggleHidden} />);
-    const buttons = screen.getAllByLabelText('隐藏（不在首页展示）');
+    const buttons = screen.getAllByLabelText('不在首页展示');
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[1]);
     expect(onToggleHidden).toHaveBeenCalledWith('/data/studio/job-hide-1/v2.png');
@@ -419,13 +420,13 @@ describe('RoundList 单图隐藏', () => {
         onToggleHidden={() => {}}
       />,
     );
-    expect(screen.getAllByLabelText('取消隐藏')).toHaveLength(1);
-    expect(screen.getAllByLabelText('隐藏（不在首页展示）')).toHaveLength(1);
+    expect(screen.getAllByLabelText('在首页展示')).toHaveLength(1);
+    expect(screen.getAllByLabelText('不在首页展示')).toHaveLength(1);
   });
 
   it('不传 onToggleHidden 时不渲染隐藏按钮（视频卡也没有）', () => {
     render(<RoundList rounds={[imageDone, videoDone]} />);
-    expect(screen.queryByLabelText('隐藏（不在首页展示）')).toBeNull();
+    expect(screen.queryByLabelText('不在首页展示')).toBeNull();
   });
 });
 
@@ -908,7 +909,7 @@ describe('RoundList 保存为创作资产', () => {
     render(<RoundList rounds={[imageBatch]} onSaveResultAsset={onSaveResultAsset} />);
 
     fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
-    fireEvent.click(screen.getByLabelText('保存生成结果 2 为资产'));
+    fireEvent.click(screen.getByLabelText('保存生成结果 2 到资产'));
     expect(onSaveResultAsset).toHaveBeenCalledWith({
       jobId: 'job-save-image',
       index: 1,
@@ -940,7 +941,7 @@ describe('RoundList 保存为创作资产', () => {
     render(<RoundList rounds={[{ ...imageBatch, shareable: false }]} onSaveResultAsset={onSaveResultAsset} />);
 
     fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
-    fireEvent.click(screen.getByLabelText('保存生成结果 1 为资产'));
+    fireEvent.click(screen.getByLabelText('保存生成结果 1 到资产'));
     expect(onSaveResultAsset).toHaveBeenCalledWith(expect.objectContaining({ generated: false }));
   });
 

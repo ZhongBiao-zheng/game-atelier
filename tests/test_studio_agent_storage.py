@@ -113,11 +113,11 @@ def test_locked_attachment_keeps_delete_retryable(isolated_data_root, monkeypatc
         directory.mkdir(parents=True)
         headers = {"If-Match": str(row.revision)}
 
-        def sharing_violation(path):
+        def sharing_violation(*_args):
             raise PermissionError("file in use")
 
         with monkeypatch.context() as patch:
-            patch.setattr(sessions.shutil, "rmtree", sharing_violation)
+            patch.setattr(sessions.trash, "move_to_trash", sharing_violation)
             assert client.delete(base, headers=headers).status_code == 409
             assert client.get(base).json()["revision"] == row.revision
         assert client.delete(base, headers=headers).status_code == 204

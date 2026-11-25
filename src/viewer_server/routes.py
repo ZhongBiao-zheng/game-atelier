@@ -36,7 +36,7 @@ from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
-    remove_image_from_job, request_job_cancel,
+    request_job_cancel, trash_studio_job,
     new_job_id, save_job, update_job_status,
 )
 from pydantic import BaseModel, Field, ValidationError
@@ -447,15 +447,22 @@ def _store_runtime_upload(ext: str, body: bytes) -> Path:
 
 
 
-@router.delete("/jobs/{job_id}/image")
-def delete_job_image(job_id: str, path: str) -> dict:
+@router.delete("/studio/jobs/{job_id}")
+def delete_studio_job(job_id: str, path: str | None = None) -> dict:
+    """「删除这一轮」（带 path 时只删这一张）：移进回收站，返回 trash_id 供撤销
+    （POST /api/trash/{id}/restore）。"""
+    from character_workflow.lib import trash
+
     try:
-        remove_image_from_job(job_id, path)
+        return {"trash_id": trash_studio_job(job_id, path)}
     except FileNotFoundError as e:
-        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
+        raise HTTPException(404, detail="找不到这一轮，可能已被删除") from e
+    except LookupError as e:
+        raise HTTPException(404, detail=str(e)) from e
+    except trash.TrashError as e:
+        raise HTTPException(422, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(404, detail=f"这张图不在该记录里：{e}") from e
-    return {"ok": True}
+        raise HTTPException(409, detail=str(e)) from e
 
 
 @router.delete("/jobs/{job_id}")
@@ -3973,3 +3980,25 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     # lifecycle is not tied to Uvicorn's response-drain phase during shutdown.
     background.add_task(_start_studio_job_task, job.job_id)
     return job.model_dump(mode="json")
+
+
+class _StudioJobToCanvas(BaseModel):
+    project_id: str = Field(min_length=1, max_length=160)
+    output_index: int = Field(ge=0)
+
+
+@router.post("/studio/jobs/{job_id}/canvas")
+def post_studio_job_to_canvas(job_id: str, body: _StudioJobToCanvas) -> dict:
+    """结果卡「加入画布」：在目标画布新建图片 / 视频节点，不建个人资产（D4）。"""
+    from character_workflow.lib.studio_jobs import add_job_output_to_canvas
+
+    try:
+        return add_job_output_to_canvas(job_id, body.output_index, body.project_id)
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail="找不到这一轮，可能已被删除") from e
+    except LookupError as e:
+        raise HTTPException(404, detail=str(e) if not isinstance(e, KeyError) else "找不到目标画布") from e
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, detail="画布正在被修改，请稍后重试") from e

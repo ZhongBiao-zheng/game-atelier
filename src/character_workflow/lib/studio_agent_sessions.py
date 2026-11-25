@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import secrets
-import shutil
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from character_workflow.lib import data_root, jobs
+from character_workflow.lib import data_root, jobs, trash
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.canvas_agent_sessions import _validate_session_id
 from character_workflow.lib.canvas_tool_common import CanvasToolError
@@ -17,7 +16,7 @@ from character_workflow.lib.schemas import StudioAgentSession
 
 
 DEFAULT_SESSION_ID = "session-default-studio"
-DEFAULT_SESSION_TITLE = "默认会话"
+DEFAULT_SESSION_TITLE = "默认对话"
 
 
 def root() -> Path:
@@ -148,7 +147,9 @@ def mutate(sid, update):
 
 
 def _return_jobs_to_default(sid):
+    """把这段对话的任务退回默认对话，返回 {job_id: turn_id}，还原时按它把任务认领回来。"""
     # 删除要求完整枚举，避免读取失败被普通列表跳过，留下指向已删除会话的任务。
+    returned = {}
     for job in jobs.list_jobs(strict=True):
         if job.studio_agent_session_id != sid:
             continue
@@ -158,9 +159,39 @@ def _return_jobs_to_default(sid):
             except FileNotFoundError:
                 continue
             if current.studio_agent_session_id == sid:
+                returned[current.job_id] = current.studio_agent_turn_id
                 jobs.write_job_under_lock(current.model_copy(update={
                     "studio_agent_session_id": None, "studio_agent_turn_id": None,
                 }))
+    return returned
+
+
+def _reclaim_jobs(sid, returned):
+    for job_id, turn_id in returned.items():
+        with jobs.job_lock(job_id):
+            try:
+                current = jobs.read_job(job_id)
+            except FileNotFoundError:
+                continue
+            if current.studio_agent_session_id is None:
+                jobs.write_job_under_lock(current.model_copy(update={
+                    "studio_agent_session_id": sid, "studio_agent_turn_id": turn_id,
+                }))
+
+
+def _restore_conversation(entry, restore_files):
+    """还原创作台对话：持会话锁移回文件，再把删除时退回默认对话、之后没被别处认领的任务认领回来。"""
+    sid = entry.meta.get("session_id")
+    if entry.meta.get("workspace") != "studio" or not isinstance(sid, str):
+        restore_files()
+        return
+    with _lock(sid):
+        restore_files()
+    returned = entry.meta.get("jobs")
+    _reclaim_jobs(sid, returned if isinstance(returned, dict) else {})
+
+
+trash.register_restore_handler("conversation", _restore_conversation)
 
 
 @contextmanager
@@ -174,18 +205,19 @@ def delete(sid, revision):
                 raise CanvasToolError("REVISION_CONFLICT", "对话已更新", 409)
             deleting.enter_context(_delete_lock(path))
         yield
+        title = read(sid).title
         try:
-            _return_jobs_to_default(sid)
+            returned = _return_jobs_to_default(sid)
         except (OSError, ValueError) as error:
-            raise CanvasToolError("JOB_REASSIGN_FAILED", "任务退回默认会话失败，请重试", 500) from error
-        directory = upload_dir(sid)
+            raise CanvasToolError("JOB_REASSIGN_FAILED", "任务退回默认对话失败，请重试", 500) from error
+        # 对话移进回收站（30 天内可还原），作品已留在默认对话里。
+        paths = [path for path in (session_path(sid), plan_path(sid), upload_dir(sid)) if path.exists()]
         try:
-            if directory.exists():
-                shutil.rmtree(directory)
-            plan_path(sid).unlink(missing_ok=True)
-            session_path(sid).unlink()
+            trash.move_to_trash("conversation", title, paths,
+                                {"workspace": "studio", "session_id": sid, "jobs": returned})
         except PermissionError:
-            # Windows 可能仍有附件正在读取。保留会话入口让用户能重试清理。
+            # Windows 可能仍有附件正在读取：整条移回原处，保留会话入口让用户能重试。
+            _reclaim_jobs(sid, returned)
             raise CanvasToolError("SESSION_BUSY", "附件正在使用，请稍后重试", 409) from None
 
 

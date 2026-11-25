@@ -80,7 +80,7 @@ describe('PromptInput 行内变量', () => {
     expect(fields[0]).toHaveAttribute('placeholder', '卡通矢量');
     expect(fields[0]).toHaveAttribute('aria-required', 'false');
     const editor = screen.getByLabelText('生图 prompt');
-    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true });
     expect(onSubmit.mock.lastCall![0]).toBe('以卡通矢量处理 图1；保持卡通矢量');
     onSubmit.mockClear();
     fireEvent.input(fields[0], { target: { value: '水彩' } });
@@ -90,7 +90,7 @@ describe('PromptInput 行内变量', () => {
     fireEvent.keyDown(fields[0], { key: 'Enter' });
     expect(onSubmit).not.toHaveBeenCalled();
     expect(fireEvent.keyDown(fields[0], { key: 'Tab' })).toBe(true);
-    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true });
     expect(onSubmit.mock.lastCall![0]).toBe('以水彩处理 图1；保持水彩');
     expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
     cleanup();
@@ -102,7 +102,7 @@ describe('PromptInput 行内变量', () => {
     const onSubmit = vi.fn();
     render(<Editor initial={initial} onSubmit={onSubmit} />);
     expect(screen.getByLabelText('变量：风格')).toHaveFocus();
-    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter', metaKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('变量：主体')).toHaveFocus();
     cleanup();
@@ -115,7 +115,7 @@ describe('PromptInput 行内变量', () => {
     const onSubmit = vi.fn();
     const initial = `保留${promptVariableToken({ name: '内容', example: '', value: literal })}和 @图1`;
     render(<Editor initial={initial} onSubmit={onSubmit} />);
-    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter', metaKey: true });
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit.mock.lastCall![0]).toBe(`保留${literal}和 图1`);
     expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
@@ -372,7 +372,7 @@ describe('PromptInput @引用参考素材', () => {
     expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
     expect(screen.queryByTestId('mention-popover')).toBeNull();
     // 触发字符 @ 被 chip 吞掉，提交序列化成纯序号
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
     expect(onSubmit).toHaveBeenCalledWith('图1');
     cleanup();
   });
@@ -393,7 +393,7 @@ describe('PromptInput @引用参考素材', () => {
     });
     const editor = screen.getByLabelText('生图 prompt');
     expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
     expect(onSubmit).toHaveBeenCalledWith('图1 在雨中奔跑');
     cleanup();
   });
@@ -444,21 +444,22 @@ describe('PromptInput 参考素材超限提示', () => {
     cleanup();
   });
 
-  // 上限按模型族走：换模型（gpt-image 16 → nano-banana 3）后已在堆叠里的参考图必须当场裁掉，
-  // 否则界面上 chip 全在、后端只发前 3 张（静默丢弃）。
-  it('切换到上限更低的模型时裁掉超出的参考图并提示', () => {
+  // 上限按模型族走：换模型（gpt-image 16 → nano-banana 3）不截参考，超出的留在堆叠里置灰（提交时只发前 3 张），
+  // 换回模型自动恢复。
+  it('切换到上限更低的模型时超出的参考图置灰、不裁掉', () => {
     const onChange = vi.fn();
     const files = [1, 2, 3, 4, 5].map((i) => new File(['x'], `r${i}.png`, { type: 'image/png' }));
-    const { rerender } = render(
+    const { rerender, container } = render(
       <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
         referenceImages={files} onReferenceImagesChange={onChange} />,
     );
-    expect(onChange).not.toHaveBeenCalled(); // gpt-image 上限 16，5 张不动
+    expect(container.querySelectorAll('[data-over-limit]')).toHaveLength(0); // gpt-image 上限 16，5 张都生效
     rerender(
       <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="nano-banana"
         referenceImages={files} onReferenceImagesChange={onChange} />,
     );
-    expect(onChange).toHaveBeenCalledWith(files.slice(0, 3));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('[data-over-limit]')).toHaveLength(2);
     cleanup();
   });
 });
@@ -473,7 +474,7 @@ describe('PromptInput 费用展示位置', () => {
   });
 });
 
-describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）', () => {
+describe('PromptInput 键盘提交规范（⌘↵ / Ctrl+↵ 生成，Enter 换行）', () => {
   function renderForKey() {
     const onSubmit = vi.fn();
     render(
@@ -489,9 +490,14 @@ describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）'
     return { onSubmit, editor: screen.getByLabelText('生图 prompt') };
   }
 
-  it('Enter 直接提交', () => {
+  it('⌘↵ / Ctrl+↵ 提交，单按 Enter 换行不提交', () => {
     const { onSubmit, editor } = renderForKey();
     fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true });
+    expect(onSubmit).toHaveBeenCalledWith('画一只猫');
+    onSubmit.mockClear();
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledWith('画一只猫');
     cleanup();
   });
@@ -564,7 +570,7 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
     const modelButton = screen.getByLabelText('选择模型');
     expect(modelButton).toHaveTextContent('选择模型');
     expect(modelButton).not.toHaveTextContent('GPT Image 2');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
     fireEvent.click(modelButton);
     expect(screen.getByRole('option', { name: /GPT Image 2/ })).toHaveAttribute('aria-selected', 'false');
     cleanup();
@@ -573,14 +579,14 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
   it('本机没有的模型 id 同样显示「选择模型」且生成禁用', () => {
     renderModel('seedream-9');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
     cleanup();
   });
 
   it('选中列表内模型后可生成', () => {
     renderModel('nano-banana');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('Nano Banana');
-    expect(screen.getByLabelText('提交生成')).not.toBeDisabled();
+    expect(screen.getByLabelText('生成')).not.toBeDisabled();
     cleanup();
   });
 
@@ -599,7 +605,7 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
       <PromptInput onSubmit={vi.fn()} providers={[mixedKey]} providerAlias="mixed" model="gpt-image-2" kind="video" value="跑步" />,
     );
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
     cleanup();
   });
 
@@ -618,7 +624,7 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
         onProviderChange={onProviderChange}
       />,
     );
-    fireEvent.click(screen.getByLabelText('选择厂商'));
+    fireEvent.click(screen.getByLabelText('选择供应商'));
     fireEvent.click(screen.getAllByRole('option')[0]);
     expect(onProviderChange).toHaveBeenCalledWith('image-first');
     expect(onModelChange).toHaveBeenCalledWith('sora-2');

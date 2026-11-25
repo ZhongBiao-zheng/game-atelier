@@ -10,7 +10,10 @@ import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { CreationAssetPanel } from '@/components/assets/CreationAssetPanel';
 import { readCreationMediaFile } from '@/api/creationAssets';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
-import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
+import { MAX_REF_IMAGES, type FrameSlots } from '@/components/studio/VideoReferenceAssets';
+import { maxReferenceImages } from '@/lib/referenceLimits';
+import { studioEstimateLabel } from './studioEstimate';
+import { errorText } from '@/lib/errorText';
 import type { RoundConfig } from '@/components/studio/RoundList';
 import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
@@ -25,11 +28,13 @@ import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
+const COMPACT_NOTICE_MS = 2400;
 
 interface SavedSelection {
   providerAlias?: string;
   model?: string;
   sizeParams?: JobParams;
+  count?: number;
   quality?: Quality;
   kind?: JobKind;
   videoMode?: VideoMode;
@@ -66,6 +71,13 @@ export function StudioCompact() {
   const [pending, setPending] = useState(false);
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
+  // 非错误的一句提示（参考超出上限只加入了几张）。
+  const [compactNotice, setCompactNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!compactNotice) return;
+    const timer = window.setTimeout(() => setCompactNotice(null), COMPACT_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [compactNotice]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   // 厂商列表 =「自动」+ 真实 KEY（同 Studio）。
@@ -82,8 +94,9 @@ export function StudioCompact() {
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
-  const [count, setCount] = useState(draft?.count ?? 1);
-  const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
+  // 张数与质量也记住（D7，与完整创作台同一份存档）。
+  const [count, setCount] = useState(draft?.count ?? clampImageCount(saved.count ?? 1));
+  const [quality, setQuality] = useState<Quality>(draft?.quality ?? saved.quality ?? 'low');
   // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
@@ -122,6 +135,12 @@ export function StudioCompact() {
   const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
   const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
   const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol, selectedModelObj?.declared);
+  const estimateLabel = composer.mode === 'agent' || !model ? null : studioEstimateLabel({
+    key: channel.key, modelId: channel.modelId, kind,
+    imageCaps: sizeContext(providers, providers.find(item => item.alias === providerAlias), model).caps,
+    sizeParams, count, quality, referenceImages: referenceImages.length, videoCaps, videoCount, duration,
+    videoResolution, videoRatio, videoQuality, generateAudio, referenceVideos: referenceVideos.length,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -183,11 +202,11 @@ export function StudioCompact() {
   useEffect(() => {
     if (!providerAlias) return;
     saveSelection({
-      providerAlias, model, sizeParams, quality,
+      providerAlias, model, sizeParams, count, quality,
       kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
-    providerAlias, model, sizeParams, quality,
+    providerAlias, model, sizeParams, count, quality,
     kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
@@ -243,14 +262,16 @@ export function StudioCompact() {
     let mjRefPaths: { sref?: string[]; cref?: string[]; oref?: string[] } = {};
     try {
       ({ referenceImages: refPaths, mjRefPaths } = await resolveImageReferencePaths({
-        midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
+        midjourney: caps.family === 'midjourney',
+        // 超出本模型上限的参考留在输入里（置灰），只发前 N 张。
+        referenceImages: referenceImages.slice(0, caps.maxRefImages ?? maxReferenceImages(effectiveModel)), mjRefs,
         overrideReferenceImages: overrideConfig?.referenceImages,
         overrideMjRefPaths: overrideConfig?.mjRefPaths,
         srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e: any) {
       setPending(false);
-      setCompactError(e.message);
+      setCompactError(errorText(e));
       return;
     }
 
@@ -295,7 +316,7 @@ export function StudioCompact() {
       updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
       setLocation('/studio');
     } catch (e: any) {
-      setCompactError(e.message);
+      setCompactError(errorText(e));
     } finally {
       setPending(false);
     }
@@ -331,14 +352,16 @@ export function StudioCompact() {
       imgPaths = overrideConfig?.referenceImages
         ?? (frameFiles
           ? await Promise.all(frameFiles.map(uploadReferenceImage))
-          : referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
+          : referenceImages.length > 0
+            ? await Promise.all(referenceImages.slice(0, effectiveCaps.maxRefImages ?? MAX_REF_IMAGES).map(uploadReferenceImage))
+            : []);
       vidPaths = overrideConfig?.referenceVideos
         ?? (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
       audPaths = overrideConfig?.referenceAudios
         ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
     } catch (e: any) {
       setPending(false);
-      setCompactError(e.message);
+      setCompactError(errorText(e));
       return;
     }
 
@@ -394,7 +417,7 @@ export function StudioCompact() {
       updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
       setLocation('/studio');
     } catch (e: any) {
-      setCompactError(e.message);
+      setCompactError(errorText(e));
     } finally {
       setPending(false);
     }
@@ -422,6 +445,9 @@ export function StudioCompact() {
         assetPanelOpen={assetPanelOpen}
         onToggleAssetPanel={composer.mode === 'agent' ? () => setAssetPanelOpen(open => !open) : undefined}
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
+        estimateLabel={estimateLabel}
+        onNotice={setCompactNotice}
+        onOpenProviders={() => setLocation('/settings/providers')}
         disabled={pending}
         submitErrorKey={compactError}
         value={promptText}
@@ -482,11 +508,16 @@ export function StudioCompact() {
             const file = await readCreationMediaFile(asset.asset_id, content);
             composer.setFiles(current => [...current, file].slice(0, 16));
             setCompactError(null);
-          } catch (error) { setCompactError(error instanceof Error ? error.message : String(error)); }
+          } catch (error) { setCompactError(errorText(error)); }
         }} />}
       {compactError && (
         <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
           {compactError}
+        </p>
+      )}
+      {!compactError && compactNotice && (
+        <p role="status" className="mt-3 max-w-[780px] mx-auto text-sm text-muted-foreground">
+          {compactNotice}
         </p>
       )}
     </div>

@@ -125,11 +125,11 @@ it('确认第一批后同一轮紧接着来第二批：新确认卡立即可操�
 
 it('对话菜单可直接切换、新建和按 revision 删除', () => {
   const agent = makeAgent('idle');
-  render(<StudioSessionControls agent={agent} clearDraft={() => {}} />);
+  render(<StudioSessionControls agent={agent} />);
   const open = () => fireEvent.click(screen.getByRole('button', { name: '切换对话' }));
   open(); fireEvent.click(screen.getByRole('button', { name: '另一段对话' }));
   expect(agent.selectSession).toHaveBeenCalledWith('s2');
-  open(); fireEvent.click(within(screen.getByLabelText('对话列表')).getByRole('button', { name: '新建对话' }));
+  open(); fireEvent.click(within(screen.getByLabelText('对话列表')).getByRole('button', { name: '新对话' }));
   expect(agent.newSession).toHaveBeenCalledOnce();
   open(); fireEvent.click(screen.getByRole('button', { name: '删除对话 另一段对话' }));
   expect(agent.removeSession).toHaveBeenCalledWith('s2', 2);
@@ -145,11 +145,11 @@ it('多方案只向作品区传入一批有序任务', () => {
 });
 
 it('新建对话用主色浅底并排在对话标题前，标题不再套胶囊', () => {
-  render(<StudioSessionControls agent={makeAgent('idle')} clearDraft={() => {}} />);
-  const create = screen.getByRole('button', { name: '新建对话' });
+  render(<StudioSessionControls agent={makeAgent('idle')} />);
+  const create = screen.getByRole('button', { name: '新对话' });
   const title = screen.getByRole('button', { name: '切换对话' });
   expect(create).toHaveClass('bg-primary/14', 'border-primary/45');
-  expect(create).toHaveTextContent('新建对话');
+  expect(create).toHaveTextContent('新对话');
   expect(create.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(title).toHaveClass('text-base', 'font-semibold');
   expect(title).not.toHaveClass('border', 'bg-glass');

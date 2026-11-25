@@ -2,7 +2,9 @@ import type { PromptPreviewRequest } from '@/components/assets/SetPromptPreviewD
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AddImageIcon, AudioIcon, BookmarkIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
+import { AddImageIcon, AudioIcon, BookmarkIcon, CanvasIcon, CheckIcon, CopyIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
+import type { JobErrorAction } from '@/lib/errorPresentation';
+import { useCopyFeedback } from '@/lib/useCopyFeedback';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -46,7 +48,7 @@ import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
@@ -108,6 +110,8 @@ export type RoundState = (
       progressPhase?: Job['progress_phase'];
       // 已按「停止」：后端登记了 cancel_requested_at，等 runner 在可中断点落 canceled。
       cancelRequested?: boolean;
+      /** 本地占位：参考素材还在上传，任务尚未提交。 */
+      uploading?: boolean;
       config: RoundConfig;
     }
   | {
@@ -123,11 +127,29 @@ export type RoundState = (
       config: RoundConfig;
     }
   // canceled=画师主动停止（不是错误）：同一张卡，去掉警示色。
-  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig }
+  | {
+      kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string;
+      /** 原文：收进「查看技术详情」与「复制详情」。 */
+      reason: string;
+      canceled?: boolean; config?: RoundConfig;
+      /** 一句原因 + 至多一个修复动作（按 error_code 选，见 presentJobError）。 */
+      failure?: RoundFailure;
+    }
 ) & {
   /** 本地提交时生成的客户端 id：占位、服务端任务、完成始终用它作 key，整卡不重挂。 */
   clientKey?: string;
 };
+
+export interface RoundFailure {
+  message: string;
+  action?: JobErrorAction;
+}
+
+/** 「加入画布」可选的目标画布。 */
+export interface CanvasTarget {
+  projectId: string;
+  name: string;
+}
 
 /** 一轮记录的稳定 key：客户端 id 优先，其次 job_id。
  *  对话轮用 client_message_id：乐观轮与服务端确认后的正式轮共用它（turn_id 会从占位 id 换成正式 id），
@@ -159,6 +181,7 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
 }
 
 type ParameterReuse = (config: RoundConfig, parameter: RoundParameter) => (() => void) | string | undefined;
+type RegenerateHandler = (config: RoundConfig, failedJobId?: string, clientKey?: string) => void | Promise<void>;
 
 function SpecChips({ config, reuseParameter, testId, children }: {
   config: RoundConfig; reuseParameter?: ParameterReuse; testId?: string; children?: ReactNode;
@@ -249,17 +272,24 @@ export function RoundList({
   hiddenPaths,
   onToggleHidden,
   onDeleteFailed,
+  onDismissLocal,
   onCancel,
   onReEdit,
+  onUsePrompt,
   reuseParameter,
   onRegenerate,
+  regenerateHint,
   onDeleteBatch,
+  onDeleteResult,
+  onFailureAction,
   onReuseReferences,
   onEditAsReference,
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
   onSetPromptPreview,
+  canvasTargets,
+  onAddToCanvas,
 }: {
   embedded?: boolean;
   rounds: TimelineRound[];
@@ -272,11 +302,20 @@ export function RoundList({
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  /** 本地失败卡（提交前就失败、没有任务记录）：直接从列表移除。 */
+  onDismissLocal?: (clientKey: string) => void;
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  /** 「使用提示词」：只填正文，不动模型、参数和参考。 */
+  onUsePrompt?: (config: RoundConfig) => void;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
-  onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
+  onRegenerate?: RegenerateHandler;
+  /** 「再次生成」按钮的提示：模型名 · 约 ¥x。 */
+  regenerateHint?: (config: RoundConfig) => string;
+  onDeleteBatch?: (jobId: string) => void | Promise<void>;
+  /** 删一张结果（多张的一轮里只删这张；只剩一张时等同删这一轮）。 */
+  onDeleteResult?: (jobId: string, path: string) => void | Promise<void>;
+  onFailureAction?: (action: JobErrorAction, round: Extract<RoundState, { kind: 'failed' }>) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
   onSavePromptAsset?: (config: RoundConfig) => void;
@@ -284,18 +323,25 @@ export function RoundList({
   /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
   onShareResult?: ShareResultHandler;
   onSetPromptPreview?: (request: PromptPreviewRequest) => void;
+  canvasTargets?: CanvasTarget[];
+  onAddToCanvas?: (jobId: string, index: number, projectId: string) => void | Promise<void>;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const lightboxItems = useMemo(() => rounds.flatMap((round) => (
     round.kind === 'done' && round.config.kind !== 'video'
       ? round.imagePaths.map((path, index) => ({
         src: imageSrc(path),
+        path,
+        jobId: round.jobId,
+        deletable: round.shareable !== false,
         config: round.config,
         name: path.split('/').pop() || `${round.jobId}-${index + 1}.png`,
       }))
       : []
   )), [rounds]);
   const lightboxIndex = lightboxSrc ? lightboxItems.findIndex((item) => item.src === lightboxSrc) : -1;
+  // 按身份记当前这张：Lightbox 删除时先翻页再回调，这里的闭包仍指向被删的那张。
+  const lightboxCurrent = lightboxIndex >= 0 ? lightboxItems[lightboxIndex] : undefined;
   const [mountedHistoryCount, setMountedHistoryCount] = useState(HISTORY_BATCH_SIZE);
   const [historyAutoLoadArmed, setHistoryAutoLoadArmed] = useState(() => !focusJobId);
   const historySentinelRef = useRef<HTMLDivElement>(null);
@@ -419,8 +465,10 @@ export function RoundList({
         showActions={!embedded || rounds.length === 1}
         onCancel={onCancel}
         onReEdit={onReEdit}
+        onUsePrompt={onUsePrompt}
         reuseParameter={reuseParameter}
         onRegenerate={onRegenerate}
+        regenerateHint={regenerateHint}
         onReuseReferences={onReuseReferences}
         mediaActive={mediaActive}
       />
@@ -435,9 +483,14 @@ export function RoundList({
         hiddenPaths={hiddenPaths}
         onToggleHidden={onToggleHidden}
         onReEdit={onReEdit}
+        onUsePrompt={onUsePrompt}
         reuseParameter={reuseParameter}
         onRegenerate={onRegenerate}
+        regenerateHint={regenerateHint}
         onDeleteBatch={fadeThen(onDeleteBatch)}
+        onDeleteResult={onDeleteResult}
+        canvasTargets={canvasTargets}
+        onAddToCanvas={onAddToCanvas}
         onLightbox={setLightboxSrc}
         justCompleted={seenPendingKeys.current.has(key)}
         onReuseReferences={onReuseReferences}
@@ -455,9 +508,13 @@ export function RoundList({
         embedded={embedded}
         showActions={!embedded || rounds.length === 1}
         onDeleteFailed={fadeThen(onDeleteFailed)}
+        onDismissLocal={fadeThen(onDismissLocal)}
         onReEdit={onReEdit}
+        onUsePrompt={onUsePrompt}
         reuseParameter={reuseParameter}
         onRegenerate={onRegenerate}
+        regenerateHint={regenerateHint}
+        onFailureAction={onFailureAction}
         onReuseReferences={onReuseReferences}
         mediaActive={mediaActive}
       />
@@ -516,6 +573,11 @@ export function RoundList({
           onNext={lightboxStep(1)}
           preloadSrcs={lightboxNeighbours}
           downloadName={lightboxItems[lightboxIndex]?.name}
+          onUseAsReference={onEditAsReference && lightboxCurrent
+            ? () => { void onEditAsReference(lightboxCurrent.path); } : undefined}
+          onCopyPrompt={lightboxCurrent ? () => lightboxCurrent.config.prompt : undefined}
+          onDelete={onDeleteResult && lightboxCurrent?.deletable
+            ? () => { void onDeleteResult(lightboxCurrent.jobId, lightboxCurrent.path); } : undefined}
           details={embedded && lightboxItems[lightboxIndex] && <>
             <p>{lightboxItems[lightboxIndex].config.prompt}</p>
             <SpecChips config={lightboxItems[lightboxIndex].config} />
@@ -530,8 +592,10 @@ function PendingBatch({
   round, embedded, showActions,
   onCancel,
   onReEdit,
+  onUsePrompt,
   reuseParameter,
   onRegenerate,
+  regenerateHint,
   onReuseReferences,
   mediaActive,
 }: {
@@ -540,8 +604,10 @@ function PendingBatch({
   round: Extract<RoundState, { kind: 'pending' }>;
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  onUsePrompt?: (config: RoundConfig) => void;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
+  onRegenerate?: RegenerateHandler;
+  regenerateHint?: (config: RoundConfig) => string;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
 }) {
@@ -583,7 +649,7 @@ function PendingBatch({
                 config={round.config}
                 jobId={round.jobId}
                 mediaActive={mediaActive}
-                onUsePrompt={onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
+                onUsePrompt={onUsePrompt ? () => onUsePrompt(round.config) : undefined}
               />
             </div>
           </div>
@@ -610,7 +676,7 @@ function PendingBatch({
                 data-testid="progress-badge"
                 className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white"
               >
-                {stageLabel(round.progressPhase, isVideo)}
+                {round.uploading ? '上传参考中…' : stageLabel(round.progressPhase, isVideo)}
               </span>
               <div className={ROUND_SPINNER_CLASS} />
               <ProgressLine
@@ -625,7 +691,7 @@ function PendingBatch({
         </div>
         {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
           <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
-          <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+          <RegenerateButton config={round.config} hint={regenerateHint} onClick={() => { void onRegenerate?.(round.config); }} />
           {cancel}
           <Hint label="耗时 · 提交时间"><p data-testid="pending-run-meta" className={ROUND_RUN_META_CLASS}>
             {elapsedSec}s · {submittedAt}
@@ -928,6 +994,7 @@ function MentionPrompt({
               <p className="whitespace-pre-wrap break-words">
                 {renderParts()}
               </p>
+              {onUsePrompt && <div className="mt-1 flex justify-end"><UsePromptButton onClick={onUsePrompt} /></div>}
             </motion.div>
           ) : (
             <motion.div
@@ -939,19 +1006,7 @@ function MentionPrompt({
               <p className="whitespace-pre-wrap break-words">
                 {renderParts()}
               </p>
-              {onUsePrompt && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  data-testid="round-use-prompt"
-                  onClick={onUsePrompt}
-                  className="h-6 shrink-0 gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
-                >
-                  <TextIcon size="sm" aria-hidden />
-                  使用提示词
-                </Button>
-              )}
+              {onUsePrompt && <UsePromptButton onClick={onUsePrompt} />}
             </motion.div>
           )
         )}
@@ -989,6 +1044,31 @@ function MentionPrompt({
       )}
     </>
   );
+}
+
+/** 只把提示词正文填进输入框，不换模型、参数和参考。 */
+function UsePromptButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      type="button"
+      data-testid="round-use-prompt"
+      onClick={onClick}
+      className="h-6 shrink-0 gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+    >
+      <TextIcon size="sm" aria-hidden />
+      使用提示词
+    </Button>
+  );
+}
+
+/** 「再次生成」按旧配置直接提交，不改输入壳；提示里写清用的是哪个模型、大概多少钱。 */
+function RegenerateButton({ config, hint, onClick }: {
+  config: RoundConfig; hint?: (config: RoundConfig) => string; onClick: () => void;
+}) {
+  const button = <ActionButton onClick={onClick}>再次生成</ActionButton>;
+  return hint ? <Hint label={hint(config)}>{button}</Hint> : button;
 }
 
 function MentionChip({ label, kind, path, jobId, onHover, mediaActive }: {
@@ -1069,7 +1149,7 @@ type SaveResultAssetHandler = (request: SaveResultAssetRequest) => void;
 
 function SaveResultButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Hint label="保存为创作资产"><Button variant="bare"
+    <Hint label="保存到资产"><Button variant="bare"
       type="button"
       onClick={(event) => {
         event.stopPropagation();
@@ -1099,6 +1179,53 @@ function ShareResultButton({ index, onClick }: { index: number; onClick: () => v
   );
 }
 
+/** 单张结果的「更多」菜单。没有可做的事就不渲染；删除排在最后，分隔线隔开，destructive 色。 */
+function ResultMoreMenu({
+  index, onSetPromptPreview, onSave, onShare, canvasTargets, onAddToCanvas, onReEdit, onDelete, deleteLabel,
+}: {
+  index: number;
+  onSetPromptPreview?: () => void;
+  onSave?: () => void;
+  onShare?: () => void;
+  canvasTargets?: CanvasTarget[];
+  onAddToCanvas?: (projectId: string) => void;
+  onReEdit?: () => void;
+  onDelete?: () => void;
+  deleteLabel: string;
+}) {
+  const canvasMenu = onAddToCanvas && canvasTargets && canvasTargets.length > 0;
+  const hasActions = Boolean(onSetPromptPreview || onSave || onShare || canvasMenu || onReEdit);
+  if (!hasActions && !onDelete) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
+        aria-label={`生成结果 ${index + 1} 的更多操作`}
+        className={`size-8 rounded-full bg-scrim text-white transition-opacity duration-150 ${RESULT_REVEAL}`}
+        onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
+        {onReEdit && <DropdownMenuItem onSelect={onReEdit}><EditIcon />重新编辑</DropdownMenuItem>}
+        {onSetPromptPreview && <DropdownMenuItem onSelect={onSetPromptPreview}><AddImageIcon />设为效果图</DropdownMenuItem>}
+        {onSave && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 到资产`} onSelect={onSave}><SaveAssetIcon />保存到资产</DropdownMenuItem>}
+        {onShare && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={onShare}><ShareIcon />分享到团队库</DropdownMenuItem>}
+        {canvasMenu && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="gap-2"><CanvasIcon />加入画布</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+              {canvasTargets.map(target => (
+                <DropdownMenuItem key={target.projectId} onSelect={() => onAddToCanvas(target.projectId)}>
+                  <span className="truncate">{target.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+        {hasActions && onDelete && <DropdownMenuSeparator />}
+        {onDelete && <DropdownMenuItem destructive onSelect={onDelete}><DeleteIcon />{deleteLabel}</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function DoneBatch({
   round, embedded, showActions,
   favorites,
@@ -1106,9 +1233,14 @@ function DoneBatch({
   hiddenPaths,
   onToggleHidden,
   onReEdit,
+  onUsePrompt,
   reuseParameter,
   onRegenerate,
+  regenerateHint,
   onDeleteBatch,
+  onDeleteResult,
+  canvasTargets,
+  onAddToCanvas,
   onLightbox,
   onReuseReferences,
   onEditAsReference,
@@ -1129,9 +1261,14 @@ function DoneBatch({
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  onUsePrompt?: (config: RoundConfig) => void;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
-  onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
+  onRegenerate?: RegenerateHandler;
+  regenerateHint?: (config: RoundConfig) => string;
+  onDeleteBatch?: (jobId: string) => void | Promise<void>;
+  onDeleteResult?: (jobId: string, path: string) => void | Promise<void>;
+  canvasTargets?: CanvasTarget[];
+  onAddToCanvas?: (jobId: string, index: number, projectId: string) => void | Promise<void>;
   onLightbox?: (src: string) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
@@ -1165,6 +1302,24 @@ function DoneBatch({
       })
     : undefined;
   const startedAt = Date.parse(round.submittedAt);
+  // skill / 归档来的记录只作溯源展示，删除只对创作台自家出图开放。
+  const deletable = round.shareable !== false;
+  // 每张结果的「更多」：保存、分享、加入画布；嵌在 Agent 回合里没有整轮操作行时，重新编辑与删除也放这里。
+  const resultMenu = (index: number, path: string, mediaKind: 'image' | 'video') => (
+    <ResultMoreMenu
+      index={index}
+      onSetPromptPreview={mediaKind === 'image' && onSetPromptPreview
+        ? () => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })
+        : undefined}
+      onSave={mediaKind === 'image' && saveResult ? () => saveResult(index, path, mediaKind) : undefined}
+      onShare={mediaKind === 'image' && share ? () => share(round.jobId, index, path, round.config) : undefined}
+      canvasTargets={round.shareable ? canvasTargets : undefined}
+      onAddToCanvas={onAddToCanvas ? projectId => { void onAddToCanvas(round.jobId, index, projectId); } : undefined}
+      onReEdit={!showActions && onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
+      onDelete={deletable && onDeleteResult ? () => { void onDeleteResult(round.jobId, path); } : undefined}
+      deleteLabel={round.imagePaths.length > 1 ? (mediaKind === 'video' ? '删除这条' : '删除这张') : '删除这一轮'}
+    />
+  );
 
   return (
     <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
@@ -1182,7 +1337,7 @@ function DoneBatch({
               config={round.config}
               jobId={round.jobId}
               mediaActive={mediaActive}
-              onUsePrompt={onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
+              onUsePrompt={onUsePrompt ? () => onUsePrompt(round.config) : undefined}
             />
           </div>
         </div>
@@ -1235,6 +1390,7 @@ function DoneBatch({
                   </>}
                 >
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {resultMenu(index, path, 'video')}
                     {share && (
                       <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
                     )}
@@ -1292,17 +1448,7 @@ function DoneBatch({
                   )}
                 >
                   <div className="absolute right-2 top-2 flex gap-1.5">
-                    {(share || saveResult || onSetPromptPreview) && <DropdownMenu>
-                      <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
-                        aria-label={`生成结果 ${index + 1} 的更多操作`}
-                        className={`size-8 rounded-full bg-scrim text-white transition-opacity duration-150 ${RESULT_REVEAL}`}
-                        onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
-                        {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><AddImageIcon />设为效果图</DropdownMenuItem>}
-                        {saveResult && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 为资产`} onSelect={() => saveResult(index, path, 'image')}><SaveAssetIcon />保存为创作资产</DropdownMenuItem>}
-                        {share && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={() => share(round.jobId, index, path, round.config)}><ShareIcon />分享到团队库</DropdownMenuItem>}
-                      </DropdownMenuContent>
-                    </DropdownMenu>}
+                    {resultMenu(index, path, 'image')}
 
                     <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
                       type="button"
@@ -1312,14 +1458,16 @@ function DoneBatch({
                     >
                       <SwapIcon swapKey={favorited} variant="pop"><FavoriteIcon className={favorited ? 'fill-current' : ''} aria-hidden /></SwapIcon>
                     </Button></Hint>
+                    {/* 图标表示要做的动作（与画布一致）：在首页展示中 → 显示「不在首页展示」的动作图标。 */}
                     {onToggleHidden && (
-                      <Hint label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}><Button variant="bare"
+                      <Hint label={hidden ? '在首页展示' : '不在首页展示'}><Button variant="bare"
                         type="button"
                         onClick={(e) => { e.stopPropagation(); void onToggleHidden(path); }}
-                        aria-label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
+                        aria-label={hidden ? '在首页展示' : '不在首页展示'}
+                        aria-pressed={hidden}
                         className={resultToggleClass(hidden)}
                       >
-                        <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <HideIcon aria-hidden /> : <ShowIcon aria-hidden />}</SwapIcon>
+                        <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <ShowIcon aria-hidden /> : <HideIcon aria-hidden />}</SwapIcon>
                       </Button></Hint>
                     )}
                     <Hint label="下载图片"><a
@@ -1349,10 +1497,10 @@ function DoneBatch({
       </div>
       {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
-        <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+        <RegenerateButton config={round.config} hint={regenerateHint} onClick={() => { void onRegenerate?.(round.config); }} />
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
-            该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
-        {(onSavePromptAsset || round.shareable !== false) && (
+            该操作只留在工坊页。这里仅对 studio 自家出图开放「删除这一轮」（进回收站，可撤销）。 */}
+        {(onSavePromptAsset || deletable) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <ActionButton compact aria-label="更多操作">...</ActionButton>
@@ -1365,10 +1513,11 @@ function DoneBatch({
                 保存提示词资产
               </DropdownMenuItem>
             )}
-            {round.shareable !== false && (
-              <DropdownMenuItem onSelect={() => { void onDeleteBatch?.(round.jobId, round.imagePaths); }}>
+            {onSavePromptAsset && deletable && <DropdownMenuSeparator />}
+            {deletable && (
+              <DropdownMenuItem destructive onSelect={() => { void onDeleteBatch?.(round.jobId); }}>
                 <DeleteIcon className="shrink-0" aria-hidden />
-                删除该批次结果
+                删除这一轮
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -1443,9 +1592,13 @@ const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButt
 function FailedCard({
   round, embedded, showActions,
   onDeleteFailed,
+  onDismissLocal,
   onReEdit,
+  onUsePrompt,
   reuseParameter,
   onRegenerate,
+  regenerateHint,
+  onFailureAction,
   onReuseReferences,
   mediaActive,
 }: {
@@ -1453,15 +1606,36 @@ function FailedCard({
   showActions: boolean;
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  onDismissLocal?: (clientKey: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  onUsePrompt?: (config: RoundConfig) => void;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
+  onRegenerate?: RegenerateHandler;
+  regenerateHint?: (config: RoundConfig) => string;
+  onFailureAction?: (action: JobErrorAction, round: Extract<RoundState, { kind: 'failed' }>) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
 }) {
   const { config } = round;
-  const summary = failureSummary(round.reason);
+  const summary = round.canceled ? round.reason : round.failure?.message ?? failureSummary(round.reason);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [copyState, copy] = useCopyFeedback();
+  const actionRowShown = Boolean(config && showActions);
+  // 主修复动作至多一个；「重试」与操作行的「再次生成」是同一件事，那时不重复给。
+  const action = !round.canceled && onFailureAction ? round.failure?.action : undefined;
+  const showAction = action && !(action.kind === 'retry' && actionRowShown);
+  const canDelete = round.jobId ? Boolean(onDeleteFailed) : Boolean(round.clientKey && onDismissLocal);
+  const remove = () => {
+    if (round.jobId) void onDeleteFailed?.(round.jobId);
+    else if (round.clientKey) void onDismissLocal?.(round.clientKey);
+  };
+  const detail = [
+    summary,
+    config && `模型：${config.modelName ?? config.model}`,
+    config?.alias && `供应商：${config.alias}`,
+    round.jobId && `任务：${round.jobId}`,
+    `原文：${round.reason}`,
+  ].filter(Boolean).join('\n');
 
   return (
     <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
@@ -1480,7 +1654,7 @@ function FailedCard({
                 config={config}
                 jobId={round.jobId}
                 mediaActive={mediaActive}
-                onUsePrompt={onReEdit ? () => { void onReEdit(config, round.jobId); } : undefined}
+                onUsePrompt={onUsePrompt ? () => onUsePrompt(config) : undefined}
               />
             </div>
           </div>
@@ -1497,25 +1671,44 @@ function FailedCard({
           : <WarningIcon className="mt-0.5 shrink-0 text-destructive/70" aria-hidden />}
         <div className="min-w-0 flex-1 text-muted-foreground">
           <p className="[overflow-wrap:anywhere]">{summary}</p>
-          {summary !== round.reason && (
+          {!round.canceled && summary !== round.reason && (
             <>
               {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}
-              <Button variant="bare"
-                type="button"
-                aria-expanded={detailOpen}
-                onClick={() => setDetailOpen(open => !open)}
-                className="mt-1 rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {detailOpen ? '收起' : '展开'}
-              </Button>
+              <div className="mt-1 flex items-center gap-3">
+                <Button variant="bare"
+                  type="button"
+                  aria-expanded={detailOpen}
+                  onClick={() => setDetailOpen(open => !open)}
+                  className="rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  {detailOpen ? '收起技术详情' : '查看技术详情'}
+                </Button>
+                <Button variant="link" size="sm"
+                  type="button"
+                  onClick={() => copy(detail)}
+                  className="h-auto gap-1 p-0 text-xs font-normal text-muted-foreground/80 hover:text-foreground hover:no-underline"
+                >
+                  <SwapIcon swapKey={copyState === 'copied'}>{copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}</SwapIcon>
+                  复制详情
+                </Button>
+              </div>
             </>
           )}
         </div>
-        {round.jobId && onDeleteFailed && (
+        {showAction && (
+          <Button variant="outline" size="sm"
+            type="button"
+            onClick={() => onFailureAction?.(action, round)}
+            className="h-7 shrink-0 px-2"
+          >
+            {action.label}
+          </Button>
+        )}
+        {canDelete && (
           <Hint label={round.canceled ? '删除已停止记录' : '删除失败记录'}><Button variant="bare"
             type="button"
             aria-label={round.canceled ? '删除已停止记录' : '删除失败记录'}
-            onClick={() => { void onDeleteFailed(round.jobId!); }}
+            onClick={remove}
             className={round.canceled
               ? 'shrink-0 whitespace-nowrap rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
               : 'shrink-0 whitespace-nowrap rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
@@ -1527,7 +1720,8 @@ function FailedCard({
       {config && showActions && (
         <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
-          <ActionButton onClick={() => { void onRegenerate?.(config, round.jobId); }}>再次生成</ActionButton>
+          <RegenerateButton config={config} hint={regenerateHint}
+            onClick={() => { void onRegenerate?.(config, round.jobId, round.jobId ? undefined : round.clientKey); }} />
         </div>
       )}
     </section>

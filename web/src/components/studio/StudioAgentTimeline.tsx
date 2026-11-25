@@ -195,7 +195,7 @@ function compareTime(a: string, b: string) {
   return fraction(a).localeCompare(fraction(b));
 }
 
-export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJobs, last, onPickSuggestion }: {
+export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJobs, last, onRetry, onPickSuggestion }: {
   turn: StudioAgentTurn;
   session: StudioAgentSession;
   agent: Controller;
@@ -203,6 +203,8 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   messages: StudioAgentSession['messages'];
   renderJobs: (jobs: Job[]) => ReactNode;
   last: boolean;
+  /** 最后一轮出错或被停止时显示「重试」：同一条消息和附件重发。 */
+  onRetry?: () => void;
   onPickSuggestion?: (text: string) => void;
 }) {
   const running = turn.status === 'running';
@@ -326,6 +328,9 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
       </p>
     )}
     {hasJobs && <div data-testid="agent-multi-job-batch" className="pt-1">{renderJobs(sortedJobs)}</div>}
+    {onRetry && last && (turn.status === 'failed' || turn.status === 'interrupted') && (
+      <Button variant="secondary" size="sm" className="h-8 text-xs" disabled={agent.pending} onClick={onRetry}>重试</Button>
+    )}
     {onPickSuggestion && <SuggestionsFade shown={suggestions.length > 0}>
       <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />
     </SuggestionsFade>}

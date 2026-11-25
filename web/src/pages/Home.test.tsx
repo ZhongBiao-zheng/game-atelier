@@ -255,13 +255,13 @@ describe('Home', () => {
       return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
     }) as any;
     renderHome();
-    const providerBtn = await screen.findByRole('button', { name: /选择厂商/ });
+    const providerBtn = await screen.findByRole('button', { name: /选择供应商/ });
     // 厂商按钮在 /api/keys 加载完前 disabled（visibleProviders 为空）：点击 disabled
     // 按钮是 no-op、弹窗不开。必须等它启用再点（CI 慢环境下不等必现）。
     await waitFor(() => expect(providerBtn).toBeEnabled());
     fireEvent.click(providerBtn);
     // 弹窗 portal 后定位走 inline fixed：向下弹 = 设 top。
-    const panel = await screen.findByRole('listbox', { name: '选择厂商列表' });
+    const panel = await screen.findByRole('listbox', { name: '选择供应商列表' });
     expect(panel).toHaveAttribute('data-toolbar-popover');
     expect(panel).toHaveAttribute('data-side', 'bottom');
   });
@@ -295,12 +295,12 @@ describe('Home', () => {
 
     renderHome();
 
-    const providerBtn = await screen.findByRole('button', { name: /选择厂商/ });
+    const providerBtn = await screen.findByRole('button', { name: /选择供应商/ });
     // 厂商按钮在 /api/keys 加载完前 disabled（visibleProviders 为空）：点击 disabled
     // 按钮是 no-op、弹窗不开。必须等它启用再点（CI 慢环境下不等必现）。
     await waitFor(() => expect(providerBtn).toBeEnabled());
     fireEvent.click(providerBtn);
-    const providerPanel = await screen.findByRole('listbox', { name: '选择厂商列表' });
+    const providerPanel = await screen.findByRole('listbox', { name: '选择供应商列表' });
     expect(providerPanel).toHaveAttribute('data-toolbar-popover');
     expect(providerPanel).toHaveAttribute('data-side', 'bottom');
 
@@ -399,7 +399,7 @@ describe('Home', () => {
 
     await screen.findByText('Volcengine Ark');
     typePrompt(screen.getByLabelText('生图 prompt'), '首页提交跳转');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     await waitFor(() => expect(location.history).toContain('/studio'));

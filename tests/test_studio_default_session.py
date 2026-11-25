@@ -26,7 +26,7 @@ def test_read_creates_one_default_session_under_contention():
     with ThreadPoolExecutor(4) as pool:
         rows = list(pool.map(sessions.read, [DEFAULT] * 8))
     assert all(row == rows[0] for row in rows)
-    assert rows[0].title == "默认会话"
+    assert rows[0].title == "默认对话"
     assert sessions.read(DEFAULT) == rows[0]
 
 
@@ -55,7 +55,7 @@ def test_patch_and_delete_default_session(client):
     for headers in ({}, {"If-Match": str(row["revision"])}):
         rejected = client.delete(f"{BASE}/{DEFAULT}", headers=headers)
         assert rejected.status_code == 400
-        assert rejected.json()["detail"] == "默认会话不能删除"
+        assert rejected.json()["detail"] == "默认对话不能删除"
     assert client.get(f"{BASE}/{DEFAULT}").json() == row
 
 

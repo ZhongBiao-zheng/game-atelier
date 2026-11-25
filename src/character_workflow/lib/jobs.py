@@ -8,11 +8,11 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, get_args
+from typing import Any, Callable, Iterator, get_args
 
 from pydantic import ValidationError
 
-from character_workflow.lib import data_root, keys
+from character_workflow.lib import data_root, keys, trash
 from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_retry
 from character_workflow.lib.schemas import Job, JobErrorCode, JobKind, JobParams, JobStatus, Namespace
 
@@ -302,19 +302,89 @@ def update_job_phase(job_id: str, phase: str) -> Job:
         return _write(job.model_copy(update={"progress_phase": phase}))
 
 
-def remove_image_from_job(job_id: str, image_path: str) -> Job:
-    """从 job 的 output_paths 移除一张图，并删除磁盘文件。
-    路径不在 output_paths 时抛 ValueError；不存在文件忽略不报错。"""
+_ROUND_LABEL_LENGTH = 24
+
+
+def _resolve_output(raw: str) -> Path:
+    path = Path(raw)
+    return path if path.is_absolute() else data_root.resolve_data_root() / raw
+
+
+def _trashable_studio_job(job_id: str) -> Job:
+    job = read_job(job_id)
+    if job.namespace != "studio":
+        raise ValueError("只能删除创作台的生成记录")
+    if job.status in (JobStatus.PENDING, JobStatus.PENDING_CONFIRM):
+        raise ValueError("生成中的记录不能删除，先停止")
+    return job
+
+
+def _round_label(job: Job) -> str:
+    return " ".join(job.prompt.split())[:_ROUND_LABEL_LENGTH] or "生成结果"
+
+
+def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
+    """创作台删除：移进回收站（30 天内可还原），返回 trash_id。
+
+    不给 output_path 删整轮（任务文件与产物目录）；给了且这一轮不止一份产物时只删这一份，
+    并从 output_paths 摘掉，还原时按原位置插回。只收创作台自家的、已结束的任务。"""
+    from character_workflow.lib.studio_jobs import studio_root
+
     with job_lock(job_id):
-        job = read_job(job_id)
-        if image_path not in job.output_paths:
-            raise ValueError(f"image {image_path} not in job {job_id} output_paths")
-        p = Path(image_path)
-        if p.exists():
-            p.unlink()
-        new_paths = [x for x in job.output_paths if x != image_path]
-        updated = job.model_copy(update={"output_paths": new_paths})
-        return _write(updated)
+        job = _trashable_studio_job(job_id)
+        if output_path is not None:
+            if output_path not in job.output_paths:
+                raise LookupError("这份结果不在这一轮里")
+            if len(job.output_paths) > 1:
+                index = job.output_paths.index(output_path)
+                trash_id = trash.move_to_trash(
+                    "round", _round_label(job), [_resolve_output(output_path)],
+                    {"job_id": job_id, "session_id": job.studio_agent_session_id,
+                     "output_path": output_path, "output_index": index},
+                )
+                _write(job.model_copy(update={
+                    "output_paths": [path for path in job.output_paths if path != output_path],
+                }))
+                return trash_id
+        output_dir = studio_root() / job_id
+        paths: list[Path] = [_path(job_id)]
+        if output_dir.exists():
+            paths.append(output_dir)
+        for raw in job.output_paths:
+            path = _resolve_output(raw)
+            if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
+                paths.append(path)
+        return trash.move_to_trash(
+            "round", _round_label(job), paths,
+            {"job_id": job_id, "session_id": job.studio_agent_session_id},
+        )
+
+
+def _restore_round(entry: trash.TrashEntry, restore_files: Callable[[], None]) -> None:
+    job_id = entry.meta.get("job_id")
+    if not isinstance(job_id, str):
+        restore_files()
+        return
+    with job_lock(job_id):
+        restore_files()
+        output_path = entry.meta.get("output_path")
+        if not isinstance(output_path, str):
+            return
+        # 单张删除：任务还在就把这张插回原位置；任务已整轮删掉时文件留在原处，不复活任务。
+        try:
+            job = read_job(job_id)
+        except FileNotFoundError:
+            return
+        if output_path in job.output_paths:
+            return
+        index = entry.meta.get("output_index")
+        position = index if isinstance(index, int) else len(job.output_paths)
+        paths = list(job.output_paths)
+        paths.insert(min(max(position, 0), len(paths)), output_path)
+        _write(job.model_copy(update={"output_paths": paths}))
+
+
+trash.register_restore_handler("round", _restore_round)
 
 
 def delete_failed_job(job_id: str) -> None:

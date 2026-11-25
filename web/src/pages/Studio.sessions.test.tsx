@@ -87,7 +87,7 @@ it('切换会话隔离历史；列表固定默认项，标出运行并可在统�
   expect(await screen.findByText('无归属字段的旧图')).toBeVisible();
   fireEvent.click(screen.getByLabelText('切换对话'));
   const menu = within(screen.getByLabelText('对话列表'));
-  expect(menu.getAllByRole('button').slice(0, 2).map(b => b.textContent)).toEqual(['新建对话', '默认会话']);
+  expect(menu.getAllByRole('button').slice(0, 2).map(b => b.textContent)).toEqual(['新对话', '默认对话']);
   expect(menu.queryByLabelText('删除对话 默认会话')).toBeNull();
   expect(menu.getByLabelText('运行中')).toBeVisible();
   fireEvent.click(menu.getByText('山色'));
@@ -117,7 +117,7 @@ it('手动与 Agent 按提交时间混排；搜索、追问回填和乐观手动
   expect(screen.getByLabelText('Agent 消息')).toHaveFocus();
   choose('图片');
   enter('等待提交的手动轮次');
-  fireEvent.click(screen.getByLabelText('提交生成'));
+  fireEvent.click(screen.getByLabelText('生成'));
   expect(await screen.findByText('等待提交的手动轮次')).toBeVisible();
   expect(screen.queryByText('继续探索')).toBeNull();
   await act(async () => finish());
@@ -128,12 +128,12 @@ it('空草稿首次手动生成先用提示词前 40 字建会话，随后携带
   const { requests, finish } = server();
   mount();
   await screen.findByText('无归属字段的旧图');
-  fireEvent.click(screen.getByLabelText('新建对话'));
+  fireEvent.click(screen.getByLabelText('新对话'));
   expect(screen.getByText('今天想一起创作什么？')).toBeVisible();
   const posts = () => requests.mock.calls.filter(([, init]) => init?.method === 'POST');
   expect(posts().some(([url]) => url === base)).toBe(false);
   enter('山🌄'.repeat(25));
-  fireEvent.click(screen.getByLabelText('提交生成'));
+  fireEvent.click(screen.getByLabelText('生成'));
   await waitFor(() => expect(posts().map(([url]) => url)).toEqual([base, '/api/studio/jobs']));
   expect(JSON.parse(String(posts()[0][1]?.body)).title).toBe('山🌄'.repeat(20));
   expect(JSON.parse(String(posts()[1][1]?.body)).studio_agent_session_id).toBe(created);
@@ -145,8 +145,8 @@ it('从首页手动提交后返回默认会话', async () => {
   updateStudioView({ activeSessionId: ordinary });
   const loc = mount(true);
   enter('首页参考图');
-  await waitFor(() => expect(screen.getByLabelText('提交生成')).toBeEnabled());
-  fireEvent.click(screen.getByLabelText('提交生成'));
+  await waitFor(() => expect(screen.getByLabelText('生成')).toBeEnabled());
+  fireEvent.click(screen.getByLabelText('生成'));
   await act(async () => finish());
   const call = requests.mock.calls.find(([url]) => url === '/api/studio/jobs');
   expect(JSON.parse(String(call?.[1]?.body)).studio_agent_session_id).toBe(DEFAULT_STUDIO_SESSION_ID);
@@ -220,8 +220,8 @@ it('切换会话读取失败时整体退回原会话，记录与提交仍归原�
   expect(screen.getByText('无归属字段的旧图')).toBeVisible();
   expect(screen.queryByText('第一幅草图')).toBeNull();
   enter('失败后提交');
-  await waitFor(() => expect(screen.getByLabelText('提交生成')).toBeEnabled());
-  fireEvent.click(screen.getByLabelText('提交生成'));
+  await waitFor(() => expect(screen.getByLabelText('生成')).toBeEnabled());
+  fireEvent.click(screen.getByLabelText('生成'));
   await act(async () => finish());
   const call = requests.mock.calls.find(([url]) => url === '/api/studio/jobs');
   expect(JSON.parse(String(call?.[1]?.body)).studio_agent_session_id).toBe(DEFAULT_STUDIO_SESSION_ID);

@@ -51,6 +51,36 @@ export function clearStudioDraft(): void {
   draft = null;
 }
 
+/** 每段对话各自的未提交输入：切到别的对话再切回来，提示词和参考素材原样回来。同样只活在内存里。 */
+export interface StudioSessionInput {
+  promptText: string;
+  promptAssetSourceTitle: string | null;
+  promptAssetId: string | null;
+  referenceImages: File[];
+  referenceVideos: File[];
+  referenceAudios: File[];
+  videoFrames: FrameSlots;
+  mjRefs: MjRefSlots;
+  agentText: string;
+  agentFiles: File[];
+}
+
+/** 还没建会话的「新对话」用这个键存草稿。 */
+export const NEW_SESSION_DRAFT_KEY = '__new__';
+const sessionInputs = new Map<string, StudioSessionInput>();
+
+export function readSessionInput(key: string): StudioSessionInput | undefined {
+  return sessionInputs.get(key);
+}
+
+export function writeSessionInput(key: string, input: StudioSessionInput): void {
+  sessionInputs.set(key, input);
+}
+
+export function deleteSessionInput(key: string): void {
+  sessionInputs.delete(key);
+}
+
 export type StudioInputMode = 'agent' | 'image' | 'video';
 export const DEFAULT_STUDIO_SESSION_ID = 'session-default-studio';
 type StudioView = { inputMode: StudioInputMode; activeSessionId: string | null };

@@ -19,7 +19,6 @@ POST /api/prompt/{job_id}
 POST /api/clipboard-attempt
 GET /api/raw
 POST /api/uploads
-DELETE /api/jobs/{job_id}/image
 DELETE /api/jobs/{job_id}
 POST /api/jobs/{job_id}/confirm
 POST /api/jobs/{job_id}/cancel
@@ -233,6 +232,8 @@ POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
 POST /api/studio/jobs
+DELETE /api/studio/jobs/{job_id}
+POST /api/studio/jobs/{job_id}/canvas
 GET /api/studio/agent/sessions
 POST /api/studio/agent/sessions
 GET /api/studio/agent/sessions/{session_id}

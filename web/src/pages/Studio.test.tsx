@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -120,8 +120,8 @@ describe('Studio 变量冻结边界', () => {
     await screen.findByRole('button', { name: '选择比例和分辨率' });
     const template = `绘制${promptVariableToken({ name: '内容', example: '', value: '城堡' })}`;
     typePrompt(screen.getByLabelText('生图 prompt'), template);
-    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(screen.getByLabelText('生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('生成'));
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1].body));
@@ -203,8 +203,8 @@ function mockCompletedBatchAndKeys() {
         }] }),
       } as any);
     }
-    if (String(url).startsWith('/api/jobs/job-studio-1/image')) {
-      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) } as any);
+    if (String(url).startsWith('/api/studio/jobs/job-studio-1')) {
+      return Promise.resolve({ ok: true, json: async () => ({ trash_id: 'trash-20261125000000-0000abcd' }) } as any);
     }
     if (String(url).startsWith('/api/raw')) {
       return Promise.resolve({
@@ -299,7 +299,7 @@ describe('Studio', () => {
     renderStudio();
 
     expect(screen.getByLabelText('打开创作资产')).toHaveClass('h-9', 'px-3');
-    expect(screen.getByLabelText('提交生成')).toHaveClass('size-10');
+    expect(screen.getByLabelText('生成')).toHaveClass('size-10');
   });
 
   it('shows no example prompt chips when no rounds', () => {
@@ -310,7 +310,7 @@ describe('Studio', () => {
 
   it('disables submit when prompt empty', () => {
     renderStudio();
-    const submit = screen.getByLabelText('提交生成');
+    const submit = screen.getByLabelText('生成');
     expect(submit).toBeDisabled();
   });
 
@@ -390,7 +390,7 @@ describe('Studio', () => {
 
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, '广西南宁城市海报');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -447,7 +447,7 @@ describe('Studio', () => {
 
     renderStudio();
     typePrompt(await screen.findByLabelText('生图 prompt'), '一张风景');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -492,7 +492,7 @@ describe('Studio', () => {
 
     renderStudio();
     typePrompt(await screen.findByLabelText('生图 prompt'), '一张竖版角色海报');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -517,7 +517,7 @@ describe('Studio', () => {
     expect(countButton).toHaveTextContent('4 张');
 
     typePrompt(screen.getByLabelText('生图 prompt'), '四张草图');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -526,7 +526,7 @@ describe('Studio', () => {
     expect(body.params.n).toBe(4);
   });
 
-  it('restores saved provider/model but resets ratio/count to defaults on mount', async () => {
+  it('restores saved provider/model, count and quality but not legacy top-level ratio on mount', async () => {
     localStorage.setItem(
       'studio:selection',
       JSON.stringify({
@@ -540,11 +540,11 @@ describe('Studio', () => {
     );
     renderStudio();
 
-    // 不做任何下拉操作，直接提交 —— provider/model 仍从 localStorage 恢复，
-    // 但出图配置（ratio/数量/质量）每次启动回默认（飙哥指定），不再回填上次选择。
+    // 不做任何下拉操作，直接提交 —— provider/model 从 localStorage 恢复；
+    // 张数与质量也记住（D7，与视频参数一致）。旧版顶层 ratio 不参与尺寸选择。
     const textarea = await screen.findByLabelText('生图 prompt');
     typePrompt(textarea, '恢复测试');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -552,11 +552,11 @@ describe('Studio', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.alias).toBe('oa');
     expect(body.model).toBe('gpt-image-2');
-    // 旧版顶层 ratio/count 不参与尺寸选择，新草稿默认 AUTO / 1 张。
+    // 旧版顶层 ratio 不参与尺寸选择，新草稿默认 AUTO；张数恢复成上次的 3 张。
     expect(body.params.size_mode).toBe('auto');
     expect(body.params.size).toBe('auto');
     expect(body.params).not.toHaveProperty('ratio');
-    expect(body.params.n).toBe(1);
+    expect(body.params.n).toBe(3);
   });
 
   it('persists selection changes to localStorage', async () => {
@@ -618,8 +618,8 @@ describe('Studio', () => {
 
     renderStudio();
 
-    await screen.findByRole('button', { name: /选择厂商/ });
-    fireEvent.click(screen.getByRole('button', { name: /选择厂商/ }));
+    await screen.findByRole('button', { name: /选择供应商/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择供应商/ }));
     fireEvent.click(screen.getByRole('option', { name: /oa/ }));
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
@@ -628,7 +628,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出高度')).toHaveValue(1152);
 
     typePrompt(screen.getByLabelText('生图 prompt'), '宽幅海报');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -708,7 +708,7 @@ describe('Studio', () => {
     renderStudio();
 
     typePrompt(await screen.findByLabelText('生图 prompt'), '开箱即用');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -787,7 +787,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出高度')).toHaveValue(2304);
 
     typePrompt(screen.getByLabelText('生图 prompt'), '竖版角色海报');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -839,7 +839,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出高度')).toHaveValue(1920);
 
     typePrompt(screen.getByLabelText('生图 prompt'), '方形角色头像');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -849,8 +849,8 @@ describe('Studio', () => {
 
   it('opens prompt menus upward on the studio page', async () => {
     renderStudio();
-    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-    const panel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    fireEvent.click(await screen.findByRole('button', { name: /选择供应商/ }));
+    const panel = screen.getByRole('listbox', { name: '选择供应商列表' });
     expect(panel).toHaveAttribute('data-toolbar-popover');
     expect(panel).toHaveAttribute('data-side', 'top');
   });
@@ -858,9 +858,9 @@ describe('Studio', () => {
   it('anchors prompt popovers to their selected trigger on the studio page', async () => {
     renderStudio();
 
-    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /选择供应商/ }));
     expect(screen.getByTestId('provider-control-wrap')).toHaveClass('relative');
-    const providerPanel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    const providerPanel = screen.getByRole('listbox', { name: '选择供应商列表' });
     expect(providerPanel).toHaveAttribute('data-toolbar-popover');
     expect(providerPanel).toHaveAttribute('data-side', 'top');
 
@@ -890,7 +890,7 @@ describe('Studio', () => {
   it('highlights prompt control buttons while their popovers are open', async () => {
     renderStudio();
 
-    const providerButton = await screen.findByRole('button', { name: /选择厂商/ });
+    const providerButton = await screen.findByRole('button', { name: /选择供应商/ });
     fireEvent.click(providerButton);
     expect(providerButton).toHaveClass('bg-secondary');
 
@@ -906,8 +906,8 @@ describe('Studio', () => {
   it('uses fixed width and row height for provider and model menus', async () => {
     renderStudio();
 
-    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('w-[280px]', 'max-h-[400px]');
+    fireEvent.click(await screen.findByRole('button', { name: /选择供应商/ }));
+    expect(screen.getByRole('listbox', { name: '选择供应商列表' })).toHaveClass('w-[280px]', 'max-h-[400px]');
     expect(screen.getByRole('option', { name: /volc/ })).toHaveClass('h-[58px]', 'text-sm');
 
     fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
@@ -1264,7 +1264,7 @@ describe('Studio', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: '更多操作' }), { key: 'Enter' });
 
     expect(screen.getByTestId('studio-more-menu')).toHaveAttribute('data-side', 'right');
-    expect(screen.getByRole('menuitem', { name: '删除该批次结果' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '删除这一轮' })).toBeInTheDocument();
   });
 
   it('closes the more menu on Escape', async () => {
@@ -1302,14 +1302,14 @@ describe('Studio', () => {
       }
       return defaultFetch(url, init);
     });
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     renderStudio();
 
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '保留当前编辑内容');
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('HTTP 403')));
+    // 不弹原生 alert：原因落在输入壳上方的状态条里。
+    expect(await screen.findByText(/取回参考图失败/)).toBeInTheDocument();
     expect(editor.textContent).toContain('保留当前编辑内容');
     expect(editor.textContent).not.toContain('一个身披白床单');
   });
@@ -1337,16 +1337,15 @@ describe('Studio', () => {
     });
   });
 
-  it('deletes every image in a completed batch through image delete endpoints', async () => {
+  it('moves a completed batch into the trash with one round delete', async () => {
     const fetchMock = mockCompletedBatchAndKeys();
     renderStudio();
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '更多操作' }), { key: 'Enter' });
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除该批次结果' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除这一轮' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv1.png', { method: 'DELETE' });
-      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv2.png', { method: 'DELETE' });
+      expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs/job-studio-1', expect.objectContaining({ method: 'DELETE' }));
     });
     await waitFor(() => {
       expect(screen.queryByRole('img', { name: '生成结果 1' })).not.toBeInTheDocument();
@@ -1509,7 +1508,7 @@ describe('Studio', () => {
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1080' } });
 
     typePrompt(screen.getByLabelText('生图 prompt'), '自定义尺寸测试');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -1543,7 +1542,7 @@ describe('Studio', () => {
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO');
     typePrompt(screen.getByLabelText('生图 prompt'), '自动构图');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = () => JSON.parse(String(fetchMock.mock.calls.filter(([url]) => url === '/api/studio/jobs').at(-1)![1].body));
     expect(payload().params).toMatchObject({ size_mode: 'auto', size: 'auto' });
@@ -1555,7 +1554,7 @@ describe('Studio', () => {
     render(<Router hook={hook}><Studio compact /></Router>);
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO'));
     typePrompt(screen.getByLabelText('生图 prompt'), '首页自动构图');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/studio/jobs')).toHaveLength(2));
     expect(payload().params).toMatchObject({ size_mode: 'auto', size: 'auto' });
     for (const key of ['ratio', 'resolution', 'custom_size', 'estimated_cost_cny']) expect(payload().params).not.toHaveProperty(key);
@@ -1577,7 +1576,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出高度')).toHaveValue(2048);
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '' } });
     typePrompt(screen.getByLabelText('生图 prompt'), '无效尺寸');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
     fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(false);
   });
@@ -1586,7 +1585,7 @@ describe('Studio', () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2', sizeParams: { size_mode: 'auto', size: 'auto' } }));
     renderStudio();
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO'));
-    fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择供应商' }));
     fireEvent.click(screen.getByRole('option', { name: /volc/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).not.toHaveTextContent('AUTO'));
   });
@@ -1678,7 +1677,7 @@ describe('Studio video submission', () => {
 
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, '一段电影质感的镜头');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -1758,7 +1757,7 @@ describe('Studio video submission', () => {
 
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, '一段电影质感的镜头');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -1830,7 +1829,7 @@ describe('Studio video submission', () => {
     typePrompt(screen.getByLabelText('生图 prompt'), '收束到这一帧');
 
     expect(await screen.findByTestId('frame-block-hint')).toBeInTheDocument();
-    const submitBtn = screen.getByLabelText('提交生成') as HTMLButtonElement;
+    const submitBtn = screen.getByLabelText('生成') as HTMLButtonElement;
     expect(submitBtn).toBeDisabled();
 
     fireEvent.click(submitBtn);
@@ -2028,7 +2027,7 @@ describe('Studio compact mode errors', () => {
 
     const textarea = await screen.findByLabelText('生图 prompt');
     typePrompt(textarea, '失败也要有反馈');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     const alert = await screen.findByRole('alert');
     // 报错要说清是哪一步失败 + 状态码（英文 `studio job failed: 500` 那种对画师没用）
@@ -2069,7 +2068,7 @@ describe('Studio compact mode errors', () => {
 
     const textarea = await screen.findByLabelText('生图 prompt');
     typePrompt(textarea, '首页也要记录费用');
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    fireEvent.click(screen.getByLabelText('生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const request = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
@@ -2359,24 +2358,23 @@ describe('Studio 复刻生成资产', () => {
     expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
   });
 
-  it('已有输入时先确认覆盖；取消不动，确认后覆盖', async () => {
-    const fetchMock = mockPanelEndpoints();
+  it('已有输入时直接覆盖，不弹确认；「已替换当前输入」的撤销还原原输入', async () => {
+    mockPanelEndpoints();
     renderStudio();
     await screen.findByText('Volcengine Ark');
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
     await openPanelAndReproduce(generationAsset(recipe()));
-    expect(await screen.findByText('覆盖当前输入？')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-    await waitFor(() => expect(screen.queryByText('覆盖当前输入？')).not.toBeInTheDocument());
-    expect(editor.textContent).toContain('我正在写的');
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/inputs/'))).toBe(false);
-
-    await act(async () => { await assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
-    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }));
     await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
     expect(editor.textContent).not.toContain('我正在写的');
+    expect(screen.queryByText('覆盖当前输入？')).not.toBeInTheDocument();
+
+    const notice = await screen.findByTestId('studio-replaced-notice');
+    expect(notice).toHaveTextContent('已替换当前输入');
+    fireEvent.click(within(notice).getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(editor.textContent).toContain('我正在写的'));
+    expect(editor.textContent).not.toContain('橘猫坐在窗台');
   });
 
   it('本机没有配方模型：模型位空着、生成禁用、常驻提示连同配方提示；选了模型后提示消失', async () => {
@@ -2400,12 +2398,12 @@ describe('Studio 复刻生成资产', () => {
     expect(notice).toHaveTextContent('本机没有 seedream-9');
     expect(notice).toHaveTextContent('遮罩参考未带入');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
 
     fireEvent.click(screen.getByLabelText('选择模型'));
     fireEvent.click(screen.getByRole('option', { name: /图片 4.7/ }));
     await waitFor(() => expect(screen.queryByText('本机没有 seedream-9')).not.toBeInTheDocument());
-    expect(screen.getByLabelText('提交生成')).not.toBeDisabled();
+    expect(screen.getByLabelText('生成')).not.toBeDisabled();
   });
 
   it('带参考视频的视频配方复刻后进全能参考，参考图与参考视频都不丢', async () => {
@@ -2504,8 +2502,8 @@ describe('Studio 模型选择按模态收敛（界面显示 = 实际提交）', 
     await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite'));
 
     typePrompt(screen.getByLabelText('生图 prompt'), '一座城堡');
-    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(screen.getByLabelText('生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
     expect(payload.alias).toBe('volc');
@@ -2566,13 +2564,13 @@ describe('Studio 复刻：边界', () => {
     ['首尾帧', { kind: 'video' as const, videoFrames: { first: file('f.png', 'image/png'), last: null } }],
     ['MJ 参考', { mjRefs: { image: [], sref: [file('s.png', 'image/png')], cref: [], oref: [] } }],
     ['参考音频', { kind: 'video' as const, videoMode: 'omni' as const, referenceAudios: [file('a.mp3', 'audio/mpeg')] }],
-  ])('只有%s、没有提示词时也先确认覆盖', async (_label, overrides) => {
+  ])('只有%s、没有提示词时覆盖后也给撤销', async (_label, overrides) => {
     writeStudioDraft(baseDraft(overrides));
     mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
     renderStudio();
     await waitFor(() => expect(screen.getByLabelText('选择模型')).not.toHaveTextContent('未配置模型'));
     await openPanelAndReproduce(generationAsset(recipe({ model: 'doubao-seedream-4-5-251128', provider: 'seedream', alias: 'volc' })));
-    expect(await screen.findByText('覆盖当前输入？')).toBeInTheDocument();
+    expect(await screen.findByTestId('studio-replaced-notice')).toHaveTextContent('已替换当前输入');
   });
 
   it('提交真正发出后复刻提示条清掉', async () => {
@@ -2595,14 +2593,13 @@ describe('Studio 复刻：边界', () => {
     })));
     expect(await screen.findByText('遮罩参考未带入')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(screen.getByLabelText('生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     await waitFor(() => expect(screen.queryByText('遮罩参考未带入')).not.toBeInTheDocument());
   });
 
   it('参考取回失败时输入框保持原样', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     mockPanelEndpoints(undefined, async () => new Response('', { status: 404 }));
     renderStudio();
     await screen.findByText('Volcengine Ark');
@@ -2610,8 +2607,7 @@ describe('Studio 复刻：边界', () => {
     typePrompt(editor, '我正在写的');
 
     await openPanelAndReproduce(generationAsset(recipe()));
-    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }));
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(await screen.findByText(/取回复刻参考素材失败/)).toBeInTheDocument();
     expect(editor.textContent).toContain('我正在写的');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite');
   });
@@ -2652,7 +2648,7 @@ describe('Studio 复刻：边界', () => {
     expect(screen.queryByText('模型列表未加载')).not.toBeInTheDocument();
     expect(readStudioDraft()?.referenceImages).toHaveLength(1);
     expect(screen.getByTestId('studio-recipe-notice')).toHaveTextContent('本机没有 gpt-image-2');
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
   });
 
   it('模型列表还没加载时不判缺模型，也先不填', async () => {
@@ -2683,7 +2679,7 @@ describe('Studio 复刻：边界', () => {
     await waitFor(() => expect(screen.getByTestId('studio-recipe-notice')).toHaveTextContent('本机没有 seedance-3.0-pro'));
     await waitFor(() => expect(readStudioDraft()?.providerAlias).toBe('tokendance'));
     expect(readStudioDraft()).toMatchObject({ model: '', kind: 'video', duration: 10, videoResolution: '1080p', videoRatio: '21:9' });
-    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    expect(screen.getByLabelText('生成')).toBeDisabled();
 
     fireEvent.click(screen.getByLabelText('选择模型'));
     fireEvent.click(screen.getByRole('option', { name: /Seedance 2.0/ }));
@@ -2729,7 +2725,7 @@ describe('Studio 生成结果保存为创作资产', () => {
     renderStudio();
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
-    fireEvent.click(await screen.findByLabelText('保存生成结果 2 为资产'));
+    fireEvent.click(await screen.findByLabelText('保存生成结果 2 到资产'));
     expect(assetPanelProps.current!.initialKind).toBe('media');
     expect(await screen.findByAltText('媒体资产预览')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
@@ -2755,7 +2751,7 @@ describe('Studio 生成结果保存为创作资产', () => {
     renderStudio();
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
-    fireEvent.click(await screen.findByLabelText('保存生成结果 1 为资产'));
+    fireEvent.click(await screen.findByLabelText('保存生成结果 1 到资产'));
     expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '保存生成资产' })).not.toBeInTheDocument();
   });
@@ -2970,10 +2966,10 @@ describe('Studio「自动」供应商', () => {
     const fetchMock = withRoutes();
     const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
     render(<Router hook={hook}><Studio compact={compact} /></Router>);
-    expect(await screen.findByRole('button', { name: '选择厂商' })).toHaveTextContent('智能路由');
+    expect(await screen.findByRole('button', { name: '选择供应商' })).toHaveTextContent('智能路由');
     typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
-    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(screen.getByLabelText('生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
     expect(payload.alias).toBeUndefined();
@@ -2993,10 +2989,10 @@ describe('Studio「自动」供应商', () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     const fetchMock = withRoutes();
     renderStudio();
-    expect(await screen.findByRole('button', { name: '选择厂商' })).not.toHaveTextContent('智能路由');
+    expect(await screen.findByRole('button', { name: '选择供应商' })).not.toHaveTextContent('智能路由');
     typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
-    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
-    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(screen.getByLabelText('生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('生成'));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
     expect(payload.alias).toBe('oa');
@@ -3017,13 +3013,13 @@ it.each([false, true])('停用供应商不进入创作台，启用后刷新可�
   });
   const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
   render(<Router hook={hook}><Studio compact={compact} /></Router>);
-  await waitFor(() => expect(screen.getByRole('button', { name: '选择厂商' })).toHaveTextContent('OpenAI'));
-  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择供应商' })).toHaveTextContent('OpenAI'));
+  fireEvent.click(screen.getByRole('button', { name: '选择供应商' }));
   expect(screen.queryByRole('option', { name: /volc ·/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择供应商' }));
   enabled = true;
   act(() => window.dispatchEvent(new Event('atelier:keys-changed')));
-  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择供应商' }));
   expect(await screen.findByRole('option', { name: /volc ·/ })).toBeInTheDocument();
 });
 
@@ -3099,7 +3095,7 @@ it('keeps the prompt asset default when used text is edited before submission', 
   await waitFor(() => expect(assetPanelProps.current?.onUsePrompt).toBeTypeOf('function'));
   act(() => assetPanelProps.current!.onUsePrompt({ asset_id: 'prompt-used', title: '角色提示词' }, '原始提示词'));
   typePrompt(screen.getByLabelText('生图 prompt'), '修改后的提示词');
-  fireEvent.click(screen.getByLabelText('提交生成'));
+  fireEvent.click(screen.getByLabelText('生成'));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
   const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/studio/jobs' && init?.method === 'POST');
   expect(JSON.parse(String(call![1]!.body))).toMatchObject({
@@ -3175,7 +3171,7 @@ it('三种生成模式共享顶部会话与筛选，切换后保留查询条件'
     fireEvent.click(screen.getByLabelText('选择生成模式'));
     fireEvent.click(screen.getByRole('option', { name: mode }));
     expect(screen.getByLabelText('切换对话')).toBeVisible();
-    expect(screen.getByLabelText('新建对话')).toBeVisible();
+    expect(screen.getByLabelText('新对话')).toBeVisible();
     expect(screen.getByLabelText('筛选：视频')).toBeVisible();
   }
 });

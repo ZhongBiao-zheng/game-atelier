@@ -10,6 +10,9 @@ import { readStudioView, updateStudioView, type StudioInputMode } from '@/pages/
 import { studioControlClass } from './ControlButton';
 import { PromptInput } from './PromptInput';
 import { Collapse } from '@/components/ui/collapse';
+import { Button } from '@/components/ui/button';
+import { ErrorIcon } from '@/components/ui/icons';
+import { canvasAgentSetupNotice } from '@/components/agent/canvasAgentSetupNotice';
 
 export function useStudioComposer(home = false) {
   const [location, navigate] = useLocation();
@@ -36,12 +39,6 @@ export function useStudioComposer(home = false) {
     setMode(next);
     updateStudioView({ inputMode: next });
   }, []);
-  function clearDraft() {
-    setText('');
-    setFiles([]);
-    setSkill(null);
-    messageId.current = null;
-  }
   /** 发出去立刻清空输入、回到对话底部，消息先以「发送中」出现在对话里；失败时把这次的文字、附件、技能填回去
    *  （输入框里已经重新打了字就不覆盖）。幂等标识留到成功才换，失败重发仍是同一条。 */
   async function send(prompt: string) {
@@ -70,18 +67,42 @@ export function useStudioComposer(home = false) {
       sending.current = false;
     }
   }
-  return { mode, switchMode, agent, text, setText, files, setFiles, skill, setSkill, clearDraft, editor, send };
+  return { mode, switchMode, agent, text, setText, files, setFiles, skill, setSkill, editor, send };
 }
 
 export type StudioComposerState = ReturnType<typeof useStudioComposer>;
 
-export function StudioComposer({ state, ...props }: { state: StudioComposerState } & ComponentProps<typeof PromptInput>) {
+export function StudioComposer({ state, onOpenProviders, ...props }: {
+  state: StudioComposerState;
+  /** Agent 配置提示里的「去设置」。 */
+  onOpenProviders?: () => void;
+} & ComponentProps<typeof PromptInput>) {
   const { agent, skill, setSkill } = state;
   const settings = agent.session ?? agent.draft;
   const running = agent.session?.status === 'running';
   const busy = agent.pending || running || agent.session?.status === 'awaiting_approval';
   const creation = settings.creation_mode ?? 'all';
   const ready = agent.models?.models.some(item => item.model === settings.model && item.alias === settings.model_alias);
+  const agentMode = state.mode === 'agent';
+  // 与画布 Agent 面板同一条配置提示：发之前就说清楚缺什么、去哪补。
+  const setupNotice = agentMode ? canvasAgentSetupNotice({
+    chatModels: agent.models?.models ?? null,
+    generationModels: agent.generationModels,
+    mode: creation,
+    auto: settings.auto_models ?? true,
+    preferred: settings.preferred_models ?? [],
+  }) : null;
+  // 存的对话模型失效、但还有别的可用模型：静默换成第一个，不让发送按钮莫名置灰。
+  const fallback = agentMode && agent.models && !ready && !busy ? agent.models.models[0] : undefined;
+  const updateSettings = agent.updateSettings;
+  const fallbackTried = useRef<string | null>(null);
+  useEffect(() => {
+    if (!fallback) return;
+    const key = `${settings.model_alias ?? ''}/${settings.model ?? ''}`;
+    if (fallbackTried.current === key) return;
+    fallbackTried.current = key;
+    void updateSettings({ model_alias: fallback.alias, model: fallback.model });
+  }, [fallback, settings.model_alias, settings.model, updateSettings]);
   const triggerClassName = studioControlClass + ' shrink-0 w-auto';
   const controls = <>
     <CanvasAgentModelPicker triggerClassName={triggerClassName} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
@@ -98,16 +119,30 @@ export function StudioComposer({ state, ...props }: { state: StudioComposerState
   const agentProps = state.mode === 'agent' ? {
     value: state.text, onValueChange: state.setText,
     referenceImages: state.files, onReferenceImagesChange: state.setFiles,
-    onSubmit: state.send, onSavePromptAsset: undefined, disabled: props.disabled || !ready || busy || agent.waitingForSession,
+    onSubmit: state.send, onSavePromptAsset: undefined, estimateLabel: null,
+    disabled: props.disabled || !ready || busy || agent.waitingForSession,
     onStop: running ? agent.stop : undefined, agentControls: controls,
     submitErrorKey: agent.error,
   } : {};
   // 报错行用 Collapse 从上沿展开，收起时保留最后一条文案播完退场。
   const lastError = useRef(agent.error);
   if (agent.error) lastError.current = agent.error;
+  const lastNotice = useRef(setupNotice);
+  if (setupNotice) lastNotice.current = setupNotice;
+  const notice = setupNotice ?? lastNotice.current;
   return <div className="pointer-events-auto mx-auto w-full max-w-[780px]">
     <Collapse open={Boolean(agent.error)} appear>
       <p role={agent.error ? 'alert' : undefined} className="text-xs text-destructive">{agent.error ?? lastError.current}</p>
+    </Collapse>
+    <Collapse open={Boolean(setupNotice)} appear>
+      {notice && <p role="status" className="mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-card px-2.5 py-1.5 text-xs text-muted-foreground">
+        <ErrorIcon size="sm" className="shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 break-words">{notice.text}</span>
+        <Button variant="link" size="sm" type="button"
+          onClick={() => notice.action === 'settings' ? onOpenProviders?.() : void agent.updateSettings({ auto_models: true })}
+          className="h-auto shrink-0 p-0 text-xs text-primary"
+        >{notice.action === 'settings' ? '去设置' : '改为自动'}</Button>
+      </p>}
     </Collapse>
     <PromptInput {...props} {...agentProps} kind={state.mode} onKindChange={state.switchMode} inputRef={state.editor} />
   </div>;

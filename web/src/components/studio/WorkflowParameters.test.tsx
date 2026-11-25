@@ -44,10 +44,10 @@ describe('ComfyUI generation controls', () => {
     const provider = { ...key, models: [{ ...key.models[0], workflow_inputs: [image] }] };
     const props = { providers: [provider], providerAlias: 'local', model: 'comfyui-upscale', onSubmit: vi.fn() };
     const { rerender } = render(<PromptInput {...props} />);
-    expect(screen.getByRole('button', { name: '提交生成' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('需要原图');
     rerender(<PromptInput {...props} referenceImages={[new File(['image'], 'ref.png', { type: 'image/png' })]} />);
-    expect(screen.getByRole('button', { name: '提交生成' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '生成' })).toBeEnabled();
     expect(workflowReferenceError([image, mask], 1, false)).toBe('需要遮罩');
     expect(workflowReferenceError([image, mask], 1, true)).toBeNull();
   });
@@ -67,7 +67,7 @@ describe('ComfyUI generation controls', () => {
     expect(screen.queryByRole('button', { name: '选择比例和分辨率' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '参数' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择出图数量' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '提交生成' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成' }));
     expect(submit).toHaveBeenCalledWith('');
     expect(canvasGenerateBlock({ mode: 'image', modelChoiceCount: 1, keyCount: 1,
       alias: 'local', modelSelected: true, prompt: '', allowEmptyPrompt: true })).toBeNull();
@@ -97,14 +97,14 @@ it('uses member snapshots for workflow controls, including automatic routing', (
   const providers = withAutoProvider([hub], [{ id: 'comfyui-upscale', name: '放大', modality: 'image', mode: 'order', candidate_alias: 'Hub', members: [{ alias: 'Hub', provider: 'atelier', model_id: 'comfyui-upscale', name: '放大', base_url: null, protocol: null, via: hub.models[0].via }] }]);
   const props = { providers, providerAlias: '@auto', model: 'comfyui-upscale', onSubmit: vi.fn(), onReferenceImagesChange: vi.fn() };
   const { rerender } = render(<PromptInput {...props} />);
-  expect(screen.getByRole('button', { name: '提交生成' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: '生图 prompt' })).toHaveAttribute('contenteditable', 'false');
   expect(screen.queryByRole('button', { name: '选择比例和分辨率' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '参数' }));
   expect(screen.getByRole('switch')).toBeInTheDocument();
   fireEvent.keyDown(screen.getByRole('switch'), { key: 'Escape' });
   rerender(<PromptInput {...props} referenceImages={[new File(['image'], 'ref.png', { type: 'image/png' })]} />);
-  expect(screen.getByRole('button', { name: '提交生成' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '生成' })).toBeEnabled();
   expect(screen.queryByTestId('reference-stack-add')).not.toBeInTheDocument();
   expect(screen.getByText('原图')).toBeInTheDocument();
 });

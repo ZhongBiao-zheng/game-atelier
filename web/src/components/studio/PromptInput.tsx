@@ -126,6 +126,10 @@ interface Props {
   submitErrorKey?: string | number | null;
   /** 从记录里带进来的内容落在哪：每个新 id 让那一块闪一次主题色描边。 */
   flashRequest?: InputFlashRequest | null;
+  /** 提交按钮旁常显的估价（「4 张 · 约 ¥1.40」）；null = 未计价，不显示。 */
+  estimateLabel?: string | null;
+  /** 输入壳上方的状态条：一次选的参考超过上限时说明只加入了几张。 */
+  onNotice?: (text: string) => void;
 }
 
 export type InputFlashRequest = { id: number; area: 'prompt' | 'references' };
@@ -144,7 +148,7 @@ const REF_HOVER_SCALE = 1.02;
 const REF_HOVER_LIFT = -5;
 
 function providerName(provider?: KeyView) {
-  if (!provider) return '未配置厂商';
+  if (!provider) return '未配置供应商';
   return providerLabel(provider.provider, provider.alias);
 }
 
@@ -306,6 +310,8 @@ export function PromptInput({
   onVideoFramesChange,
   submitErrorKey,
   flashRequest,
+  estimateLabel = null,
+  onNotice,
 }: Props) {
   const isVideo = kind === 'video';
   const isAgent = kind === 'agent';
@@ -741,14 +747,11 @@ export function PromptInput({
   const trackMask =
     `linear-gradient(to right, black calc(100% - ${scrollBlockWidth}px), transparent calc(100% - ${scrollReserve}px))`;
 
-  // 参考图数量不变式：永远 ≤ 当前模型族上限。切换模型（16 张的 gpt-image → 3 张的 nano-banana）
-  // 或整组复用历史参考图都可能撑爆上限 —— 旧行为是界面上 chip 全在、后端只发前 N 张（静默丢弃）。
-  // 这里当场裁掉，用户看到的堆叠就是真正会发出去的那几张。
-  const refImagesLimit = isVideo ? (isOmni ? maxRefImgs : null) : maxRef;
-  useEffect(() => {
-    if (refImagesLimit === null || referenceImages.length <= refImagesLimit) return;
-    onReferenceImagesChange?.(referenceImages.slice(0, refImagesLimit));
-  }, [refImagesLimit, referenceImages, onReferenceImagesChange]);
+  // 切换模型（16 张的 gpt-image → 3 张的 nano-banana）不截参考：超出上限的留在堆叠里置灰，
+  // 提交时只发前 N 张（Studio 负责截取并在输入壳上方说明），换回模型后自动恢复。
+  const refImagesLimit = isAgent ? null : isVideo ? (isOmni ? maxRefImgs : null) : maxRef;
+  const overLimitImage = (item: { kind: string; live: number | null }) =>
+    refImagesLimit !== null && item.kind === 'image' && item.live !== null && item.live >= refImagesLimit;
 
   const submit = useCallback(() => {
     if (isAgent) {
@@ -778,15 +781,12 @@ export function PromptInput({
     if (e.key !== 'Enter') return;
     // 输入法组合期（中文候选）按 Enter 是确认候选，既不提交也不换行。
     if (composing.current || e.nativeEvent.isComposing) return;
-    if (e.shiftKey) {
-      // Shift+Enter 换行：contentEditable 原生 Enter 会包 <div>，统一改插 '\n'（pre-wrap 渲染换行）。
-      e.preventDefault();
-      insertPlainText('\n');
-      return;
-    }
-    // Enter 提交（聊天输入规范）；Cmd/Ctrl+Enter 同样提交，保留旧手感。
     e.preventDefault();
-    submit();
+    // 图片 / 视频会花钱：⌘↵ / Ctrl+↵ 提交，Enter 换行（D5）。Agent 是对话：Enter 发送，Shift+Enter 换行。
+    const submits = isAgent ? !e.shiftKey : e.metaKey || e.ctrlKey;
+    // 换行：contentEditable 原生 Enter 会包 <div>，统一改插 '\n'（pre-wrap 渲染换行）。
+    if (submits) submit();
+    else insertPlainText('\n');
   };
 
   function onEditorInput(e: React.FormEvent<HTMLDivElement>) {
@@ -842,24 +842,32 @@ export function PromptInput({
     const files = e.target.files;
     if (!files?.length) return;
     if (isOmni) {
-      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限，超限的文件直接丢弃。
+      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限，超限的不加入并在状态条说明。
       const images = [...referenceImages];
       const videos = [...referenceVideos];
       const audios = [...referenceAudios];
+      let dropped = 0;
       for (const file of Array.from(files)) {
         if (file.type.startsWith('video/')) {
           if (videoCaps?.supportsReferenceVideo && videos.length < maxRefVids) videos.push(file);
+          else dropped += 1;
         } else if (file.type.startsWith('audio/')) {
           if (videoCaps?.supportsReferenceAudio && audios.length < maxRefAudios) audios.push(file);
+          else dropped += 1;
         } else if (file.type.startsWith('image/')) {
           if (images.length < maxRefImgs) images.push(file);
+          else dropped += 1;
         }
       }
       onReferenceImagesChange?.(images);
       onReferenceVideosChange?.(videos);
       onReferenceAudiosChange?.(audios);
+      if (dropped > 0) onNotice?.(`${dropped} 个素材超出上限（图片 ${maxRefImgs} / 视频 ${maxRefVids} / 音频 ${maxRefAudios}），没有加入`);
     } else {
-      onReferenceImagesChange?.([...referenceImages, ...Array.from(files).filter(file => !isAgent || file.type.startsWith('image/'))].slice(0, maxRef));
+      const picked = Array.from(files).filter(file => !isAgent || file.type.startsWith('image/'));
+      const room = Math.max(0, maxRef - referenceImages.length);
+      onReferenceImagesChange?.([...referenceImages, ...picked.slice(0, room)]);
+      if (picked.length > room) onNotice?.(`只加入了前 ${room} 张（上限 ${maxRef}）`);
     }
     e.target.value = '';
   }
@@ -1040,8 +1048,9 @@ export function PromptInput({
                   key={item.key}
                   data-ref-key={item.key}
                   data-testid={leaving ? undefined : 'reference-drawer-item'}
+                  data-over-limit={overLimitImage(item) || undefined}
                   aria-hidden={leaving || undefined}
-                  className="group relative shrink-0"
+                  className={`group relative shrink-0 ${overLimitImage(item) ? 'opacity-40' : ''}`}
                   style={{ width: REF_W, height: REF_H }}
                   onMouseEnter={leaving ? undefined : () => setRefHovered(i)}
                   onMouseLeave={leaving ? undefined : () => setRefHovered(null)}
@@ -1149,8 +1158,9 @@ export function PromptInput({
                       <div
                         key={item.key}
                         data-testid={leaving ? undefined : 'reference-stack-item'}
+                        data-over-limit={overLimitImage(item) || undefined}
                         aria-hidden={leaving || undefined}
-                        className="absolute top-1/2 left-0 transition-[left,transform] duration-300 ease-in-out"
+                        className={`absolute top-1/2 left-0 transition-[left,transform,opacity] duration-300 ease-in-out ${overLimitImage(item) ? 'opacity-40' : ''}`}
                         style={{
                           width: REF_W,
                           height: REF_H,
@@ -1468,7 +1478,7 @@ export function PromptInput({
           <div ref={providerRef} data-testid="provider-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'provider'}
-              aria-label="选择厂商"
+              aria-label="选择供应商"
               onClick={() => visibleProviders.length === 0 ? openOnboarding('model_chip') : setOpenPanel(openPanel === 'provider' ? null : 'provider')}
             >
               <ProviderBrandIcon provider={provider} size="sm" /> {providerDisplayName}
@@ -1479,11 +1489,11 @@ export function PromptInput({
               anchorRef={providerRef}
               direction={menuDirection}
               role="listbox"
-              aria-label="选择厂商列表"
+              aria-label="选择供应商列表"
               maxHeight={400}
               className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
             >
-                <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
+                <div className="px-3 py-2 text-sm text-muted-foreground">选择供应商</div>
                 {visibleProviders.map((item) => (
                   <Button variant="bare"
                     key={item.alias}
@@ -1503,7 +1513,7 @@ export function PromptInput({
                     <ProviderBrandIcon provider={item} />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{providerName(item)}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{isAutoProvider(item) ? '' : `${item.alias} · `}{item.models.length} models</span>
+                      <span className="block truncate text-xs text-muted-foreground">{isAutoProvider(item) ? '' : `${item.alias} · `}{item.models.length} 个模型</span>
                     </span>
                   </Button>
                 ))}
@@ -1612,14 +1622,23 @@ export function PromptInput({
           )}
 
           <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
-            <ControlButton
-              active={openPanel === 'count'}
-              aria-label="选择出图数量"
-              disabled={fixedWorkflowSeed}
-              onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
-            >
-              <ImagesIcon size="sm" aria-hidden /> {fixedWorkflowSeed ? 1 : isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
-            </ControlButton>
+            {/* MJ 一次固定出 4 张：张数做成禁用态，说明放在提示里（禁用按钮收不到悬停，套一层 span）。 */}
+            {isMj ? (
+              <Hint label="Midjourney 一次出 4 张，张数不可调"><span className="inline-flex">
+                <ControlButton active={false} aria-label="选择出图数量" disabled>
+                  <ImagesIcon size="sm" aria-hidden /> {MJ_IMAGES_PER_TASK} 张
+                </ControlButton>
+              </span></Hint>
+            ) : (
+              <ControlButton
+                active={openPanel === 'count'}
+                aria-label="选择出图数量"
+                disabled={fixedWorkflowSeed}
+                onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
+              >
+                <ImagesIcon size="sm" aria-hidden /> {fixedWorkflowSeed ? 1 : Math.min(count, caps.maxCount ?? 4)} 张
+              </ControlButton>
+            )}
             <ToolbarPopover
               open={openPanel === 'count'}
               onClose={() => setOpenPanel(null)}
@@ -1628,20 +1647,14 @@ export function PromptInput({
               aria-label="选择出图数量列表"
               className="rounded-xl border border-border bg-card p-3"
             >
-                {isMj ? (
-                  <p data-testid="mj-count-note" className="max-w-[220px] text-xs text-muted-foreground">
-                    Midjourney 一次出 4 张方案（上游已切成 4 张单图），张数不可调。
-                  </p>
-                ) : (
-                  <CountOptions
-                    value={Math.min(count, caps.maxCount ?? 4)}
-                    max={caps.maxCount}
-                    onSelect={(item) => {
-                      onCountChange?.(item);
-                      setOpenPanel(null);
-                    }}
-                  />
-                )}
+                <CountOptions
+                  value={Math.min(count, caps.maxCount ?? 4)}
+                  max={caps.maxCount}
+                  onSelect={(item) => {
+                    onCountChange?.(item);
+                    setOpenPanel(null);
+                  }}
+                />
             </ToolbarPopover>
           </div>
           {workflowInputs != null && <WorkflowParameters inputs={workflowInputs} params={{ ...sizeParams, n: count }} menuDirection={menuDirection} onPatch={patch => { onSizeParamsChange?.(patch); if (patch.n != null) onCountChange?.(patch.n); }} />}
@@ -1724,6 +1737,9 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
+          {estimateLabel && !workflowReferenceProblem && !lastFrameOnlyBlocked && (
+            <span data-testid="studio-estimate" className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{estimateLabel}</span>
+          )}
           {workflowReferenceProblem && <span role="status" className="text-xs text-muted-foreground">{workflowReferenceProblem}</span>}
           {lastFrameOnlyBlocked && (
             <span
@@ -1742,12 +1758,12 @@ export function PromptInput({
       {/* 提交按钮：唯一一颗，锚定壳右下角，固定 40px。收起只在外层做 transform（缩到 80%、上移 2px
           落到单行条中线），不改尺寸与位置；缩放放在外层，按下反馈的 scale 不会和它打架。 */}
       <div className={`absolute bottom-4 right-4 origin-center transition-transform duration-300 ease-in-out ${collapsed ? '-translate-y-0.5 scale-80' : ''}`}>
-      <Hint label={isAgent ? (onStop ? '停止' : '发送') : workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
+      <Hint label={isAgent ? (onStop ? '停止' : '发送 ↵') : workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '生成 ⌘↵ / Ctrl+↵')}><Button variant="bare"
         ref={submitButtonRef}
         type="button"
         onClick={(e) => { e.stopPropagation(); if (onStop) onStop(); else submit(); }}
         disabled={!onStop && !canSubmit}
-        aria-label={isAgent ? (onStop ? "停止" : "发送") : "提交生成"}
+        aria-label={isAgent ? (onStop ? "停止" : "发送") : "生成"}
         className="inline-flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
       >
         <SwapIcon swapKey={ActionIcon === StopIcon ? 'stop' : 'send'}><ActionIcon size="lg" aria-hidden /></SwapIcon>
