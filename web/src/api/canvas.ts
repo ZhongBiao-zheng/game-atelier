@@ -279,11 +279,12 @@ export function commitCanvasPackage(token: string): Promise<CanvasPackageImport>
   );
 }
 
+/** 删除项目：移进回收站（30 天内可还原），返回回收站条目 id。 */
 export function deleteCanvasProject(
   projectId: string,
   expectedRevision: number,
-): Promise<void> {
-  return request(
+): Promise<string> {
+  return requestJson<{ trash_id: string }>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}`,
     '删除画布项目',
     {
@@ -291,7 +292,20 @@ export function deleteCanvasProject(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ expected_revision: expectedRevision }),
     },
-  ).then(() => undefined);
+  ).then(body => body.trash_id);
+}
+
+/** 「新建项目」建出来、什么都没做就离开的空项目直接清掉；服务端只在项目确实为空时才删。 */
+export function discardEmptyCanvasProject(projectId: string): Promise<boolean> {
+  return requestJson<{ discarded?: boolean }>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}?if_empty=true`,
+    '清理空项目',
+    {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: 0 }),
+    },
+  ).then(body => body.discarded === true);
 }
 
 export function getCanvasDocument(projectId: string): Promise<CanvasDocument> {

@@ -389,7 +389,7 @@ def test_deleting_canvas_drops_its_mounts_and_watch(client, tmp_path, observer):
     deleted = client.request(
         "DELETE", f"/api/canvas/projects/{project_id}", json={"expected_revision": revision}
     )
-    assert deleted.status_code == 204, deleted.text
+    assert deleted.status_code == 200, deleted.text
     assert client.get("/api/team-libraries", params={"project_id": project_id}).json() == []
     assert observer.unscheduled == [str(folder.resolve())]
 

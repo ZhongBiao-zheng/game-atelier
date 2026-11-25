@@ -2402,18 +2402,26 @@ def post_canvas_project_import_commit(
         raise HTTPException(422, detail=str(error)) from error
 
 
-@router.delete("/canvas/projects/{project_id}", status_code=204)
+@router.delete("/canvas/projects/{project_id}")
 def delete_canvas_project_route(
     project_id: str,
     payload: CanvasProjectDeleteRequest,
-) -> Response:
+    if_empty: bool = False,
+) -> dict[str, str | bool]:
+    """删除项目进回收站；`if_empty=true` 时只清掉确实为空的项目（新建后什么都没做就离开），不进回收站。"""
     from character_workflow.lib.canvas_packages import (
         CanvasPackageError,
         CanvasProjectBusyError,
         delete_canvas_project,
+        discard_empty_canvas_project,
     )
+    if if_empty:
+        try:
+            return {"discarded": discard_empty_canvas_project(project_id)}
+        except KeyError:
+            return {"discarded": False}
     try:
-        delete_canvas_project(project_id, payload.expected_revision)
+        trash_id = delete_canvas_project(project_id, payload.expected_revision)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except CanvasProjectBusyError as error:
@@ -2432,7 +2440,7 @@ def delete_canvas_project_route(
     from viewer_server.watcher import sync_team_library_watches
 
     sync_team_library_watches()
-    return Response(status_code=204)
+    return {"trash_id": trash_id}
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)

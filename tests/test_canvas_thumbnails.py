@@ -95,5 +95,5 @@ def test_thumbnail_cache_lives_outside_the_project_and_goes_with_it(client, isol
         f"/api/canvas/projects/{project_id}",
         json={"expected_revision": revision},
     )
-    assert deleted.status_code == 204, deleted.text
+    assert deleted.status_code == 200, deleted.text
     assert not cache.exists()

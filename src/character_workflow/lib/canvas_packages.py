@@ -19,7 +19,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, trash
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.canvas_specs import SPEC_FILENAME, validate_text
 from character_workflow.lib.canvas_agent_sessions import (
@@ -163,42 +163,8 @@ def _package_transactions_root() -> Path:
     return data_root.runtime_dir() / "canvas-package-transactions"
 
 
-def _delete_transactions_root() -> Path:
-    return data_root.runtime_dir() / "canvas-delete-transactions"
-
-
 def _import_claim_lock_path(token: str) -> Path:
     return data_root.runtime_dir() / "locks" / f"canvas-import-{token}.lock"
-
-
-def _recover_delete_transactions_unlocked() -> None:
-    root = _delete_transactions_root()
-    if not root.exists():
-        return
-    for transaction in sorted(root.iterdir()):
-        if not transaction.is_dir():
-            continue
-        journal_path = transaction / "transaction.json"
-        if not journal_path.is_file():
-            shutil.rmtree(transaction, ignore_errors=True)
-            continue
-        try:
-            journal = json.loads(journal_path.read_text(encoding="utf-8"))
-            project_id = str(journal["project_id"])
-            job_ids = [str(item) for item in journal["job_ids"]]
-        except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-            raise CanvasPackageError(f"删除事务记录损坏：{transaction.name}") from error
-        live_project = _project_dir_unchecked(project_id)
-        staged_project = transaction / "project"
-        if live_project.exists() and not staged_project.exists():
-            shutil.rmtree(transaction, ignore_errors=True)
-            continue
-        with ExitStack() as stack:
-            for job_id in sorted(job_ids):
-                stack.enter_context(job_lock(job_id))
-            for job_id in job_ids:
-                (data_root.runtime_dir() / "jobs" / f"{job_id}.json").unlink(missing_ok=True)
-        shutil.rmtree(transaction, ignore_errors=True)
 
 
 def _recover_import_transactions_unlocked() -> None:
@@ -237,7 +203,6 @@ def _recover_import_transactions_unlocked() -> None:
 
 
 def _recover_package_transactions_unlocked() -> None:
-    _recover_delete_transactions_unlocked()
     _recover_import_transactions_unlocked()
 
 
@@ -1290,9 +1255,8 @@ def commit_canvas_package(token: str) -> list[CanvasProject]:
 def delete_canvas_project(
     project_id: str,
     expected_revision: int,
-) -> None:
-    """Permanently delete a project and every Canvas job it owns."""
-    transaction = _delete_transactions_root() / f"delete-{secrets.token_hex(12)}"
+) -> str:
+    """把项目目录和它的全部画布任务一起移进回收站（D11，30 天内可还原），返回 trash_id。"""
     with (
         file_lock(_lifecycle_lock_path()),
         file_lock(canvas_project_lock_path(project_id)),
@@ -1303,45 +1267,71 @@ def delete_canvas_project(
         current = _read_canvas_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
+        project = read_canvas_project(project_id)
         jobs = _jobs_for_project(project_id)
         with ExitStack() as stack:
             for job in jobs:
                 stack.enter_context(job_lock(job.job_id))
             locked_jobs = [read_job(job.job_id) for job in jobs]
             _assert_jobs_are_quiescent(locked_jobs)
-            moved_jobs: list[tuple[Path, Path]] = []
-            moved_project: tuple[Path, Path] | None = None
-            try:
-                transaction.mkdir(parents=True, exist_ok=False)
-                (transaction / "jobs").mkdir()
-                atomic_write_json(
-                    transaction / "transaction.json",
-                    {
-                        "project_id": project_id,
-                        "job_ids": [job.job_id for job in locked_jobs],
-                    },
-                )
-                source_project = canvas_project_dir(project_id)
-                destination_project = transaction / "project"
-                source_project.replace(destination_project)
-                moved_project = (source_project, destination_project)
-                for job in locked_jobs:
-                    source = data_root.runtime_dir() / "jobs" / f"{job.job_id}.json"
-                    destination = transaction / "jobs" / source.name
-                    source.replace(destination)
-                    moved_jobs.append((source, destination))
-            except BaseException:
-                for source, destination in reversed(moved_jobs):
-                    if destination.exists():
-                        destination.replace(source)
-                if moved_project is not None and moved_project[1].exists():
-                    moved_project[1].replace(moved_project[0])
-                shutil.rmtree(transaction, ignore_errors=True)
-                raise
-    shutil.rmtree(transaction, ignore_errors=True)
-    # 缩略图缓存放在 .runtime 下，不随项目目录一起被移走：删项目时得自己收。
+            from character_workflow.lib.team_library import list_mounts
+            mounts = [mount.model_dump(mode="json") for mount in list_mounts(project_id)]
+            trash_id = trash.move_to_trash(
+                "project",
+                project.name,
+                [
+                    canvas_project_dir(project_id),
+                    *(data_root.runtime_dir() / "jobs" / f"{job.job_id}.json" for job in locked_jobs),
+                ],
+                {"project_id": project_id, "mounts": mounts},
+            )
+    # 缩略图是派生缓存，还原后按需重建；资产关系与团队库挂载随删除清掉，挂载在还原时接回。
     discard_canvas_thumbnails(project_id)
     from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
     remove_canvas_project_asset_relations(project_id)
     from character_workflow.lib.team_library import remove_project_mounts
     remove_project_mounts(project_id)
+    return trash_id
+
+
+def discard_empty_canvas_project(project_id: str) -> bool:
+    """「新建项目」直接建出的空项目，用户什么都没做就离开时清掉（D12）。
+
+    只有画布上没有任何节点、连线、内容版本，也没有任何画布任务时才删，直接删不进回收站；
+    否则原样保留并返回 False。要不要清由调用方按「本会话刚新建、没改名」判断，这里只守住「确实是空的」。"""
+    with (
+        file_lock(_lifecycle_lock_path()),
+        file_lock(canvas_project_lock_path(project_id)),
+        file_lock(canvas_agent_sessions_lock_path(project_id)),
+    ):
+        _recover_canvas_transactions_unlocked(project_id)
+        current = _read_canvas_document_unlocked(project_id)
+        if current.nodes or current.connections or current.content_versions or _jobs_for_project(project_id):
+            return False
+        shutil.rmtree(canvas_project_dir(project_id))
+    discard_canvas_thumbnails(project_id)
+    return True
+
+
+def _restore_canvas_project(entry: trash.TrashEntry, restore_files: Callable[[], None]) -> None:
+    """回收站还原项目：在项目生命周期锁里移回文件，再把删除时记下的团队库挂载接回（库已不在的跳过）。"""
+    with file_lock(_lifecycle_lock_path()):
+        restore_files()
+    project_id = str(entry.meta.get("project_id") or "")
+    from character_workflow.lib.team_library import mount_library
+    for mount in entry.meta.get("mounts") or []:
+        try:
+            mount_library(
+                project_id=project_id,
+                path=str(mount["mount_path"]),
+                name=str(mount.get("name") or ""),
+                created_by="restore",
+            )
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+    if entry.meta.get("mounts"):
+        from viewer_server.watcher import sync_team_library_watches
+        sync_team_library_watches()
+
+
+trash.register_restore_handler("project", _restore_canvas_project)

@@ -42,7 +42,7 @@ describe('CanvasProjectIndex', () => {
           status: 201,
           json: async () => ({
             project_id: 'canvas-new',
-            name: '广告分镜',
+            name: '未命名项目',
             created_at: '',
             updated_at: '',
           }),
@@ -55,13 +55,11 @@ describe('CanvasProjectIndex', () => {
     render(<CanvasProjectIndex onOpenProject={onOpen} />);
 
     fireEvent.click(await screen.findByRole('button', { name: '新建一个画布项目' }));
-    fireEvent.change(screen.getByLabelText('画布项目名称'), { target: { value: '广告分镜' } });
-    fireEvent.click(screen.getByRole('button', { name: '创建并进入' }));
 
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith('canvas-new'));
     expect(fetchMock).toHaveBeenCalledWith('/api/canvas/projects', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ name: '广告分镜' }),
+      body: JSON.stringify({ name: '未命名项目' }),
     }));
   });
 });

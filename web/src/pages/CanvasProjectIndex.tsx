@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, type Transition } from 'motion/react';
+import { Link } from 'wouter';
 import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, SearchIcon, UploadIcon } from '@/components/ui/icons';
 
 import {
@@ -13,16 +14,9 @@ import {
   listCanvasProjects,
   renameCanvasProject,
 } from '@/api/canvas';
+import { restoreTrash } from '@/api/trash';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,28 +24,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { EditableText, type EditableTextHandle } from '@/components/ui/editable-text';
-import { Label } from '@/components/ui/label';
-import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
-import { SwapLabel } from '@/components/ui/swap-label';
+import type { CanvasProjectSummary } from '@/schema/canvas';
 import { FileInput } from '@/components/ui/file-input';
 import { RevealImage } from '@/components/ui/reveal-image';
-import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, shakeOnError } from '@/lib/motion';
+import { errorText } from '@/lib/errorText';
+import { clipName, notify } from '@/lib/notify';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable } from '@/lib/motion';
+import { cn } from '@/lib/utils';
+import { CANVAS_PROJECT_DISCARDED_EVENT, markFreshCanvasProject, UNTITLED_CANVAS_PROJECT_NAME } from './canvasFreshProject';
 
-
-type EditorState =
-  | { open: false }
-  | { open: true; name: string };
-
-type DeleteState =
-  | { open: false }
-  | { open: true; project: CanvasProjectSummary; revision: number };
-
-type ImportState =
-  | { open: false }
-  | { open: true; filename: string; inspection: CanvasPackageInspection };
+/** 导入后新卡片高亮这么久。 */
+const IMPORTED_HIGHLIGHT_MS = 2400;
 
 /** 读取超过这么久才出骨架：快的时候直接出卡片，不闪一下骨架。 */
 const SKELETON_DELAY_MS = 300;
@@ -70,20 +55,17 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [editor, setEditor] = useState<EditorState>({ open: false });
-  const [editorError, setEditorError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [deleteState, setDeleteState] = useState<DeleteState>({ open: false });
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [importState, setImportState] = useState<ImportState>({ open: false });
-  const [importError, setImportError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importedIds, setImportedIds] = useState<ReadonlySet<string>>(() => new Set());
   const importRef = useRef<HTMLInputElement>(null);
-  const createSubmitRef = useRef<HTMLButtonElement>(null);
-  const importSubmitRef = useRef<HTMLButtonElement>(null);
-  const deleteSubmitRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!importedIds.size) return;
+    const timer = window.setTimeout(() => setImportedIds(new Set()), IMPORTED_HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [importedIds]);
   const [listMotion, setListMotion] = useState<ListMotion>('reveal');
   // 加载中与为空是两态：读取超过 300ms 才出骨架，之前保持空白。
   const [showSkeleton, setShowSkeleton] = useState(false);
@@ -118,26 +100,27 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const drop = (event: Event) => {
+      const projectId = (event as CustomEvent<string>).detail;
+      setProjects(current => current.filter(item => item.project_id !== projectId));
+    };
+    window.addEventListener(CANVAS_PROJECT_DISCARDED_EVENT, drop);
+    return () => window.removeEventListener(CANVAS_PROJECT_DISCARDED_EVENT, drop);
+  }, []);
 
-  async function submitEditor(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!editor.open) return;
-    const name = editor.name.trim();
-    if (!name) {
-      setEditorError('请输入画布项目名称');
-      return;
-    }
-    setSaving(true);
-    setEditorError(null);
+  // D12：直接建「未命名项目」并进入，名字在画布顶栏改；什么都没做就离开的空项目由画布自动清掉。
+  async function createProject() {
+    setCreating(true);
+    setActionError(null);
     try {
-      const project = await createCanvasProject(name);
-      setEditor({ open: false });
+      const project = await createCanvasProject(UNTITLED_CANVAS_PROJECT_NAME);
+      markFreshCanvasProject(project.project_id);
       onOpenProject(project.project_id);
     } catch (error) {
-      setEditorError((error as Error).message);
-      shakeOnError(createSubmitRef.current);
+      setActionError(errorText(error));
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   }
 
@@ -149,36 +132,22 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       .sort((left, right) => right.updated_at.localeCompare(left.updated_at)));
   }
 
-  async function prepareDelete(project: CanvasProjectSummary) {
+  // D11：删除进回收站，不弹确认；撤销 toast 直接从回收站还原。
+  async function deleteProject(project: CanvasProjectSummary) {
     setBusyProjectId(project.project_id);
     setActionError(null);
     try {
       const document = await getCanvasDocument(project.project_id);
-      setDeleteError(null);
-      setDeleteState({ open: true, project, revision: document.revision });
-    } catch (error) {
-      setActionError((error as Error).message);
-    } finally {
-      setBusyProjectId(null);
-    }
-  }
-
-  async function submitDelete(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!deleteState.open) return;
-    setBusyProjectId(deleteState.project.project_id);
-    setDeleteError(null);
-    try {
-      await deleteCanvasProject(
-        deleteState.project.project_id,
-        deleteState.revision,
-      );
+      const trashId = await deleteCanvasProject(project.project_id, document.revision);
       setListMotion('reveal');
-      setProjects(current => current.filter(item => item.project_id !== deleteState.project.project_id));
-      setDeleteState({ open: false });
+      setProjects(current => current.filter(item => item.project_id !== project.project_id));
+      notify.undo(`已移至回收站：项目「${clipName(project.name)}」`, () => {
+        void restoreTrash(trashId)
+          .then(() => { setListMotion('reveal'); return load(); })
+          .catch(error => notify.error(errorText(error)));
+      });
     } catch (error) {
-      setDeleteError((error as Error).message);
-      shakeOnError(deleteSubmitRef.current);
+      setActionError(errorText(error));
     } finally {
       setBusyProjectId(null);
     }
@@ -196,32 +165,19 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     }
   }
 
+  // 校验通过直接导入：导入只新建项目，不覆盖也不计费，不再多确认一次。
   async function handlePackage(file: File) {
     setImporting(true);
     setActionError(null);
     try {
       const inspection = await inspectCanvasPackage(file);
-      setImportError(null);
-      setImportState({ open: true, filename: file.name, inspection });
-    } catch (error) {
-      setActionError((error as Error).message);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function commitImport() {
-    if (!importState.open) return;
-    setImporting(true);
-    setImportError(null);
-    try {
-      await commitCanvasPackage(importState.inspection.token);
-      setImportState({ open: false });
+      const imported = await commitCanvasPackage(inspection.token);
       setListMotion('reveal');
       await load();
+      setImportedIds(new Set(imported.projects.map(project => project.project_id)));
+      notify.info(`已导入 ${imported.projects.length} 个项目`);
     } catch (error) {
-      setImportError((error as Error).message);
-      shakeOnError(importSubmitRef.current);
+      setActionError(errorText(error));
     } finally {
       setImporting(false);
     }
@@ -256,15 +212,13 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 />
               </InputGroup>
             )}
-            <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
-              <UploadIcon aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
+            <Button variant="ghost" asChild>
+              <Link href="/settings/trash"><DeleteIcon aria-hidden="true" />回收站</Link>
             </Button>
-            <Button
-              onClick={() => {
-                setEditor({ open: true, name: '' });
-                setEditorError(null);
-              }}
-            >
+            <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
+              <UploadIcon aria-hidden="true" />{importing ? '导入中…' : '导入项目包'}
+            </Button>
+            <Button disabled={creating} onClick={() => void createProject()}>
               <AddIcon aria-hidden="true" />新建项目
             </Button>
           </div>
@@ -300,7 +254,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           {!loading && !loadError && projects.length === 0 && (
             <Button
               variant="ghost"
-              onClick={() => { setEditor({ open: true, name: '' }); setEditorError(null); }}
+              disabled={creating}
+              onClick={() => void createProject()}
               className="aspect-[16/10] h-auto flex-col gap-3 rounded-xl border-dashed border-foreground/20 font-normal text-muted-foreground hover:border-foreground/40 hover:text-foreground [&_svg]:size-7"
             >
               <AddIcon size="xl" aria-hidden="true" />
@@ -334,8 +289,9 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                   onOpen={() => onOpenProject(project.project_id)}
                   onInlineRename={name => renameProjectInline(project, name)}
                   onExport={() => void handleExport(project)}
-                  onDelete={() => void prepareDelete(project)}
+                  onDelete={() => void deleteProject(project)}
                   disabled={busyProjectId === project.project_id}
+                  highlighted={importedIds.has(project.project_id)}
                 />
               </motion.div>
             ))}
@@ -343,87 +299,6 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
         </div>
       </div>
 
-      <Dialog open={editor.open} onOpenChange={open => { if (!open && !saving) setEditor({ open: false }); }}>
-        {editor.open && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>新建画布项目</DialogTitle>
-              <DialogDescription></DialogDescription>
-            </DialogHeader>
-            <form autoComplete="off" className="space-y-4" onSubmit={submitEditor}>
-              <div className="space-y-2">
-                <Label htmlFor="canvas-project-name">画布项目名称</Label>
-                <Input
-                  id="canvas-project-name"
-                  autoFocus
-                  value={editor.name}
-                  aria-invalid={Boolean(editorError)}
-                  aria-describedby={editorError ? 'canvas-project-name-error' : undefined}
-                  onChange={event => {
-                    const name = event.target.value;
-                    setEditor(current => current.open ? { ...current, name } : current);
-                  }}
-                />
-                {editorError && <p id="canvas-project-name-error" role="alert" className="text-xs text-destructive">{editorError}</p>}
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" disabled={saving} onClick={() => setEditor({ open: false })}>取消</Button>
-                <Button ref={createSubmitRef} type="submit" disabled={saving}>
-                  <SwapLabel active={Boolean(saving)} on="创建中…" off="创建并进入" />
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        )}
-      </Dialog>
-
-      <Dialog open={importState.open} onOpenChange={open => { if (!open && !importing) { setImportError(null); setImportState({ open: false }); } }}>
-        {importState.open && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>导入 Canvas 项目包</DialogTitle>
-              <DialogDescription>
-                已通过结构、路径、配额和摘要校验。导入会创建新的项目 ID，不覆盖现有项目。
-              </DialogDescription>
-            </DialogHeader>
-            <div className="rounded-lg border border-border bg-secondary/20 p-4 text-sm">
-              <p className="truncate font-medium text-foreground">{importState.filename}</p>
-              <p className="mt-1 text-muted-foreground">
-                {importState.inspection.projects.map(project => project.name).join('、')} · {formatBytes(importState.inspection.extracted_bytes)} · {importState.inspection.entry_count} 个条目
-              </p>
-            </div>
-            {importError && <p role="alert" className="text-xs text-destructive">{importError}</p>}
-            <DialogFooter>
-              <Button variant="outline" disabled={importing} onClick={() => setImportState({ open: false })}>取消</Button>
-              <Button ref={importSubmitRef} disabled={importing} onClick={() => void commitImport()}>
-                <SwapLabel active={importing} on="导入中…" off={`导入 ${importState.inspection.projects.length} 个项目`} />
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
-
-      <Dialog open={deleteState.open} onOpenChange={open => { if (!open && !busyProjectId) setDeleteState({ open: false }); }}>
-        {deleteState.open && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>删除“{deleteState.project.name}”？</DialogTitle>
-              <DialogDescription>
-                项目、节点、媒体与生成记录将被永久删除，此操作无法撤销。
-              </DialogDescription>
-            </DialogHeader>
-            <form autoComplete="off" className="space-y-4" onSubmit={submitDelete}>
-              {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
-              <DialogFooter>
-                <Button type="button" variant="outline" disabled={Boolean(busyProjectId)} onClick={() => setDeleteState({ open: false })}>取消</Button>
-                <Button ref={deleteSubmitRef} type="submit" variant="destructive" disabled={Boolean(busyProjectId)}>
-                  <SwapLabel active={Boolean(busyProjectId)} on="删除中…" off="确认删除" />
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        )}
-      </Dialog>
     </section>
   );
 }
@@ -446,6 +321,7 @@ function CanvasProjectCard({
   onExport,
   onDelete,
   disabled,
+  highlighted,
 }: {
   project: CanvasProjectSummary;
   onOpen: () => void;
@@ -453,6 +329,7 @@ function CanvasProjectCard({
   onExport: () => void;
   onDelete: () => void;
   disabled: boolean;
+  highlighted: boolean;
 }) {
   const titleEditorRef = useRef<EditableTextHandle>(null);
 
@@ -461,7 +338,10 @@ function CanvasProjectCard({
   }
 
   return (
-    <article className="group relative overflow-hidden rounded-xl border border-border bg-card/45 transition-colors hover:border-input">
+    <article className={cn(
+      'group relative overflow-hidden rounded-xl border border-border bg-card/45 transition-colors hover:border-input',
+      highlighted && 'border-primary',
+    )}>
       <Button variant="bare"
         type="button"
         disabled={disabled}
@@ -533,11 +413,4 @@ function formatActivity(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '刚刚编辑';
   return `编辑于 ${new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)}`;
-}
-
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }

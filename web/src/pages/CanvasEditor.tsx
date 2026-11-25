@@ -48,6 +48,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   renameCanvasProject,
+  discardEmptyCanvasProject,
   updateCanvasCategories,
   replaceCanvasNodeMedia,
   pasteIntoCanvas,
@@ -252,6 +253,12 @@ import {
   canvasNodeActiveRunId,
 } from './canvasEditorModel';
 import { resolveRecipeModel } from './studioRecipe';
+import {
+  isFreshCanvasProject,
+  openCanvasEditor,
+  scheduleFreshCanvasProjectCleanup,
+  settleFreshCanvasProject,
+} from './canvasFreshProject';
 import {
   canvasNodeSaveRequest,
   canvasNodeShareRequest,
@@ -682,6 +689,16 @@ function CanvasEditorInner({
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
   const reversePromptConfigEligibleRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+  // D12：离开一个「新建项目」建出来、什么都没做的空项目时清掉它。
+  useEffect(() => {
+    const release = openCanvasEditor(projectId);
+    return () => {
+      release();
+      scheduleFreshCanvasProjectCleanup(projectId, discardEmptyCanvasProject);
+    };
+  }, [projectId]);
   // 本页最后一次确认过的服务端文档：外部改动到来时做三方合并的基准（首屏、保存成功、外部重载时更新）。
   const serverBaseDocument = useRef<CanvasDocument | null>(null);
   // 外部（Agent）改动的「这一轮」：连续落盘的几次合成撤销栈里的一步，撤销 toast 也只留一条。
@@ -1453,6 +1470,8 @@ function CanvasEditorInner({
   }, [flushSave]);
 
   const commit = useCallback((updater: (current: CanvasDocument) => CanvasDocument, record = false) => {
+    // 新建的空项目一旦有了编辑就不再自动清理（D12）。
+    settleFreshCanvasProject(projectIdRef.current);
     setDocument(current => {
       if (!current) return current;
       if (record) {
@@ -2280,8 +2299,16 @@ function CanvasEditorInner({
   function beginProjectRename() {
     projectNameEditorRef.current?.edit();
   }
+  // D12：刚新建的「未命名项目」进来就让顶栏项目名处于可编辑状态。
+  const projectNameKnown = projects.some(project => project.project_id === projectId);
+  useEffect(() => {
+    if (loading || !projectNameKnown || !isFreshCanvasProject(projectId)) return;
+    const frame = window.requestAnimationFrame(() => projectNameEditorRef.current?.edit());
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, projectId, projectNameKnown]);
 
   async function saveProjectName(name: string) {
+    settleFreshCanvasProject(projectId);
     projectRenameInFlight.current = true;
     setError(null);
     try {
