@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import errno
+import http.client
 import socket
 import ssl
 import traceback
@@ -92,6 +93,52 @@ def initial_handshake_eof(error: requests.exceptions.SSLError) -> bool:
         return False
     frames = {frame.f_code for frame, _ in traceback.walk_tb(eof.__traceback__)}
     return {HTTPSConnectionPool._validate_conn.__code__, ssl.SSLSocket.do_handshake.__code__} <= frames
+
+
+def transport_causes(error: BaseException):
+    """Walk explicit transport causes. Ignore ambient exceptions from earlier attempts."""
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        pending.extend(child for child in (current.__cause__, getattr(current, "reason", None),
+                                           *current.args) if isinstance(child, BaseException))
+
+
+def tls_failure_details(error: BaseException) -> tuple[str, str | None] | None:
+    """Describe the failing TLS operation for diagnostics only, never for retry decisions."""
+    phase, version = "unknown", None
+    is_tls = False
+    for cause in transport_causes(error):
+        if isinstance(cause, _SSL):
+            is_tls = True
+        if not isinstance(cause, ssl.SSLError):
+            continue
+        is_tls = True
+        frames = list(traceback.walk_tb(cause.__traceback__))
+        codes = {frame.f_code for frame, _ in frames}
+        if ssl.SSLSocket.do_handshake.__code__ in codes:
+            phase = "handshake"
+        elif http.client.HTTPResponse._read_status.__code__ in codes:
+            phase = "read_status"
+        elif ssl.SSLSocket.read.__code__ in codes:
+            phase = "read"
+        elif ssl.SSLSocket.send.__code__ in codes or ssl.SSLSocket.write.__code__ in codes:
+            phase = "send"
+        for frame, _ in reversed(frames):
+            sock = frame.f_locals.get("self")
+            if isinstance(sock, ssl.SSLSocket):
+                try:
+                    version = sock.version()
+                except (OSError, ValueError):
+                    pass  # The transport may already have closed the failing socket.
+                break
+        break
+    return (phase, version) if is_tls else None
 
 
 def never_sent(error: BaseException) -> bool:

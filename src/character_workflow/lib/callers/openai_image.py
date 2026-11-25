@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from http.client import IncompleteRead
 import io
+import logging
 import math
 import re
 import subprocess
@@ -12,16 +13,19 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import requests
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
-from character_workflow.lib.callers.connect_failure import initial_handshake_eof
+from character_workflow.lib.callers.connect_failure import initial_handshake_eof, tls_failure_details
 from character_workflow.lib.callers.image_output import write_image
 from character_workflow.lib.image_size_catalog import (
     image_size_options, is_nano_image_size_model,
 )
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -194,9 +198,16 @@ def render(
         if callable(callback):
             callback()
 
+    def record_tls_warning(message: str) -> None:
+        _warn(kwargs, message)
+        kwargs["on_params_changed"]()
+
+    # The Job Runner supplies this callback for durable params, even if render ultimately fails.
+    tls_options = {"on_tls_event": record_tls_warning} if callable(kwargs.get("on_params_changed")) else {}
+
     def _post_image_json(url: str, payload: dict) -> dict:
         if not use_tuzi_tasks:
-            return _post_json(url, key.access_key, payload, timeout=timeout)
+            return _post_json(url, key.access_key, payload, timeout=timeout, **tls_options)
         return tuzi_async.execute_json(
             url=url,
             api_key=key.access_key,
@@ -238,7 +249,7 @@ def render(
                     size=requested_size,
                     image_paths=image_paths or None,
                 ),
-                timeout=timeout,
+                timeout=timeout, **tls_options,
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
             if len(paths) >= requested:
@@ -255,7 +266,7 @@ def render(
             data = _post_json(
                 _chat_image_url(base_url), key.access_key,
                 _chat_image_payload(prompt=_tuzi_gif_prompt(prompt, gif), model=model, size=None),
-                timeout=timeout,
+                timeout=timeout, **tls_options,
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
             if len(paths) >= requested:
@@ -328,7 +339,7 @@ def render(
                 if use_tuzi_tasks else
                 _post_multipart(
                     _edits_url(base_url), key.access_key, fields=fields, files=files,
-                    timeout=timeout,
+                    timeout=timeout, **tls_options,
                 )
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
@@ -374,7 +385,7 @@ def render(
             payload["layer_decomposition_options"] = {"max_images": int(max_images)}
         if prompt.strip():
             payload["prompt"] = prompt.strip()
-        data = _post_json(generations_url, key.access_key, payload, timeout=timeout)
+        data = _post_json(generations_url, key.access_key, payload, timeout=timeout, **tls_options)
         paths, result = _write_layer_decomposition_outputs(
             data, out_dir, _source_image_size(_collect_ref_paths(kwargs, key.provider, model)[0]),
         )
@@ -631,23 +642,51 @@ def _hk_edits_fields(
     return fields
 
 
-def _post_image_request(url: str, **kwargs: Any) -> requests.Response:
+def _post_image_request(url: str, *, on_tls_event: Callable[[str], None] | None = None, **kwargs: Any) -> requests.Response:
     try:
         return requests.post(url, **kwargs)
-    except requests.exceptions.SSLError as error:
-        if not initial_handshake_eof(error):
+    except requests.RequestException as error:
+        details = tls_failure_details(error)
+        if details is None:
             raise
-    return requests.post(url, **kwargs)
+        phase, version = details
+        retry = isinstance(error, requests.exceptions.SSLError) and initial_handshake_eof(error)
+        # Log only generated identifiers and transport metadata. URLs can contain credentials.
+        prefix = f"图片 POST TLS [{uuid4().hex[:12]}] stage={phase} tls={version or 'unknown'}"
+
+        def report(outcome: str) -> None:
+            message = f"{prefix} retry={int(retry)} result={outcome}"
+            _log.warning("%s", message)
+            if on_tls_event is not None:
+                try:
+                    on_tls_event(message)
+                except Exception:  # A diagnostics write must not change paid submission behavior.
+                    _log.warning("未能保存图片 TLS 诊断记录")
+
+        report("pending" if retry else "not_retried")
+        if not retry:
+            raise
+
+    try:
+        response = requests.post(url, **kwargs)
+    except requests.RequestException as second:
+        phase, version = tls_failure_details(second) or ("unknown", None)
+        report(f"{type(second).__name__} retry_stage={phase} retry_tls={version or 'unknown'}")
+        raise
+    report(f"HTTP_{response.status_code}")
+    return response
 
 
 def _post_multipart(
-    url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float]
+    url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float],
+    on_tls_event: Callable[[str], None] | None = None,
 ) -> dict:
     # 不手动设 Content-Type，让 requests 生成 multipart boundary。
     # files 字节已在 _ref_file_parts 预读入内存，重试重发同一份 data/files 安全。
     headers = {"Authorization": f"Bearer {api_key}"}
     for attempt in range(3):
-        resp = _post_image_request(url, headers=headers, data=fields, files=files, timeout=timeout)
+        resp = _post_image_request(url, headers=headers, data=fields, files=files,
+                                   timeout=timeout, on_tls_event=on_tls_event)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
             if (_is_retryable(resp.status_code, resp.text) and attempt < 2
@@ -1021,14 +1060,16 @@ def _api_root(base_url: str) -> str:
     return base.rstrip("/")
 
 
-def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[float, float]) -> dict:
+def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[float, float],
+               on_tls_event: Callable[[str], None] | None = None) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     for attempt in range(3):
         try:
-            resp = _post_image_request(url, headers=headers, json=payload, timeout=timeout)
+            resp = _post_image_request(url, headers=headers, json=payload, timeout=timeout,
+                                       on_tls_event=on_tls_event)
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
