@@ -109,26 +109,28 @@ def test_paid_post_handshake_retry(server_tls, multipart, actions, expected_conn
     (["redirect", "handshake"], ["retry=0 result=not_retried"]),
 ])
 def test_image_tls_diagnostics_keep_credentials_and_body_private(server_tls, caplog, actions, results):
-    warnings = []
     with upstream(server_tls, actions) as (url, _, _):
         def post():
             return openai_image._post_json(url + "?signature=hidden-query", "hidden-key",
-                                           {"prompt": "hidden-prompt"}, timeout=3,
-                                           on_tls_event=warnings.append)
+                                           {"prompt": "hidden-prompt"}, timeout=3, job_id="job-x")
         if actions[-1] == "success":
             assert post() == {}
         else:
             with pytest.raises(openai_image.OpenAIImageError):
                 post()
 
+    warnings = _tls_log(caplog)
     assert len(warnings) == len(results)
     for message, expected in zip(warnings, results, strict=True):
-        assert "stage=handshake tls=unknown" in message
-        assert expected in message and message in caplog.messages
+        assert "job=job-x stage=handshake tls=unknown" in message and expected in message
     assert "hidden-" not in caplog.text
 
 
-def test_failed_image_render_persists_tls_warnings_before_raising(server_tls, tmp_path, monkeypatch):
+def _tls_log(caplog) -> list[str]:
+    return [message for message in caplog.messages if message.startswith("图片 POST TLS")]
+
+
+def test_tls_diagnostics_stay_out_of_user_visible_warnings(server_tls, tmp_path, monkeypatch, caplog):
     from character_workflow.lib import keys
 
     params = {"warnings": ["原有提示"]}
@@ -139,24 +141,26 @@ def test_failed_image_render_persists_tls_warnings_before_raising(server_tls, tm
         monkeypatch.setattr(keys, "find_by_alias", lambda _: key)
         with pytest.raises(openai_image.OpenAIImageError):
             openai_image.render(prompt="probe", model="nano-banana-2", alias="local",
-                                output_dir=tmp_path, params=params, timeout=3,
+                                output_dir=tmp_path, params=params, timeout=3, job_id="job-t",
                                 on_params_changed=lambda: saved.append(params["warnings"].copy()))
     assert len(connections) == 2 and not bodies
-    assert saved[0][0] == "原有提示" and "result=pending" in saved[0][-1]
-    assert saved[-1] == params["warnings"] and "result=SSLError" in saved[-1][-1]
+    assert params["warnings"] == ["原有提示"] and all(item == ["原有提示"] for item in saved)
+    logged = _tls_log(caplog)
+    assert len(logged) == 2 and all("job=job-t" in message for message in logged)
+    assert "result=pending" in logged[0] and "result=SSLError" in logged[1]
 
 
-def test_response_status_tls_eof_with_received_body_is_not_replayed(server_tls, monkeypatch):
+def test_response_status_tls_eof_with_received_body_is_not_replayed(server_tls, monkeypatch, caplog):
     from http.client import HTTPResponse
 
     def read_status(_self):
         raise ssl.SSLEOFError(8, "test peer closed TLS")
 
     monkeypatch.setattr(HTTPResponse, "_read_status", read_status)
-    warnings = []
     with upstream(server_tls, ["sent"]) as (url, connections, bodies):
         with pytest.raises(openai_image.OpenAIImageError):
-            openai_image._post_json(url, "fake", {"prompt": "test"}, timeout=3, on_tls_event=warnings.append)
+            openai_image._post_json(url, "fake", {"prompt": "test"}, timeout=3)
+    warnings = _tls_log(caplog)
     assert len(connections) == len(bodies) == len(warnings) == 1
     assert "stage=read_status" in warnings[0] and "retry=0 result=not_retried" in warnings[0]
 

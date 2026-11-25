@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from http.client import IncompleteRead
 import io
 import logging
@@ -198,12 +198,8 @@ def render(
         if callable(callback):
             callback()
 
-    def record_tls_warning(message: str) -> None:
-        _warn(kwargs, message)
-        kwargs["on_params_changed"]()
-
-    # The Job Runner supplies this callback for durable params, even if render ultimately fails.
-    tls_options = {"on_tls_event": record_tls_warning} if callable(kwargs.get("on_params_changed")) else {}
+    # TLS 诊断只写服务日志并带上 job_id；params.warnings 会显示在界面上，不放排查记录。
+    tls_options = {"job_id": kwargs["job_id"]} if kwargs.get("job_id") else {}
 
     def _post_image_json(url: str, payload: dict) -> dict:
         if not use_tuzi_tasks:
@@ -642,7 +638,7 @@ def _hk_edits_fields(
     return fields
 
 
-def _post_image_request(url: str, *, on_tls_event: Callable[[str], None] | None = None, **kwargs: Any) -> requests.Response:
+def _post_image_request(url: str, *, job_id: str | None = None, **kwargs: Any) -> requests.Response:
     try:
         return requests.post(url, **kwargs)
     except requests.RequestException as error:
@@ -652,16 +648,11 @@ def _post_image_request(url: str, *, on_tls_event: Callable[[str], None] | None 
         phase, version = details
         retry = isinstance(error, requests.exceptions.SSLError) and initial_handshake_eof(error)
         # Log only generated identifiers and transport metadata. URLs can contain credentials.
-        prefix = f"图片 POST TLS [{uuid4().hex[:12]}] stage={phase} tls={version or 'unknown'}"
+        job = f" job={job_id}" if job_id else ""
+        prefix = f"图片 POST TLS [{uuid4().hex[:12]}]{job} stage={phase} tls={version or 'unknown'}"
 
         def report(outcome: str) -> None:
-            message = f"{prefix} retry={int(retry)} result={outcome}"
-            _log.warning("%s", message)
-            if on_tls_event is not None:
-                try:
-                    on_tls_event(message)
-                except Exception:  # A diagnostics write must not change paid submission behavior.
-                    _log.warning("未能保存图片 TLS 诊断记录")
+            _log.warning("%s retry=%d result=%s", prefix, int(retry), outcome)
 
         report("pending" if retry else "not_retried")
         if not retry:
@@ -679,14 +670,14 @@ def _post_image_request(url: str, *, on_tls_event: Callable[[str], None] | None 
 
 def _post_multipart(
     url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float],
-    on_tls_event: Callable[[str], None] | None = None,
+    job_id: str | None = None,
 ) -> dict:
     # 不手动设 Content-Type，让 requests 生成 multipart boundary。
     # files 字节已在 _ref_file_parts 预读入内存，重试重发同一份 data/files 安全。
     headers = {"Authorization": f"Bearer {api_key}"}
     for attempt in range(3):
         resp = _post_image_request(url, headers=headers, data=fields, files=files,
-                                   timeout=timeout, on_tls_event=on_tls_event)
+                                   timeout=timeout, job_id=job_id)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
             if (_is_retryable(resp.status_code, resp.text) and attempt < 2
@@ -1061,7 +1052,7 @@ def _api_root(base_url: str) -> str:
 
 
 def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[float, float],
-               on_tls_event: Callable[[str], None] | None = None) -> dict:
+               job_id: str | None = None) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -1069,7 +1060,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
     for attempt in range(3):
         try:
             resp = _post_image_request(url, headers=headers, json=payload, timeout=timeout,
-                                       on_tls_event=on_tls_event)
+                                       job_id=job_id)
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
