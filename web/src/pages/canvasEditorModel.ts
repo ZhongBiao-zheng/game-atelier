@@ -497,13 +497,114 @@ export function restoreContentVersions(
   return restored;
 }
 
+/** 比较前的规范形：键排序，省略 undefined / null / false。服务端回来的对象会补上默认字段
+ *  （null、false），键序也可能不同；按原样 stringify 比会把没动过的节点误判成「改过」。 */
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (!value || typeof value !== 'object') return value;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    const item = (value as Record<string, unknown>)[key];
+    if (item === undefined || item === null || item === false) continue;
+    result[key] = canonicalJson(item);
+  }
+  return result;
+}
+
+const sameJson = (a: unknown, b: unknown) => (
+  a === b || JSON.stringify(canonicalJson({ value: a })) === JSON.stringify(canonicalJson({ value: b }))
+);
+
+/** 服务端维护的运行态字段（生成中 / 失败）：两边都改了时以服务端为准，本页只会把它们清空或照抄。 */
+const SERVER_OWNED_NODE_DATA_KEYS: ReadonlySet<string> = new Set(['active_run_id', 'error']);
+
+/** 按键三方合并一层对象：只有一边改了的键取改的那边；两边都改成不同值时交给 onConflict。
+ *  值为 undefined 的键不写出（与 JSON 序列化后的形状一致）。 */
+function mergeRecordByKey(
+  base: Readonly<Record<string, unknown>> | undefined,
+  local: Readonly<Record<string, unknown>>,
+  remote: Readonly<Record<string, unknown>>,
+  onConflict: (key: string, localValue: unknown, remoteValue: unknown, baseValue: unknown) => unknown,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const key of new Set([...Object.keys(remote), ...Object.keys(local)])) {
+    const localValue = local[key];
+    const remoteValue = remote[key];
+    const baseValue = base?.[key];
+    const value = sameJson(localValue, remoteValue) || sameJson(remoteValue, baseValue)
+      ? localValue
+      : sameJson(localValue, baseValue)
+        ? remoteValue
+        : onConflict(key, localValue, remoteValue, baseValue);
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+}
+
+/** 同一节点两边都改了：按字段合并，而不是整节点取本地。
+ *
+ *  画师只拖了位置、Agent 同时改了正文（换了 current_version_id）时，位置取本地、版本指针取服务端；
+ *  原来整节点用本地副本，Agent 新写的版本留在 content_versions 里，节点却被存回旧指针。
+ *  两边改了同一字段才算真冲突：运行态字段（active_run_id / error）以服务端为准，其余以本页为准
+ *  （本页正在显示、用户刚做的那一下）。pinned 节点（正在编辑、文本版本还没落盘）的版本指针一律留本地。 */
+function mergeCanvasNode(
+  base: CanvasNode | undefined,
+  local: CanvasNode,
+  remote: CanvasNode,
+  pinned: boolean,
+): CanvasNode {
+  if (local.type !== remote.type) return local;
+  const localRecord = local as unknown as Record<string, unknown>;
+  const remoteRecord = remote as unknown as Record<string, unknown>;
+  const baseRecord = base?.type === local.type ? base as unknown as Record<string, unknown> : undefined;
+  const mergeData = (
+    baseData: unknown,
+    localData: Record<string, unknown>,
+    remoteData: Record<string, unknown>,
+  ) => {
+    const merged = mergeRecordByKey(
+      baseData as Record<string, unknown> | undefined,
+      localData,
+      remoteData,
+      (key, localValue, remoteValue) => (SERVER_OWNED_NODE_DATA_KEYS.has(key) ? remoteValue : localValue),
+    );
+    if (pinned && 'current_version_id' in localData) merged.current_version_id = localData.current_version_id;
+    return merged;
+  };
+  const merged = mergeRecordByKey(baseRecord, localRecord, remoteRecord, (key, localValue, remoteValue, baseValue) => (
+    key === 'data' && localValue && remoteValue && typeof localValue === 'object' && typeof remoteValue === 'object'
+      ? mergeData(baseValue, localValue as Record<string, unknown>, remoteValue as Record<string, unknown>)
+      : localValue
+  ));
+  // 只有服务端改了 data 时上面直接取了服务端的 data；pinned 节点的版本指针仍要留本地。
+  if (pinned && merged.data && typeof merged.data === 'object' && merged.data !== localRecord.data) {
+    const localData = localRecord.data as Record<string, unknown>;
+    if ('current_version_id' in localData) {
+      merged.data = { ...(merged.data as Record<string, unknown>), current_version_id: localData.current_version_id };
+    }
+  }
+  return merged as unknown as CanvasNode;
+}
+
+/** 后端判连线重复的业务键（schemas.py CanvasDocument.validate_graph_references）：
+ *  角色 + 两端 + 槽位（只有输入连线看槽位）。id 不同、业务键相同的两条线一起提交会被 422 拒掉。 */
+export function canvasConnectionBusinessKey(connection: CanvasConnection): string {
+  return JSON.stringify([
+    connection.role,
+    connection.source_node_id,
+    connection.target_node_id,
+    connection.role === 'input' ? connection.slot ?? null : null,
+  ]);
+}
+
 /** 别处（Agent 经 MCP、另一标签页）改了画布时，按三方合并收下服务端文档。
  *
  *  base 是服务端已接受的内容，用本页手里的同一份对象表示（服务端回来的对象会多出默认字段，
  *  拿它比会把没动过的节点误判成「本页改过」）；local 是本页当前文档，remote 是服务端新文档。
- *  本页相对 base 改过的节点 / 连线（含 pinned：正在编辑、文本版本还没落盘的节点）保留本地值，
- *  其余以服务端为准；本页新建的保留，本页删掉的不复活，服务端删掉而本页没动的跟着删。
- *  原来是整份换成服务端文档，Agent 落盘那一刻本页还没保存的编辑整段消失，没有任何提示。 */
+ *  节点两边都改了时按字段合并（见 mergeCanvasNode）；只有本页改了的保留本地值，其余以服务端为准；
+ *  本页新建的保留，本页删掉的不复活，服务端删掉而本页没动的跟着删。
+ *  连线按 id 合并后再按后端的业务键去重，同一条线两边各连了一次时留服务端那条。
+ *  显示设置（背景、图片信息）按键合并，本页改了还没落盘的不被服务端快照盖掉。 */
 export function mergeRemoteCanvasDocument(
   base: CanvasDocument,
   local: CanvasDocument,
@@ -516,18 +617,20 @@ export function mergeRemoteCanvasDocument(
     localItems: readonly T[],
     remoteItems: readonly T[],
     pinned: ReadonlySet<string>,
+    mergeBoth: (base: T | undefined, mine: T, theirs: T) => T,
   ): T[] => {
-    const baseById = new Map(baseItems.map(item => [item.id, JSON.stringify(item)]));
+    const baseById = new Map(baseItems.map(item => [item.id, item]));
     const localById = new Map(localItems.map(item => [item.id, item]));
     const remoteIds = new Set(remoteItems.map(item => item.id));
-    const localChanged = (item: T) => pinned.has(item.id) || baseById.get(item.id) !== JSON.stringify(item);
+    const localChanged = (item: T) => pinned.has(item.id) || !sameJson(baseById.get(item.id), item);
     const merged: T[] = [];
     for (const item of remoteItems) {
       const mine = localById.get(item.id);
       if (mine) {
         if (localChanged(mine)) {
-          if (JSON.stringify(mine) !== JSON.stringify(item)) keptLocal = true;
-          merged.push(mine);
+          const value = mergeBoth(baseById.get(item.id), mine, item);
+          if (!sameJson(value, item)) keptLocal = true;
+          merged.push(value);
         } else merged.push(item);
         continue;
       }
@@ -548,13 +651,35 @@ export function mergeRemoteCanvasDocument(
     }
     return merged;
   };
-  const nodes = mergeById(base.nodes, local.nodes, remote.nodes, pinnedNodeIds);
+  const nodes = mergeById(
+    base.nodes,
+    local.nodes,
+    remote.nodes,
+    pinnedNodeIds,
+    (baseNode, mine, theirs) => mergeCanvasNode(baseNode, mine, theirs, pinnedNodeIds.has(mine.id)),
+  );
   const nodeIds = new Set(nodes.map(node => node.id));
-  const connections = mergeById(base.connections, local.connections, remote.connections, new Set())
-    .filter(connection => nodeIds.has(connection.source_node_id) && nodeIds.has(connection.target_node_id));
+  // 服务端的连线排在前面，去重时留下的是服务端那条。
+  const connectionKeys = new Set<string>();
+  const connections = mergeById(base.connections, local.connections, remote.connections, new Set(), (_base, mine) => mine)
+    .filter(connection => nodeIds.has(connection.source_node_id) && nodeIds.has(connection.target_node_id))
+    .filter(connection => {
+      const key = canvasConnectionBusinessKey(connection);
+      if (connectionKeys.has(key)) return false;
+      connectionKeys.add(key);
+      return true;
+    });
+  const settings = mergeRecordByKey(
+    base.settings as unknown as Record<string, unknown>,
+    local.settings as unknown as Record<string, unknown>,
+    remote.settings as unknown as Record<string, unknown>,
+    (_key, localValue) => localValue,
+  ) as unknown as CanvasDocument['settings'];
+  if (!sameJson(settings, remote.settings)) keptLocal = true;
   return {
     document: normalizeCanvasGroups({
       ...remote,
+      settings,
       nodes,
       connections,
       viewport: local.viewport,
@@ -562,6 +687,29 @@ export function mergeRemoteCanvasDocument(
     }),
     keptLocal,
   };
+}
+
+/** 「撤销本轮」后还没回到本轮之前的节点 / 连线数：本轮改过、之后又被改过，所以保留了现在的样子。 */
+export function canvasRoundUndoConflicts(
+  steps: ReadonlyArray<{ before: CanvasDocument; after: CanvasDocument }>,
+  reverted: CanvasDocument,
+): number {
+  if (steps.length === 0) return 0;
+  const origin = steps[0].before;
+  const count = <T extends { id: string }>(pick: (doc: CanvasDocument) => readonly T[]) => {
+    const touched = new Set<string>();
+    for (const { before, after } of steps) {
+      const beforeById = new Map(pick(before).map(item => [item.id, item]));
+      const afterById = new Map(pick(after).map(item => [item.id, item]));
+      for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
+        if (!sameJson(beforeById.get(id), afterById.get(id))) touched.add(id);
+      }
+    }
+    const originById = new Map(pick(origin).map(item => [item.id, item]));
+    const revertedById = new Map(pick(reverted).map(item => [item.id, item]));
+    return [...touched].filter(id => !sameJson(originById.get(id), revertedById.get(id))).length;
+  };
+  return count(doc => doc.nodes) + count(doc => doc.connections);
 }
 
 export function canvasNodeActiveRunId(node: CanvasNode): string | null {

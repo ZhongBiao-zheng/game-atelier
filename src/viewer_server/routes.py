@@ -2449,9 +2449,10 @@ def delete_canvas_project_route(
         discard_empty_canvas_project,
     )
     if if_empty:
+        # 资格（版本、元数据、设置、内容、Agent 会话）由服务端核验；读不准的一律保留。
         try:
-            return {"discarded": discard_empty_canvas_project(project_id)}
-        except KeyError:
+            return {"discarded": discard_empty_canvas_project(project_id, payload.expected_revision)}
+        except (KeyError, OSError, ValueError):
             return {"discarded": False}
     try:
         trash_id = delete_canvas_project(project_id, payload.expected_revision)

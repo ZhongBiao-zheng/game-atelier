@@ -7,6 +7,7 @@ import { getCanvasSpecs, saveCanvasSpec, getCanvasLessons, reviewCanvasLesson, t
 import { getTeamSpecs, listTeamLibraries, saveTeamSpec } from '@/api/teamLibraries';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
+import { errorText } from '@/lib/errorText';
 import { Textarea } from '@/components/ui/textarea';
 
 const PROJECT = 'project';
@@ -69,7 +70,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
         setError('');
         return true;
       } catch (e) {
-        setError(e instanceof Error ? e.message : '保存失败');
+        setError(errorText(e, '保存失败'));
         setStatus('未保存');
         return false;
       }
@@ -108,7 +109,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
       setLessons(items);
       setStatus(Object.keys(recovered).length ? '未保存' : '已保存');
       setReady(true);
-    }).catch(e => { if (!disposed) setError(String(e)); });
+    }).catch(e => { if (!disposed) setError(errorText(e)); });
     return () => { disposed = true; clearTimeout(timer.current); void flush(); };
   }, [projectId, storageKey, flush]);
   const schedule = () => {
@@ -144,7 +145,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
       const specs = await getCanvasSpecs(projectId);
       setTexts(current => ({...current, [PROJECT]: specs.project}));
       setError('');
-    } catch (e) { setError(String(e)); }
+    } catch (e) { setError(errorText(e)); }
     finally { setReviewing(false); }
   };
   return <Dialog open onOpenChange={open => { if (!open) void flush().then(saved => { if (saved) onClose(); }); }}>

@@ -39,11 +39,13 @@ from character_workflow.lib.canvas_thumbnails import discard_canvas_thumbnails
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import archive_for_usage, job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
+    DEFAULT_CANVAS_CATEGORIES,
     CanvasAgentSession,
     CanvasContentVersion,
     CanvasDocument,
     CanvasPluginState,
     CanvasProject,
+    CanvasSettings,
     Job,
     JobStatus,
 )
@@ -1299,11 +1301,34 @@ def delete_canvas_project(
     return trash_id
 
 
-def discard_empty_canvas_project(project_id: str) -> bool:
-    """「新建项目」直接建出的空项目，用户什么都没做就离开时清掉（D12）。
+UNTITLED_CANVAS_PROJECT_NAME = "未命名项目"
+# 新建项目时就有的文件，加上读写文档时建出的锁文件；目录里出现其他任何文件
+# （Agent 会话、计划、上传、规范、未完成的事务…）都算用过。
+_FRESH_PROJECT_FILES = frozenset({"canvas.json", "project.json", ".media-operation.lock", ".canvas.lock"})
 
-    只有画布上没有任何节点、连线、内容版本，也没有任何画布任务时才删，直接删不进回收站；
-    否则原样保留并返回 False。要不要清由调用方按「本会话刚新建、没改名」判断，这里只守住「确实是空的」。"""
+
+def _fresh_project_untouched(project_dir: Path) -> bool:
+    for path in project_dir.rglob("*"):
+        if path.is_dir():
+            continue
+        if path.parent != project_dir or path.name not in _FRESH_PROJECT_FILES:
+            return False
+    return True
+
+
+def discard_empty_canvas_project(project_id: str, expected_revision: int) -> bool:
+    """「新建项目」直接建出的空项目，用户什么都没做就离开时清掉（D12），直接删不进回收站。
+
+    触发由前端挂在「本会话点了新建项目」上，资格在这里按新建时的状态逐项核验：
+    文档版本仍是 0 且等于请求的 expected_revision（只动视口不推进版本），显示设置是默认值，
+    项目名仍是「未命名项目」、分类与规范未改，没有节点 / 连线 / 内容版本 / 画布任务，
+    没有团队库挂载和资产关系，项目目录里只有新建时的文件（Agent 会话、计划、上传都会留下文件）。
+    任一条不满足或读不准就保留，返回 False。"""
+    from character_workflow.lib.creation_assets import list_creation_assets
+    from character_workflow.lib.team_library import list_mounts
+
+    if list_mounts(project_id) or list_creation_assets(project_id=project_id, archived=None).assets:
+        return False
     with (
         file_lock(_lifecycle_lock_path()),
         file_lock(canvas_project_lock_path(project_id)),
@@ -1311,9 +1336,30 @@ def discard_empty_canvas_project(project_id: str) -> bool:
     ):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_canvas_document_unlocked(project_id)
-        if current.nodes or current.connections or current.content_versions or _jobs_for_project(project_id):
+        project = read_canvas_project(project_id)
+        pristine_document = (
+            current.revision == 0
+            and expected_revision == current.revision
+            and current.settings == CanvasSettings()
+            and not current.nodes
+            and not current.connections
+            and not current.content_versions
+        )
+        pristine_project = (
+            project.name == UNTITLED_CANVAS_PROJECT_NAME
+            and project.categories == DEFAULT_CANVAS_CATEGORIES
+            and not project.category_spec_files
+            and project.migrated_from_workshop is None
+        )
+        project_dir = canvas_project_dir(project_id)
+        if (
+            not pristine_document
+            or not pristine_project
+            or _jobs_for_project(project_id)
+            or not _fresh_project_untouched(project_dir)
+        ):
             return False
-        shutil.rmtree(canvas_project_dir(project_id))
+        shutil.rmtree(project_dir)
     discard_canvas_thumbnails(project_id)
     return True
 

@@ -194,7 +194,7 @@ import { assetMediaContent, type CreationAsset } from '@/schema/creationAssets';
 import { DEFAULT_CANVAS_CATEGORIES, type CanvasProject } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
-import { notify, UNDO_DURATION_MS } from '@/lib/notify';
+import { notify } from '@/lib/notify';
 
 import {
   appendCanvasMentionToken,
@@ -250,6 +250,7 @@ import {
   expandCanvasInputSource,
   canvasModesRejectingSources,
   mergeRemoteCanvasDocument,
+  canvasRoundUndoConflicts,
   canvasVideoFrameSlotMode,
   canvasInputConnectionRejection,
   canvasNodeActiveRunId,
@@ -258,6 +259,7 @@ import { resolveRecipeModel } from './studioRecipe';
 import { useCanvasAgentIndicator } from '@/components/canvas/useCanvasAgentIndicator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { errorText } from '@/lib/errorText';
+import { presentJobError, type JobErrorAction } from '@/lib/errorPresentation';
 import { CanvasContextMenu, type CanvasContextMenuItem } from '@/components/canvas/CanvasContextMenu';
 import {
   isFreshCanvasProject,
@@ -436,6 +438,18 @@ export function canvasMentionGraphSignature(document: CanvasDocument | null): st
     .map(mentionConnectionFragment)
     .join(',');
   return `${nodes}|${connections}`;
+}
+
+/** Agent 一轮对画布的改动：每次落盘一步（落盘前后的本页文档），撤销时只反转这些步骤。 */
+interface ExternalRound {
+  steps: Array<{ before: CanvasDocument; after: CanvasDocument }>;
+  /** 这一轮在撤销栈里占的那一步（第一次落盘前的文档）。 */
+  stackSnapshot: CanvasDocument;
+  pastLength: number;
+  deleted: number;
+  toastId: string | number;
+  /** 本页 Agent 还在跑：之后的落盘并进这一轮。 */
+  open: boolean;
 }
 
 interface CanvasClipboardPayload {
@@ -715,6 +729,8 @@ function CanvasEditorInner({
   const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => undefined);
   const pendingTeamAssetAction = useRef<TeamAssetAction | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
+  // 前端提交队列的纪元：「全部停止」、离开画布、卸载时加一，之前排进队列还没发出的计费提交一律作废。
+  const submissionEpoch = useRef(0);
   const pendingTextVersions = useRef(new Map<string, string>());
   // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
   // 又不能把它塞进 flushSave 的依赖里让保存闭包每次重建。
@@ -732,19 +748,17 @@ function CanvasEditorInner({
     const release = openCanvasEditor(projectId);
     return () => {
       release();
+      // 资格由服务端核验（版本仍是 0、没改名、没改设置、没有内容 / 任务 / Agent 会话），这里只管触发。
       scheduleFreshCanvasProjectCleanup(projectId, discardEmptyCanvasProject);
     };
   }, [projectId]);
   // 本页最后一次确认过的服务端文档：外部改动到来时做三方合并的基准（首屏、保存成功、外部重载时更新）。
   const serverBaseDocument = useRef<CanvasDocument | null>(null);
-  // 外部（Agent）改动的「这一轮」：连续落盘的几次合成撤销栈里的一步，撤销 toast 也只留一条。
-  const externalRound = useRef<{
-    snapshot: CanvasDocument;
-    pastLength: number;
-    deleted: number;
-    toastId: string | number;
-    at: number;
-  } | null>(null);
+  // 外部（Agent）改动的「这一轮」：按 Agent 运行区间划分（会话在跑期间的几次落盘是同一轮），
+  // 每次落盘记一步 before → after，「撤销本轮」只反转这些步骤；撤销栈里同一轮也只占一步。
+  const externalRound = useRef<ExternalRound | null>(null);
+  const agentActiveRef = useRef(false);
+  const undoExternalRoundRef = useRef<(round: ExternalRound) => void>(() => undefined);
   const undoToRef = useRef<(target?: CanvasDocument) => void>(() => undefined);
   const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
@@ -906,6 +920,11 @@ function CanvasEditorInner({
   // 这里只把「结果并回文档」这一半交出去。必须声明在下面那个切项目的 effect 之前——
   // 那个 effect 的依赖数组要引用 acceptJobs / resetJobSync。
   const { indicator: agentIndicator, onAgentEvent } = useCanvasAgentIndicator(projectId);
+  agentActiveRef.current = agentIndicator !== 'idle';
+  // Agent 停下：这一轮结束，之后的落盘算新的一轮。
+  useEffect(() => {
+    if (agentIndicator === 'idle' && externalRound.current) externalRound.current.open = false;
+  }, [agentIndicator]);
   const { jobs, acceptJobs, applyLocalJob, reset: resetJobSync } = useCanvasJobSync({
     projectId,
     mergeRunDocument,
@@ -1317,7 +1336,7 @@ function CanvasEditorInner({
         if (saveError instanceof ApiError && saveError.status === 409) {
           // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。重载时按节点三方合并，
           // 本页没落盘的改动保留下来再存一次，不弹横幅。
-          void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message));
+          void reloadDocumentRef.current().catch(reloadError => setError(errorText(reloadError)));
           throw saveError;
         }
         // 不再弹报错条：按退避自动重试，状态只在顶栏胶囊里（规格 2.4）。原因放在胶囊的 Hint 里。
@@ -1341,8 +1360,9 @@ function CanvasEditorInner({
 
   // Agent 经 MCP 改画布（#92）：服务端 canvas.json 一落盘就广播 canvas-document-changed，
   // 本页按 revision 判断是不是别人的改动——自己的保存也会触发同一事件。
-  /** 外部改动（Agent 一轮落盘）进撤销栈：一轮 = 一步。连续几次落盘之间用户没动过撤销栈时并成同一轮，
-   *  toast 只留一条并累计删除数（规格 2.1）。 */
+  /** 外部改动（Agent 一轮落盘）进撤销栈：一轮 = 一步，toast 只留一条并累计删除数（规格 2.1）。
+   *  轮次按 Agent 会话的运行区间划分：会话在跑期间的连续落盘并成一轮，会话停下后的下一次落盘开新的一轮；
+   *  没有本页 Agent 在跑时（外部 MCP、另一标签页）每次落盘各算一轮。不再按 8 秒窗口猜。 */
   const recordExternalRound = useCallback((before: CanvasDocument, after: CanvasDocument) => {
     const signature = (doc: CanvasDocument) => JSON.stringify([doc.nodes, doc.connections]);
     if (signature(before) === signature(after)) return;
@@ -1350,35 +1370,34 @@ function CanvasEditorInner({
     const deleted = before.nodes.filter(node => !afterIds.has(node.id)).length;
     const past = history.current.past;
     const round = externalRound.current;
-    const continues = round
-      && Date.now() - round.at < UNDO_DURATION_MS
-      && past.length === round.pastLength
-      && past[past.length - 1] === round.snapshot;
+    const continues = Boolean(round?.open && agentActiveRef.current);
     if (round) notify.dismiss(round.toastId);
-    let snapshot = round?.snapshot ?? before;
-    let total = deleted;
-    if (continues && round) {
-      total += round.deleted;
-    } else {
-      snapshot = before;
+    // 撤销栈：同一轮、期间用户没动过撤销栈时不另占一步。
+    const stackUntouched = continues && round
+      && past.length === round.pastLength
+      && past[past.length - 1] === round.stackSnapshot;
+    let stackSnapshot = round?.stackSnapshot ?? before;
+    if (!stackUntouched) {
+      stackSnapshot = before;
       past.push(before);
       history.current.past = past.slice(-50);
     }
     history.current.future = [];
+    const steps = continues && round ? [...round.steps, { before, after }] : [{ before, after }];
+    const total = deleted + (continues && round ? round.deleted : 0);
     const message = total
       ? `已应用本轮修改（含删除 ${total} 个节点）`
       : '已应用本轮修改';
-    const toastId = notify.undo(message, () => {
-      if (externalRound.current?.snapshot === snapshot) externalRound.current = null;
-      undoToRef.current(snapshot);
-    }, { actionLabel: '撤销本轮' });
-    externalRound.current = {
-      snapshot,
+    const next: ExternalRound = {
+      steps,
+      stackSnapshot,
       pastLength: history.current.past.length,
       deleted: total,
-      toastId,
-      at: Date.now(),
+      toastId: '',
+      open: continues || agentActiveRef.current,
     };
+    next.toastId = notify.undo(message, () => undoExternalRoundRef.current(next), { actionLabel: '撤销本轮' });
+    externalRound.current = next;
   }, []);
 
   const reloadDocumentFromServer = useCallback(async () => {
@@ -1446,7 +1465,7 @@ function CanvasEditorInner({
       return;
     }
     // 其余情况收下服务端文档：本页没落盘的改动按节点三方合并保留，不弹横幅让人做选择。
-    void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message));
+    void reloadDocumentFromServer().catch(reloadError => setError(errorText(reloadError)));
   };
 
   // 中文 / 日文输入法在候选未确认前一直处于 composition 状态，而自动保存的去抖只有 350ms，
@@ -1550,6 +1569,8 @@ function CanvasEditorInner({
 
   /** 离开画布前先存；存不进去时报错条给「仍然离开」（明说会丢掉未保存的改动），不把人困在画布里。 */
   const leaveCanvas = useCallback((go: () => void) => {
+    // 要离开了：队列里还没发出的计费提交不再发（等保存的这段时间里也不能轮到它们）。
+    submissionEpoch.current += 1;
     void persistNow().then(saved => {
       if (saved) { go(); return; }
       setErrorAction({
@@ -1582,6 +1603,24 @@ function CanvasEditorInner({
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
   }, []);
+
+  /** 「撤销本轮」：只反转这一轮 Agent 落盘的改动，从后往前逐步三方合并（基准 = 那一步之后，
+   *  本页 = 现在，目标 = 那一步之前）。之后用户自己的编辑原样保留；这一轮改过、之后又被改过的节点 /
+   *  连线保留现在的样子，并提示有几处没撤回。整次撤销本身进撤销栈，⌘Z 可以再撤回来。 */
+  const undoExternalRound = useCallback((round: ExternalRound) => {
+    if (externalRound.current === round) externalRound.current = null;
+    const current = latestDocument.current;
+    if (!current) return;
+    const pinned = new Set([...activeTextEditingNodeIds.current, ...pendingTextVersions.current.keys()]);
+    let reverted = current;
+    for (const step of [...round.steps].reverse()) {
+      reverted = mergeRemoteCanvasDocument(step.after, reverted, step.before, pinned).document;
+    }
+    const conflicts = canvasRoundUndoConflicts(round.steps, reverted);
+    commit(() => ({ ...reverted, viewport: current.viewport }), true);
+    if (conflicts > 0) notify.info(`有 ${conflicts} 处在本轮之后又改过，保留了现在的样子`);
+  }, [commit]);
+  undoExternalRoundRef.current = undoExternalRound;
 
   const previewNodeResize = useCallback((nodeId: string, layout: Omit<LiveNodeLayout, 'nodeId'>) => {
     activeResizeNodeId.current = nodeId;
@@ -2803,7 +2842,7 @@ function CanvasEditorInner({
               },
             });
           })
-          .catch(reloadError => setError((reloadError as Error).message));
+          .catch(reloadError => setError(errorText(reloadError)));
         return;
       }
       setError((reproduceError as Error).message);
@@ -3527,11 +3566,25 @@ function CanvasEditorInner({
   }, []);
 
   /** 生成提交在前端排队（P1）：前一个提交落地后自动提交下一个，不再报「另一项生成正在提交」让人再点一次。
-   *  排队中的节点按钮显示「排队中」。只串行「提交」这一步，提交之后的生成照常并行。 */
+   *  排队中的节点按钮显示「排队中」。只串行「提交」这一步，提交之后的生成照常并行。
+   *  排队项都是计费请求：「全部停止」、离开画布、卸载都把纪元加一，之前排进来的项轮到时一律不发；
+   *  任务在真正调接口前还要再问一次 stillWanted（保存等待期间可能已经停止）。
+   *  dedupeKey 相同的项在排队或提交中时不重复入队（同图同档的 AI高清连点）。 */
   const submissionChain = useRef<Promise<unknown>>(Promise.resolve());
   const pendingSubmissions = useRef(0);
+  const pendingSubmissionKeys = useRef(new Set<string>());
   const [queuedNodeIds, setQueuedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
-  const queueSubmission = useCallback(<T,>(nodeId: string, task: () => Promise<T>, fallback: T): Promise<T> => {
+  const queueSubmission = useCallback(<T,>(
+    nodeId: string,
+    task: (stillWanted: () => boolean) => Promise<T>,
+    fallback: T,
+    dedupeKey?: string,
+  ): Promise<T> => {
+    if (dedupeKey && pendingSubmissionKeys.current.has(dedupeKey)) return Promise.resolve(fallback);
+    if (dedupeKey) pendingSubmissionKeys.current.add(dedupeKey);
+    const epoch = submissionEpoch.current;
+    const stillWanted = () => submissionEpoch.current === epoch
+      && latestDocument.current?.project_id === projectIdRef.current;
     const mustWait = pendingSubmissions.current > 0 || runSubmissionInFlight.current;
     pendingSubmissions.current += 1;
     if (mustWait) setQueuedNodeIds(current => new Set(current).add(nodeId));
@@ -3543,21 +3596,31 @@ function CanvasEditorInner({
     });
     const run = submissionChain.current.catch(() => undefined).then(async () => {
       // 不走这条队列的提交（MJ 续查、媒体操作）还在途时也等它落地。
-      while (runSubmissionInFlight.current) await new Promise(resolve => window.setTimeout(resolve, 100));
+      while (runSubmissionInFlight.current && stillWanted()) {
+        await new Promise(resolve => window.setTimeout(resolve, 100));
+      }
       unqueue();
-      if (latestDocument.current?.project_id !== projectIdRef.current) return fallback;
-      return task();
+      if (!stillWanted()) return fallback;
+      return task(stillWanted);
     }).finally(() => {
       pendingSubmissions.current -= 1;
+      if (dedupeKey) pendingSubmissionKeys.current.delete(dedupeKey);
       unqueue();
     });
     submissionChain.current = run;
     return run;
   }, []);
+  /** 撤销前端队列里还没发出的提交（已发出的由服务端 run 的停止处理）。 */
+  const cancelQueuedSubmissions = useCallback(() => {
+    submissionEpoch.current += 1;
+    setQueuedNodeIds(current => (current.size ? new Set() : current));
+  }, []);
+  // 卸载（离开画布、切项目）后，旧闭包里排着的提交不能再发出去计费。
+  useEffect(() => () => { submissionEpoch.current += 1; }, []);
 
   /** 返回这次提交的结果：submitted 已受理；not_sent / conflict 确定没有发出或被版本校验拒绝（可以再提交）；
    *  error 结果不明或被拒绝（不要自动再提交，可能已经在计费）。 */
-  const submitRunNow = useCallback(async (nodeId: string): Promise<SubmitRunOutcome> => {
+  const submitRunNow = useCallback(async (nodeId: string, stillWanted: () => boolean): Promise<SubmitRunOutcome> => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return { status: 'not_sent' };
@@ -3577,6 +3640,7 @@ function CanvasEditorInner({
         : draft.mode === 'audio'
           ? Math.max(1, Math.min(2, Number(draft.params.n ?? 1)))
           : 1;
+      if (!stillWanted()) return { status: 'not_sent' };
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await submitCanvasRun(
@@ -3611,9 +3675,9 @@ function CanvasEditorInner({
     projectId,
     rememberGenerationDefault,
   ]);
-  const submitRun = useCallback((nodeId: string): Promise<SubmitRunOutcome> => queueSubmission(nodeId, () => submitRunNow(nodeId), { status: 'not_sent' } as SubmitRunOutcome), [queueSubmission, submitRunNow]);
+  const submitRun = useCallback((nodeId: string): Promise<SubmitRunOutcome> => queueSubmission(nodeId, stillWanted => submitRunNow(nodeId, stillWanted), { status: 'not_sent' } as SubmitRunOutcome), [queueSubmission, submitRunNow]);
 
-  const reversePromptNow = useCallback(async (node: CanvasContentNode) => {
+  const reversePromptNow = useCallback(async (node: CanvasContentNode, stillWanted: () => boolean) => {
     if (node.type !== 'image' || !node.data.current_version_id) {
       setError('请选择一个已有内容的图片节点再反推提示词。');
       return;
@@ -3625,7 +3689,7 @@ function CanvasEditorInner({
     setSubmittingNodeIds(current => new Set(current).add(node.id));
     setError(null);
     try {
-      if (!await persistNow()) return;
+      if (!await persistNow() || !stillWanted()) return;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await submitCanvasReversePrompt(
@@ -3656,7 +3720,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
-  const reversePrompt = useCallback((node: CanvasContentNode): Promise<void> => queueSubmission(node.id, () => reversePromptNow(node), undefined), [queueSubmission, reversePromptNow]);
+  const reversePrompt = useCallback((node: CanvasContentNode): Promise<void> => queueSubmission(node.id, stillWanted => reversePromptNow(node, stillWanted), undefined), [queueSubmission, reversePromptNow]);
 
   const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
     const current = latestDocument.current;
@@ -3685,7 +3749,7 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([stack.id]));
   }, [commit, keys]);
 
-  const submitLayerDecompositionNow = useCallback(async (nodeId: string) => {
+  const submitLayerDecompositionNow = useCallback(async (nodeId: string, stillWanted: () => boolean) => {
     const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
     if (node?.type !== 'layer_stack' || node.data.base_version_id) {
       setError('这个拆分图层节点已不可提交。');
@@ -3702,7 +3766,7 @@ function CanvasEditorInner({
     setSubmittingNodeIds(current => new Set(current).add(nodeId));
     setError(null);
     try {
-      if (!await persistNow()) return;
+      if (!await persistNow() || !stillWanted()) return;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await submitCanvasLayerDecomposition(
@@ -3733,7 +3797,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
-  const submitLayerDecomposition = useCallback((nodeId: string): Promise<void> => queueSubmission(nodeId, () => submitLayerDecompositionNow(nodeId), undefined), [queueSubmission, submitLayerDecompositionNow]);
+  const submitLayerDecomposition = useCallback((nodeId: string): Promise<void> => queueSubmission(nodeId, stillWanted => submitLayerDecompositionNow(nodeId, stillWanted), undefined), [queueSubmission, submitLayerDecompositionNow]);
 
   // 已完成的拆分节点不能再提交：改提示词重拆 = 从同一张来源图新建一个拆分节点放在下方并立即提交。
   const rerunLayerDecomposition = useCallback(async (
@@ -3844,6 +3908,8 @@ function CanvasEditorInner({
   const commitDisplaySetting = useCallback((settings: Partial<CanvasDocument['settings']>) => {
     const current = latestDocument.current;
     if (!current) return;
+    // 改设置也是编辑过（D12）：不进撤销栈，但新建项目从此不再自动清理。
+    settleFreshCanvasProject(projectIdRef.current);
     const next = { ...current, settings: { ...current.settings, ...settings }, updated_at: new Date().toISOString() };
     latestDocument.current = next;
     setDocument(next);
@@ -4853,7 +4919,11 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const upscaleImageNow = useCallback(async (node: CanvasContentNode, target: CanvasUpscaleTarget) => {
+  const upscaleImageNow = useCallback(async (
+    node: CanvasContentNode,
+    target: CanvasUpscaleTarget,
+    stillWanted: () => boolean,
+  ) => {
     if (runSubmissionInFlight.current) return;
     setPreview(null);
     setSubmittingNodeIds(current => new Set(current).add(node.id));
@@ -4862,6 +4932,7 @@ function CanvasEditorInner({
         setError('自动保存失败，AI高清尚未提交。请检查服务后重试。');
         return;
       }
+      if (!stillWanted()) return;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await submitCanvasUpscaleRun(projectId, {
@@ -4899,7 +4970,12 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
-  const upscaleImage = useCallback((node: CanvasContentNode, target: CanvasUpscaleTarget): Promise<void> => queueSubmission(node.id, () => upscaleImageNow(node, target), undefined), [queueSubmission, upscaleImageNow]);
+  const upscaleImage = useCallback((node: CanvasContentNode, target: CanvasUpscaleTarget): Promise<void> => queueSubmission(
+    node.id,
+    stillWanted => upscaleImageNow(node, target, stillWanted),
+    undefined,
+    `upscale:${node.id}:${target}`,
+  ), [queueSubmission, upscaleImageNow]);
 
   const executeMediaOperation = useCallback(async (
     target: { nodeId: string; versionId: string },
@@ -5487,6 +5563,35 @@ function CanvasEditorInner({
     void loadHostPlugin(plugin.id).then(module => module?.canvasActions?.[action.id]?.(hostPluginApi, position));
   };
 
+  /** 节点失败态上的修复动作（规格 2.3，与创作台同一张表）：密钥 / 余额 / 地址去供应商设置（有充值地址的直接外链），
+   *  服务无响应重新加载；重试只对普通生成直接再提交一次，反推、AI高清等预设任务与换模型、改提示词一样
+   *  定位并选中发起生成的那个节点，交给用户在面板里改了再点生成。 */
+  const runFailureAction = useCallback((job: Job, action: JobErrorAction) => {
+    if (action.kind === 'topup' || action.kind === 'open_provider' || action.kind === 'edit_endpoint') {
+      const href = presentJobError(job, keys.find(key => key.alias === job.alias)).action?.href;
+      if (href) {
+        window.open(href, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      leaveCanvas(() => setLocation('/settings/providers'));
+      return;
+    }
+    if (action.kind === 'reconnect') {
+      window.location.reload();
+      return;
+    }
+    const surfaceId = job.canvas_run?.snapshot.surface_node_id;
+    const surface = surfaceId ? latestDocument.current?.nodes.find(node => node.id === surfaceId) : undefined;
+    if (!surface) return;
+    const presetTask = Boolean(job.canvas_run?.snapshot.normalized_params.preset_id);
+    if (action.kind === 'retry' && !presetTask && generationDraftForNode(surface)) {
+      void submitRun(surface.id);
+      return;
+    }
+    selectOnlyNode(surface.id);
+    locateNode(surface.id);
+  }, [keys, leaveCanvas, locateNode, selectOnlyNode, setLocation, submitRun]);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
@@ -5589,7 +5694,9 @@ function CanvasEditorInner({
     editVideo,
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
+    runFailureAction,
   }), [
+    runFailureAction,
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
     annotationController,
@@ -6258,6 +6365,7 @@ function CanvasEditorInner({
                   <div className="mt-1 border-t border-border pt-1">
                     <Button variant="ghost" size="sm" className="h-8 w-full justify-center text-destructive hover:text-destructive"
                       onClick={() => {
+                        cancelQueuedSubmissions();
                         for (const nodeId of runningNodeIds) {
                           const node = document.nodes.find(item => item.id === nodeId);
                           const job = node ? canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).job : undefined;

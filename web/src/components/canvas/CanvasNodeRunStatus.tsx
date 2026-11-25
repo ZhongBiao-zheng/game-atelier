@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
+import { Button } from '@/components/ui/button';
 import { LoadingIcon } from '@/components/ui/icons';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, useAnimateOnChange } from '@/lib/motion';
 
+import { presentJobError, type JobErrorAction } from '@/lib/errorPresentation';
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -17,6 +19,8 @@ export interface CanvasNodeRunState {
   detail: string | null;
   job: Job | undefined;
   reversePrompt: boolean;
+  /** 失败时按 error_code 给的那一个修复动作（规格 2.3）；「重新查询」画布还没有接口，不给。 */
+  failureAction?: JobErrorAction;
 }
 
 export function canvasNodeRunDisplayError(
@@ -86,15 +90,19 @@ export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
     };
   }
   if (job.status === 'failed') {
+    // 原因与动作按后端落盘的 error_code 选（与创作台同一张表）；没有分类码的旧任务仍显示原文摘要。
+    const presentation = presentJobError(job);
+    const classified = Boolean(job.error_code && job.error_code !== 'unknown');
     return {
       status: 'error',
       label: reversePrompt ? '分析失败' : '生成失败',
-      detail: canvasNodeRunDisplayError(
+      detail: classified ? presentation.message : canvasNodeRunDisplayError(
         job.error,
         reversePrompt ? '反推提示词失败，请检查设置后重新生成' : '生成失败，请检查设置后重新生成',
       ),
       job,
       reversePrompt,
+      failureAction: presentation.action?.kind === 'requery' ? undefined : presentation.action,
     };
   }
   return {
@@ -155,10 +163,13 @@ export function CanvasNodeRunOverlay({
   state,
   hasContent,
   holdUntilReady = false,
+  onFailureAction,
 }: {
   state: CanvasNodeRunState;
   hasContent: boolean;
   holdUntilReady?: boolean;
+  /** 失败态的修复动作（更新密钥、更换模型、重试…）；不传就只显示原因。 */
+  onFailureAction?: (job: Job, action: JobErrorAction) => void;
 }) {
   const active = state.status === 'loading' || state.status === 'error';
   const lastLoading = useRef<OverlayFrame | null>(null);
@@ -213,6 +224,19 @@ export function CanvasNodeRunOverlay({
           >
             {shown.state.detail || shown.state.label}
           </span></Hint>
+          {shown.state.status === 'error' && shown.state.failureAction && shown.state.job && onFailureAction && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="pointer-events-auto h-6 shrink-0 px-2 text-xs"
+              onClick={event => {
+                event.stopPropagation();
+                if (shown.state.job && shown.state.failureAction) onFailureAction(shown.state.job, shown.state.failureAction);
+              }}
+            >
+              {shown.state.failureAction.label}
+            </Button>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

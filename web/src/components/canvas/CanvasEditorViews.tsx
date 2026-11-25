@@ -142,6 +142,7 @@ import type {
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+import type { JobErrorAction } from '@/lib/errorPresentation';
 import {
   canvasNodeAcceptsInput,
   CANVAS_COMPARE_SLOTS,
@@ -248,6 +249,8 @@ export interface CanvasNodeContextValue {
   ) => void;
   /** 生成提交在前端排队中的节点（前一个提交落地后自动提交）。 */
   queuedNodeIds?: ReadonlySet<string>;
+  /** 节点失败态上的修复动作（按 error_code：更新密钥、更换模型、重试…）。 */
+  runFailureAction?: (job: Job, action: JobErrorAction) => void;
   /** 本机能不能抠图（进画布时预取）；false 时工具条和配置候选里都不出现抠图。 */
   mattingAvailable?: boolean;
   /** 删除节点（走撤销栈并给撤销 toast），节点「更多」与右键菜单用。 */
@@ -782,7 +785,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
                 node={node}
                 content={content}
                 replacing={replacingMedia}
-                submitting={submittingNode}
+                // 排队中的节点也禁用提交类工具（AI高清等），不让同一操作重复入队。
+                submitting={submittingNode || Boolean(context.queuedNodeIds?.has(node.id))}
                 context={context}
                 trailing={(
                   <>
@@ -1085,6 +1089,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           ? revealedVersionId !== null
           : Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
         holdUntilReady={content?.kind === 'image' && revealedVersionId !== content.version_id}
+        onFailureAction={context.runFailureAction}
       />
       {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
         <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
