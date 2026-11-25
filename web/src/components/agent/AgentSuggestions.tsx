@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { AiIcon, ArrowToolIcon } from '@/components/ui/icons';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 
 const SUGGESTION_LINE = /^(?:[-*•]\s*)?→\s+(.+)$/;
 const MAX_SUGGESTIONS = 3;
@@ -19,11 +21,19 @@ export function parseAgentReply(raw: string): { body: string; suggestions: strin
   return { body: lines.slice(0, end).join('\n').trim(), suggestions: suggestions.slice(0, MAX_SUGGESTIONS) };
 }
 
-/** 画布面板与创作台时间线共用的「继续探索」。 */
+/** 画布面板与创作台时间线共用的「继续探索」。一轮结束、追问出现（或换了一组）时淡入并上移 4px，
+ *  减弱动态效果时只淡入；打开时已有的不播。 */
 export function AgentSuggestions({ suggestions, onPick }: { suggestions: string[]; onPick: (text: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(suggestions.join('\n'), (value, _previous, reduced) => {
+    const element = ref.current;
+    if (!value || !element) return;
+    const keyframes = reduced ? { opacity: [0, 1] } : { opacity: [0, 1], y: [4, 0] };
+    clearOnFinish(animate(element, keyframes, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), element);
+  }, { keepWhenReduced: true });
   if (suggestions.length === 0) return null;
   return (
-    <div aria-label="推荐追问" className="flex flex-col items-start gap-2 pt-2">
+    <div ref={ref} aria-label="推荐追问" className="flex flex-col items-start gap-2 pt-2">
       <span className="flex items-center gap-1.5 text-xs text-subtle-foreground">
         <AiIcon size="sm" />继续探索
       </span>

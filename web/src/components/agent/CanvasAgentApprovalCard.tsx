@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapse } from '@/components/ui/collapse';
 import { Label } from '@/components/ui/label';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { shakeOnError } from '@/lib/motion';
 import type { CanvasAgentApproval, CanvasAgentBatchItems } from '@/schema/canvas';
 
 const COLLAPSED_LINES = 12;
@@ -67,18 +70,31 @@ function ApprovalSummary({ text }: { text: string }) {
   </>;
 }
 
+/** 确认卡收起后留在对话里的一行结论，与按钮成对：「执行」→ 已执行…，「取消」→ 已取消。
+ *  total / chosen 按项数算（批量生成拿到明细后每项算一项）。 */
+export function approvalConclusion(total: number, chosen: number, onlyLabel: string | null): string {
+  if (chosen === 0) return '已取消';
+  if (chosen < total) return `已执行 ${chosen}/${total} 项`;
+  return total === 1 && onlyLabel ? `已执行 · ${onlyLabel}` : `已执行 ${total} 项`;
+}
+
 /**
  * 待确认的工具调用：多条时逐条勾选，「执行」只执行勾上的，其余按拒绝回给 Agent；
- * 「拒绝」全部拒绝。摘要由服务端写好（生成会带模型与预计费用）。新一批待确认到来时由调用方换 key 重建，默认全选。
+ * 「取消」全部不执行。摘要由服务端写好（生成会带模型与预计费用）。新一批待确认到来时由调用方换 key 重建，默认全选。
  * 批量生成：loadBatchItems 拿到逐项数据后按项勾选（一项都不勾等于拒绝这次调用）、按勾选重算合计；
- * 拿不到时整段显示服务端摘要，只能整条执行或拒绝。onDecide 的 items：批量生成里没全选时，勾上的项下标。
+ * 拿不到时整段显示服务端摘要，只能整条执行或拒绝。onDecide 的 items：批量生成里没全选时，勾上的项下标；conclusion：收起后显示的结论行。
+ * onDecide 返回 Promise 时等它结束：结果为空（提交失败）就让按下的按钮微抖、恢复可再点。
  */
 export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide, loadBatchItems, unit = '张' }: {
   unit?: string;
   approvals: CanvasAgentApproval[];
   labels: Record<string, string>;
   disabled?: boolean;
-  onDecide: (approved: ReadonlySet<string>, items: ReadonlyMap<string, readonly number[]>) => void;
+  onDecide: (
+    approved: ReadonlySet<string>,
+    items: ReadonlyMap<string, readonly number[]>,
+    conclusion: string,
+  ) => void | Promise<unknown>;
   loadBatchItems?: (callId: string) => Promise<CanvasAgentBatchItems>;
 }) {
   const [approved, setApproved] = useState<Set<string>>(() => new Set(approvals.map(item => item.call_id)));
@@ -86,6 +102,10 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
   const [details, setDetails] = useState<Map<string, CanvasAgentBatchItems>>(() => new Map());
   const [picked, setPicked] = useState<Map<string, Set<number>>>(() => new Map());
   const loader = useRef(loadBatchItems);
+  // 按下的是哪个：执行键在提交期间原位换成「执行中…」，失败时按下的那个微抖。
+  const [choice, setChoice] = useState<'run' | 'cancel' | null>(null);
+  const runRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const batchIds = approvals.filter(item => item.tool === BATCH_TOOL).map(item => item.call_id).join(',');
   useEffect(() => {
     let alive = true;
@@ -119,6 +139,19 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
     });
   }
 
+  function submit(which: 'run' | 'cancel', calls: ReadonlySet<string>, items: ReadonlyMap<string, readonly number[]>) {
+    const onlyLabel = approvals.length === 1 && !details.size ? labels[approvals[0].tool] ?? approvals[0].tool : null;
+    const conclusion = approvalConclusion(total, which === 'cancel' ? 0 : chosen, onlyLabel);
+    setChoice(which);
+    const result = onDecide(calls, items, conclusion);
+    if (!(result instanceof Promise)) return;
+    void result.then(value => {
+      if (value !== undefined) return;
+      setChoice(null);
+      shakeOnError(which === 'run' ? runRef.current : cancelRef.current);
+    });
+  }
+
   function decide() {
     const calls = new Set([...approved].filter(id => !details.has(id)));
     const items = new Map<string, number[]>();
@@ -129,7 +162,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
       calls.add(item.call_id);
       if (chosenItems.size < data.items.length) items.set(item.call_id, [...chosenItems].sort((a, b) => a - b));
     }
-    onDecide(calls, items);
+    submit('run', calls, items);
   }
 
   function toggle(callId: string, checked: boolean) {
@@ -144,21 +177,9 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
     <div role="group" aria-label="待确认的操作" className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3">
       {approvals.map(item => {
         const data = details.get(item.call_id);
-        if (data) {
-          return <div key={item.call_id} className="text-xs">
-            <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>
-            <BatchItems unit={unit} data={data} selected={selectedItems(item.call_id)} disabled={disabled}
-              onToggle={(index, checked) => togglePick(item.call_id, index, checked)} />
-          </div>;
-        }
-        const body = (
-          <>
-            <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>
-            <ApprovalSummary text={item.summary} />
-          </>
-        );
-        return multiple ? (
-          <Label key={item.call_id} className="flex cursor-pointer items-start gap-2 text-xs font-normal leading-normal">
+        const title = <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>;
+        const plain = multiple ? (
+          <Label className="flex cursor-pointer items-start gap-2 text-xs font-normal leading-normal">
             <Checkbox
               aria-label={`执行：${labels[item.tool] ?? item.tool}`}
               checked={approved.has(item.call_id)}
@@ -166,14 +187,29 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
               onCheckedChange={checked => toggle(item.call_id, checked === true)}
               className="mt-0.5"
             />
-            <span className="min-w-0 flex-1">{body}</span>
+            <span className="min-w-0 flex-1">{title}<ApprovalSummary text={item.summary} /></span>
           </Label>
-        ) : <div key={item.call_id} className="text-xs">{body}</div>;
+        ) : <div className="text-xs">{title}<ApprovalSummary text={item.summary} /></div>;
+        if (item.tool !== BATCH_TOOL) return <div key={item.call_id}>{plain}</div>;
+        // 批量生成的逐项明细异步到达：整段摘要收起，逐项列表从同一位置展开，不整块替换。
+        return <div key={item.call_id}>
+          <Collapse open={!data}>{plain}</Collapse>
+          <Collapse open={Boolean(data)}>
+            {data && <div className="text-xs">
+              {title}
+              <BatchItems unit={unit} data={data} selected={selectedItems(item.call_id)} disabled={disabled}
+                onToggle={(index, checked) => togglePick(item.call_id, index, checked)} />
+            </div>}
+          </Collapse>
+        </div>;
       })}
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onDecide(new Set(), new Map())}>拒绝</Button>
-        <Button size="sm" disabled={disabled || chosen === 0} onClick={decide}>
-          {multiple && chosen < total ? `执行 ${chosen} 项` : '执行'}
+        <Button ref={cancelRef} size="sm" variant="secondary" disabled={disabled}
+          onClick={() => submit('cancel', new Set(), new Map())}>取消</Button>
+        {/* 「执行 N 项」随勾选变数、提交时换「执行中…」：最小宽 + 等宽数字，按钮不左右跳。 */}
+        <Button ref={runRef} size="sm" disabled={disabled || chosen === 0} onClick={decide} className="min-w-18 tabular-nums">
+          <SwapLabel active={choice === 'run' && Boolean(disabled)} on="执行中…"
+            off={multiple && chosen < total ? `执行 ${chosen} 项` : '执行'} />
         </Button>
       </div>
     </div>

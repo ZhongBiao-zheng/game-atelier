@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { AgentProcessToggle } from '@/components/agent/AgentProcessToggle';
 import { AgentMarkdown, AgentStreamingMarkdown, agentToolStatusLabel, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
 import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
@@ -10,7 +11,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import type { CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
+import type { CanvasAgentApproval, CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
 import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
 import { CanvasAgentPlanList } from '@/components/agent/CanvasAgentPlanList';
 import { CanvasAgentModeMenu } from '@/components/agent/CanvasAgentModeMenu';
@@ -21,7 +22,7 @@ import { CanvasAgentPreferencePicker } from '@/components/agent/CanvasAgentPrefe
 import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
 import { buildCanvasAgentTimeline, isOutgoingMessage } from '@/components/agent/canvasAgentTimeline';
 import { canvasAgentSetupNotice } from '@/components/agent/canvasAgentSetupNotice';
-import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
+import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, agentPanelWidthStyle, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from '@/components/agent/CanvasAgentSkillPicker';
 import { useCanvasAgent } from '@/components/agent/useWorkspaceAgent';
 import { Collapse } from '@/components/ui/collapse';
@@ -31,7 +32,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 import {
   animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, useAnimateOnChange,
-  motionAvailable,
+  motionAvailable, shakeOnError,
 } from '@/lib/motion';
 
 export interface CanvasAgentNodeRef {
@@ -81,13 +82,15 @@ function ProcessImages({ projectId, images }: { projectId: string; images: Canva
   return (
     <div className="flex flex-wrap gap-1.5">
       {images.map(ref => (
-        <img
-          key={ref.reference_id}
-          src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
-          alt={ref.title}
-          loading="lazy"
-          className="size-20 rounded-md border border-border object-cover"
-        />
+        // 底色占位：图解码完成前是一块浅底，不是空白，解码后淡入。
+        <span key={ref.reference_id} className="size-20 overflow-hidden rounded-md border border-border bg-secondary/55">
+          <RevealImage
+            src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
+            alt={ref.title}
+            loading="lazy"
+            className="size-full object-cover"
+          />
+        </span>
       ))}
     </div>
   );
@@ -107,7 +110,7 @@ const ProcessGroup = memo(function ProcessGroup({ projectId, messages, steps, ar
   return (
     <Collapse open appear={arriving}>
       <div className="flex flex-col gap-2">
-        <AgentProcessToggle label={`处理过程 · ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
+        <AgentProcessToggle label={`已执行 ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
         <Collapse open={open}>
           <div className="flex flex-col gap-3 border-l border-border pl-3">
             {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} arriving={false} />)}
@@ -159,7 +162,9 @@ const Message = memo(function Message({ projectId, message, arriving }: {
     );
   }
   if (message.role === 'tool') {
-    const label = labels[message.title ?? ''] ?? message.title;
+    // 过程里的工具都已跑完：显示完成态「已读取画布」；只读工具的正文就是裸标签，相同时不重复。
+    const bare = labels[message.title ?? ''] ?? message.title;
+    const label = message.title ? agentToolStatusLabel(message.title, labels, false) : bare;
     const images = message.references.filter(ref => ref.kind === 'content' && ref.version_id);
     return (
       <div ref={ref} className="flex gap-2 text-xs text-muted-foreground">
@@ -167,7 +172,7 @@ const Message = memo(function Message({ projectId, message, arriving }: {
         <div className="min-w-0 flex-1">
           <p className="whitespace-pre-line break-words">
             <span className="text-foreground/80">{label}</span>
-            {message.text && message.text !== label && <span className="ml-1.5">{message.text}</span>}
+            {message.text && message.text !== bare && <span className="ml-1.5">{message.text}</span>}
           </p>
           {images.length > 0 && (
             <div className="mt-1.5">
@@ -186,16 +191,43 @@ const Message = memo(function Message({ projectId, message, arriving }: {
   }
   return (
     <div ref={ref} className="flex flex-col gap-1">
-      {message.reasoning_summary && (
-        <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">思考过程</summary>
-          <p className="mt-1 whitespace-pre-wrap break-words border-l border-border pl-2">{message.reasoning_summary}</p>
-        </details>
-      )}
+      {message.reasoning_summary && <Reasoning text={message.reasoning_summary} />}
       {message.text && <AgentMarkdown text={parseAgentReply(message.text).body} />}
     </div>
   );
 });
+
+/** 思考过程：与处理过程同一套开关与展开收起。 */
+function Reasoning({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col text-xs text-muted-foreground">
+      <AgentProcessToggle label="思考过程" icon={<ThinkingIcon size="sm" />} open={open} onToggle={() => setOpen(value => !value)} />
+      <Collapse open={open}>
+        <p className="mt-1 whitespace-pre-wrap break-words border-l border-border pl-2">{text}</p>
+      </Collapse>
+    </div>
+  );
+}
+
+/** 确认卡收起后留下的一行结论（与按钮成对：执行 → 已执行…，取消 → 已取消），从卡片原位置展开。 */
+function DecisionLine({ text }: { text: string }) {
+  return (
+    <Collapse open appear>
+      <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {text === '已取消' ? <CloseIcon size="sm" className="shrink-0" /> : <CheckIcon size="sm" className="shrink-0" />}
+        {text}
+      </p>
+    </Collapse>
+  );
+}
+
+/** 底部提示条（报错、缺模型）：出现时从 0 高度展开，关掉时收回，收回途中仍显示最后一份内容。 */
+function BottomNotice({ show, children }: { show: boolean; children: ReactNode }) {
+  const last = useRef<ReactNode>(null);
+  if (show) last.current = children;
+  return <Collapse open={show}><div className="px-3 pb-2">{show ? children : last.current}</div></Collapse>;
+}
 
 /** 一轮刚结束：最后一段流式文字盖在最终回复上同位淡出，最终回复淡入（底边对齐——流式文字的末段就是最终回复）。 */
 function SettlingReply({ streamed, children }: { streamed: string; children: ReactNode }) {
@@ -232,8 +264,11 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const [text, setText] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [skill, setSkill] = useState<string | null>(null);
-  const { width: panelWidth, startResize, resizeByKey } = useAgentPanelWidth();
+  const { width: panelWidth, startResize, resizeByKey, panelRef } = useAgentPanelWidth();
   const listRef = useRef<HTMLDivElement>(null);
+  const sendRef = useRef<HTMLButtonElement>(null);
+  // 确认卡的结论行：挂在按下时的最后一条消息之后；只在本次打开期间、同一会话里显示。
+  const [decision, setDecision] = useState<{ sessionId: string; after: string | null; text: string } | null>(null);
   const status = session?.status ?? 'idle';
   const running = status === 'running';
   const awaiting = status === 'awaiting_approval';
@@ -264,6 +299,27 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const lastMessage = status === 'idle' ? messages.at(-1) : undefined;
   const suggestions = lastMessage?.role === 'assistant' ? parseAgentReply(lastMessage.text).suggestions : [];
   const usageLabel = session ? agentUsageLabel(agent.usage) : null;
+  // 确认卡收回期间（已不在等确认）仍显示最后一批，收完才卸载。
+  const lastApprovals = useRef<{ key: string; sessionId: string; approvals: CanvasAgentApproval[] } | null>(null);
+  if (awaiting && session && session.pending_approvals.length > 0) {
+    lastApprovals.current = {
+      key: session.pending_approvals.map(item => item.call_id).join(','),
+      sessionId: session.session_id,
+      approvals: session.pending_approvals,
+    };
+  }
+  const approvalCard = lastApprovals.current?.sessionId === session?.session_id ? lastApprovals.current : null;
+
+  async function decide(approved: ReadonlySet<string>, items: ReadonlyMap<string, readonly number[]>, text: string) {
+    const target = session;
+    if (!target) return undefined;
+    const after = target.messages.at(-1)?.message_id ?? null;
+    const result = await agent.decide(approved, items);
+    if (result) setDecision({ sessionId: target.session_id, after, text });
+    return result;
+  }
+  const decisionLine = decision && decision.sessionId === session?.session_id
+    ? <DecisionLine key={`decision:${decision.after}`} text={decision.text} /> : null;
 
   // 选中的节点变了：之前移除过的不再记着，免得重新选中却带不进来。
   const selectionKey = selectedNodes.map(node => node.id).join(',');
@@ -347,6 +403,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
     stickToBottom.current = true;
     const sent = await agent.send(message, attached.map(node => node.id), sentSkill);
     if (sent) return;
+    shakeOnError(sendRef.current);
     setText(current => current || message);
     setSkill(current => current ?? sentSkill);
     setDismissed(sentDismissed);
@@ -360,10 +417,11 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 
   return (
     <aside
+      ref={panelRef}
       id="canvas-agent-panel"
       aria-label="画布 Agent"
       className={cn('fixed bottom-56 right-4 top-24 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow', className)}
-      style={{ width: `min(${panelWidth}px, calc(100vw - 2rem))` }}
+      style={{ width: agentPanelWidthStyle(panelWidth) }}
     >
       <div
         role="separator"
@@ -382,7 +440,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       <header className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="bare" type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary">
+            <Button variant="bare" type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium transition-colors hover:bg-secondary">
               <span className="truncate">{session?.title ?? (loading ? '\u00a0' : '新对话')}</span>
               <ChevronDownIcon size="sm" className="shrink-0 text-muted-foreground" />
             </Button>
@@ -397,11 +455,12 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {usageLabel && (
+        {/* 用量常驻占位：第一次请求后数字出现时标题不被挤得一跳。 */}
+        {usageLabel ? (
           <Hint label={usageLabel.detail}>
-            <span aria-label={`本对话用量：${usageLabel.text}`} className="shrink-0 px-1 text-xs tabular-nums text-muted-foreground">{usageLabel.text}</span>
+            <span aria-label={`本对话用量：${usageLabel.text}`} className="min-w-24 shrink-0 px-1 text-right text-xs tabular-nums text-muted-foreground">{usageLabel.text}</span>
           </Hint>
-        )}
+        ) : session && <span aria-hidden="true" className="min-w-24 shrink-0" />}
         <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><NewChatIcon /></Button></Hint>
         <Hint label="关闭"><Button variant="bare" type="button" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><CloseIcon /></Button></Hint>
       </header>
@@ -433,16 +492,23 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             </div>
           </div>
         )}
-        {buildCanvasAgentTimeline(messages, running || awaiting).map(block => {
+        {decision?.after === null && decisionLine}
+        {buildCanvasAgentTimeline(messages, running || awaiting).flatMap(block => {
+          const holdsDecision = decisionLine !== null && (block.kind === 'process'
+            ? block.messages.some(item => item.message_id === decision?.after)
+            : block.message.message_id === decision?.after);
+          let node: ReactNode;
           if (block.kind === 'process') {
-            return <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps}
+            node = <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps}
               arriving={block.messages.some(arriving)} />;
+          } else {
+            const item = <Message key={block.message.message_id} projectId={projectId} message={block.message}
+              arriving={arriving(block.message) && settling?.messageId !== block.message.message_id} />;
+            node = settling?.messageId === block.message.message_id
+              ? <SettlingReply key={block.message.message_id} streamed={settling.text}>{item}</SettlingReply>
+              : item;
           }
-          const item = <Message key={block.message.message_id} projectId={projectId} message={block.message}
-            arriving={arriving(block.message) && settling?.messageId !== block.message.message_id} />;
-          return settling?.messageId === block.message.message_id
-            ? <SettlingReply key={block.message.message_id} streamed={settling.text}>{item}</SettlingReply>
-            : item;
+          return holdsDecision ? [node, decisionLine] : [node];
         })}
         {outgoing && (
           <Message projectId={projectId} arriving message={{
@@ -455,34 +521,37 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         {/* 工具状态单独一行贴在底部：文字到达时原位换成完成态，不被清空。 */}
         {(running || sending) && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <LoadingIcon size="sm" aria-label="Agent 正在处理" className="animate-spin" />
+            <LoadingIcon size="sm" aria-label="Agent 处理中" className="animate-spin" />
             {tool && <SwapLabel active={tool.running}
               on={agentToolStatusLabel(tool.name, labels, true)}
               off={agentToolStatusLabel(tool.name, labels, false)} />}
           </p>
         )}
-        {awaiting && session && (
-          <CanvasAgentApprovalCard
-            key={session.pending_approvals.map(item => item.call_id).join(',')}
-            approvals={session.pending_approvals}
-            labels={labels}
-            disabled={pending}
-            onDecide={(approved, items) => void agent.decide(approved, items)}
-            loadBatchItems={callId => getCanvasAgentBatchItems(projectId, session.session_id, callId)}
-          />
-        )}
+        {/* 确认卡出现时从 0 高度展开；执行或取消后收回，原位置留下结论行。 */}
+        <Collapse open={awaiting && Boolean(session)}>
+          {approvalCard && (
+            <CanvasAgentApprovalCard
+              key={approvalCard.key}
+              approvals={approvalCard.approvals}
+              labels={labels}
+              disabled={pending || !awaiting}
+              onDecide={decide}
+              loadBatchItems={callId => getCanvasAgentBatchItems(projectId, approvalCard.sessionId, callId)}
+            />
+          )}
+        </Collapse>
       </div>
       </div>
 
-      {agent.error && (
-        <p role="alert" className="mx-3 mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
+      <BottomNotice show={Boolean(agent.error)}>
+        <p role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
           <span className="min-w-0 flex-1 break-words">{agent.error}</span>
-          <Button variant="bare" type="button" aria-label="关闭提示" onClick={agent.clearError}><CloseIcon size="sm" /></Button>
+          <Button variant="bare" type="button" aria-label="关闭提示" onClick={agent.clearError} className="transition-colors hover:text-foreground"><CloseIcon size="sm" /></Button>
         </p>
-      )}
+      </BottomNotice>
 
-      {setupNotice && (
-        <p role="status" className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground">
+      <BottomNotice show={Boolean(setupNotice)}>
+        {setupNotice && <p role="status" className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground">
           <ErrorIcon size="sm" className="shrink-0 text-primary" />
           <span className="min-w-0 flex-1 break-words">{setupNotice.text}</span>
           <Button variant="bare"
@@ -492,8 +561,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               : void agent.updateSettings({ auto_models: true })}
             className="shrink-0 text-primary underline-offset-2 hover:underline"
           >{setupNotice.action === 'settings' ? '去设置' : '改为自动'}</Button>
-        </p>
-      )}
+        </p>}
+      </BottomNotice>
 
       <div className="m-2 mt-0 rounded-xl border border-border bg-background/60 focus-within:border-primary/60">
         {(attached.length > 0 || skill) && (
@@ -502,7 +571,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               <span className="flex max-w-[12rem] items-center gap-1 rounded-full border border-primary/50 py-0.5 pl-2 pr-1 text-xs text-primary">
                 <SkillIcon size="sm" className="shrink-0" />
                 <span className="truncate">{skill}</span>
-                <Button variant="bare" type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 hover:bg-secondary"><CloseIcon size="sm" /></Button>
+                <Button variant="bare" type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 transition-colors hover:bg-secondary"><CloseIcon size="sm" /></Button>
               </span>
             )}
             {attached.map(node => node.type === 'image' && node.versionId ? (
@@ -518,7 +587,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               <span key={node.id} className="flex max-w-[10rem] items-center gap-1 rounded-full border border-border py-0.5 pl-2 pr-1 text-xs text-muted-foreground">
                 <NodeIcon type={node.type} />
                 <span className="truncate">{node.title}</span>
-                <Button variant="bare" type="button" aria-label={`不带入 ${node.title}`} onClick={() => setDismissed(current => new Set(current).add(node.id))} className="rounded-full p-0.5 hover:bg-secondary hover:text-foreground"><CloseIcon size="sm" /></Button>
+                <Button variant="bare" type="button" aria-label={`不带入 ${node.title}`} onClick={() => setDismissed(current => new Set(current).add(node.id))} className="rounded-full p-0.5 transition-colors hover:bg-secondary hover:text-foreground"><CloseIcon size="sm" /></Button>
               </span>
             ))}
           </div>
@@ -580,6 +649,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           <span className="min-w-1 flex-1" />
           {/* 发送与停止是同一个按钮壳，图标与底色换态，不整颗换掉。 */}
           <Hint label={running ? '停止' : '发送'}><Button variant="bare"
+            ref={sendRef}
             type="button"
             aria-label={running ? '停止' : '发送'}
             disabled={!running && !canSend}

@@ -152,7 +152,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dis
                 aria-label={`删除 Skill ${item.name}`}
                 disabled={busy}
                 onClick={() => void remove(item.name)}
-                className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition-[opacity,color] hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
               ><DeleteIcon size="sm" /></Button></Hint>
             </div>
           ))}
@@ -161,10 +161,10 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dis
           <p role={notice.error ? 'alert' : 'status'} className={cn('px-2 py-1.5 text-xs', notice.error ? 'text-destructive' : 'text-muted-foreground')}>{notice.text}</p>
         )}
         <div className="mt-1 flex gap-1 border-t border-border pt-1.5">
-          <Button variant="bare" type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
+          <Button variant="bare" type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40">
             <ArchiveFileIcon size="sm" />导入 zip / SKILL.md
           </Button>
-          <Button variant="bare" type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
+          <Button variant="bare" type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40">
             <FolderOpenIcon size="sm" />导入文件夹
           </Button>
         </div>

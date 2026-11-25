@@ -19,26 +19,29 @@ describe('CanvasAgentApprovalCard', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '执行：生成' }));
     fireEvent.click(screen.getByRole('button', { name: '执行 1 项' }));
     expect([...onDecide.mock.calls[0][0]]).toEqual(['c1']);
+    expect(onDecide.mock.calls[0][2]).toBe('已执行 1/2 项');
   });
 
-  it('rejects everything and cannot execute an empty selection', () => {
+  it('cancels everything and cannot execute an empty selection', () => {
     const onDecide = vi.fn();
     render(<CanvasAgentApprovalCard labels={LABELS} onDecide={onDecide} approvals={[
       approval('c1', 'apply_changes', 'a'), approval('c2', 'apply_changes', 'b'),
     ]} />);
     for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
     expect(screen.getByRole('button', { name: '执行 0 项' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect([...onDecide.mock.calls[0][0]]).toEqual([]);
+    expect(onDecide.mock.calls[0][2]).toBe('已取消');
   });
 
-  it('keeps a single call to plain execute / reject', () => {
+  it('keeps a single call to plain execute / cancel', () => {
     const onDecide = vi.fn();
     render(<CanvasAgentApprovalCard labels={LABELS} onDecide={onDecide}
       approvals={[approval('c1', 'run_generation', 'x')]} />);
     expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '执行' }));
     expect([...onDecide.mock.calls[0][0]]).toEqual(['c1']);
+    expect(onDecide.mock.calls[0][2]).toBe('已执行 · 生成');
   });
 });
 
@@ -115,6 +118,7 @@ describe('CanvasAgentApprovalCard · 批量生成', () => {
     const [calls, items] = onDecide.mock.calls[0];
     expect([...calls]).toEqual(['g1']);
     expect([...items]).toEqual([['g1', [0, 2]]]);
+    expect(onDecide.mock.calls[0][2]).toBe('已执行 2/3 项');
   });
 
   it('全选时不带逐项选择，全部去掉勾等于拒绝这次调用', async () => {

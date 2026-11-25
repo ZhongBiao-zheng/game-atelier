@@ -815,7 +815,7 @@ READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型"
                "read_video_frames": "查看视频画面", "check_run": "核对生成结果",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
                "wait_for_runs": "等待多个生成结果", "update_plan": "更新待办",
-               "search_library": "查找项目参考", "search_team": "查找团队库参考",
+               "search_library": "查找参考素材", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}
 
 
