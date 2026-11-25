@@ -499,9 +499,10 @@ export function restoreContentVersions(
 
 /** 别处（Agent 经 MCP、另一标签页）改了画布时，按三方合并收下服务端文档。
  *
- *  base 是本页最后一次确认过的服务端文档，local 是本页当前文档，remote 是服务端新文档。
+ *  base 是服务端已接受的内容，用本页手里的同一份对象表示（服务端回来的对象会多出默认字段，
+ *  拿它比会把没动过的节点误判成「本页改过」）；local 是本页当前文档，remote 是服务端新文档。
  *  本页相对 base 改过的节点 / 连线（含 pinned：正在编辑、文本版本还没落盘的节点）保留本地值，
- *  其余以服务端为准；本页新建的保留，本页删掉而服务端没动的不复活，服务端删掉而本页没动的跟着删。
+ *  其余以服务端为准；本页新建的保留，本页删掉的不复活，服务端删掉而本页没动的跟着删。
  *  原来是整份换成服务端文档，Agent 落盘那一刻本页还没保存的编辑整段消失，没有任何提示。 */
 export function mergeRemoteCanvasDocument(
   base: CanvasDocument,
@@ -530,9 +531,8 @@ export function mergeRemoteCanvasDocument(
         } else merged.push(item);
         continue;
       }
-      const baseItem = baseById.get(item.id);
-      // 本页删掉了、服务端没动：尊重本页的删除。
-      if (baseItem !== undefined && baseItem === JSON.stringify(item)) {
+      // 本页删掉了（基准里有、本地没有）：本页的删除优先，不复活。
+      if (baseById.has(item.id)) {
         keptLocal = true;
         continue;
       }

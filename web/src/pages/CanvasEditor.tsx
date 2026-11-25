@@ -877,12 +877,14 @@ function CanvasEditorInner({
             || runIds.has(canvasNodeActiveRunId(node) ?? '')
             || runIds.has(canvasNodeActiveRunId(serverNode) ?? '')) runNodeIds.add(node.id);
         }
+        // 用合并后本页手里的对象：它们的 run 字段已是服务端的值，其余字段与本地一致。
+        const mergedNodes = new Map(merged.nodes.map(node => [node.id, node]));
         const baseIds = new Set(base.nodes.map(node => node.id));
         serverBaseDocument.current = {
           ...base,
           nodes: [
-            ...base.nodes.map(node => (runNodeIds.has(node.id) ? remoteNodes.get(node.id) ?? node : node)),
-            ...remote.nodes.filter(node => runNodeIds.has(node.id) && !baseIds.has(node.id)),
+            ...base.nodes.map(node => (runNodeIds.has(node.id) ? mergedNodes.get(node.id) ?? node : node)),
+            ...merged.nodes.filter(node => runNodeIds.has(node.id) && !baseIds.has(node.id)),
           ],
           connections: [...base.connections, ...serverRunConnections],
           content_versions: { ...base.content_versions, ...remote.content_versions },
@@ -1010,8 +1012,9 @@ function CanvasEditorInner({
           pendingTextVersions.current.set(nodeId, versionId);
         }
         setProjects(projectRows);
-        setDocument(normalizeCanvasGroups(hydrated.document));
-        serverBaseDocument.current = normalizeCanvasGroups(canvasDocument);
+        const loaded = normalizeCanvasGroups(hydrated.document);
+        setDocument(loaded);
+        serverBaseDocument.current = loaded;
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
           dirtyVersion.current += 1;
@@ -1262,7 +1265,6 @@ function CanvasEditorInner({
             revision: serverRevision.current,
           });
           failedSnapshot = null;
-          if (saved.revision >= serverRevision.current) serverBaseDocument.current = normalizeCanvasGroups(saved);
           const authoritativeRevision = Math.max(serverRevision.current, saved.revision);
           serverRevision.current = authoritativeRevision;
           const queued = saveQueued.current as CanvasDocument | null;
@@ -1293,6 +1295,8 @@ function CanvasEditorInner({
           // 排队的上传会在下一次 React render 前接着保存，必须先同步权威版本。
           latestDocument.current = acceptSaved(latestDocument.current);
           setDocument(acceptSaved);
+          // 三方合并的基准 = 服务端已接受的内容，用本页手里的那份对象表示（同一份对象才比得出「没改过」）。
+          serverBaseDocument.current = latestDocument.current === saved ? saved : snapshot;
         }
         setSaveState('saved');
         setSaveErrorDetail(null);
@@ -1374,9 +1378,9 @@ function CanvasEditorInner({
     const remote = await getCanvasDocument(projectId);
     const before = latestDocument.current;
     const base = serverBaseDocument.current;
-    serverBaseDocument.current = normalizeCanvasGroups(remote);
     const hydrated = materializeEmptyTextContent(remote);
     const remoteDocument = normalizeCanvasGroups(hydrated.document);
+    serverBaseDocument.current = remoteDocument;
     // 本页还有没落盘的编辑（正在编辑的文本、排队的保存）时按三方合并收下服务端文档：
     // 本页改过的节点保留本地值，其余用服务端的；合并结果再存一次。
     const sameProject = before?.project_id === remoteDocument.project_id;
