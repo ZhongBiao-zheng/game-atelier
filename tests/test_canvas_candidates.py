@@ -323,6 +323,35 @@ def test_non_native_batch_commits_each_slot_before_starting_the_next(monkeypatch
     assert result.data.current_version_id == finalized.canvas_run.candidates[0].version_id
 
 
+def test_save_drops_a_finished_run_id_left_on_the_result_node(monkeypatch):
+    # 前端合并漏掉终态那一轮时，会把封面上已结束的 run 原样存回来；成员因此一直被当成重新生成中。
+    run_id = "run-stale-cover"
+    project, _document, _primary = _project_with_result_node(primary_version_id=None, active_run_id=run_id)
+    job = _job(project.project_id, run_id, [
+        CanvasResultCandidate(candidate_id=f"candidate-{index}", index=index, status="pending")
+        for index in range(2)
+    ])
+    save_job(job)
+
+    calls: list[int] = []
+
+    def fake_run_job(job_id: str, *, defer_terminal: bool = False):
+        calls.append(len(calls))
+        output = _write_output(project.project_id, job_id, f"candidate-{calls[-1]}.png")
+        return update_job_status(job_id, status=JobStatus.PENDING, output_paths=[output], error=None)
+
+    monkeypatch.setattr(canvas_runs, "run_job", fake_run_job)
+    assert run_canvas_job(job.job_id).status == JobStatus.DONE
+    finished = read_canvas_document(project.project_id)
+    assert next(node for node in finished.nodes if node.id == "image-result").data.active_run_id is None
+
+    payload = finished.model_dump(mode="json")
+    payload["nodes"][0]["data"]["active_run_id"] = run_id
+    saved = save_canvas_document(project.project_id, type(finished).model_validate(payload), finished.revision)
+
+    assert next(node for node in saved.nodes if node.id == "image-result").data.active_run_id is None
+
+
 def test_text_batches_keep_the_existing_single_provider_request_path():
     job = _job("canvas-text-batch", "run-text-batch", [
         CanvasResultCandidate(candidate_id=f"candidate-{index}", index=index, status="pending")

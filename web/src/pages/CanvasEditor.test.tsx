@@ -110,6 +110,7 @@ vi.mock('@xyflow/react', () => {
       nodes: Array<{
         id: string;
         selected?: boolean;
+        hidden?: boolean;
         data: unknown;
         position?: { x: number; y: number };
         style?: { width?: number; height?: number };
@@ -147,6 +148,7 @@ vi.mock('@xyflow/react', () => {
               type="button"
               key={node.id}
               aria-label={`flow-node-${node.id}`}
+              data-hidden={node.hidden ? 'true' : undefined}
               onClick={event => {
                 // 复刻 xyflow 的真实顺序：handleNodeClick 先按 multiSelectionKeyCode 更新选择集，
                 // 之后才轮到 onNodeClick。B2 的 bug 就藏在这个顺序里。
@@ -763,6 +765,60 @@ it('undoes and redoes a configuration saved during an edit run without reverting
   }));
   expect(lastSavedDocument()!.nodes.find(node => node.id === 'result')!.data).toMatchObject({ active_run_id: null, current_version_id: 'completed-v' });
   expect(lastSavedDocument()!.connections).toEqual(initial.connections);
+});
+
+it('expands a multi-image result stack whose last image arrived alone with the terminal sync', async ({ onTestFinished }) => {
+  // 逐张提交的多图：第 1 张那一轮认领了封面，终态那一轮服务端已清掉封面的 active_run_id，
+  // 新版本又不挂在封面上。canvas-document-changed 晚到或丢失时，只有这条同步能把封面收回来。
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
+  onTestFinished(() => { vi.unstubAllGlobals(); state.mockRestore(); });
+  const version = (id: string, index: number) => ({ ...generatedVersion, version_id: id,
+    origin: { kind: 'job_output' as const, job_id: 'job-four', candidate_id: `c-${index}` } });
+  const versionIds = ['v-1', 'v-2', 'v-3', 'v-4'];
+  const cover = imageNode('cover', '封面');
+  cover.data.active_run_id = 'run-four';
+  cover.data.current_version_id = 'v-1';
+  const pending = {
+    job_id: 'job-four', character_id: 'main', prompt: '', model: 'gpt-image-2', params: { n: 4 },
+    submitted_at: '2026-11-25T00:00:00Z', status: 'pending', kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: null,
+    canvas_run: { run_id: 'run-four', result_node_id: 'cover',
+      candidates: versionIds.map((id, index) => ({ candidate_id: `c-${index}`, index, error: null,
+        status: index === 0 ? 'succeeded' : 'pending', version_id: index === 0 ? id : null })),
+      snapshot: { snapshot_version: 1, surface_node_id: 'cover', result_node_id: 'cover', mode: 'image',
+        final_prompt: '', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai', alias: 'main',
+        normalized_params: {}, inputs: [], mask_version_id: null, submitted_at: '2026-11-25T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      } },
+  } as unknown as Job;
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ revision: 8, nodes: [cover],
+    content_versions: { 'v-1': version('v-1', 0) } }));
+  vi.mocked(listCanvasJobs).mockResolvedValue([pending]);
+  await renderReadyCanvas();
+  await waitFor(() => expect(getCanvasDocument).toHaveBeenCalledTimes(2));
+
+  const done = { ...pending, status: 'done', output_paths: versionIds.map(id => `${id}.png`), canvas_run: {
+    ...pending.canvas_run!, candidates: versionIds.map((id, index) => ({
+      candidate_id: `c-${index}`, index, status: 'succeeded', version_id: id, error: null })),
+  } } as Job;
+  vi.mocked(listCanvasJobs).mockResolvedValue([done]);
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ revision: 11,
+    nodes: [{ ...cover, data: { ...cover.data, active_run_id: null } }],
+    content_versions: Object.fromEntries(versionIds.map((id, index) => [id, version(id, index)])) }));
+  await act(async () => { events.emit('job-changed', { job_id: 'job-four', status: 'done' }); });
+
+  await waitFor(() => expect(lastSavedDocument()?.nodes.find(node => node.id === 'cover')?.data)
+    .toMatchObject({ result_stack: { run_id: 'run-four' } }));
+  const saved = lastSavedDocument()!.nodes.find(node => node.id === 'cover') as CanvasImageNode;
+  expect(saved.data.active_run_id).toBeNull();
+  const members = saved.data.result_stack!.member_node_ids;
+  expect(members).toHaveLength(3);
+  act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).toggleResultStack?.('cover'));
+  await waitFor(() => {
+    for (const id of members) expect(screen.getByRole('button', { name: `flow-node-${id}` })).not.toHaveAttribute('data-hidden');
+  });
 });
 
 it.each([
