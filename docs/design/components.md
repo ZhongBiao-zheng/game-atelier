@@ -15,10 +15,11 @@
 | 下拉选择 | `Select` + `SelectTrigger` / `SelectContent` / `SelectItem` | Radix Select；测试里用 `test/select.ts` 打开 |
 | 多选 | `Checkbox` | 开关语义（立即生效的启用 / 停用）用 `Switch` |
 | 单选 | `RadioGroup` + `RadioGroupItem` | 选项 ≤ 4 且需要并排比较时用；否则用 `Select` |
-| 分段切换（视图、模式） | `ToggleGroup` + `ToggleGroupItem` | `type="single"` 再点已选项得到空值，调用方忽略空值以保持必选 |
+| 分段切换（视图、模式） | `ToggleGroup` + `ToggleGroupItem` | `type="single"` 再点已选项得到空值，调用方忽略空值以保持必选；`sliding` 让选中底色滑动（选项自带选中外观的组不开） |
 | 单个按下 / 弹起 | `Toggle` | |
 | 弹层里的紧凑参数（尺寸、档位、时长、开关） | `Segmented` + `SegmentedItem` | ToggleGroup 单选 + 滑动底色；选中态写在各项的 `selected` 上 |
-| 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | 文字下划线页签给 List 与 Trigger 传 `variant="line"` |
+| 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | 文字下划线页签给 List 与 Trigger 传 `variant="line"`；选中底色 / 下划线自带滑动，选中不改字重 |
+| 单选组的选中底色 | `SelectionHighlight` | 放进 `relative isolate` 的组容器，跟随 `aria-selected / pressed / checked / current` 的子项滑动；Segmented、Tabs、ToggleGroup sliding 已内置 |
 | 数值拖动 | `Slider` | 刻度数字用 `SliderMarks`（与滑钮中心对齐、当前值高亮） |
 | 数字步进（带单位与上下箭头） | `NumberInput` | 方向键 / 箭头按 step 增减，回车或失焦夹到 [min, max]；常与 `Slider` 并排联动 |
 | 选文件 | `FileInput` | 隐藏，由按钮或拖放区 `ref.click()` 触发 |
@@ -26,12 +27,15 @@
 | 图标 | `ui/icons` 的语义图标（`CloseIcon`…） | `size`：sm / md / lg / xl；新图标先在注册表登记，规则见 DESIGN.md「图标」 |
 | 文字标签 | `Label` | 页面不写原生 `<label>` |
 | 悬停提示 | `Hint`（`ui/tooltip.tsx`） | 替代原生 `title`；测试里用 `test/hint.ts` 的 `hoverHint` |
-| 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`） |
+| 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`）；一律受控 `open`，内容读 `useRetained` 缓存的最后一份，带表单状态的用 `useRetainedSession` 的会话号作 key（`ui/retained.ts`） |
 | 浮层 | `Popover` | 控件 chip 的下拉面板用 `studio/ToolbarPopover`（基于 Popover，锚点移动时逐帧跟随） |
-| 通知提示 | `Toaster` + `toast`（`ui/sonner.tsx`） | 需要独立一组时给 `Toaster` 传 `id`，`toast` 里用 `toasterId` |
+| 通知提示 | `toast`（`ui/sonner.tsx`） | 全站只有 AppShell 挂的一个 `Toaster`（右上角顶栏下方），页面只调 `toast`，不再各挂一个 |
 | 菜单 | `DropdownMenu` | |
 | 标签 | `Badge` / `MetaTag` | 参数标签用 `MetaTag` |
-| 展开收起 | `Collapse` | 高度 0↔auto，收起播完再卸载，中途反向从当前高度接上 |
+| 展开收起 | `Collapse` | 高度 0↔auto，收起播完再卸载，中途反向从当前高度接上；`appear` 挂载即展开（新到的报错条）；`keepMounted` 收起后留在 DOM 里 |
+| 折叠区（替代原生 `<details>`） | `Disclosure` | 标题行是带 `aria-expanded` 的按钮，内容走 `Collapse keepMounted`；受控传 `open` + `onOpenChange`，非受控传 `defaultOpen` |
+| 滚动区上下渐隐 | `.scroll-fade-y` + `useScrollFade`（`ui/scroll-fade.ts`） | 回调 ref 挂到滚动容器上，渐隐宽度随滚动连续变化 |
+| 表单校验失败定位 | `revealInvalidField`（`ui/invalid-field.ts`） | 首个 `aria-invalid` 字段不在可见区时平滑滚入，再聚焦并微抖 |
 | 图标换态 | `SwapIcon` | `swapKey` 变化时新图标淡入放大；`variant="pop"` 只给喜欢、复制成功等正向确认 |
 | 按钮文案换态 | `SwapLabel` | 两段文案叠格占宽，切换时按钮不跳 |
 | 图片出现 | `RevealImage` | 解码完成再淡入，已缓存的不播；`onReady` 供父级交叉淡化后卸掉旧层 |
