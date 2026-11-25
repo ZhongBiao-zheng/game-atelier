@@ -178,6 +178,7 @@ import type {
   CanvasImageEditNode,
   CanvasNode,
   CanvasPluginNode,
+  CanvasInputConnection,
   CanvasPoint,
   CanvasSize,
   CanvasTextVersion,
@@ -190,6 +191,7 @@ import { assetMediaContent, type CreationAsset } from '@/schema/creationAssets';
 import { DEFAULT_CANVAS_CATEGORIES, type CanvasProject } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
+import { notify, UNDO_DURATION_MS } from '@/lib/notify';
 
 import {
   appendCanvasMentionToken,
@@ -244,6 +246,10 @@ import {
   canvasReadingOrder,
   expandCanvasInputSource,
   canvasModesRejectingSources,
+  mergeRemoteCanvasDocument,
+  canvasVideoFrameSlotMode,
+  canvasInputConnectionRejection,
+  canvasNodeActiveRunId,
 } from './canvasEditorModel';
 import { resolveRecipeModel } from './studioRecipe';
 import {
@@ -676,6 +682,17 @@ function CanvasEditorInner({
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
   const reversePromptConfigEligibleRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
+  // 本页最后一次确认过的服务端文档：外部改动到来时做三方合并的基准（首屏、保存成功、外部重载时更新）。
+  const serverBaseDocument = useRef<CanvasDocument | null>(null);
+  // 外部（Agent）改动的「这一轮」：连续落盘的几次合成撤销栈里的一步，撤销 toast 也只留一条。
+  const externalRound = useRef<{
+    snapshot: CanvasDocument;
+    pastLength: number;
+    deleted: number;
+    toastId: string | number;
+    at: number;
+  } | null>(null);
+  const undoToRef = useRef<(target?: CanvasDocument) => void>(() => undefined);
   const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
   const pasteSequence = useRef(0);
@@ -802,6 +819,29 @@ function CanvasEditorInner({
         ),
       });
       preserveImageEditResultHistory(merged, serverAddedNodeIds);
+      // 三方合并的基准跟着收下这批 run 涉及的节点：否则它们一直被当成「本页改过」，
+      // Agent 之后再改同一个节点时，本地旧值会盖掉 Agent 的改动。
+      const base = serverBaseDocument.current;
+      if (base) {
+        const runNodeIds = new Set(serverAddedNodeIds);
+        for (const node of current.nodes) {
+          const serverNode = remoteNodes.get(node.id);
+          if (!serverNode) continue;
+          if (resultNodeIds.has(node.id)
+            || runIds.has(canvasNodeActiveRunId(node) ?? '')
+            || runIds.has(canvasNodeActiveRunId(serverNode) ?? '')) runNodeIds.add(node.id);
+        }
+        const baseIds = new Set(base.nodes.map(node => node.id));
+        serverBaseDocument.current = {
+          ...base,
+          nodes: [
+            ...base.nodes.map(node => (runNodeIds.has(node.id) ? remoteNodes.get(node.id) ?? node : node)),
+            ...remote.nodes.filter(node => runNodeIds.has(node.id) && !baseIds.has(node.id)),
+          ],
+          connections: [...base.connections, ...serverRunConnections],
+          content_versions: { ...base.content_versions, ...remote.content_versions },
+        };
+      }
       if (saveQueued.current) saveQueued.current = merged;
       return merged;
     });
@@ -875,6 +915,9 @@ function CanvasEditorInner({
     resizePreviewFrame.current = null;
     setLiveNodeLayout(null);
     history.current = { past: [], future: [] };
+    serverBaseDocument.current = null;
+    if (externalRound.current) notify.dismiss(externalRound.current.toastId);
+    externalRound.current = null;
     viewportSync.current = null;
     nodeClipboard.current = null;
     pasteSequence.current = 0;
@@ -920,6 +963,7 @@ function CanvasEditorInner({
         }
         setProjects(projectRows);
         setDocument(normalizeCanvasGroups(hydrated.document));
+        serverBaseDocument.current = normalizeCanvasGroups(canvasDocument);
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
           dirtyVersion.current += 1;
@@ -1140,6 +1184,7 @@ function CanvasEditorInner({
             revision: serverRevision.current,
           });
           failedSnapshot = null;
+          if (saved.revision >= serverRevision.current) serverBaseDocument.current = normalizeCanvasGroups(saved);
           const authoritativeRevision = Math.max(serverRevision.current, saved.revision);
           serverRevision.current = authoritativeRevision;
           const queued = saveQueued.current as CanvasDocument | null;
@@ -1180,8 +1225,8 @@ function CanvasEditorInner({
         // 而状态药丸在窄屏被 max-w-24 truncate 掉。保存一失败，本地文档就和服务端分叉了，
         // 之后每一次编辑都不落盘，所以必须把服务端的 detail 原样送到报错条上。
         if (saveError instanceof ApiError && saveError.status === 409) {
-          // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。服务端文档是唯一
-          // 事实源，直接重载覆盖本页（本页未落盘的改动最多是一次去抖窗口内的编辑），不弹横幅。
+          // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。重载时按节点三方合并，
+          // 本页没落盘的改动保留下来再存一次，不弹横幅。
           void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message));
           throw saveError;
         }
@@ -1200,34 +1245,84 @@ function CanvasEditorInner({
 
   // Agent 经 MCP 改画布（#92）：服务端 canvas.json 一落盘就广播 canvas-document-changed，
   // 本页按 revision 判断是不是别人的改动——自己的保存也会触发同一事件。
+  /** 外部改动（Agent 一轮落盘）进撤销栈：一轮 = 一步。连续几次落盘之间用户没动过撤销栈时并成同一轮，
+   *  toast 只留一条并累计删除数（规格 2.1）。 */
+  const recordExternalRound = useCallback((before: CanvasDocument, after: CanvasDocument) => {
+    const signature = (doc: CanvasDocument) => JSON.stringify([doc.nodes, doc.connections]);
+    if (signature(before) === signature(after)) return;
+    const afterIds = new Set(after.nodes.map(node => node.id));
+    const deleted = before.nodes.filter(node => !afterIds.has(node.id)).length;
+    const past = history.current.past;
+    const round = externalRound.current;
+    const continues = round
+      && Date.now() - round.at < UNDO_DURATION_MS
+      && past.length === round.pastLength
+      && past[past.length - 1] === round.snapshot;
+    if (round) notify.dismiss(round.toastId);
+    let snapshot = round?.snapshot ?? before;
+    let total = deleted;
+    if (continues && round) {
+      total += round.deleted;
+    } else {
+      snapshot = before;
+      past.push(before);
+      history.current.past = past.slice(-50);
+    }
+    history.current.future = [];
+    const message = total
+      ? `已应用本轮修改（含删除 ${total} 个节点）`
+      : '已应用本轮修改';
+    const toastId = notify.undo(message, () => {
+      if (externalRound.current?.snapshot === snapshot) externalRound.current = null;
+      undoToRef.current(snapshot);
+    }, { actionLabel: '撤销本轮' });
+    externalRound.current = {
+      snapshot,
+      pastLength: history.current.past.length,
+      deleted: total,
+      toastId,
+      at: Date.now(),
+    };
+  }, []);
+
   const reloadDocumentFromServer = useCallback(async () => {
     const remote = await getCanvasDocument(projectId);
+    const before = latestDocument.current;
+    const base = serverBaseDocument.current;
+    serverBaseDocument.current = normalizeCanvasGroups(remote);
     const hydrated = materializeEmptyTextContent(remote);
-    pendingTextVersions.current.clear();
-    for (const [nodeId, versionId] of hydrated.versionIds) {
-      pendingTextVersions.current.set(nodeId, versionId);
-    }
+    const remoteDocument = normalizeCanvasGroups(hydrated.document);
+    // 本页还有没落盘的编辑（正在编辑的文本、排队的保存）时按三方合并收下服务端文档：
+    // 本页改过的节点保留本地值，其余用服务端的；合并结果再存一次。
+    const sameProject = before?.project_id === remoteDocument.project_id;
+    const pinned = new Set([...activeTextEditingNodeIds.current, ...pendingTextVersions.current.keys()]);
+    const merge = sameProject && before && base
+      ? mergeRemoteCanvasDocument(base, before, remoteDocument, pinned)
+      : { document: remoteDocument, keptLocal: false };
+    const reloaded = merge.document;
+    const keptPending = new Map([...pendingTextVersions.current].filter(([nodeId, versionId]) => (
+      reloaded.nodes.some(node => node.id === nodeId && isContentNode(node) && node.data.current_version_id === versionId)
+    )));
+    pendingTextVersions.current = new Map([...keptPending, ...hydrated.versionIds]);
     saveQueued.current = null;
-    activeTextEditingNodeIds.current.clear();
     autosaveObservedDirtyVersion.current = 0;
     serverRevision.current = remote.revision;
-    const reloaded = normalizeCanvasGroups(hydrated.document);
     // 别处（多半是 Agent）改了画布：新放上来的节点淡入放大，被改动的节点闪一圈描边（Q15），看得出改了哪里。
-    const before = latestDocument.current;
-    if (before?.project_id === reloaded.project_id) {
+    if (sameProject && before) {
       const { added, changed } = canvasRemoteNodeChanges(before, reloaded);
       markCanvasNodesEntering(added, 0.96);
       flashCanvasNodes(changed);
+      recordExternalRound(before, reloaded);
     }
     setDocument(reloaded);
-    // 与首屏加载相同：补出来的空文本版本还没落盘，要再保存一次。
-    dirtyVersion.current = hydrated.versionIds.size ? 1 : 0;
+    // 与首屏加载相同：补出来的空文本版本、合并留下的本地改动都还没落盘，要再保存一次。
+    dirtyVersion.current = hydrated.versionIds.size || merge.keptLocal ? dirtyVersion.current + 1 : 0;
     setDirtySignal(dirtyVersion.current);
     setSaveState('saved');
     setSaveErrorDetail(null);
     setError(null);
     setErrorAction(null);
-  }, [projectId]);
+  }, [projectId, recordExternalRound]);
   reloadDocumentRef.current = reloadDocumentFromServer;
   remoteDocumentChanged.current = (revision: number | null) => {
     if (revision === null || revision <= serverRevision.current) return;
@@ -1254,8 +1349,7 @@ function CanvasEditorInner({
       window.setTimeout(() => remoteDocumentChanged.current(revision), 200);
       return;
     }
-    // 其余情况一律以服务端文档为准：排队中的本地改动最多是一次去抖窗口内的编辑，
-    // 直接覆盖，不再弹「重新载入（放弃本页改动）」横幅让人做选择。
+    // 其余情况收下服务端文档：本页没落盘的改动按节点三方合并保留，不弹横幅让人做选择。
     void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message));
   };
 
@@ -1673,10 +1767,19 @@ function CanvasEditorInner({
   }, [commit, updateMediaPlaceholder]);
 
   const onConnect = useCallback((connection: Connection) => {
-    if (!canCreateCanvasInputConnection(latestDocument.current, connection)) {
-      setError('这两个节点不能建立输入连接。');
+    const document = latestDocument.current;
+    if (!document || !canCreateCanvasInputConnection(document, connection)) {
+      setError(canvasInputConnectionRejection(document, connection) ?? '这两个节点不能建立输入连接。');
       return;
     }
+    const frameSlots = isCanvasCompareSlot(connection.targetHandle)
+      ? { slots: [undefined] }
+      : canvasFrameSlotsForNewInputs(document, connection.target!, [connection.source!], latestProviders.current);
+    if (frameSlots.error) {
+      setError(frameSlots.error);
+      return;
+    }
+    const frameSlot = frameSlots.slots[0];
     setError(null);
     const connectionId = makeId('connection');
     flashCanvasEdges([connectionId]);
@@ -1690,6 +1793,7 @@ function CanvasEditorInner({
           target_node_id: connection.target!,
           // 拖到对比节点的 Before / After 接口上时，接口 id 就是槽位。
           ...(isCanvasCompareSlot(connection.targetHandle) ? { slot: connection.targetHandle } : {}),
+          ...(frameSlot ? { slot: frameSlot } : {}),
         }],
       };
       return syncCanvasPromptReferences(next, new Set([connection.target!]));
@@ -1719,14 +1823,22 @@ function CanvasEditorInner({
       setError('选中的节点都不能连进这个节点。');
       return;
     }
+    const frameSlots = canvasFrameSlotsForNewInputs(
+      latestDocument.current!, targetNodeId, accepted, latestProviders.current,
+    );
+    if (frameSlots.error) {
+      setError(frameSlots.error);
+      return;
+    }
     setError(null);
     commit(current => syncCanvasPromptReferences({
       ...current,
-      connections: [...current.connections, ...accepted.map(sourceId => ({
+      connections: [...current.connections, ...accepted.map((sourceId, index) => ({
         id: makeId('connection'),
         role: 'input' as const,
         source_node_id: sourceId,
         target_node_id: targetNodeId,
+        ...(frameSlots.slots[index] ? { slot: frameSlots.slots[index] } : {}),
       }))],
     }, new Set([targetNodeId])), true);
   }, [commit]);
@@ -1846,6 +1958,50 @@ function CanvasEditorInner({
         })),
       ],
     }), true);
+  }, [commit]);
+
+  /** 切换视频生成方式时把已有连线搬过去，而不是删掉让人重连：切到全能参考，首尾帧连线变普通参考；
+   *  切到首尾帧，普通的图片参考按顺序填进空着的首帧、尾帧槽位（多出来的留着，由面板提示）。 */
+  const convertVideoFrameConnections = useCallback((targetNodeId: string, toFrameSlots: boolean, maxFrames: number) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const kindOf = (nodeId: string) => {
+      const node = current.nodes.find(item => item.id === nodeId);
+      const versionId = node && isContentNode(node) ? node.data.current_version_id : null;
+      return versionId ? current.content_versions[versionId]?.kind : undefined;
+    };
+    const incoming = current.connections.filter((connection): connection is CanvasInputConnection => (
+      connection.role === 'input' && connection.target_node_id === targetNodeId
+    ));
+    // 值为 null 表示删掉（同一张图已经是普通参考，留一条就够）。
+    const updates = new Map<string, CanvasInputConnection | null>();
+    if (toFrameSlots) {
+      const taken = new Set(incoming.map(connection => connection.slot).filter(Boolean));
+      const free = (['first_frame', 'last_frame'] as const).slice(0, maxFrames).filter(slot => !taken.has(slot));
+      for (const connection of incoming) {
+        if (connection.slot || kindOf(connection.source_node_id) !== 'image') continue;
+        const slot = free.shift();
+        if (!slot) break;
+        updates.set(connection.id, { ...connection, slot });
+      }
+    } else {
+      const plainSources = new Set(incoming.filter(connection => !connection.slot).map(connection => connection.source_node_id));
+      for (const connection of incoming) {
+        if (!isCanvasVideoFrameSlot(connection.slot)) continue;
+        const { slot: _slot, ...plain } = connection;
+        updates.set(connection.id, plainSources.has(connection.source_node_id) ? null : plain);
+        plainSources.add(connection.source_node_id);
+      }
+    }
+    if (!updates.size) return;
+    commit(document => syncCanvasPromptReferences({
+      ...document,
+      connections: document.connections.flatMap(connection => {
+        if (!updates.has(connection.id)) return [connection];
+        const next = updates.get(connection.id);
+        return next ? [next] : [];
+      }),
+    }, new Set([targetNodeId])), true);
   }, [commit]);
 
   const beginMaterialPick = useCallback((request: MaterialPickState) => {
@@ -3497,13 +3653,18 @@ function CanvasEditorInner({
     if (historyHintTimer.current !== null) window.clearTimeout(historyHintTimer.current);
   }, []);
 
-  const undo = useCallback(() => {
-    const previous = history.current.past.pop();
-    if (!previous || !document) return;
+  /** 撤销到撤销栈里的某一步（不传 = 上一步）。Agent 一轮的「撤销本轮」传那一轮之前的快照：
+   *  之后用户又做过的编辑一并退回，重做一次即可回到撤销前。 */
+  const undoTo = useCallback((target?: CanvasDocument) => {
+    const past = history.current.past;
+    const index = target ? past.lastIndexOf(target) : past.length - 1;
+    if (index < 0 || !document) return;
+    const previous = past[index];
     if (document.nodes.some(node => node.type === 'image_edit' && node.data.active_run_id
       && !previous.nodes.some(item => item.id === node.id))) {
-      history.current.past.push(previous); setError('请先停止编辑节点的生成，再撤销创建。'); return;
+      setError('请先停止编辑节点的生成，再撤销创建。'); return;
     }
+    history.current.past = past.slice(0, index);
     history.current.future.push(document);
     const restored = syncDraftLayerStackSources({
       ...restoreImageEditRunState(previous, document, jobsByRunId),
@@ -3522,6 +3683,8 @@ function CanvasEditorInner({
     setDirtySignal(dirtyVersion.current);
     announceHistoryChange('撤销', document, restored);
   }, [announceHistoryChange, document, jobsByRunId]);
+  undoToRef.current = undoTo;
+  const undo = useCallback(() => undoTo(), [undoTo]);
 
   const redo = useCallback(() => {
     const next = history.current.future.pop();
@@ -5050,6 +5213,7 @@ function CanvasEditorInner({
     setAnnotationDelivery,
     reorderMaterialConnections,
     setVideoFrameConnections,
+    convertVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
     previewLayerStack,
@@ -5185,6 +5349,7 @@ function CanvasEditorInner({
     reorderMaterialConnections,
     setTextEditing,
     setVideoFrameConnections,
+    convertVideoFrameConnections,
     submitLayerDecomposition,
     rerunLayerDecomposition,
     submitRun,
@@ -6433,6 +6598,45 @@ function generationDraftForNode(node: CanvasNode) {
   if (node.type === 'image_edit') return null;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
+}
+
+/** 连到首尾帧模式的视频生成配置上的图片按顺序填进空着的首帧、尾帧槽位（P0：不再让人先删线再去槽位里重选）。
+ *  返回每个来源对应的槽位（不是首尾帧模式时都是 undefined）；槽位不够时给出原因。 */
+function canvasFrameSlotsForNewInputs(
+  document: CanvasDocument,
+  targetNodeId: string,
+  sourceIds: readonly string[],
+  providers: readonly KeyView[],
+): { slots: (CanvasVideoFrameSlot | undefined)[]; error?: string } {
+  const none = { slots: sourceIds.map(() => undefined) };
+  const target = document.nodes.find(node => node.id === targetNodeId);
+  const draft = target ? generationDraftForNode(target) : null;
+  if (!draft || draft.mode !== 'video') return none;
+  const mediaKind = (nodeId: string) => {
+    const node = document.nodes.find(item => item.id === nodeId);
+    const versionId = node && isContentNode(node) ? node.data.current_version_id : null;
+    return versionId ? document.content_versions[versionId]?.kind : undefined;
+  };
+  const editingExistingVideo = document.connections.some(connection => (
+    connection.role === 'input' && connection.target_node_id === targetNodeId
+    && !connection.slot && mediaKind(connection.source_node_id) === 'video'
+  ));
+  const { usesFrameSlots, maxFrames } = canvasVideoFrameSlotMode(draft, providers, editingExistingVideo);
+  if (!usesFrameSlots || maxFrames === 0) return none;
+  const taken = new Set(document.connections.flatMap(connection => (
+    connection.role === 'input' && connection.target_node_id === targetNodeId ? [connection.slot] : []
+  )));
+  const free = (['first_frame', 'last_frame'] as const).slice(0, maxFrames).filter(slot => !taken.has(slot));
+  const slots: (CanvasVideoFrameSlot | undefined)[] = [];
+  for (const sourceId of sourceIds) {
+    if (mediaKind(sourceId) !== 'image') return none;
+    const slot = free.shift();
+    if (!slot) {
+      return { ...none, error: maxFrames === 1 ? '首帧已占用，先移除再连接。' : '首帧和尾帧都已占用，先移除一个再连接。' };
+    }
+    slots.push(slot);
+  }
+  return { slots };
 }
 
 function withGenerationDraftForNode(

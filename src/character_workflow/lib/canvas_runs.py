@@ -711,6 +711,17 @@ def _current_version_id(node: CanvasNode) -> str | None:
     return None
 
 
+def _surface_has_content(document: CanvasDocument, node: CanvasNode) -> bool:
+    """节点上已经有内容（文本节点要有非空正文）。有内容时生成结果落到新节点，不覆盖原内容（D10）。"""
+    version_id = _current_version_id(node)
+    if version_id is None:
+        return False
+    if node.type == "text":
+        version = document.content_versions.get(version_id)
+        return not isinstance(version, CanvasTextVersion) or bool(version.text.strip())
+    return True
+
+
 def _uses_video_frame_slots(draft: CanvasGenerationDraft) -> bool:
     return draft.mode == "video" and draft.params.frame_mode in {"first", "last", "firstlast"}
 
@@ -1387,7 +1398,7 @@ def _commit_frozen_run(
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
-        and (mode == "text" or _current_version_id(surface) is None)
+        and not _surface_has_content(current, surface)
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
     snapshot_payload = {

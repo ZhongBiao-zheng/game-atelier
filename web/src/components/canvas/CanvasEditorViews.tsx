@@ -243,6 +243,8 @@ export interface CanvasNodeContextValue {
     targetNodeId: string,
     frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
   ) => void;
+  /** 切换视频生成方式时搬已有连线：全能参考 ↔ 首尾帧槽位。 */
+  convertVideoFrameConnections?: (targetNodeId: string, toFrameSlots: boolean, maxFrames: number) => void;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   previewLayerStack: (nodeId: string) => void;
@@ -2742,10 +2744,7 @@ export function CanvasGenerationComposer({
                 nextParams.frame_mode === 'auto'
                 && (videoFrames.first_frame || videoFrames.last_frame)
               ) {
-                context.setVideoFrameConnections?.(node.id, {
-                  first_frame: null,
-                  last_frame: null,
-                });
+                context.convertVideoFrameConnections?.(node.id, false, 0);
               }
             }
             updateDraftWithHistory(current => ({
@@ -2827,12 +2826,7 @@ export function CanvasGenerationComposer({
               videoReferenceLimits(videoCaps, mode),
             )}
             onModeChange={mode => {
-              if (mode === 'omni') {
-                context.setVideoFrameConnections?.(node.id, {
-                  first_frame: null,
-                  last_frame: null,
-                });
-              }
+              context.convertVideoFrameConnections?.(node.id, mode !== 'omni', videoCaps?.maxFrames ?? 2);
               updateDraftWithHistory(current => ({
                 ...current,
                 params: { ...current.params, frame_mode: mode === 'omni' ? 'auto' : 'firstlast' },

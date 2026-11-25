@@ -497,6 +497,73 @@ export function restoreContentVersions(
   return restored;
 }
 
+/** 别处（Agent 经 MCP、另一标签页）改了画布时，按三方合并收下服务端文档。
+ *
+ *  base 是本页最后一次确认过的服务端文档，local 是本页当前文档，remote 是服务端新文档。
+ *  本页相对 base 改过的节点 / 连线（含 pinned：正在编辑、文本版本还没落盘的节点）保留本地值，
+ *  其余以服务端为准；本页新建的保留，本页删掉而服务端没动的不复活，服务端删掉而本页没动的跟着删。
+ *  原来是整份换成服务端文档，Agent 落盘那一刻本页还没保存的编辑整段消失，没有任何提示。 */
+export function mergeRemoteCanvasDocument(
+  base: CanvasDocument,
+  local: CanvasDocument,
+  remote: CanvasDocument,
+  pinnedNodeIds: ReadonlySet<string>,
+): { document: CanvasDocument; keptLocal: boolean } {
+  let keptLocal = false;
+  const mergeById = <T extends { id: string }>(
+    baseItems: readonly T[],
+    localItems: readonly T[],
+    remoteItems: readonly T[],
+    pinned: ReadonlySet<string>,
+  ): T[] => {
+    const baseById = new Map(baseItems.map(item => [item.id, JSON.stringify(item)]));
+    const localById = new Map(localItems.map(item => [item.id, item]));
+    const remoteIds = new Set(remoteItems.map(item => item.id));
+    const localChanged = (item: T) => pinned.has(item.id) || baseById.get(item.id) !== JSON.stringify(item);
+    const merged: T[] = [];
+    for (const item of remoteItems) {
+      const mine = localById.get(item.id);
+      if (mine) {
+        if (localChanged(mine)) {
+          if (JSON.stringify(mine) !== JSON.stringify(item)) keptLocal = true;
+          merged.push(mine);
+        } else merged.push(item);
+        continue;
+      }
+      const baseItem = baseById.get(item.id);
+      // 本页删掉了、服务端没动：尊重本页的删除。
+      if (baseItem !== undefined && baseItem === JSON.stringify(item)) {
+        keptLocal = true;
+        continue;
+      }
+      merged.push(item);
+    }
+    for (const item of localItems) {
+      if (remoteIds.has(item.id)) continue;
+      // 服务端没有：本页新建的、或本页改过的（服务端删了也留住编辑）保留；其余跟着服务端删。
+      if (!baseById.has(item.id) || localChanged(item)) {
+        keptLocal = true;
+        merged.push(item);
+      }
+    }
+    return merged;
+  };
+  const nodes = mergeById(base.nodes, local.nodes, remote.nodes, pinnedNodeIds);
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const connections = mergeById(base.connections, local.connections, remote.connections, new Set())
+    .filter(connection => nodeIds.has(connection.source_node_id) && nodeIds.has(connection.target_node_id));
+  return {
+    document: normalizeCanvasGroups({
+      ...remote,
+      nodes,
+      connections,
+      viewport: local.viewport,
+      content_versions: acceptServerContentVersions(local.content_versions, remote.content_versions),
+    }),
+    keptLocal,
+  };
+}
+
 export function canvasNodeActiveRunId(node: CanvasNode): string | null {
   return 'active_run_id' in node.data ? node.data.active_run_id ?? null : null;
 }
@@ -843,6 +910,38 @@ export function canCreateCanvasInputConnection(
     && edge.source_node_id === connection.source
     && edge.target_node_id === connection.target
   ));
+}
+
+const CANVAS_NODE_TYPE_LABELS: Record<string, string> = {
+  text: '文本', image: '图片', video: '视频', audio: '音频',
+};
+
+/** canCreateCanvasInputConnection 拒绝时的原因，一句话；说不清的返回 null 由调用方用通用文案。 */
+export function canvasInputConnectionRejection(
+  document: CanvasDocument | null,
+  connection: { source: string | null; target: string | null },
+): string | null {
+  if (!document || !connection.source || !connection.target || connection.source === connection.target) return null;
+  const source = document.nodes.find(node => node.id === connection.source);
+  const target = document.nodes.find(node => node.id === connection.target);
+  if (!source || !target) return null;
+  if (document.connections.some(edge => edge.role === 'input'
+    && edge.source_node_id === source.id && edge.target_node_id === target.id)) return '已经连接过了。';
+  if (target.type === 'compare') return '对比节点只接收图片。';
+  if (target.type === 'plugin') {
+    const contribution = enabledNodeContribution(target.data.plugin_id, target.data.node_type)?.node;
+    const existing = document.connections.filter(edge => edge.role === 'input' && edge.target_node_id === target.id);
+    if (contribution && contribution.max_inputs !== null && existing.length >= contribution.max_inputs) {
+      return `这个节点最多接收 ${contribution.max_inputs} 个输入。`;
+    }
+    return contribution ? `这个节点不接收${CANVAS_NODE_TYPE_LABELS[source.type] ?? '这类节点'}。` : null;
+  }
+  if (!canvasNodeAcceptsInput(target)) return '这个节点不接收输入。';
+  const draft = 'generation_draft' in target.data ? target.data.generation_draft : null;
+  if (draft && !canvasTargetAcceptsSource(target, source)) {
+    return `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成不接收${CANVAS_NODE_TYPE_LABELS[source.type] ?? '这类节点'}。`;
+  }
+  return null;
 }
 
 export function closestCanvasConnectionEndpoint(
@@ -1383,6 +1482,28 @@ export function canvasVideoEditCaps(
   declared?: ModelDeclared | null,
 ): VideoControlCaps {
   return videoControlCaps(model, protocol, declared);
+}
+
+/** 视频生成配置当前是不是首尾帧模式，及最多几个帧槽位。判据与生成面板（CanvasGenerationComposer）一致：
+ *  有视频参考时只能全能参考；模型支持全能参考且选的是 auto 时走全能参考，否则走能力表第一种。 */
+export function canvasVideoFrameSlotMode(
+  draft: CanvasGenerationDraft,
+  providers: readonly KeyView[],
+  editingExistingVideo: boolean,
+): { usesFrameSlots: boolean; maxFrames: number } {
+  if (draft.mode !== 'video') return { usesFrameSlots: false, maxFrames: 0 };
+  const key = providerForAlias(providers, draft.alias);
+  const model = key?.models.find(candidate => candidate.id === draft.model);
+  if (!key || !model) {
+    const slots = ['first', 'last', 'firstlast'].includes(String(draft.params.frame_mode));
+    return { usesFrameSlots: slots, maxFrames: slots ? 2 : 0 };
+  }
+  const channel = routeChannel(key, model);
+  const caps = canvasVideoEditCaps(channel.model.id, channel.model.protocol, channel.model.declared);
+  const modes = editingExistingVideo ? caps.modes.filter(mode => mode === 'omni') : caps.modes;
+  const omni = modes.includes('omni') && (editingExistingVideo || draft.params.frame_mode === 'auto');
+  const usesFrameSlots = !omni && (modes[0] ?? 'firstlast') === 'firstlast';
+  return { usesFrameSlots, maxFrames: usesFrameSlots ? caps.maxFrames : 0 };
 }
 
 export function supportsCanvasVideoEdit(
