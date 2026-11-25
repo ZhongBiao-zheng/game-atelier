@@ -8,7 +8,7 @@ import type { Theme } from './theme';
 /** 外壳的系统菜单「设置…」等入口：detail.path 是站内路径。 */
 export const DESKTOP_NAVIGATE_EVENT = 'atelier:navigate';
 
-type ShellBridge = { setTheme: (theme: Theme) => void };
+type ShellBridge = { setTheme: (theme: Theme) => void; openLog?: () => void };
 
 function shell(): ShellBridge | null {
   if (!document.documentElement.dataset.shell) return null;
@@ -18,6 +18,12 @@ function shell(): ShellBridge | null {
 /** 外壳记下页面的深浅色，下次启动的窗口底色与加载页跟着走，浅色用户不再先闪一下暗色。 */
 export function syncShellTheme(theme: Theme) {
   shell()?.setTheme(theme);
+}
+
+/** 桌面版打开服务日志；浏览器里与旧外壳没有这个接口，返回 null（调用方据此不显示按钮）。 */
+export function shellLogOpener(): (() => void) | null {
+  const open = shell()?.openLog;
+  return open ? () => open() : null;
 }
 
 /** 只接受站内路径，避免事件被用来导航到别处。 */

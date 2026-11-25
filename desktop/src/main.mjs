@@ -20,6 +20,8 @@ const { log } = rt;
 const PROBE_INTERVAL = 3000;
 /** About nine seconds without an answer before the window reports a stopped server. */
 const FAILED_PROBES_BEFORE_ERROR = 3;
+/** At most one automatic restart of a stopped server in this window. */
+const AUTO_RESTART_WINDOW = 10 * 60_000;
 /** Extra time for a first start after the launcher's own 8 s check has given up. */
 const SLOW_START_GRACE = 30_000;
 const SMOKE_TIMEOUT = 180_000;
@@ -69,6 +71,8 @@ const state = {
   currentUrl: null,
   booting: false,
   quitting: false,
+  /** Last automatic restart after the server stopped (watchdog). */
+  autoRestartedAt: 0,
   /** Shut down / log out / session end: quit without asking, never hold up the system. */
   systemEnding: false,
   /** Set once a runtime was unpacked by this launch (a first start). */
@@ -407,7 +411,16 @@ function watchdog() {
         log(`status probe failed (${failures})`);
         if (failures >= FAILED_PROBES_BEFORE_ERROR) {
           failures = 0;
-          showError('stopped');
+          // A server this shell started gets one automatic restart (per AUTO_RESTART_WINDOW);
+          // the error page only appears when that also fails or it keeps stopping.
+          const now = Date.now();
+          if (rt.isOwned(dataRoot, shown) && now - state.autoRestartedAt > AUTO_RESTART_WINDOW) {
+            state.autoRestartedAt = now;
+            log('server stopped; restarting it once');
+            boot();
+          } else {
+            showError('stopped');
+          }
         }
       }
     } finally {
@@ -708,6 +721,7 @@ function start() {
   listen('atelier:set-theme', 'page', setTheme);
   listen('atelier:retry', 'local', () => { boot(); });
   listen('atelier:open-log', 'local', openLog);
+  listen('atelier:page-open-log', 'page', openLog);
   listen('atelier:cancel', 'local', cancelDownload);
   listen('atelier:resume', 'local', () => { boot(); });
   listen('atelier:import', 'local', () => { importRuntime(); });

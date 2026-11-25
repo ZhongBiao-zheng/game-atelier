@@ -25,6 +25,7 @@ if (protocol === 'http:' && hostname === '127.0.0.1') {
   }
   contextBridge.exposeInMainWorld('atelierShell', {
     setTheme: (theme) => ipcRenderer.send('atelier:set-theme', theme === 'light' ? 'light' : 'dark'),
+    openLog: () => ipcRenderer.send('atelier:page-open-log'),
   });
 } else if (protocol === 'file:' && pathname.endsWith('/ui/index.html')) {
   contextBridge.exposeInMainWorld('atelierLoading', {

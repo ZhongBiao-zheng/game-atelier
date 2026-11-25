@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
-import { DataRootPage } from './pages/onboarding/DataRoot';
 import { FirstRunGuide } from './pages/onboarding/FirstRunGuide';
-import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
 import { LocalConnectionGate } from '@/components/LocalConnectionGate';
 import { StartupScreen } from '@/components/StartupScreen';
+import { Button } from '@/components/ui/button';
 import { ApiError } from '@/api/http';
+import { errorText } from '@/lib/errorText';
+import { shellLogOpener } from '@/lib/desktopShell';
 import { probeUpdateInstance, readPendingUpdate, savePendingUpdate, updateNavigation, updateRecoveryExpired } from '@/api/update';
+
+/** 首屏状态读取失败先静默重试几次（服务刚起、磁盘慢时常见），仍失败才露错误。 */
+const STATUS_RETRY_DELAYS_MS = [1000, 3000];
+const NOT_RECOVERED = 'Atelier 没有自动恢复，请重新打开 Atelier';
 
 export function App() {
   return <LocalConnectionGate><ConnectedApp /></LocalConnectionGate>;
@@ -21,6 +26,7 @@ function ConnectedApp() {
 
   const reload = useCallback(() => {
     clearTimeout(retryTimer.current);
+    setError(null);
     const generation = ++loadGeneration.current;
     const load = (attempt: number) => {
       fetchOnboardingStatus(AbortSignal.timeout(8000))
@@ -32,7 +38,7 @@ function ConnectedApp() {
             const recovering = { ...pending, restartAt: pending.restartAt ?? Date.now() };
             if (updateRecoveryExpired(recovering)) {
               savePendingUpdate(null);
-              setError('服务没有自动恢复，请双击启动器');
+              setError(NOT_RECOVERED);
               return;
             }
             savePendingUpdate(recovering);
@@ -51,7 +57,9 @@ function ConnectedApp() {
           // A new instance serves its identity before the update executor commits it.
           if (e instanceof ApiError && e.status === 503 && attempt < 30) {
             retryTimer.current = setTimeout(() => load(attempt + 1), 1000);
-          } else setError(String(e));
+          } else if (attempt < STATUS_RETRY_DELAYS_MS.length) {
+            retryTimer.current = setTimeout(() => load(attempt + 1), STATUS_RETRY_DELAYS_MS[attempt]);
+          } else setError(errorText(e, '暂时读不到 Atelier 的状态'));
         });
     };
     load(0);
@@ -66,27 +74,31 @@ function ConnectedApp() {
     return cancelLoad;
   }, [reload, cancelLoad]);
 
-  if (error) {
-    return (
-      <div className="grid h-screen place-items-center bg-background p-8 text-destructive">
-        {error}
-      </div>
-    );
-  }
+  if (error) return <StartupError message={error} onRetry={reload} />;
   if (!state) return <StartupScreen label={readPendingUpdate() ? '重启中…' : '启动中…'} />;
 
   // 主内容第一次出现时 200ms 淡入，接住启动页；之后在引导与主界面之间切换不再重播。
   return <div className="content-reveal">{connectedView(state, reload)}</div>;
 }
 
+function StartupError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const openLog = shellLogOpener();
+  return <StartupScreen label="暂时打不开 Atelier">
+    <p role="alert" className="break-words text-sm text-pretty text-muted-foreground">{message}</p>
+    <div className="flex justify-center gap-2">
+      {openLog && <Button variant="outline" onClick={openLog}>查看日志</Button>}
+      <Button onClick={onRetry}>重试</Button>
+    </div>
+  </StartupScreen>;
+}
+
 function connectedView(state: OnboardingState, reload: () => void) {
   switch (state.status) {
-    case 'needs_data_root':
-      return <DataRootPage onComplete={reload} />;
-    case 'needs_keys_repair':
-      return <KeysPage mode="onboarding" onComplete={reload} />;
     case 'needs_first_key':
-      if (!state.onboarding_skipped) return <FirstRunGuide onComplete={reload} />;
+      // 供应商配置刚因损坏被备份：即使之前点过「稍后」也回到引导，说明一次。
+      if (!state.onboarding_skipped || state.keys_recovered) {
+        return <FirstRunGuide onComplete={reload} recovered={Boolean(state.keys_recovered)} />;
+      }
       return <AppShell runtimeMode={state.runtime_mode ?? 'source'} latestRelease={state.update?.update_available ? state.update.latest : null} />;
     case 'ready':
     default:

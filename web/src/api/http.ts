@@ -12,13 +12,13 @@ import { ConnectionInterrupted, connectionFetch } from '@/api/connection';
 /** 服务端没给 detail 时按状态码兜底 —— 至少说清是「哪一类」问题。 */
 function statusReason(status: number, statusText: string): string {
   if (status === 0) return '请求没有发出去（连接被中断）';
-  if (status === 404) return '服务端找不到这个接口或资源（可能是版本不匹配，试试重启服务）';
+  if (status === 404) return '找不到这个接口或资源（可能是版本不匹配，重新打开 Atelier 试试）';
   if (status === 405) return '接口不接受这种请求方法（版本不匹配）';
-  if (status === 409) return '和服务端当前状态冲突（可能已被别处改动，刷新后重试）';
-  if (status === 413) return '文件超出服务端允许的大小';
-  if (status === 422) return '提交的内容不合接口要求';
+  if (status === 409) return '和当前状态冲突（可能已在别处改动，刷新后重试）';
+  if (status === 413) return '文件超出允许的大小';
+  if (status === 422) return '提交的内容不合要求';
   if (status === 429) return '请求太频繁，被限流了';
-  if (status >= 500) return '服务端内部出错（原因见 data root 下 .runtime/server.log，或 viewer-server 终端）';
+  if (status >= 500) return 'Atelier 服务内部出错，请重试；反复出现时重新打开 Atelier';
   if (status >= 400) return statusText || '请求被服务端拒绝';
   return statusText || '未知错误';
 }
@@ -115,14 +115,19 @@ export async function apiError(resp: Response, what: string): Promise<ApiError> 
   );
 }
 
-/** fetch 本身 reject（服务没起 / 端口被占 / 请求被掐断）→ 中文 Error。 */
+/** fetch 本身 reject（服务没起 / 端口被占 / 请求被掐断 / 超时）→ 中文 ApiError；原始报错只进 raw。 */
 export function requestError(err: unknown, what: string): Error {
   if (err instanceof ConnectionInterrupted) return err;
-  const raw = err instanceof Error ? err.message : String(err);
-  return new Error(
-    `${what}失败：连不上本地服务（viewer-server 没在运行，或它的端口被别的程序占了）。` +
-      `请重启服务后重试。原始报错：${raw}`,
-  );
+  const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const timedOut = err instanceof Error && err.name === 'TimeoutError';
+  const reason = timedOut ? 'Atelier 服务响应超时' : '连不上 Atelier 服务';
+  return new ApiError(`${what}失败：${reason}`, {
+    status: 0,
+    code: timedOut ? 'timeout' : 'service_unavailable',
+    reason,
+    recovery: timedOut ? '请稍后重试' : '确认 Atelier 正在运行后重试',
+    raw,
+  });
 }
 
 /** `fetch` + 失败即抛中文 Error 的薄封装。GET/POST 都用它，省掉每处两段 if。 */

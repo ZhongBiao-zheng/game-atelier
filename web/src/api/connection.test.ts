@@ -78,7 +78,7 @@ describe('local connection', () => {
     }));
     const connection = client(); const pending = connection.start();
     await vi.advanceTimersByTimeAsync(8000); await pending;
-    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true, message: 'Atelier服务响应超时。' });
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true, message: 'Atelier 服务响应超时。' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(network).toHaveBeenCalledTimes(2);
   });
@@ -92,7 +92,7 @@ describe('local connection', () => {
     expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: false });
   });
 
-  it('requires an explicit reconnect if the server restarted during automatic recovery', async () => {
+  it('reconnects automatically to a restarted server of the same version and reports it once', async () => {
     vi.useFakeTimers(); let offline = false; let instance = 'i1';
     server(url => {
       if (offline) throw new TypeError('Failed to fetch');
@@ -102,8 +102,7 @@ describe('local connection', () => {
     const connection = client(); await connection.start(); offline = true;
     await expect(connection.fetch('/api/save', { method: 'PUT' })).rejects.toThrow();
     offline = false; instance = 'i2'; await vi.advanceTimersByTimeAsync(1000);
-    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: false, message: expect.stringContaining('已重启') });
-    await connection.start(); expect(connection.getSnapshot().phase).toBe('ready');
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', recovering: false, reconnects: 1 });
   });
 
   it('renews an expired local session without replaying writes', async () => {
@@ -128,14 +127,14 @@ describe('local connection', () => {
     expect(network.mock.calls.filter(([url]) => url === '/api/generate')).toHaveLength(1);
   });
 
-  it('stops after three automatic retries and cancels scheduled retries on disposal', async () => {
+  it('keeps retrying with backoff while the page is open and cancels scheduled retries on disposal', async () => {
     vi.useFakeTimers();
     const network = server(() => { throw new TypeError('Failed to fetch'); });
     const connection = client(); await connection.start();
+    // 1s → 3s → 10s，之后每 10s：60 秒内首次握手之外再试 1、4、14、24、34、44、54 秒共 7 次。
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(network).toHaveBeenCalledTimes(4);
-    expect(connection.getSnapshot().phase).toBe('interrupted');
-    await connection.start();
+    expect(network).toHaveBeenCalledTimes(8);
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true });
     connection.dispose();
     const count = network.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);

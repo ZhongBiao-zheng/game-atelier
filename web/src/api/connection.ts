@@ -6,10 +6,22 @@ export interface ConnectionSnapshot {
   editing: boolean;
   message: string | null;
   recovering?: boolean;
+  /** 这次断线从什么时候开始（Date.now）；连上后清空。断线胶囊按它分「重连中」与「警示」。 */
+  outageSince?: number | null;
+  /** 这次断线已失败的自动重连次数。 */
+  failures?: number;
+  /** 自动重连到了一个新的服务实例（看护重启、崩溃自启）：每次 +1，界面据此轻提示「已重连」。 */
+  reconnects?: number;
+  /** 服务换了新版本而本页还有未保存的修改：停下来让用户选，不自动覆盖。 */
+  versionConflict?: boolean;
 }
 
 export const PROTOCOL = 'atelier-local/2';
 export const HEARTBEAT_MS = 10_000;
+/** 自动重连的退避（规格 2.4）：1s → 3s → 10s，之后每 10s 探测一次，直到恢复或遇到确定性错误。 */
+export const RECOVERY_DELAYS_MS = [1000, 3000, 10_000] as const;
+/** 页面刷新只换前端代码；测试里替换成假的。 */
+export const connectionNavigation = { reload: () => window.location.reload() };
 
 export class ConnectionInterrupted extends Error {
   constructor(message = '本机连接已暂停，请重新连接。') {
@@ -22,6 +34,8 @@ const CONNECTION_ERRORS = new Set([
   'CONNECTION_REQUIRED', 'SESSION_EXPIRED', 'SESSION_REVOKED', 'INSTANCE_CHANGED',
   'EDITOR_IN_USE', 'ORIGIN_DENIED', 'HOST_DENIED', 'PROTOCOL_MISMATCH',
 ]);
+/** 服务重启后旧会话失效会报这几种：重新握手就能恢复，不必等人点。 */
+const RENEWABLE_ERRORS = new Set(['CONNECTION_REQUIRED', 'SESSION_EXPIRED', 'INSTANCE_CHANGED']);
 
 /** A page owns its client ID. Shared cookies never imply a shared editor lease. */
 export class LocalConnection {
@@ -35,6 +49,8 @@ export class LocalConnection {
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private recoveryAttempts = 0;
   private instanceId: string | null = null;
+  private appVersion: string | null = null;
+  private unsaved = new Set<string>();
 
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -57,15 +73,31 @@ export class LocalConnection {
 
   private interrupt(message: string, code?: string, retryable = false, retryAfterMs = 0) {
     this.invalidate();
-    const recovering = retryable && this.recoveryAttempts < 3;
-    this.publish({ phase: code === 'EDITOR_IN_USE' ? 'editor_in_use' : 'interrupted', message, recovering });
+    // 页面在就一直退避重试；只有协议、来源、撤销这类确定性错误停下等人。
+    const recovering = retryable;
+    const outageSince = this.snapshot.outageSince ?? Date.now();
+    this.publish({
+      phase: code === 'EDITOR_IN_USE' ? 'editor_in_use' : 'interrupted', message, recovering,
+      outageSince, failures: this.recoveryAttempts + 1,
+    });
     if (recovering) {
-      const delay = Math.max(1000 * 2 ** this.recoveryAttempts++, retryAfterMs);
-      this.recoveryTimer = setTimeout(() => {
-        void this.start({ editing: this.requestedEditing, recoveryAttempt: true });
-      }, delay);
+      const step = RECOVERY_DELAYS_MS[Math.min(this.recoveryAttempts, RECOVERY_DELAYS_MS.length - 1)];
+      this.recoveryAttempts++;
+      this.recoveryTimer = setTimeout(() => this.retryNow(), Math.max(step, retryAfterMs));
     }
   }
+
+  /** 自动重连中立刻再试一次（「立即重试」、页面回到前台、网络恢复）；没在重连时什么也不做。 */
+  retryNow = () => {
+    if (this.snapshot.phase !== 'interrupted' || !this.snapshot.recovering || this.pending) return;
+    clearTimeout(this.recoveryTimer);
+    void this.start({ editing: this.requestedEditing, recoveryAttempt: true });
+  };
+
+  /** 页面上有没保存的本地改动时登记（owner 区分来源），保存后撤销登记。服务换新版本时据此决定能否自动刷新。 */
+  setUnsaved = (owner: string, dirty: boolean) => {
+    if (dirty) this.unsaved.add(owner); else this.unsaved.delete(owner);
+  };
 
   private async inspect(response: Response) {
     if (response.ok) return;
@@ -77,7 +109,7 @@ export class LocalConnection {
       if (typeof body.error?.message === 'string') message = body.error.message;
     } catch { /* Non-JSON failures are handled by the ordinary API error formatter. */ }
     if (response.status === 401 || (code && CONNECTION_ERRORS.has(code))) {
-      this.interrupt(message, code, code === 'SESSION_EXPIRED');
+      this.interrupt(message, code, Boolean(code && RENEWABLE_ERRORS.has(code)));
     }
   }
 
@@ -129,7 +161,7 @@ export class LocalConnection {
           } catch (error) {
             release();
             if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-              this.interrupt(timedOut ? 'Atelier服务响应超时。' : 'Atelier服务连接中断。', undefined, true);
+              this.interrupt(timedOut ? 'Atelier 服务响应超时。' : 'Atelier 服务连接中断。', undefined, true);
             }
             output.error(error);
           }
@@ -140,7 +172,7 @@ export class LocalConnection {
     } catch (error) {
       release();
       if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-        this.interrupt(timedOut ? 'Atelier服务响应超时。' : '无法连接Atelier服务，请确认Atelier已启动。', undefined, true);
+        this.interrupt(timedOut ? 'Atelier 服务响应超时。' : 'Atelier 服务无响应。', undefined, true);
       }
       throw error;
     }
@@ -212,10 +244,10 @@ export class LocalConnection {
         const retryAfterMs = retryAfter === null ? 0 : /^\d+$/.test(retryAfter)
           ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) || 0;
         this.interrupt(response.status === 404
-          ? 'Atelier服务版本不匹配，请更新并重新启动Atelier。'
-          : `无法建立Atelier连接（HTTP ${response.status}）。`, undefined, retryable, retryAfterMs);
+          ? 'Atelier 服务版本不匹配，请重新打开 Atelier。'
+          : 'Atelier 服务暂时无法连接。', undefined, retryable, retryAfterMs);
       }
-      throw new ConnectionInterrupted(this.snapshot.message ?? '无法建立Atelier连接。');
+      throw new ConnectionInterrupted(this.snapshot.message ?? 'Atelier 服务暂时无法连接。');
     }
     if (response.status === 204) return null;
     return response.json();
@@ -239,17 +271,30 @@ export class LocalConnection {
     if (!options.recoveryAttempt) this.recoveryAttempts = 0;
     const wasEditing = this.snapshot.phase === 'ready' && this.snapshot.editing;
     this.invalidate();
-    this.publish({ phase: 'connecting', message: null, editing, recovering: Boolean(options.recoveryAttempt) });
+    this.publish({
+      phase: 'connecting', message: null, editing, recovering: Boolean(options.recoveryAttempt), versionConflict: false,
+    });
     const generation = this.snapshot.generation;
     const task = async () => {
       try {
         if (wasEditing && !editing) await this.control('/api/connection/editor-lease', { client_id: this.clientId }, 'DELETE');
         const status = await this.control('/api/connection/status', undefined, 'GET');
         if (status.service !== 'game-atelier' || typeof status.instance_id !== 'string' || status.protocol !== PROTOCOL) {
-          throw new Error('本机服务版本不匹配，请更新后重新连接。');
+          throw new Error('Atelier 服务版本不匹配，请重新打开 Atelier。');
         }
-        if (options.recoveryAttempt && this.instanceId && status.instance_id !== this.instanceId) {
-          throw new Error('Atelier服务已重启，请重新连接并核对最新内容。');
+        const restarted = Boolean(options.recoveryAttempt && this.instanceId && status.instance_id !== this.instanceId);
+        const version = typeof status.app_version === 'string' ? status.app_version : null;
+        if (restarted && this.appVersion && version !== this.appVersion) {
+          // 新版本的服务配旧页面代码会出怪问题：没有未保存修改就直接刷新页面；有就停下让用户选。
+          if (this.unsaved.size === 0) { connectionNavigation.reload(); return; }
+          if (generation === this.snapshot.generation) {
+            this.invalidate();
+            this.publish({
+              phase: 'interrupted', recovering: false, versionConflict: true,
+              message: 'Atelier 已更新到新版本，页面里还有未保存的修改。',
+            });
+          }
+          return;
         }
         const session = await this.control('/api/connection/local-session', {});
         if (session.instance_id !== status.instance_id || typeof session.session_id !== 'string') {
@@ -258,8 +303,12 @@ export class LocalConnection {
         if (editing) await this.control('/api/connection/editor-lease', { client_id: this.clientId, takeover: options.takeover ?? false });
         if (generation !== this.snapshot.generation) return;
         this.instanceId = status.instance_id;
+        this.appVersion ??= version;
         this.recoveryAttempts = 0;
-        this.publish({ phase: 'ready', message: null, recovering: false });
+        this.publish({
+          phase: 'ready', message: null, recovering: false, outageSince: null, failures: 0, versionConflict: false,
+          reconnects: (this.snapshot.reconnects ?? 0) + (restarted ? 1 : 0),
+        });
         if (editing) this.scheduleHeartbeat(generation);
       } catch (error) {
         if (generation === this.snapshot.generation) this.interrupt(error instanceof Error ? error.message : '无法建立本机连接。');
@@ -315,7 +364,7 @@ export class LocalConnection {
     this.invalidate();
     this.pending = null;
     this.recoveryAttempts = 0;
-    this.publish({ phase: 'idle', editing: false, message: null, recovering: false });
+    this.publish({ phase: 'idle', editing: false, message: null, recovering: false, outageSince: null, failures: 0 });
     if (release) void fetch('/api/connection/editor-lease', {
       method: 'DELETE', credentials: 'same-origin', redirect: 'error', keepalive: true,
       headers: { 'Content-Type': 'application/json', 'X-Atelier-Client': this.clientId },
@@ -326,6 +375,8 @@ export class LocalConnection {
 
 export const localConnection = new LocalConnection();
 export const connectionFetch = localConnection.fetch;
+/** 有未保存的本地改动时登记，保存后撤销（`owner` 用稳定的字符串，如 `canvas:<projectId>`）。 */
+export const markUnsavedChanges = localConnection.setUnsaved;
 export function useConnectionState() {
   return useSyncExternalStore(localConnection.subscribe, localConnection.getSnapshot);
 }

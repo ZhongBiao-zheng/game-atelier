@@ -60,7 +60,7 @@ it('lays out the recommended provider and the three key-free paths with their li
 it('walks the recommended steps and opens the key form on the last one', async () => {
   render(<OnboardingGuide source="first_run" onDone={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: /^Tuzi/ }));
-  const steps = screen.getByRole('list', { name: '获取 Key 步骤' });
+  const steps = screen.getByRole('list', { name: '获取密钥步骤' });
   const rows = within(steps).getAllByRole('listitem');
   expect(rows[0]).toHaveAttribute('aria-current', 'step');
   const signup = within(rows[0]).getByRole('link', { name: /打开/ });
@@ -83,7 +83,7 @@ it('walks the recommended steps and opens the key form on the last one', async (
 it('gives TokenDance its own steps, hints and key form', async () => {
   render(<OnboardingGuide source="first_run" onDone={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: /^TokenDance/ }));
-  const rows = within(screen.getByRole('list', { name: '获取 Key 步骤' })).getAllByRole('listitem');
+  const rows = within(screen.getByRole('list', { name: '获取密钥步骤' })).getAllByRole('listitem');
   expect(rows.map(row => within(row).queryByRole('link')?.getAttribute('href'))).toEqual([
     'https://tokendance.space/login', 'https://tokendance.space/credits', 'https://tokendance.space/keys', undefined,
   ]);

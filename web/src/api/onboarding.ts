@@ -1,10 +1,7 @@
 import { request, requestJson } from './http';
 import type { GuideVendor } from '@/lib/onboardingGuide';
-export type OnboardingStatus =
-  | 'ready'
-  | 'needs_data_root'
-  | 'needs_first_key'
-  | 'needs_keys_repair';
+/** 服务端已把「缺数据目录」静默补成默认目录、把损坏的 keys.json 备份成空库，前端只见这两态。 */
+export type OnboardingStatus = 'ready' | 'needs_first_key';
 
 export interface OnboardingState {
   status: OnboardingStatus;
@@ -15,16 +12,38 @@ export interface OnboardingState {
   next_action: string;
   runtime_mode?: 'source' | 'bundle';
   update?: { current: string; latest: string | null; update_available: boolean } | null;
-  /** 首启第二步（连接模型）点过「稍后」。 */
+  /** 首启「连接模型」点过「稍后」。 */
   onboarding_skipped?: boolean;
+  /** keys.json 损坏后自动备份的记录；添加第一个供应商后清除。 */
+  keys_recovered?: { backup: string; at: string } | null;
 }
 
 export async function fetchOnboardingStatus(signal?: AbortSignal): Promise<OnboardingState> {
   return requestJson<OnboardingState>('/api/onboarding/status', '读取初始化状态', signal ? { signal } : undefined);
 }
 
-export async function setDataRoot(path: string): Promise<{ data_root: string }> {
-  return requestJson<{ data_root: string }>('/api/onboarding/data-root', '设置数据目录', {
+export interface DataRootMove {
+  phase: 'idle' | 'copying' | 'verifying' | 'done' | 'failed';
+  mode: 'copy' | 'switch' | null;
+  target: string | null;
+  total_bytes: number;
+  copied_bytes: number;
+  error: string | null;
+  detail: string | null;
+}
+
+export interface DataRootState {
+  data_root: string;
+  move: DataRootMove;
+}
+
+export function fetchDataRoot(): Promise<DataRootState> {
+  return requestJson<DataRootState>('/api/data-root', '读取数据目录');
+}
+
+/** 更换数据目录：空目标复制后切换、已有 Atelier 数据直接切换；复制在后台进行，用 fetchDataRoot 看进度。 */
+export function changeDataRoot(path: string): Promise<DataRootState> {
+  return requestJson<DataRootState>('/api/data-root', '更换数据目录', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),

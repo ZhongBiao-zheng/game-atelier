@@ -26,6 +26,17 @@ interface FormState {
 
 const presetById = (id: string) => PROVIDER_PRESETS.find(preset => preset.id === id);
 
+/** 「粘贴」真的读剪贴板：像一把密钥（一段 16 位以上、不含空白的字符串）就直接填进去开始校验。
+ *  读不到（浏览器没给权限、剪贴板是别的内容）就打开空表单，不报错。 */
+async function readClipboardKey(): Promise<string | undefined> {
+  try {
+    const text = (await navigator.clipboard?.readText())?.trim();
+    return text && text.length >= 16 && text.length <= 512 && !/\s/.test(text) ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function editInitial(key: KeyView): Partial<KeyCreatePayload> {
   return {
     alias: key.alias, enabled: key.enabled !== false, provider: key.provider, base_url: key.base_url,
@@ -35,7 +46,7 @@ function editInitial(key: KeyView): Partial<KeyCreatePayload> {
   };
 }
 
-/** 连接第一个模型：推荐厂商分步获取 Key，或走 ChatGPT 订阅 / 本机 ComfyUI / 团队网关。
+/** 连接第一个模型：推荐供应商分步获取密钥，或走 ChatGPT 订阅 / 本机 ComfyUI / 团队网关。
  *  每条路径最后都落到同一个 KeyForm；有可用模型即调用 onDone。 */
 export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDone: () => void }) {
   const [vendor, setVendor] = useState<RecommendedProvider | null>(null);
@@ -81,10 +92,16 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
     setOpened(current => new Set(current).add(step));
     void recordOnboardingEvent({ event: 'step_opened', step, vendor: item.presetId });
   };
-  const openKeyForm = (item: RecommendedProvider) => {
+  const openKeyForm = async (item: RecommendedProvider) => {
     const preset = presetById(item.presetId);
     void recordOnboardingEvent({ event: 'step_opened', step: 'key_form', vendor: item.presetId });
-    if (preset) setForm({ path: 'key', vendor: item.presetId, presetId: preset.id, initial: presetInitial(preset), mode: 'create' });
+    if (!preset) return;
+    const pasted = await readClipboardKey();
+    const initial = presetInitial(preset);
+    setForm({
+      path: 'key', vendor: item.presetId, presetId: preset.id, mode: 'create',
+      initial: pasted ? { ...initial, access_key: pasted } : initial,
+    });
   };
 
   /** 保存或关掉表单后重新判断：有可用模型就结束；ComfyUI 还没工作流就转到编辑态导入。 */
@@ -143,7 +160,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
             onClick={() => choosePath('other', { path: 'other', mode: 'create' })}>其他供应商</Button>
         </div>
       </> : <VendorSteps item={vendor} opened={opened} onBack={() => setVendor(null)}
-        onOpenStep={step => openStep(vendor, step)} onPaste={() => openKeyForm(vendor)} />}
+        onOpenStep={step => openStep(vendor, step)} onPaste={() => { void openKeyForm(vendor); }} />}
       {shownForm && <KeyForm
         key={formSession.current.n}
         open={Boolean(form)}
@@ -174,7 +191,7 @@ function VendorSteps({ item, opened, onBack, onOpenStep, onPaste }: {
         {preset && <BrandTile provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />}
         <span className="text-base font-medium">{preset?.label}</span>
       </div>
-      <ol aria-label="获取 Key 步骤" className="flex flex-col gap-2">
+      <ol aria-label="获取密钥步骤" className="flex flex-col gap-2">
         {item.steps.map((step, index) => {
           const done = opened.has(step.id);
           const current = !done && item.steps.slice(0, index).every(prev => opened.has(prev.id));
@@ -188,7 +205,7 @@ function VendorSteps({ item, opened, onBack, onOpenStep, onPaste }: {
             </StepRow>
           );
         })}
-        <StepRow index={item.steps.length + 1} label="粘贴 Key" hint={item.pasteHint}
+        <StepRow index={item.steps.length + 1} label="粘贴密钥" hint={item.pasteHint}
           done={false} current={item.steps.every(step => opened.has(step.id))}>
           <Button size="sm" type="button" onClick={onPaste}>粘贴</Button>
         </StepRow>

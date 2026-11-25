@@ -11,7 +11,7 @@ vi.mock('@/api/gateway', async importOriginal => ({
 }));
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn((url: RequestInfo | URL) => {
+  vi.stubGlobal('fetch', vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
     if (url === '/api/onboarding/status') {
       return Promise.resolve({
         ok: true,
@@ -37,10 +37,15 @@ beforeEach(() => {
         json: async () => ({ keys: [], default_alias: null }),
       } as Response);
     }
-    if (url === '/api/onboarding/data-root') {
+    if (url === '/api/data-root') {
+      const switched = init?.method === 'POST';
       return Promise.resolve({
         ok: true,
-        json: async () => ({ data_root: '/Users/me/new-root' }),
+        json: async () => ({
+          data_root: switched ? '/Users/me/new-root' : '/Users/me/game-atelier',
+          move: { phase: switched ? 'done' : 'idle', mode: switched ? 'switch' : null, target: null,
+            total_bytes: 0, copied_bytes: 0, error: null, detail: null },
+        }),
       } as Response);
     }
     if (url === '/api/folder-picker') {
@@ -87,26 +92,22 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     const path = await screen.findByLabelText('数据目录');
-    expect(path).toHaveTextContent('/Users/me/game-atelier');
-    // 「保存」在设置页有多处（显示名节也有），按节限定查询
+    await waitFor(() => expect(path).toHaveTextContent('/Users/me/game-atelier'));
     const rootSection = within(path.closest('section') as HTMLElement);
-    // 保存按需浮现：路径未变更时不出现
-    expect(rootSection.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
 
+    // 选完文件夹直接更换（目标已是 Atelier 数据目录时服务端直接切换），不再有「保存」这一步。
     fireEvent.click(rootSection.getByRole('button', { name: /更换文件夹/ }));
-    await waitFor(() => expect(path).toHaveTextContent('/Users/me/new-root'));
-    fireEvent.click(rootSection.getByRole('button', { name: /保存/ }));
-
     await waitFor(() => {
       expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
-        '/api/onboarding/data-root',
+        '/api/data-root',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ path: '/Users/me/new-root' }),
         }),
       );
     });
-    expect(await screen.findByText('项目存放地址已更新，API Key 已重新读取新目录。')).toBeInTheDocument();
+    await waitFor(() => expect(path).toHaveTextContent('/Users/me/new-root'));
+    expect(await rootSection.findByText('已切换')).toBeInTheDocument();
   });
 
   it('renders the show-canvas-on-home switch and posts the toggle', async () => {

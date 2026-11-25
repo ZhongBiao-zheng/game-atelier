@@ -108,7 +108,7 @@ describe('local connection gate', () => {
     const network = server(); network.mockRejectedValue(new TypeError('Failed to fetch'));
     render(<LocalConnectionGate><Draft onMount={vi.fn()} /></LocalConnectionGate>);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(screen.getByText('暂时无法连接Atelier服务')).toBeInTheDocument();
+    expect(screen.getByText('暂时无法连接 Atelier 服务')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
@@ -137,13 +137,13 @@ describe('local connection gate', () => {
     vi.useFakeTimers();
     network.mockRejectedValue(new TypeError('Failed to fetch'));
     await act(async () => { await connectionFetch('/api/config', { method: 'PUT' }).catch(() => {}); });
-    // 自动恢复中的断线先等 400ms 才出条，抖一下就恢复时不闪。
-    expect(screen.queryByText('恢复连接中…')).not.toBeInTheDocument();
-    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    expect(screen.getByText('恢复连接中…')).toBeInTheDocument();
+    // 自动恢复中的断线 1.5 秒内静默，抖一下就恢复时不闪（规格 2.4）。
+    expect(screen.queryByText('重连中…')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.getByText('重连中…')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(editor).toHaveValue('尚未保存的手稿');
     server();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(localConnection.getSnapshot().phase).toBe('ready');
     expect(editor).not.toBeDisabled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(screen.queryByText('本机连接已暂停')).not.toBeInTheDocument();

@@ -1,15 +1,51 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useLocation } from 'wouter';
-import { HEARTBEAT_MS, localConnection, useConnectionState } from '@/api/connection';
+import { HEARTBEAT_MS, connectionNavigation, localConnection, useConnectionState, type ConnectionSnapshot } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
 import { StartupScreen } from '@/components/StartupScreen';
 import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
+import { notify } from '@/lib/notify';
+import { cn } from '@/lib/utils';
 
-/** 断线条的出现延迟：网络抖一下就恢复时不闪条。 */
-const OUTAGE_NOTICE_DELAY_MS = 400;
+/** 断线分级（规格 2.4）：1.5 秒内静默；之后中性胶囊「重连中…」；超过 15 秒或连续失败 4 次转警示并给「立即重试」。 */
+const OUTAGE_QUIET_MS = 1500;
+const OUTAGE_WARN_MS = 15_000;
+const OUTAGE_WARN_FAILURES = 4;
+type OutageLevel = 'none' | 'quiet' | 'reconnecting' | 'warning' | 'paused';
+
+function useOutageLevel(connection: ConnectionSnapshot): OutageLevel {
+  const outage = connection.phase !== 'ready' && connection.phase !== 'editor_in_use' && connection.outageSince != null;
+  const paused = outage && !connection.recovering && connection.phase !== 'connecting';
+  const [, tick] = useState(0);
+  const since = connection.outageSince ?? 0;
+  useEffect(() => {
+    if (!outage || paused) return;
+    const elapsed = Date.now() - since;
+    const timers = [OUTAGE_QUIET_MS, OUTAGE_WARN_MS].filter(at => at > elapsed)
+      .map(at => setTimeout(() => tick(value => value + 1), at - elapsed));
+    return () => timers.forEach(clearTimeout);
+  }, [outage, paused, since]);
+  if (!outage) return 'none';
+  if (paused) return 'paused';
+  const elapsed = Date.now() - since;
+  if (elapsed >= OUTAGE_WARN_MS || (connection.failures ?? 0) >= OUTAGE_WARN_FAILURES) return 'warning';
+  return elapsed < OUTAGE_QUIET_MS ? 'quiet' : 'reconnecting';
+}
+
+/** 浏览器报告的联网状态：本机断网时与「Atelier 服务无响应」「单个供应商故障」分开提示。 */
+function useOnline() {
+  const [online, setOnline] = useState(() => window.navigator.onLine !== false);
+  useEffect(() => {
+    const update = () => setOnline(window.navigator.onLine !== false);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
+  return online;
+}
 export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const connection = useConnectionState();
@@ -20,7 +56,10 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(location);
   const editing = !viewOnly;
   const ready = connection.phase === 'ready';
-  const busy = connection.phase === 'idle' || connection.phase === 'connecting' || connection.recovering;
+  const level = useOutageLevel(connection);
+  const online = useOnline();
+  // 启动页：自动重连到警示级或已暂停才露错误与「重试」，之前一律「启动中…」。
+  const startupFailed = level === 'warning' || level === 'paused';
   const blocked = !ready || viewOnly;
 
   useLayoutEffect(() => { void localConnection.start({ editing }); }, [editing]);
@@ -38,15 +77,20 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
     };
   }, []);
   useEffect(() => { if (ready) setActivated(true); }, [ready]);
-  // 断线条：自动恢复中的短暂断线先等 400ms，抖一下就好了不出条；已暂停（需要用户处理）立刻出。
-  const outage = activated && !ready;
-  const [outageNotice, setOutageNotice] = useState(false);
+  // 服务换了实例且自动接上：轻提示一次，不打断。
+  const reconnects = connection.reconnects ?? 0;
+  useEffect(() => { if (reconnects > 0) notify.info('Atelier 服务已重连'); }, [reconnects]);
   useEffect(() => {
-    if (!outage) { setOutageNotice(false); return; }
-    if (!busy) { setOutageNotice(true); return; }
-    const timer = setTimeout(() => setOutageNotice(true), OUTAGE_NOTICE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [outage, busy]);
+    // 页面回到前台、网络恢复时不等退避计时，立刻再试一次。
+    const retry = () => { if (window.document.visibilityState === 'visible') localConnection.retryNow(); };
+    window.document.addEventListener('visibilitychange', retry);
+    window.addEventListener('online', retry);
+    return () => {
+      window.document.removeEventListener('visibilitychange', retry);
+      window.removeEventListener('online', retry);
+    };
+  }, []);
+  const outageNotice = activated && level !== 'none' && level !== 'quiet';
   useEffect(() => {
     if (!blocked) return;
     // 画布的系统菜单粘贴可能以 body 为目标，不能只依赖 React 子树捕获。
@@ -99,7 +143,8 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   }, [viewOnly, ready]);
 
   function reconnect() {
-    void localConnection.start({ editing });
+    if (connection.recovering) localConnection.retryNow();
+    else void localConnection.start({ editing });
   }
   function takeover() {
     setConfirmTakeover(false);
@@ -121,8 +166,8 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         onBeforeInputCapture={preventEditing} onDropCapture={preventEditing} onSubmitCapture={preventEditing}>
         {activated && children}
       </fieldset>
-      {!activated && <StartupScreen label={busy ? '启动中…' : '暂时无法连接Atelier服务'}>
-        {!busy && <>
+      {!activated && <StartupScreen label={startupFailed ? '暂时无法连接 Atelier 服务' : '启动中…'}>
+        {startupFailed && <>
           <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
           <div className="flex justify-center gap-2">
             <Button onClick={reconnect}>重试</Button>
@@ -130,20 +175,8 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         </>}
       </StartupScreen>}
       <AnimatePresence>
-        {outage && outageNotice && <motion.div
-          key="outage"
-          data-connection-controls
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
-          exit={{ opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
-          className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
-          style={{ marginTop: 'env(safe-area-inset-top)' }}>
-          <div role="status" className="min-w-0 flex-1">
-            <p className="text-pretty">{busy ? '恢复连接中…' : 'Atelier服务连接已暂停'}</p>
-            <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>
-          </div>
-          {!busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}
-        </motion.div>}
+        {outageNotice ? <OutageCapsule key="outage" level={level} connection={connection} onRetry={reconnect} />
+          : activated && ready && !online && <StatusCapsule key="offline" tone="warning"><p role="status">网络已断开</p></StatusCapsule>}
       </AnimatePresence>
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
           （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
@@ -171,4 +204,39 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       </Dialog>
     </>
   );
+}
+
+function StatusCapsule({ tone, children }: { tone: 'neutral' | 'warning'; children: ReactNode }) {
+  return <motion.div
+    data-connection-controls
+    initial={{ opacity: 0, y: -4 }}
+    animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+    exit={{ opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+    className={cn(
+      'fixed inset-x-3 top-3 z-50 mx-auto flex min-h-9 w-fit max-w-full flex-wrap items-center justify-center gap-2.5 rounded-full border bg-popover py-1 pl-3.5 pr-1 text-sm',
+      tone === 'warning' ? 'border-status-running/50 text-foreground' : 'border-border text-muted-foreground',
+    )}
+    style={{ marginTop: 'env(safe-area-inset-top)' }}>
+    <span aria-hidden className={cn('size-1.5 rounded-full', tone === 'warning' ? 'bg-status-running' : 'bg-status-pending')} />
+    {children}
+  </motion.div>;
+}
+
+/** 断线胶囊：重连中（中性）→ 无响应（警示 +「立即重试」）→ 已暂停（需要人处理）。 */
+function OutageCapsule({ level, connection, onRetry }: { level: OutageLevel; connection: ConnectionSnapshot; onRetry: () => void }) {
+  if (connection.versionConflict) {
+    return <StatusCapsule tone="warning">
+      <p role="status" className="text-pretty">{connection.message}</p>
+      <Button variant="outline" size="sm" className="h-7 rounded-full" onClick={() => connectionNavigation.reload()}>刷新页面</Button>
+      <Button size="sm" className="h-7 rounded-full" onClick={onRetry}>继续编辑</Button>
+    </StatusCapsule>;
+  }
+  if (level === 'reconnecting') {
+    return <StatusCapsule tone="neutral"><p role="status" className="pr-2.5">重连中…</p></StatusCapsule>;
+  }
+  const paused = level === 'paused';
+  return <StatusCapsule tone="warning">
+    <p role="status" className="text-pretty">{paused ? connection.message ?? 'Atelier 服务连接已暂停' : 'Atelier 服务无响应'}</p>
+    <Button variant="outline" size="sm" className="h-7 rounded-full" onClick={onRetry}>{paused ? '重新连接' : '立即重试'}</Button>
+  </StatusCapsule>;
 }

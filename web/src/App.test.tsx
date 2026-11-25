@@ -50,7 +50,7 @@ describe('App onboarding gate', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: '正在准备新版' }), { status: 503 })));
     const { act } = await import('@testing-library/react');
     await act(async () => { render(<App />); });
-    expect(screen.getByText('服务没有自动恢复，请双击启动器')).toBeInTheDocument();
+    expect(screen.getByText('Atelier 没有自动恢复，请重新打开 Atelier')).toBeInTheDocument();
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
   });
   it('retries onboarding while a newly started update instance is still initializing', async () => {
@@ -87,7 +87,8 @@ describe('App onboarding gate', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: '连接一个模型' })).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: /第 2 步/ })).toBeInTheDocument();
+    // 首启只剩这一步（存放位置已静默用默认目录），不再显示步数。
+    expect(screen.queryByRole('list', { name: /步/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '稍后' })).toBeInTheDocument();
     expect(screen.queryByLabelText('作品集首页')).not.toBeInTheDocument();
   });
