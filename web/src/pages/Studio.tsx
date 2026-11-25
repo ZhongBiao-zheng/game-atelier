@@ -1,7 +1,9 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable } from '@/lib/motion';
 import { useLocation, useSearch } from 'wouter';
 import { ScrollBottomIcon } from '@/components/ui/icons';
 
@@ -15,6 +17,7 @@ import { listStudioAgentJobs } from '@/api/canvas';
 import { StudioSessionControls } from '@/components/studio/StudioSessionControls';
 import { StudioAgentTurnCard } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
+import type { InputFlashRequest } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
   type CreationAssetPanelHandle,
@@ -60,6 +63,34 @@ import { Button } from '@/components/ui/button';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 const ASSET_TITLE_LENGTH = 24;
+/** 深链定位后的两次纠偏时刻（图片异步加载会把布局往下推）。 */
+const DEEP_LINK_SETTLE_MS = [600, 1600] as const;
+/** 目标轮描边：300ms 进场 + 停留 1s，之后淡出。 */
+const DEEP_LINK_HIGHLIGHT_MS = 1300;
+const NOTICE_MOTION = {
+  initial: { opacity: 0, y: 4 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0 },
+  transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle },
+} as const;
+
+/** 搜索 / 筛选把结果筛空：先等 150ms 确认（快速打字时不闪），再 200ms 淡入。 */
+function FilteredEmpty() {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || !motionAvailable()) return;
+    element.style.opacity = '0';
+    const controls = animate(element, { opacity: [0, 1] }, {
+      delay: MOTION_DURATION.fast,
+      duration: MOTION_DURATION.base,
+      ease: MOTION_EASE.subtle,
+    });
+    clearOnFinish(controls, element, ['opacity']);
+    return () => controls.stop();
+  }, []);
+  return <p ref={ref} className="my-auto text-center font-display text-display italic text-foreground/70">没有匹配的记录</p>;
+}
 
 interface RoundReferenceFiles {
   images: File[];
@@ -130,6 +161,11 @@ function StudioFull() {
   const { hiddenPaths, toggleHidden } = useGalleryHidden();
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
+  // 提交（含参考上传）失败的次数：每多一次，提交按钮水平微抖一下，失败原因落在记录里的失败卡上。
+  const [submitFailures, setSubmitFailures] = useState(0);
+  // 从记录里带进输入壳的东西（重新编辑 / 使用提示词 / 编辑为参考）：落点闪一次主题色描边。
+  const [inputFlash, setInputFlash] = useState<InputFlashRequest | null>(null);
+  const flashInput = (area: InputFlashRequest['area']) => setInputFlash(previous => ({ id: (previous?.id ?? 0) + 1, area }));
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   // 厂商列表 =「自动」+ 真实 KEY；选择、能力、收敛都在这份列表上做，实际渠道用 resolveChannel 取。
@@ -402,6 +438,7 @@ function StudioFull() {
       } else {
         setReferenceImages((prev) => [...prev, file]);
       }
+      flashInput('references');
     } catch (e) {
       console.warn('[studio] 参考图导入失败（源文件取不到）', path, e);
     }
@@ -421,12 +458,23 @@ function StudioFull() {
     return () => { active = false; };
   }, [targetJobId, selectSession]);
   const focusConsumedRef = useRef<string | null>(null);
+  const [focusHighlight, setFocusHighlight] = useState(false);
   useEffect(() => {
     if (!targetJobId || focusConsumedRef.current === targetJobId) return;
     const found = scopedJobs.some(job => job.job_id === targetJobId);
     if (!found) return;
     focusConsumedRef.current = targetJobId;
+    // 用户一动滚轮或手指，就把位置交给用户：后面的纠偏不再把他拽回去。
+    let userScrolled = false;
+    const yieldToUser = () => {
+      userScrolled = true;
+      window.removeEventListener('wheel', yieldToUser);
+      window.removeEventListener('touchstart', yieldToUser);
+    };
+    window.addEventListener('wheel', yieldToUser, { passive: true });
+    window.addEventListener('touchstart', yieldToUser, { passive: true });
     const scrollToRound = () => {
+      if (userScrolled) return;
       document
         .querySelector(`[data-round-job="${CSS.escape(targetJobId)}"]`)
         ?.scrollIntoView({ block: 'center' });
@@ -435,8 +483,11 @@ function StudioFull() {
     // 不返回 cleanup：deps 里的 rounds 随 SSE/轮询频繁变化，effect 重跑会把上一轮的
     // 一次性定时器掐掉。定时器是幂等一次性动作，放着跑完即可。
     scrollToRound();
-    setTimeout(scrollToRound, 600);
-    setTimeout(scrollToRound, 1600);
+    setTimeout(scrollToRound, DEEP_LINK_SETTLE_MS[0]);
+    setTimeout(() => { scrollToRound(); yieldToUser(); }, DEEP_LINK_SETTLE_MS[1]);
+    // 定位后给目标轮一圈主题色描边：300ms 进，停 1s 后淡出，告诉用户「是这一条」。
+    setFocusHighlight(true);
+    setTimeout(() => setFocusHighlight(false), DEEP_LINK_HIGHLIGHT_MS);
   }, [scopedJobs, targetJobId, timeline]);
 
   // 分享提醒的「复刻」/「看看」：本页在就地认领；别的页面带着 ?team_asset= 跳过来，挂载后处理一次。
@@ -677,6 +728,7 @@ function StudioFull() {
         srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e: any) {
+      setSubmitFailures(count => count + 1);
       setPending(false);
       setRounds((rs) => [
         { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
@@ -759,6 +811,7 @@ function StudioFull() {
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
     } catch (e: any) {
+      setSubmitFailures(count => count + 1);
       setRounds((rs) =>
         rs.map((r) =>
           r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
@@ -825,6 +878,7 @@ function StudioFull() {
       audPaths = overrideConfig?.referenceAudios
         ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
     } catch (e: any) {
+      setSubmitFailures(count => count + 1);
       setPending(false);
       setRounds((rs) => [
         { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message },
@@ -928,6 +982,7 @@ function StudioFull() {
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
     } catch (e: any) {
+      setSubmitFailures(count => count + 1);
       setRounds((rs) =>
         rs.map((r) =>
           r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
@@ -959,6 +1014,7 @@ function StudioFull() {
               composer.editor.current?.focus();
             }} />}
           focusJobId={targetJobId ?? undefined}
+          focusHighlight={focusHighlight}
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
           hiddenPaths={hiddenPaths}
@@ -1026,7 +1082,10 @@ function StudioFull() {
         {usage && visibleRounds.length > 0 && <div className="mx-auto w-full max-w-[1024px] pt-4">
           <Hint label={usage.detail}><span className="text-xs text-muted-foreground">{usage.text}</span></Hint>
         </div>}
-        {timeline.length ? renderRounds(visibleRounds) : <p className="my-auto text-center font-display text-display italic text-foreground/70">今天想一起创作什么？</p>}
+        {!timeline.length
+          ? <p className="my-auto text-center font-display text-display italic text-foreground/70">今天想一起创作什么？</p>
+          : visibleRounds.length ? renderRounds(visibleRounds)
+            : <FilteredEmpty />}
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
@@ -1049,35 +1108,46 @@ function StudioFull() {
             <ScrollBottomIcon size="sm" aria-hidden />
             回到底部
           </Button>
+        {/* 提示条贴着输入壳上沿：出现时从下方 4px 淡入（150ms），消失时原位淡出，不硬切。 */}
         <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
+          <AnimatePresence initial={false}>
           {recipeNotice && (
-            <div
+            <motion.div
+              key="recipe"
+              {...NOTICE_MOTION}
               role="status"
               data-testid="studio-recipe-notice"
               className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
             >
               {recipeNotice.missingModel && <p>本机没有 {recipeNotice.missingModel}</p>}
               {recipeNotice.warnings.map((warning) => <p key={warning}>{warning}</p>)}
-            </div>
+            </motion.div>
           )}
           {assetNotice && (
-            <span
+            <motion.span
+              key="asset"
+              {...NOTICE_MOTION}
               role="status"
               className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
             >
               {assetNotice}
-            </span>
+            </motion.span>
           )}
           {reuseLimitNotice && (
-            <span
+            <motion.span
+              key="reuse-limit"
+              {...NOTICE_MOTION}
               role="status"
               className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
             >
               历史参考图超过 MJ 每槽 4 张，已保留前 4 张
-            </span>
+            </motion.span>
           )}
+          </AnimatePresence>
         </div>
         <StudioComposer state={composer}
+          submitErrorKey={submitFailures || null}
+          flashRequest={inputFlash}
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
@@ -1412,6 +1482,7 @@ function StudioFull() {
       const refs = await fetchRoundReferences(config, jobId);
       if (requestSequence !== reEditSequence.current) return;
       applyRoundConfig(config, refs);
+      flashInput('prompt');
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
       alert(error instanceof Error ? error.message : '参考素材恢复失败');

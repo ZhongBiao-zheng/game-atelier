@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useLocation } from 'wouter';
 
@@ -404,10 +405,17 @@ export function StudioCompact() {
     : kind === 'video'
       ? '描述你想生成的镜头'
       : '描述你想生成的图片';
+  // 切模式换标题：新标题 200ms 淡入，不硬切。
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useAnimateOnChange(heroHeading, () => {
+    const element = headingRef.current;
+    if (!element) return;
+    clearOnFinish(animate(element, { opacity: [0, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }), element, ['opacity']);
+  }, { keepWhenReduced: true });
 
   return (
     <div className="py-8" aria-label="生图沙箱">
-      <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
+      <h1 ref={headingRef} className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
         {heroHeading}
       </h1>
       <StudioComposer state={composer}
@@ -415,6 +423,7 @@ export function StudioCompact() {
         onToggleAssetPanel={composer.mode === 'agent' ? () => setAssetPanelOpen(open => !open) : undefined}
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
+        submitErrorKey={compactError}
         value={promptText}
         onValueChange={setPromptText}
         providers={providers}

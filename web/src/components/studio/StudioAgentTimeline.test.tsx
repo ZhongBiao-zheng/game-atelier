@@ -78,12 +78,12 @@ it('推荐追问只在最后一轮正常结束时出现，没有约定格式就�
 it('运行时默认收起工具步骤，待确认强制展开，停止后能展开查看步骤', () => {
   const view = (status: StudioAgentTurn['status']) => <TurnCards agent={makeAgent(status)} jobs={[]} renderJobs={() => null} />;
   const tree = render(view('running'));
-  const running = screen.getByRole('button', { name: '任务响应中…' });
+  const running = screen.getByRole('button', { name: '处理中…' });
   expect(running).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(running);
   expect(running).toHaveAttribute('aria-expanded', 'true');
   tree.rerender(view('awaiting_approval'));
-  fireEvent.click(screen.getByRole('button', { name: '任务响应中…' }));
+  fireEvent.click(screen.getByRole('button', { name: '处理中…' }));
   expect(screen.getByRole('group', { name: '待确认的操作' })).toBeVisible();
   expect(screen.getByRole('button', { name: '生成 · 待确认' })).toBeVisible();
   expect(screen.queryByText('已执行 2 条命令')).toBeNull();

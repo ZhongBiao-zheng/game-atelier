@@ -329,7 +329,7 @@ describe('TeamShareDialog', () => {
     rerender(<TeamShareDialog request={{ ...request, defaultTitle: '第二张' }} {...props} />);
     resolveFirst([view({ name: '迟到的库' })]);
 
-    expect(await screen.findByLabelText('团队库')).toHaveTextContent('正在读取…');
+    expect(await screen.findByLabelText('团队库')).toHaveTextContent('加载中…');
     await waitFor(() => expect(screen.getByLabelText('标题')).toHaveValue('第二张'));
     expect(screen.getByLabelText('团队库')).not.toHaveTextContent('迟到的库');
   });

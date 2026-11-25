@@ -123,8 +123,8 @@ function MjReferenceGroup({
           htmlFor={disabled ? undefined : inputId}
           aria-label={label}
           aria-disabled={disabled || undefined}
-          className={`flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-[translate,border-color] duration-150 ${
-            disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
+          className={`flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-[scale,border-color] duration-150 ${
+            disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:scale-[1.02] hover:border-input'
           }`}
         >
           <AddIcon className="text-muted-foreground" />
@@ -161,7 +161,7 @@ function MjReferenceGroup({
                   type="button"
                   aria-label={`移除${caption}参考图 ${index + 1}`}
                   onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}
-                  className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full border border-border bg-scrim text-foreground/80 transition-colors hover:bg-destructive hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                  className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full border border-border bg-scrim text-foreground/80 transition-colors before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                 >
                   <CloseIcon size="sm" aria-hidden />
                 </Button>

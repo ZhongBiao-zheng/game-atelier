@@ -77,8 +77,9 @@ export function StudioQueryBar({
     >
       {/* 搜索区常驻挂载，靠宽度过渡做展开/收起滑动动画（条件渲染会瞬间跳变）。 */}
       <div
-        className={`flex items-center overflow-hidden transition-[width] duration-300 ease-out ${
-          searchOpen ? 'w-24 md:w-48 lg:w-80 pr-1' : 'w-8'
+        // 展开 300ms out；收起是退场，150ms subtle（默认曲线）。
+        className={`flex items-center overflow-hidden transition-[width] ${
+          searchOpen ? 'w-24 md:w-48 lg:w-80 pr-1 duration-300 ease-out' : 'w-8 duration-150'
         }`}
       >
         <Button variant="bare"
@@ -97,7 +98,7 @@ export function StudioQueryBar({
           tabIndex={searchOpen ? 0 : -1}
           onChange={(e) => onChange({ ...filters, search: e.target.value })}
           onBlur={() => { if (!filters.search) setSearchOpen(false); }}
-          className={`h-7 min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none transition-opacity duration-200 ${
+          className={`h-7 min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none transition-opacity duration-150 ${
             searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         />
@@ -106,7 +107,7 @@ export function StudioQueryBar({
           aria-label="关闭搜索"
           tabIndex={searchOpen ? 0 : -1}
           onClick={() => { onChange({ ...filters, search: '' }); setSearchOpen(false); }}
-          className={`grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary transition-opacity duration-200 ${
+          className={`grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary transition-[opacity,background-color] duration-150 ${
             searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >

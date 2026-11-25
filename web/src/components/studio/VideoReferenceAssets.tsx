@@ -86,13 +86,13 @@ export function FixedSlot({
   if (file && preview) {
     return (
       // 删除钮必须在 overflow-hidden 圆角框外层，否则左上突出的部分会被圆角裁掉。
-      <div className={`relative ${SLOT} ${rotate} transition-transform duration-200 hover:scale-[1.12]`}>
+      <div className={`relative ${SLOT} ${rotate} transition-[scale] duration-150 hover:scale-[1.02]`}>
         <Button variant="bare" type="button" aria-label={`查看${caption}大图`} onClick={() => setZoomed(true)}
           className="block h-full w-full cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0">
           <img src={preview} alt={caption} className="h-full w-full object-cover" />
         </Button>
         <Button variant="bare" type="button" aria-label={`移除${caption}`} onClick={onRemove}
-          className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors">
+          className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-scrim border border-border text-foreground/80 before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground transition-colors">
           <CloseIcon size="sm" />
         </Button>
         {zoomed && <Lightbox src={preview} onClose={() => setZoomed(false)} />}
@@ -108,10 +108,10 @@ export function FixedSlot({
         htmlFor={disabled ? undefined : inputId}
         aria-label={label}
         aria-disabled={disabled || undefined}
-        className={`flex ${SLOT} ${rotate} flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-[translate,border-color] duration-150 ${
+        className={`flex ${SLOT} ${rotate} flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-[scale,border-color] duration-150 ${
           disabled
             ? 'cursor-not-allowed opacity-40'
-            : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
+            : 'cursor-pointer hover:scale-[1.02] hover:border-input'
         }`}>
         <AddIcon className="text-muted-foreground" />
         <span className="text-xs leading-none text-muted-foreground">{caption}</span>

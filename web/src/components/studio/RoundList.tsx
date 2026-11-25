@@ -39,6 +39,8 @@ import {
   useLeavingRounds,
   useResultAspect,
 } from './RoundMotion';
+import { AnimatePresence, motion } from 'motion/react';
+import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
@@ -239,6 +241,7 @@ export function RoundList({
   rounds,
   renderAgent,
   focusJobId,
+  focusHighlight = false,
   favorites,
   onToggleFavorite,
   hiddenPaths,
@@ -260,6 +263,8 @@ export function RoundList({
   rounds: TimelineRound[];
   renderAgent?: (round: AgentRound) => ReactNode;
   focusJobId?: string;
+  /** 深链定位到目标轮后的提示描边：true 时主题色描边 300ms 进，回到 false 时 150ms 淡出。 */
+  focusHighlight?: boolean;
   favorites?: string[];
   onToggleFavorite?: (path: string) => void | Promise<void>;
   hiddenPaths?: string[];
@@ -326,6 +331,11 @@ export function RoundList({
     for (const round of rounds) if (round.kind === 'pending') seenPendingKeys.current.add(roundKey(round));
   }, [rounds]);
   const [leavingKeys, removeAfterFade] = useLeavingRounds();
+  // 前后各一张先预取，翻页时新图多半已在缓存里，不经过空白。
+  const lightboxNeighbours = useMemo(() => (lightboxIndex < 0 ? [] : [
+    lightboxItems[lightboxIndex - 1]?.src,
+    lightboxItems[lightboxIndex + 1]?.src,
+  ].filter((src): src is string => Boolean(src))), [lightboxItems, lightboxIndex]);
   // 不循环：到头的一侧不给回调，大图层据此把那一侧箭头置灰。
   const lightboxStep = (offset: -1 | 1) => {
     const target = lightboxIndex < 0 ? undefined : lightboxItems[lightboxIndex + offset];
@@ -482,11 +492,15 @@ export function RoundList({
             {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
             {!embedded && startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
             <RoundEnter enter={enteringKeys.has(stableKey)} leaving={leavingKeys.has(stableKey)}>
+              <div className={r === focusedRound
+                ? `rounded-xl outline-2 outline-offset-8 transition-[outline-color] ${focusHighlight ? 'outline-primary duration-300 ease-out' : 'outline-transparent duration-150'}`
+                : undefined}>
               {r.kind === 'agent' ? renderAgent?.(r) : <MediaActivationBoundary jobId={r.jobId}>
                 {(mediaActive) => (
                   renderMedia(r, mediaActive)
                 )}
               </MediaActivationBoundary>}
+              </div>
             </RoundEnter>
             </Fragment>
           );
@@ -498,6 +512,7 @@ export function RoundList({
           onClose={() => setLightboxSrc(null)}
           onPrevious={lightboxStep(-1)}
           onNext={lightboxStep(1)}
+          preloadSrcs={lightboxNeighbours}
           downloadName={lightboxItems[lightboxIndex]?.name}
           details={embedded && lightboxItems[lightboxIndex] && <>
             <p>{lightboxItems[lightboxIndex].config.prompt}</p>
@@ -718,6 +733,8 @@ const REF_CARD_H = 58;
 const REF_ROTATIONS = [-6, 5, -4, 7, -5, 4, -3, 6];
 const REF_OVERLAP_REST = 30;
 const REF_OVERLAP_HOVER = 8;
+/** 悬停放大与图片卡片统一 1.02：散开已经交代了「可以看」，当前那张只靠微放大和提到最上层区分。 */
+const HOVER_SCALE = 1.02;
 
 // 出图历史里提示词左侧的参考图堆叠：未 hover 重叠旋转成一叠；hover 时整组散开、每张以中心为轴放大；点击看大图（或整组复用）。
 function ReferenceStack({
@@ -767,7 +784,7 @@ function ReferenceStack({
           {refs.map((src, i) => {
             const angle = REF_ROTATIONS[i % REF_ROTATIONS.length];
             const isActive = active === i;
-            const scale = isActive ? 1.18 : hover ? 1.1 : 1;
+            const scale = isActive ? HOVER_SCALE : 1;
             return (
               <span
                 key={i}
@@ -787,7 +804,7 @@ function ReferenceStack({
                   transform: `translateX(${i * (REF_CARD_W - (hover ? REF_OVERLAP_HOVER : REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
                   transformOrigin: 'center',
                 }}
-                className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card transition-transform duration-200 ease-out"
+                className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card transition-transform duration-200 ease-in-out"
               >
                 <RefThumb src={src} jobId={jobId} mediaActive={mediaActive} />
               </span>
@@ -813,6 +830,14 @@ function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): stri
 
 type MentionHover = { kind: MentionKind; path: string; left: number; top: number };
 
+const PROMPT_HOVER_INTENT_MS = 200;
+const PROMPT_OVERLAY_FADE = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle },
+} as const;
+
 /** 历史记录里的提示词：@图片N/@图N/@视频N/@音频N 渲染成同款 chip；悬停时零位移浮现外框（长文本展开全文，短文本浮现「使用提示词」）。 */
 function MentionPrompt({
   prompt,
@@ -829,6 +854,13 @@ function MentionPrompt({
 }) {
   const [hover, setHover] = useState<MentionHover | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
+  // 意图延迟：鼠标扫过记录列表时不让浮层一路闪；停留 200ms 才浮现。
+  const intentTimer = useRef<number | null>(null);
+  const clearIntent = () => {
+    if (intentTimer.current !== null) window.clearTimeout(intentTimer.current);
+    intentTimer.current = null;
+  };
+  useEffect(() => clearIntent, []);
   const isLongPrompt = prompt.length > 48 || prompt.includes('\n');
   const parts = useMemo(() => {
     const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
@@ -868,24 +900,36 @@ function MentionPrompt({
       <div
         data-testid="round-prompt-container"
         className="relative"
-        onMouseEnter={() => setExpandedOpen(true)}
-        onMouseLeave={() => setExpandedOpen(false)}
+        onMouseEnter={() => {
+          clearIntent();
+          intentTimer.current = window.setTimeout(() => setExpandedOpen(true), PROMPT_HOVER_INTENT_MS);
+        }}
+        onMouseLeave={() => {
+          clearIntent();
+          setExpandedOpen(false);
+        }}
       >
         <p className="line-clamp-2 text-sm leading-6 text-foreground">
           {renderParts()}
         </p>
+        {/* 原位浮现外框，零位移，只淡入淡出（150ms）。 */}
+        <AnimatePresence>
         {expandedOpen && (
           isLongPrompt ? (
-            <div
+            <motion.div
+              key="long"
+              {...PROMPT_OVERLAY_FADE}
               data-testid="round-prompt-expanded"
               className="shell-glow absolute -left-[13px] -right-[13px] -top-[9px] z-40 rounded-xl border border-border bg-popover px-3 py-2 text-sm leading-6 text-foreground"
             >
               <p className="whitespace-pre-wrap break-words">
                 {renderParts()}
               </p>
-            </div>
+            </motion.div>
           ) : (
-            <div
+            <motion.div
+              key="short"
+              {...PROMPT_OVERLAY_FADE}
               data-testid="round-prompt-expanded"
               className="shell-glow absolute -left-[13px] -top-[7px] z-40 inline-flex max-w-full items-center gap-3 rounded-xl border border-border bg-popover px-3 py-1.5 text-sm leading-6 text-foreground"
             >
@@ -905,9 +949,10 @@ function MentionPrompt({
                   使用提示词
                 </Button>
               )}
-            </div>
+            </motion.div>
           )
         )}
+        </AnimatePresence>
       </div>
       {hover && createPortal(
         <div
@@ -998,10 +1043,12 @@ type ShareResultHandler = (jobId: string, index: number, path: string, config: R
 
 // 结果图上的悬停按钮用不透明底，不叠毛玻璃：每张图好几颗 backdrop-blur 在长列表里很贵。
 const RESULT_BUTTON_BASE = 'grid size-8 place-items-center rounded-full border border-border bg-scrim transition-opacity duration-150 hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-const RESULT_ACTION_CLASS = `${RESULT_BUTTON_BASE} text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100`;
+/** 悬停浮现；触屏没有悬停，常驻显示（按钮本身 32px，热区够大）。 */
+const RESULT_REVEAL = 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100';
+const RESULT_ACTION_CLASS = `${RESULT_BUTTON_BASE} text-white ${RESULT_REVEAL}`;
 /** 喜欢、隐藏这类开关：打开时常驻显示，关着时随悬停浮现。 */
 function resultToggleClass(on: boolean) {
-  return `${RESULT_BUTTON_BASE} ${on ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`;
+  return `${RESULT_BUTTON_BASE} ${on ? 'text-primary opacity-100' : `text-white ${RESULT_REVEAL}`}`;
 }
 
 /** 保存一张生成结果。index 是 imagePaths 下标（= Job.output_paths 下标）；
@@ -1171,16 +1218,17 @@ function DoneBatch({
                   roundJob={embedded && index === 0 ? round.jobId : undefined}
                   testId={`studio-result-video-${index + 1}`}
                   className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
-                  media={({ onSize, onReady }) => mediaActive ? (
-                    <ResultVideo src={videoSrc(path)} onSize={onSize} onReady={onReady} />
-                  ) : (
+                  // 封面（图标占位）垫在底下，视频首帧可显示后在它上面淡入，换上去的过程不露黑帧也不露空白。
+                  media={({ onSize, onReady }) => <>
                     <div
-                      data-testid="studio-video-placeholder"
-                      className="flex h-full w-full items-center justify-center text-muted-foreground"
+                      data-testid={mediaActive ? undefined : 'studio-video-placeholder'}
+                      aria-hidden={mediaActive}
+                      className="absolute inset-0 flex items-center justify-center text-muted-foreground"
                     >
                       <VideoIcon size="xl" aria-hidden />
                     </div>
-                  )}
+                    {mediaActive && <ResultVideo src={videoSrc(path)} onSize={onSize} onReady={onReady} />}
+                  </>}
                 >
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {share && (
@@ -1242,7 +1290,7 @@ function DoneBatch({
                     {(share || saveResult || onSetPromptPreview) && <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
                         aria-label={`生成结果 ${index + 1} 的更多操作`}
-                        className="size-8 rounded-full bg-scrim text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+                        className={`size-8 rounded-full bg-scrim text-white transition-opacity duration-150 ${RESULT_REVEAL}`}
                         onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
                         {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><AddImageIcon />设为效果图</DropdownMenuItem>}

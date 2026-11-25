@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { AgentMarkdown, AgentStreamingMarkdown, TOOL_LABELS, agentToolStatusLabel, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
@@ -20,6 +21,10 @@ const TURN_REF_H = 58;
 const TURN_REF_ROTATIONS = [-6, 5, -4, 7, -5, 4, -3, 6];
 const TURN_REF_OVERLAP_REST = 30;
 const TURN_REF_OVERLAP_HOVER = 8;
+/** 悬停放大与图片卡片统一 1.02：散开已经交代了「可以看」，当前那张只靠微放大和提到最上层区分。 */
+const TURN_REF_HOVER_SCALE = 1.02;
+/** 确认执行后，过程区先停在「执行中…」这么久再收起，让裁决有个落点。 */
+const EXECUTING_HOLD_MS = 600;
 
 function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: string }[]; onLightbox: (src: string) => void }) {
   const [hover, setHover] = useState(false);
@@ -33,12 +38,12 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
         width: TURN_REF_W + Math.max(0, urls.length - 1) * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST)),
         height: TURN_REF_H,
       }}
-      className="relative z-20 flex shrink-0 items-center transition-[width] duration-200 ease-out motion-reduce:transition-none"
+      className="relative z-20 flex shrink-0 items-center transition-[width] duration-200 ease-in-out"
     >
       {urls.map((item, i) => {
         const angle = TURN_REF_ROTATIONS[i % TURN_REF_ROTATIONS.length];
         const isActive = active === i;
-        const scale = isActive ? 1.18 : hover ? 1.1 : 1;
+        const scale = isActive ? TURN_REF_HOVER_SCALE : 1;
         return (
           <Button
             key={i}
@@ -57,7 +62,7 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
               transform: `translateX(${i * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
               transformOrigin: 'center',
             }}
-            className="absolute block cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0 transition-transform duration-200 ease-out motion-reduce:transition-none"
+            className="absolute block cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0 transition-transform duration-200 ease-in-out"
           >
             <img src={item.src} alt={item.alt} className="h-full w-full object-cover" onError={event => { event.currentTarget.hidden = true; }} />
           </Button>
@@ -65,6 +70,18 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
       })}
     </div>
   );
+}
+
+/** 一轮结束时推荐追问出现：整组 200ms 淡入并从下方 4px 落位；加载历史时已在的不动。 */
+function SuggestionsFade({ shown, children }: { shown: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(shown, (next, _previous, reduced) => {
+    const element = ref.current;
+    if (!next || !element) return;
+    clearOnFinish(animate(element, reduced ? { opacity: [0, 1] } : { opacity: [0, 1], y: [4, 0] },
+      { duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out }), element);
+  }, { keepWhenReduced: true });
+  return <div ref={ref}>{children}</div>;
 }
 
 function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: boolean }) {
@@ -172,8 +189,22 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   const [override, setOverride] = useState<{ status: string; open: boolean } | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const toolLabels = useAgentToolLabels();
-  const open = awaiting || (override?.status === turn.status ? override.open : false);
-  const title = running || awaiting ? '任务响应中…' : turn.status === 'idle' ? '已完成'
+  // 确认执行后先把确认卡换成「执行中…」，等这一轮离开待确认、再停一下才收起过程区；拒绝时直接收起。
+  const [executing, setExecuting] = useState(false);
+  useEffect(() => {
+    if (!executing || awaiting) return;
+    const timer = window.setTimeout(() => setExecuting(false), EXECUTING_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [executing, awaiting]);
+  const decide: Controller['decide'] = (approved, items) => {
+    setExecuting(approved.size > 0);
+    const result = agent.decide(approved, items);
+    // 请求失败时这一轮还在待确认：把确认卡还回来，可以重新裁决。
+    void result.then(updated => { if (!updated) setExecuting(false); });
+    return result;
+  };
+  const open = awaiting || executing || (override?.status === turn.status ? override.open : false);
+  const title = running || awaiting ? '处理中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
   const user = messages.find(m => m.role === 'user');
   const sortedJobs = [...jobs].sort((a, b) => compareTime(a.submitted_at, b.submitted_at) || a.job_id.localeCompare(b.job_id));
@@ -217,8 +248,11 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
           awaiting={awaiting && session.pending_approvals.some(item => item.call_id === group[0].step_id)} />)}
         <GenerationPlanCard jobs={sortedJobs} />
         {errors.map(m => <p key={m.message_id} className="whitespace-pre-wrap text-destructive">{m.text}</p>)}
-        {awaiting && <CanvasAgentApprovalCard unit="份" key={session.pending_approvals.map(a => a.call_id).join()} approvals={session.pending_approvals} labels={TOOL_LABELS}
-          disabled={agent.pending} onDecide={agent.decide}
+        {executing && <p className="flex items-center gap-1.5 text-muted-foreground">
+          <LoadingIcon size="sm" className="animate-spin" />执行中…
+        </p>}
+        {awaiting && !executing && <CanvasAgentApprovalCard unit="份" key={session.pending_approvals.map(a => a.call_id).join()} approvals={session.pending_approvals} labels={TOOL_LABELS}
+          disabled={agent.pending} onDecide={decide}
           loadBatchItems={id => getCanvasAgentBatchItems(null, session.session_id, id)} />}
       </div></Collapse>
       {!open && errors.map(m => <p key={m.message_id} className="whitespace-pre-wrap text-xs text-destructive">{m.text}</p>)}
@@ -244,7 +278,9 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
       </p>
     )}
     {hasJobs && <div data-testid="agent-multi-job-batch" className="pt-1">{renderJobs(sortedJobs)}</div>}
-    {onPickSuggestion && <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />}
+    {onPickSuggestion && <SuggestionsFade shown={suggestions.length > 0}>
+      <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />
+    </SuggestionsFade>}
     {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
   </section>;
 }

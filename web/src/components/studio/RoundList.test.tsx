@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { hoverHint } from '@/test/hint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MJ_DEFAULTS } from '@/lib/mjParams';
@@ -56,23 +56,25 @@ describe('RoundList video', () => {
     expect(screen.getByText('一只猫在跳舞')).toBeInTheDocument();
   });
 
-  it('expands long truncated prompts into an in-place floating card on hover, and shows 使用提示词 on short prompts', () => {
+  it('expands long truncated prompts into an in-place floating card on hover, and shows 使用提示词 on short prompts', async () => {
     const longPrompt = '核心主题：写实暗黑特摄 | BLACK SUN美学风格 面部：参考上传图片，五官、脸型、发型百分百还原，杜绝美化。表情全程阴郁 服装：哑光黑色皮质长风衣';
     const { unmount } = render(<RoundList rounds={[{
       ...videoDone,
       config: { ...videoDone.config, prompt: longPrompt },
     }]} />);
     expect(screen.queryByTestId('round-prompt-expanded')).toBeNull();
+    // 悬停 200ms 才浮现（意图延迟），离开后淡出再卸载。
     fireEvent.mouseEnter(screen.getByTestId('round-prompt-container'));
-    expect(screen.getByTestId('round-prompt-expanded')).toHaveTextContent(longPrompt);
-    fireEvent.mouseLeave(screen.getByTestId('round-prompt-container'));
     expect(screen.queryByTestId('round-prompt-expanded')).toBeNull();
+    expect(await screen.findByTestId('round-prompt-expanded')).toHaveTextContent(longPrompt);
+    fireEvent.mouseLeave(screen.getByTestId('round-prompt-container'));
+    await waitFor(() => expect(screen.queryByTestId('round-prompt-expanded')).toBeNull());
     unmount();
 
     const onReEdit = vi.fn();
     render(<RoundList rounds={[videoDone]} onReEdit={onReEdit} />);
     fireEvent.mouseEnter(screen.getByTestId('round-prompt-container'));
-    fireEvent.click(screen.getByTestId('round-use-prompt'));
+    fireEvent.click(await screen.findByTestId('round-use-prompt'));
     expect(onReEdit).toHaveBeenCalledWith(videoDone.config, videoDone.jobId);
   });
 

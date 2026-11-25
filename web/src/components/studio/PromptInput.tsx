@@ -53,6 +53,8 @@ import {
 import { FileInput } from '@/components/ui/file-input';
 import { Hint } from '@/components/ui/tooltip';
 import { Collapse } from '@/components/ui/collapse';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, shakeOnError, useAnimateOnChange, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { ReferenceItemMotion, useArrivingKeys, useFileKeys, useLeavingFiles, useSlideOnReorder } from './ReferenceMotion';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -120,7 +122,16 @@ interface Props {
   onReferenceAudiosChange?: (files: File[]) => void;
   videoFrames?: FrameSlots;
   onVideoFramesChange?: (frames: FrameSlots) => void;
+  /** 提交失败的标识（错误文案或计数）：每次变成新的非空值，提交按钮水平微抖一次。 */
+  submitErrorKey?: string | number | null;
+  /** 从记录里带进来的内容落在哪：每个新 id 让那一块闪一次主题色描边。 */
+  flashRequest?: InputFlashRequest | null;
 }
+
+export type InputFlashRequest = { id: number; area: 'prompt' | 'references' };
+
+/** 带入提示：描边 300ms 亮起，停一下，再 300ms 褪掉（跟随所在行的收放时长与曲线）。 */
+const INPUT_FLASH_HOLD_MS = 600;
 
 const REF_W = 48;
 const REF_H = 60;
@@ -128,8 +139,8 @@ const REF_STEP = 42;
 // 折叠堆叠时按 index 取的旋转角度（循环），制造层次让用户看到下面的图
 const COLLAPSE_ANGLES = [8, -4, 22, -8, 8, -4];
 const collapseAngle = (i: number) => COLLAPSE_ANGLES[i % COLLAPSE_ANGLES.length];
-// hover 单张时微放大 + 微上抬
-const REF_HOVER_SCALE = 1.04;
+// hover 单张时微放大（与图片卡片统一 1.02）+ 微上抬
+const REF_HOVER_SCALE = 1.02;
 const REF_HOVER_LIFT = -5;
 
 function providerName(provider?: KeyView) {
@@ -282,6 +293,8 @@ export function PromptInput({
   onReferenceAudiosChange,
   videoFrames = { first: null, last: null },
   onVideoFramesChange,
+  submitErrorKey,
+  flashRequest,
 }: Props) {
   const isVideo = kind === 'video';
   const isAgent = kind === 'agent';
@@ -291,6 +304,18 @@ export function PromptInput({
   const setText = onValueChange ?? setInternalText;
   const [openPanel, setOpenPanel] = useState<'kind' | 'provider' | 'model' | 'size' | 'count' | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const [flashArea, setFlashArea] = useState<InputFlashRequest['area'] | null>(null);
+  useEffect(() => {
+    if (!flashRequest) return;
+    setFlashArea(flashRequest.area);
+    const timer = window.setTimeout(() => setFlashArea(null), INPUT_FLASH_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [flashRequest]);
+  // 提交失败：只抖提交按钮这一处局部元素，错误文案由调用方用错误色显示。
+  useAnimateOnChange(submitErrorKey ?? null, next => {
+    if (next != null && next !== '') shakeOnError(submitButtonRef.current);
+  });
   // 控件 chip 外壳锚点：弹窗 portal 出横滚容器后靠这些 ref 定位。
   const kindRef = useRef<HTMLDivElement>(null);
   const providerRef = useRef<HTMLDivElement>(null);
@@ -299,6 +324,13 @@ export function PromptInput({
   const countRef = useRef<HTMLDivElement>(null);
   // 控件行横滚：track 容器 + 是否还能右滚 + 底栏 hover（决定右缘箭头是否浮现）。
   const trackRef = useRef<HTMLDivElement>(null);
+  // 切换 图片 / 视频 / Agent：控件行整排换成另一套，新的一排 150ms 淡入，不硬切。
+  useAnimateOnChange(kind, (_next, _previous, reduced) => {
+    const element = trackRef.current;
+    if (!element) return;
+    clearOnFinish(animate(element, reduced ? { opacity: [0, 1] } : { opacity: [0, 1], x: [-4, 0] },
+      { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), element);
+  }, { keepWhenReduced: true });
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [barHovering, setBarHovering] = useState(false);
   const [refExpanded, setRefExpanded] = useState(false);
@@ -751,7 +783,10 @@ export function PromptInput({
   function onEditorPaste(e: React.ClipboardEvent<HTMLDivElement>) {
     if (variableInput(e.target)) return;
     e.preventDefault();
+    const editor = editorRef.current;
+    const before = editor?.getBoundingClientRect().height ?? 0;
     insertPlainText(e.clipboardData.getData('text/plain'));
+    smoothPasteGrowth(editor, before);
   }
 
   function onEditorCopy(e: React.ClipboardEvent<HTMLDivElement>) {
@@ -812,7 +847,8 @@ export function PromptInput({
     e.target.value = '';
   }
 
-  function handleRefRemove(idx: number) {
+  function handleRefRemove(file: File) {
+    const idx = stackItems.findIndex(item => item.file === file);
     const item = stackItems[idx];
     if (!item) return;
     let removedNumber = idx + 1;
@@ -846,6 +882,14 @@ export function PromptInput({
   useEffect(() => {
     if (stackItems.length === 0) setRefDrawerOpen(false);
   }, [stackItems.length]);
+
+  // 参考素材按 File 身份取稳定 key：删中间一张时其余各张不重挂，被删的淡出缩小后再移除，新加的淡入放大。
+  const fileKey = useFileKeys();
+  const stackKeys = stackItems.map(item => fileKey(item.file));
+  const arrivingRefs = useArrivingKeys(stackKeys);
+  const [leavingRefs, removeRefAfterFade] = useLeavingFiles(handleRefRemove);
+  const drawerRowRef = useRef<HTMLDivElement>(null);
+  useSlideOnReorder(drawerRowRef, stackKeys, refDrawerTab);
 
   const showRefPanel = !isMj && (isOmni || (!isVideo && onReferenceImagesChange && maxRef > 0));
   const hoveredRefItem = refHovered !== null ? stackItems[refHovered] : null;
@@ -947,20 +991,23 @@ export function PromptInput({
               </Button>
             </div>
           </div>
-          <div className="thin-scrollbar flex items-center gap-2 overflow-x-auto pb-1 pt-1">
+          <div ref={drawerRowRef} key={refDrawerTab} className="thin-scrollbar flex items-center gap-2 overflow-x-auto pb-1 pt-1">
             {stackItems.map((item, i) => {
               if (refDrawerTab !== 'all' && item.kind !== refDrawerTab) return null;
               const thumb = thumbFor(i);
               const label = workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label;
+              const leaving = leavingRefs.has(item.file);
               return (
                 <div
-                  key={i}
+                  key={stackKeys[i]}
+                  data-ref-key={stackKeys[i]}
                   data-testid="reference-drawer-item"
                   className="group relative shrink-0"
                   style={{ width: REF_W, height: REF_H }}
                   onMouseEnter={() => setRefHovered(i)}
                   onMouseLeave={() => setRefHovered(null)}
                 >
+                  <ReferenceItemMotion appear={arrivingRefs.has(stackKeys[i])} leaving={leaving}>
                   <div
                     role={item.kind === 'image' ? 'button' : undefined}
                     tabIndex={item.kind === 'image' ? 0 : undefined}
@@ -987,13 +1034,16 @@ export function PromptInput({
                       </span>
                     )}
                   </div>
+                  </ReferenceItemMotion>
+                  {/* 触屏没有悬停：× 常驻，热区向外扩到 28px。 */}
                   <Button
                     variant="secondary"
                     size="icon"
                     type="button"
                     aria-label={`移除参考素材 ${i + 1}`}
-                    onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
-                    className="absolute -right-1.5 -top-1.5 z-10 flex size-[18px] items-center justify-center rounded-full border border-border bg-scrim p-0 text-foreground/80 opacity-0 backdrop-blur-glass transition-opacity hover:bg-destructive hover:text-foreground group-hover:opacity-100"
+                    disabled={leaving}
+                    onClick={(e) => { e.stopPropagation(); removeRefAfterFade(item.file); }}
+                    className="absolute -right-1.5 -top-1.5 z-10 flex size-[18px] items-center justify-center rounded-full border border-border bg-scrim p-0 text-foreground/80 opacity-0 transition-[opacity,background-color,color] duration-150 before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <CloseIcon size="sm" />
                   </Button>
@@ -1020,14 +1070,14 @@ export function PromptInput({
         {showRefPanel && !(refDrawerOpen && !collapsed && stackItems.length > 0) && (
           <div
             data-testid="reference-images-panel"
-            className={`shrink-0 relative h-[60px] overflow-visible origin-left transition-transform duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'}`}
+            className={`shrink-0 relative h-[60px] overflow-visible origin-left transition-[transform,translate,scale,outline-color] duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'} rounded-lg outline-2 outline-offset-4 ${flashArea === 'references' ? 'outline-primary' : 'outline-transparent'}`}
             style={{ width: REF_W + 14 }}
           >
             {stackItems.length === 0 ? (
               <Label
                 htmlFor={refInputId}
                 aria-label={isOmni ? '添加参考内容' : '添加参考图'}
-                className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-[translate,filter,border-color] duration-150 hover:-translate-y-1 hover:brightness-110 hover:border-input"
+                className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-[scale,border-color] duration-150 hover:scale-[1.02] hover:border-input"
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <AddIcon size="lg" className="text-muted-foreground" />
@@ -1055,7 +1105,7 @@ export function PromptInput({
                     const zIndex = refExpanded ? 10 + i * 10 : stackItems.length - i;
                     return (
                       <div
-                        key={i}
+                        key={stackKeys[i]}
                         data-testid="reference-stack-item"
                         className="absolute top-1/2 left-0 transition-[left,transform] duration-300 ease-in-out"
                         style={{
@@ -1068,6 +1118,7 @@ export function PromptInput({
                         onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(i); } }}
                         onMouseLeave={() => setRefHovered(null)}
                       >
+                        <ReferenceItemMotion appear={arrivingRefs.has(stackKeys[i])} leaving={leavingRefs.has(item.file)}>
                         <div
                           role={item.kind === 'image' ? 'button' : undefined}
                           tabIndex={item.kind === 'image' ? 0 : undefined}
@@ -1094,17 +1145,18 @@ export function PromptInput({
                             </span>
                           )}
                         </div>
+                        </ReferenceItemMotion>
                       </div>
                     );
                   })}
-                  {refHovered !== null && stackItems[refHovered] && (
+                  {refHovered !== null && stackItems[refHovered] && !leavingRefs.has(stackItems[refHovered].file) && (
                     <Button
                       variant="bare"
                       type="button"
                       aria-label={`移除参考素材 ${refHovered + 1}`}
                       onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(refHovered); } }}
-                      onClick={(e) => { e.stopPropagation(); handleRefRemove(refHovered); }}
-                      className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 backdrop-blur-glass transition-[left,background-color,color,scale] duration-200 hover:bg-destructive hover:text-foreground"
+                      onClick={(e) => { e.stopPropagation(); removeRefAfterFade(stackItems[refHovered].file); }}
+                      className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 transition-[left,background-color,color,scale] duration-200 before:absolute before:-inset-[5px] hover:bg-destructive hover:text-foreground"
                       style={{
                         left: `${(refExpanded ? refHovered * REF_STEP : 0) + REF_W - 11}px`,
                         top: `calc(50% - ${REF_H / 2 + 11}px)`,
@@ -1128,7 +1180,7 @@ export function PromptInput({
                           setRefHovered(null);
                         }
                       }}
-                      className="absolute top-1/2 flex cursor-pointer items-center justify-center overflow-hidden rounded-lg border-[1.5px] border-white bg-card text-white transition-transform duration-200 hover:-translate-y-1 hover:scale-104"
+                      className="absolute top-1/2 flex cursor-pointer items-center justify-center overflow-hidden rounded-lg border-[1.5px] border-white bg-card text-white transition-[scale] duration-150 hover:scale-[1.02]"
                       style={{
                         width: REF_W,
                         height: REF_H,
@@ -1177,7 +1229,7 @@ export function PromptInput({
           </div>
         )}
         {isMj && onMjRefsChange && (
-          <div className={slotRowClass(collapsed)}>
+          <div className={slotRowClass(collapsed, flashArea === 'references')}>
             <MjReferenceSlots
               refs={mjRefs}
               onChange={onMjRefsChange}
@@ -1188,7 +1240,7 @@ export function PromptInput({
           </div>
         )}
         {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (videoCaps?.maxFrames ?? 2) > 0 && (
-          <div className={slotRowClass(collapsed)}>
+          <div className={slotRowClass(collapsed, flashArea === 'references')}>
             <FirstLastFrames
               frames={videoFrames}
               onChange={onVideoFramesChange}
@@ -1197,7 +1249,7 @@ export function PromptInput({
           </div>
         )}
         {/* 编辑器高度走 grid-rows：收起时只留首行（32px 窗口裁掉其余行），整块下移 14px 落到 60px 行的中线。 */}
-        <div className={`grid min-w-0 flex-1 transition-[grid-template-rows,translate] duration-300 ease-in-out ${collapsed ? 'grid-rows-[0fr] translate-y-3.5' : 'grid-rows-[1fr]'}`}>
+        <div className={`grid min-w-0 flex-1 rounded-md outline-2 outline-offset-2 transition-[grid-template-rows,translate,outline-color] duration-300 ease-in-out ${collapsed ? 'grid-rows-[0fr] translate-y-3.5' : 'grid-rows-[1fr]'} ${flashArea === 'prompt' ? 'outline-primary' : 'outline-transparent'}`}>
         <div className="min-h-8 overflow-hidden">
         <div
           ref={editorRef}
@@ -1333,7 +1385,7 @@ export function PromptInput({
               aria-label="选择生成模式"
               onClick={() => setOpenPanel(openPanel === 'kind' ? null : 'kind')}
             >
-              {isAgent ? <AiIcon size="sm" aria-hidden /> : isVideo ? <VideoIcon size="sm" aria-hidden /> : <ImageIcon size="sm" aria-hidden />}
+              <SwapIcon swapKey={kind}>{isAgent ? <AiIcon size="sm" aria-hidden /> : isVideo ? <VideoIcon size="sm" aria-hidden /> : <ImageIcon size="sm" aria-hidden />}</SwapIcon>
               {isAgent ? 'Agent' : isVideo ? '视频' : '图片'}
             </ControlButton>
             <ToolbarPopover
@@ -1530,7 +1582,6 @@ export function PromptInput({
               onClose={() => setOpenPanel(null)}
               anchorRef={countRef}
               direction={menuDirection}
-              role="listbox"
               aria-label="选择出图数量列表"
               className="rounded-xl border border-border bg-card p-3"
             >
@@ -1584,7 +1635,6 @@ export function PromptInput({
                   onClose={() => setOpenPanel(null)}
                   anchorRef={countRef}
                   direction={menuDirection}
-                  role="listbox"
                   aria-label="选择视频生成数量列表"
                   className="rounded-xl border border-border bg-card p-3"
                 >
@@ -1650,6 +1700,7 @@ export function PromptInput({
           落到单行条中线），不改尺寸与位置；缩放放在外层，按下反馈的 scale 不会和它打架。 */}
       <div className={`absolute bottom-4 right-4 origin-center transition-transform duration-300 ease-in-out ${collapsed ? '-translate-y-0.5 scale-80' : ''}`}>
       <Hint label={isAgent ? (onStop ? '停止' : '发送') : workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
+        ref={submitButtonRef}
         type="button"
         onClick={(e) => { e.stopPropagation(); if (onStop) onStop(); else submit(); }}
         disabled={!onStop && !canSubmit}
@@ -1664,6 +1715,20 @@ export function PromptInput({
   );
 }
 
+/** 粘贴大段文字时编辑器一次长高好几行：用 150ms 补上这段高度，逐字输入的单行增高不经过这里，照旧跟手。
+ *  外壳贴底悬浮，高度从上沿长出，底边始终不动。 */
+const PASTE_GROWTH_MIN_PX = 24;
+function smoothPasteGrowth(editor: HTMLElement | null, before: number) {
+  if (!editor || !motionAvailable() || prefersReducedMotion()) return;
+  const after = editor.getBoundingClientRect().height;
+  if (Math.abs(after - before) < PASTE_GROWTH_MIN_PX) return;
+  clearOnFinish(
+    animate(editor, { height: [`${before}px`, `${after}px`] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }),
+    editor,
+    ['height'],
+  );
+}
+
 /** 输入壳里随收放出现/消失的一段：grid-rows 0fr↔1fr，与壳内其他收放同一时长与曲线。 */
 function ShellCollapse({ open, children }: { open: boolean; children: ReactNode }) {
   return (
@@ -1674,27 +1739,20 @@ function ShellCollapse({ open, children }: { open: boolean; children: ReactNode 
 }
 
 /** MJ 参考槽、首尾帧：版面固定 60px 高，展开下移 16px 对齐 92px 行的中线，收起缩到 80%，只动 transform。 */
-function slotRowClass(collapsed: boolean) {
-  return `flex h-[60px] shrink-0 items-center origin-left transition-transform duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'}`;
+function slotRowClass(collapsed: boolean, flash: boolean) {
+  return `flex h-[60px] shrink-0 items-center origin-left rounded-lg outline-2 outline-offset-4 transition-[transform,translate,scale,outline-color] duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'} ${flash ? 'outline-primary' : 'outline-transparent'}`;
 }
 
-/** 数量弹窗的 1-4 选项（图片张数 / 视频条数共用同一配方）。 */
+/** 数量弹窗的 1-4 选项（图片张数 / 视频条数共用同一配方）：与质量等单选同一个分段控件，选中底色滑到新位置。 */
 function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: number; onSelect: (n: number) => void }) {
   return (
-    <div className="flex rounded-lg bg-popover p-1">
+    <Segmented aria-label="数量" className="h-9 auto-cols-[36px] grid-flow-col">
       {[1, 2, 3, 4].filter(item => item <= max).map((item) => (
-        <Button variant="bare"
-          key={item}
-          type="button"
-          role="option"
-          aria-selected={value === item}
-          aria-label={String(item)}
-          onClick={() => onSelect(item)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
-        >
+        <SegmentedItem key={item} value={String(item)} selected={value === item} onSelect={() => onSelect(item)}
+          className="font-medium tabular-nums">
           {item}
-        </Button>
+        </SegmentedItem>
       ))}
-    </div>
+    </Segmented>
   );
 }

@@ -92,7 +92,9 @@ export function ToolbarPopover({
           collisionPadding={8}
           updatePositionStrategy="always"
           style={style}
-          className={cn('z-50', className)}
+          // popover-in：从触发器一侧滑出淡入，方向读 Radix 的 data-side（向上弹就从下往上）；
+          // 关闭时 data-state=closed 播退场，Radix Presence 等它播完再卸载。
+          className={cn('popover-in z-50', className)}
           onOpenAutoFocus={event => {
             event.preventDefault();
             if (autoFocus) (event.currentTarget as HTMLElement).querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true });

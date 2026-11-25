@@ -41,7 +41,7 @@ export function StudioSessionControls({ agent, clearDraft, disabled = false }: {
         </Button>
         {item.session_id !== DEFAULT_STUDIO_SESSION_ID && <Button variant="ghost" size="icon" disabled={busy}
           aria-label={`删除对话 ${item.title}`} onClick={() => void agent.removeSession(item.session_id, item.revision)}
-          className="absolute right-1 top-1 size-8 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          className="absolute right-1 top-1 size-8 opacity-0 transition-[opacity,background-color,color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
           <DeleteIcon size="sm" /></Button>}
       </div>)}
     </ToolbarPopover>

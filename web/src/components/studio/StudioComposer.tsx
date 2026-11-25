@@ -9,6 +9,7 @@ import { useWorkspaceAgent } from '@/components/agent/useWorkspaceAgent';
 import { readStudioView, updateStudioView, type StudioInputMode } from '@/pages/studioDraft';
 import { studioControlClass } from './ControlButton';
 import { PromptInput } from './PromptInput';
+import { Collapse } from '@/components/ui/collapse';
 
 export function useStudioComposer(home = false) {
   const [location, navigate] = useLocation();
@@ -99,9 +100,15 @@ export function StudioComposer({ state, ...props }: { state: StudioComposerState
     referenceImages: state.files, onReferenceImagesChange: state.setFiles,
     onSubmit: state.send, onSavePromptAsset: undefined, disabled: props.disabled || !ready || busy || agent.waitingForSession,
     onStop: running ? agent.stop : undefined, agentControls: controls,
+    submitErrorKey: agent.error,
   } : {};
+  // 报错行用 Collapse 从上沿展开，收起时保留最后一条文案播完退场。
+  const lastError = useRef(agent.error);
+  if (agent.error) lastError.current = agent.error;
   return <div className="pointer-events-auto mx-auto w-full max-w-[780px]">
-    {agent.error && <p role="alert" className="text-xs text-destructive">{agent.error}</p>}
+    <Collapse open={Boolean(agent.error)} appear>
+      <p role={agent.error ? 'alert' : undefined} className="text-xs text-destructive">{agent.error ?? lastError.current}</p>
+    </Collapse>
     <PromptInput {...props} {...agentProps} kind={state.mode} onKindChange={state.switchMode} inputRef={state.editor} />
   </div>;
 }

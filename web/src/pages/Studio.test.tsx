@@ -386,7 +386,7 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('radio', { name: '16:9' }));
     fireEvent.click(screen.getByRole('radio', { name: /^4K$/ }));
     fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
-    fireEvent.click(screen.getByRole('option', { name: '3' }));
+    fireEvent.click(screen.getByRole('radio', { name: '3' }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, '广西南宁城市海报');
@@ -512,8 +512,8 @@ describe('Studio', () => {
     expect(sizeButton.parentElement?.nextElementSibling).toBe(countButton.parentElement);
 
     fireEvent.click(countButton);
-    expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveAttribute('data-toolbar-popover');
-    fireEvent.click(screen.getByRole('option', { name: '4' }));
+    expect(screen.getByRole('dialog', { name: '选择出图数量列表' })).toHaveAttribute('data-toolbar-popover');
+    fireEvent.click(screen.getByRole('radio', { name: '4' }));
     expect(countButton).toHaveTextContent('4 张');
 
     typePrompt(screen.getByLabelText('生图 prompt'), '四张草图');
@@ -563,7 +563,7 @@ describe('Studio', () => {
     renderStudio();
 
     fireEvent.click(await screen.findByRole('button', { name: /选择出图数量/ }));
-    fireEvent.click(screen.getByRole('option', { name: '4' }));
+    fireEvent.click(screen.getByRole('radio', { name: '4' }));
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem('studio:selection') ?? '{}');

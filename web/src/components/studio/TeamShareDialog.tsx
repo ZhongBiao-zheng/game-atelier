@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { shakeOnError } from '@/lib/motion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export interface TeamShareDialogRequest {
@@ -86,6 +87,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
   const [mountOpen, setMountOpen] = useState(false);
   // state 要等下一次渲染才生效；同一 tick 内的重复调用靠 ref 拦住。
   const submittingRef = useRef(false);
+  const shareButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!request) return;
@@ -153,7 +155,10 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
       else if (cause instanceof ProfileRequiredError) {
         setNeedsName(true);
         setError(cause.message);
-      } else setError(errorMessage(cause, '分享失败'));
+      } else {
+        setError(errorMessage(cause, '分享失败'));
+        shakeOnError(shareButtonRef.current);
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -210,7 +215,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
                   disabled={loading || submitting || libraries.length === 0}
                 >
                   <SelectTrigger id="team-share-library">
-                    <SelectValue placeholder={loading ? '正在读取…' : '选择团队库…'} />
+                    <SelectValue placeholder={loading ? '加载中…' : '选择团队库…'} />
                   </SelectTrigger>
                   <SelectContent>
                     {libraries.map(item => (
@@ -257,7 +262,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
             <Button type="button" variant="outline" className="min-h-11" disabled={submitting} onClick={onClose}>
               取消
             </Button>
-            <Button type="button" className="min-h-11" disabled={!canSubmit} onClick={() => void share(false)}>
+            <Button ref={shareButtonRef} type="button" className="min-h-11" disabled={!canSubmit} onClick={() => void share(false)}>
               <SwapLabel active={Boolean(submitting)} on="分享中…" off="分享" />
             </Button>
           </DialogFooter>

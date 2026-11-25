@@ -673,7 +673,7 @@ describe('参考素材三阶交互（堆叠 → 悬停预览与展开卡 → 顶
     expect(screen.getByTestId('reference-hover-preview')).toBeInTheDocument();
     expect(screen.getByTestId('reference-hover-preview').style.left).toBe('16px');
     expect(screen.getByTestId('reference-drawer-expand')).toBeInTheDocument();
-    expect(screen.getAllByTestId('reference-stack-item')[0].style.transform).toContain('scale(1.04)');
+    expect(screen.getAllByTestId('reference-stack-item')[0].style.transform).toContain('scale(1.02)');
 
     // 第 3 阶：点击 ⤢ 展开卡 → 打开输入框顶部素材抽屉
     fireEvent.click(screen.getByTestId('reference-drawer-expand'));
