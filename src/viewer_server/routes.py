@@ -883,27 +883,32 @@ def data_root_state() -> dict:
 
 @router.post("/data-root")
 def change_data_root(payload: _DataRootPayload) -> dict:
-    """更换数据目录：空目标复制并切换、已有 Atelier 数据直接切换、其他非空目录拒绝（规格 D1）。"""
+    """更换数据目录：空目标复制并切换、已有 Atelier 数据直接切换、其他非空目录拒绝（规格 D1）。
+
+    进行中的生成、Agent、网关任务（含排队、可续查的）都会拦住更换；data_root_move 先封住写入门闩、
+    排空在途写请求再复查，切换后文件监听接不上就退回原目录。"""
     from character_workflow.lib import data_root_move
-    from viewer_server.update_routes import active_work
+    from viewer_server.update_routes import data_root_move_work
     from viewer_server.watcher import restart_watchers
 
     if not payload.path.strip():
         raise HTTPException(422, detail="请选择一个文件夹")
-    busy = active_work()
-    running = busy["jobs"] + busy["agents"] + busy["gateway"]
-    if running:
-        raise HTTPException(409, detail=f"有 {running} 个生成正在进行，完成后再更换数据目录")
+
+    def busy() -> int:
+        counts = data_root_move_work()
+        return counts["jobs"] + counts["agents"] + counts["gateway"]
 
     def switched() -> None:
-        root = data_root.resolve_data_root()
+        restart_watchers()  # 抛错 = 切换失败，data_root_move 退回原目录后再调一次把监听挪回去
         from character_workflow.lib import onboarding_metrics
 
-        onboarding_metrics.record_data_root_set(root)
-        restart_watchers()
+        try:
+            onboarding_metrics.record_data_root_set(data_root.resolve_data_root())
+        except OSError:
+            logging.getLogger(__name__).warning("data root metrics not recorded", exc_info=True)
 
     try:
-        move = data_root_move.start(payload.path, on_switched=switched)
+        move = data_root_move.start(payload.path, busy=busy, on_switched=switched)
     except data_root_move.MoveRejected as error:
         raise HTTPException(409, detail=str(error)) from error
     except OSError as error:

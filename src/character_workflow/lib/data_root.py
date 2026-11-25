@@ -6,6 +6,8 @@ from pathlib import Path
 
 import platformdirs
 
+from character_workflow.lib.atomic_io import atomic_write_text
+
 _APP_NAME = "game-atelier"
 _ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 
@@ -87,8 +89,24 @@ def agent_credential_file() -> Path:
     return config_dir() / "connections" / AGENT_CREDENTIAL_NAME
 
 
+def read_global_config() -> str | None:
+    """全局 data-root 配置文件的原文；没有文件时 None（换目录失败时按它原样退回）。"""
+    try:
+        return _global_config_file().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
 def write_global_config(path: Path) -> None:
-    """写全局 data-root 配置文件（用户手动改 data root 时用）。"""
-    cfg = _global_config_file()
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(str(Path(path).expanduser().resolve()) + "\n", encoding="utf-8")
+    """写全局 data-root 配置文件（用户手动改 data root 时用）。
+
+    原子替换：中途强退只会留下旧指针或新指针，不会留下截断的半行。"""
+    atomic_write_text(_global_config_file(), str(Path(path).expanduser().resolve()) + "\n")
+
+
+def restore_global_config(text: str | None) -> None:
+    """把指针退回 `read_global_config()` 读到的原文；原来没有文件就删掉。"""
+    if text is None:
+        _global_config_file().unlink(missing_ok=True)
+    else:
+        atomic_write_text(_global_config_file(), text)

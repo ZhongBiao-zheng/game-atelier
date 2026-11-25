@@ -192,8 +192,22 @@ def _bundled() -> bool:
     return Path(sys.executable).resolve().is_relative_to(_BOOTSTRAP.parent.parent.parent / "python")
 
 
+def _recover_data_root_move() -> None:
+    """上次更换数据目录在提交窗口里被强退：先补完或退回，再按（可能变了的）数据目录找运行记录。"""
+    from character_workflow.lib import data_root_move
+
+    try:
+        outcome = data_root_move.recover_interrupted()
+    except OSError as error:
+        print(f"上次更换数据目录未完成，自动处理失败：{error}", file=sys.stderr)
+        return
+    if outcome == "rolled_back":
+        print(f"上次更换数据目录没有完成，已退回原目录：{data_root.resolve_data_root()}", file=sys.stderr)
+
+
 def cmd_start(background: bool = False, *, open_browser: bool = True, skip_check: bool = False) -> None:
     from viewer_server.bundle_update import start_allowed
+    _recover_data_root_move()
     if not start_allowed(data_root.runtime_dir()):
         print("正在更新，请稍后重试。", file=sys.stderr)
         sys.exit(1)

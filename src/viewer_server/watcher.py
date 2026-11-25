@@ -208,6 +208,8 @@ def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
 
 
 _observer: Observer | None = None
+# lifespan 起过监听、还没退出：换数据目录时才需要把监听挪过去。
+_enabled = False
 _team_watches: dict[str, object] = {}
 _team_handlers: dict[str, TeamLibraryHandler] = {}
 
@@ -347,23 +349,47 @@ def start_watchers() -> Observer:
                 # config 里的路径建不出来（权限/挂载盘掉了）→ 跳过该 watcher，不拦启动。
                 pass
 
-    global _observer
+    global _observer, _enabled
     _observer = observer
     stop_team_library_watches()
-    sync_team_library_watches()
-
-    observer.start()
+    try:
+        sync_team_library_watches()
+        observer.start()
+    except BaseException:
+        _observer = None
+        stop_team_library_watches()
+        raise
+    _enabled = True
     # 监听建好之后再补扫：补扫期间库里的新变化由监听接住，不会漏在两者之间。
     # 这里只读挂载表、每个库起一条 daemon 线程就返回，不会拖住 server 启动。
     rescan_team_libraries()
     return observer
 
 
+def _halt_observer() -> None:
+    global _observer
+    observer, _observer = _observer, None
+    stop_team_library_watches()
+    if observer is not None and observer.is_alive():
+        observer.stop()
+        observer.join(timeout=2)
+
+
+def stop_watchers() -> None:
+    """服务退出：停掉当前那个 observer（换过数据目录后已不是启动时那个）。"""
+    global _enabled
+    _enabled = False
+    _halt_observer()
+
+
 def restart_watchers() -> None:
-    """更换数据目录后把文件监听挪到新目录；服务退出时仍由 lifespan 停掉最初那个 observer。"""
-    old = _observer
-    if old is None:
+    """更换数据目录后把文件监听挪到当前目录，并让页面重拉一次任务列表。
+
+    新监听起不来就抛错：调用方据此把切换判失败并退回原目录（退回时再调一次，把监听挪回去）。
+    服务还没开始监听（未进 lifespan）时什么都不做。"""
+    if not _enabled:
         return
-    old.stop()
-    old.join(timeout=2)
+    _halt_observer()
     start_watchers()
+    # 新目录里的任务与旧目录不同：job_id 为空的 job-changed 让页面整体重拉，不逐条比对。
+    hub.broadcast("job-changed", {"job_id": None, "status": None})

@@ -29,7 +29,7 @@ from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.sse import hub, sse_router
 from viewer_server.team_library_routes import team_library_router
-from viewer_server.watcher import start_watchers, stop_team_library_watches
+from viewer_server.watcher import start_watchers, stop_watchers
 
 
 _CANVAS_DOCUMENT_MAX_BYTES = 25 * 1024 * 1024
@@ -302,7 +302,7 @@ async def normal_lifespan(app: FastAPI):
         logging.getLogger(__name__).warning(
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
         )
-    observer = start_watchers()
+    start_watchers()
     # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。配置损坏时网关停在错误状态。
     await asyncio.to_thread(gateway_server.apply_saved)
     heartbeat_task = asyncio.create_task(_record_host_lifecycle(app))
@@ -379,9 +379,8 @@ async def normal_lifespan(app: FastAPI):
         share_sync.cancel()
         await asyncio.gather(share_sync, return_exceptions=True)
         await asyncio.to_thread(gateway_server.stop)
-        stop_team_library_watches()
-        observer.stop()
-        observer.join(timeout=2)
+        # 换过数据目录后监听已不是启动时那个 observer：停当前的。
+        stop_watchers()
 
 
 # 发布产物用固定文件名（去哈希，见 web/vite.config.ts），所以必须显式要求浏览器每次验证。

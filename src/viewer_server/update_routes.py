@@ -17,7 +17,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import JSONResponse
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, data_root_move
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.file_lock import try_file_lock
 
@@ -86,14 +86,15 @@ def work_request(path: str, method: str) -> bool:
 MOVING_CODE = "moving_data_root"
 
 
-def moving_blocks(path: str, method: str) -> bool:
+def move_gated(path: str, method: str) -> bool:
+    """受更换数据目录写入门闩管的请求：写方法的 /api/ 与 /gateway/。
+
+    更换请求本身不进门闩（否则排空要等它自己）；连接握手不写业务数据。"""
     if method in {"GET", "HEAD", "OPTIONS"} or path.startswith("/api/connection/"):
         return False
-    if not (path.startswith("/api/") or path.startswith("/gateway/")):
+    if path == "/api/data-root":
         return False
-    from character_workflow.lib import data_root_move
-
-    return data_root_move.active()
+    return path.startswith("/api/") or path.startswith("/gateway/")
 
 
 class UpdateAdmissionMiddleware:
@@ -120,11 +121,21 @@ class UpdateAdmissionMiddleware:
             await JSONResponse({"detail": "正在更新，请稍后", "code": UPDATING_CODE},
                                status_code=503)(scope, receive, send)
             return
-        if moving_blocks(path, scope["method"]):
-            # 更换数据目录复制期间的写入只会落进旧目录，复制完就丢了；请求未受理，可原样重发。
-            await JSONResponse({"detail": "正在迁移数据目录，完成后再试", "code": MOVING_CODE},
-                               status_code=503)(scope, receive, send)
-            return
+        gated = move_gated(path, scope["method"])
+        if gated:
+            if not data_root_move.enter_write():
+                # 更换数据目录期间的写入只会落进旧目录，复制完就丢了；请求未受理，可原样重发。
+                await JSONResponse({"detail": "正在迁移数据目录，完成后再试", "code": MOVING_CODE},
+                                   status_code=503)(scope, receive, send)
+                return
+        try:
+            await self._admit(scope, receive, send, gate)
+        finally:
+            if gated:
+                data_root_move.leave_write()
+
+    async def _admit(self, scope, receive, send, gate: Admission):
+        path = scope["path"]
         if not work_request(path, scope["method"]):
             await self.app(scope, receive, send)
             return
@@ -160,6 +171,12 @@ def gateway_work(*, update_drain: bool) -> int:
         else:
             count = sum(t.status not in gateway_tasks.TERMINAL for t in tasks)
     return count + len(gateway_live.active())
+
+
+def data_root_move_work() -> dict[str, int]:
+    """拦着更换数据目录的进行中工作：与外壳退出同口径，排队中、能续查的网关任务也算——切走后旧目录里的
+    任务没人接着跑，新目录里又找不到它们的在途状态。"""
+    return {**active_work(), "gateway": gateway_work(update_drain=False)}
 
 
 def active_work() -> dict[str, int]:
