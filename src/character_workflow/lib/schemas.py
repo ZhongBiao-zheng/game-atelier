@@ -45,9 +45,11 @@ class JobKind(str, Enum):
 Namespace = Literal["studio", "canvas", "assist"]
 # 失败分类码：job_runner 写 error 时按 HTTP 状态、异常类型与报文关键词同时写；界面按码选文案与修复动作
 # （web/src/lib/errorPresentation.ts）。service_unavailable 只给前端连接层用，runner 不写。
+# submission_unconfirmed：提交请求可能已到上游、结局不明（`SubmissionUnconfirmed`），可能已计费，不按普通超时处理。
 JobErrorCode = Literal[
     "insufficient_balance", "invalid_key", "model_unavailable", "content_rejected",
-    "timeout", "network", "bad_endpoint", "service_unavailable", "unknown",
+    "timeout", "submission_unconfirmed", "network", "bad_endpoint", "service_unavailable",
+    "unknown",
 ]
 ProviderTaskId = Annotated[
     str,

@@ -3,7 +3,10 @@ import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChang
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useLocation } from 'wouter';
 
-import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
+import {
+  createStudioJob, findStudioJobByRequest, newStudioRequestId, resolveImageReferencePaths, submissionRejected,
+  uploadReferenceImage, type StudioJobCreate,
+} from '@/api/studio';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
@@ -23,7 +26,9 @@ import { nearestDuration, videoControlCaps, type VideoMode, type VideoQuality } 
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import type { JobKind, JobParams } from '@/schema/jobs';
-import { DEFAULT_STUDIO_SESSION_ID, updateStudioView, readStudioDraft, writeStudioDraft } from './studioDraft';
+import {
+  DEFAULT_STUDIO_SESSION_ID, markStudioInputSubmitted, updateStudioView, readStudioDraft, writeStudioDraft,
+} from './studioDraft';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
@@ -125,7 +130,7 @@ export function StudioCompact() {
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
       sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
-    });
+    }, DEFAULT_STUDIO_SESSION_ID);
   }, [
     providerAlias, model, kind, promptText,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
@@ -217,6 +222,38 @@ export function StudioCompact() {
     });
   }, [providers, providerAlias, model]);
 
+  // 受理未知的那次提交（回包途中断开）的请求 ID：下次生成先按它核对，查到就去创作台看原任务，
+  // 查不到才沿用它重新提交；核对失败什么都不发。
+  const unconfirmedRequest = useRef<string | null>(null);
+  const submitJob = async (body: StudioJobCreate, overrideConfig?: RoundConfig) => {
+    const submittedInput = overrideConfig ? null : {
+      promptText, referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs,
+    };
+    const pendingRequest = unconfirmedRequest.current;
+    const requestId = pendingRequest ?? newStudioRequestId();
+    try {
+      const adopted = pendingRequest ? await findStudioJobByRequest(pendingRequest) : null;
+      if (!adopted) {
+        try {
+          await createStudioJob({ ...body, client_request_id: requestId });
+        } catch (error) {
+          unconfirmedRequest.current = submissionRejected(error) ? null : requestId;
+          throw error;
+        }
+      }
+      unconfirmedRequest.current = null;
+      if (submittedInput && !adopted) markStudioInputSubmitted(DEFAULT_STUDIO_SESSION_ID, submittedInput);
+      updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
+      setLocation('/studio');
+    } catch (e: any) {
+      setCompactError(unconfirmedRequest.current
+        ? '没有收到 Atelier 的确认，生成可能已提交；再次生成会先核对'
+        : errorText(e));
+    } finally {
+      setPending(false);
+    }
+  };
+
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
@@ -304,22 +341,14 @@ export function StudioCompact() {
     );
     if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
-    try {
-      await createStudioJob({
-        studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
-        prompt,
-        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
-        model: effectiveModel,
-        params: jobParams,
-      });
-      updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
-      setLocation('/studio');
-    } catch (e: any) {
-      setCompactError(errorText(e));
-    } finally {
-      setPending(false);
-    }
+    await submitJob({
+      studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
+      prompt,
+      ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
+      alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
+      model: effectiveModel,
+      params: jobParams,
+    }, overrideConfig);
   };
 
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
@@ -404,23 +433,15 @@ export function StudioCompact() {
     );
     if (estimatedCost != null) videoParams.estimated_cost_cny = estimatedCost;
 
-    try {
-      await createStudioJob({
-        studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
-        prompt,
-        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
-        model: effectiveModel,
-        params: videoParams,
-        kind: 'video',
-      });
-      updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
-      setLocation('/studio');
-    } catch (e: any) {
-      setCompactError(errorText(e));
-    } finally {
-      setPending(false);
-    }
+    await submitJob({
+      studio_agent_session_id: DEFAULT_STUDIO_SESSION_ID,
+      prompt,
+      ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
+      alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
+      model: effectiveModel,
+      params: videoParams,
+      kind: 'video',
+    }, overrideConfig);
   };
 
   const heroHeading = composer.mode === 'agent'

@@ -72,7 +72,7 @@ def work_request(path: str, method: str) -> bool:
     if path in {"/api/studio/jobs", "/api/canvas-agent/run", "/api/canvas-agent/run-batch", "/gateway/v1/tasks",
                 "/gateway/v1/openai/chat/completions", "/gateway/v1/openai/responses"}:
         return True
-    if re.fullmatch(r"/api/jobs/[^/]+/confirm", path):
+    if re.fullmatch(r"/api/jobs/[^/]+/confirm", path) or re.fullmatch(r"/api/studio/jobs/[^/]+/requery", path):
         return True
     if re.fullmatch(r"/api/studio/agent/sessions(?:/[^/]+/messages)?", path):
         return True

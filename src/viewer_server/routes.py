@@ -37,7 +37,7 @@ from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
     request_job_cancel, trash_studio_job,
-    new_job_id, save_job, update_job_status,
+    new_job_id, save_job, update_job_status, write_job_under_lock,
 )
 from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
@@ -2115,6 +2115,27 @@ def gallery_image(path: str) -> FileResponse:
     return FileResponse(target)
 
 
+_STUDIO_REQUEST_ID_PATTERN = r"^\d{14}[0-9a-f]{8}$"
+
+
+def _studio_request_job_id(request_id: str) -> str:
+    """客户端请求 ID → 任务 ID。形状与 `new_job_id()` 一致，按 ID 直接核对，不另建索引。"""
+    return f"job-{request_id}"
+
+
+def _studio_job_for_request(request_id: str) -> Job | None:
+    """这个请求 ID 已经建过的创作台任务；没有返回 None。"""
+    try:
+        job = read_job(_studio_request_job_id(request_id))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, ValidationError) as error:
+        raise HTTPException(409, detail="这次提交对应的任务记录读不出来") from error
+    if job.namespace != "studio":
+        raise HTTPException(409, detail="请求 ID 已被别的任务占用")
+    return job
+
+
 class _StudioJobCreate(BaseModel):
     model_config = {"extra": "forbid"}
     prompt: str
@@ -2126,6 +2147,8 @@ class _StudioJobCreate(BaseModel):
     studio_agent_session_id: CanvasAgentSessionId | None = None
     # 「再次生成」来自哪个失败轮次：网关未确认的失败在 20 小时内、请求不变时接回主机上的原任务。
     reattach_job_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$")
+    # 客户端请求 ID（一次提交意图一个，重试沿用）：同 ID 只建一个任务，回包丢了重发拿回原任务。
+    client_request_id: str | None = Field(default=None, pattern=_STUDIO_REQUEST_ID_PATTERN)
 
 
 def _create_user_job(
@@ -4003,11 +4026,55 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
     sid = body.studio_agent_session_id
+    request_id = body.client_request_id
     with studio_agent_sessions.locked_session(sid) if sid else nullcontext():
-        job = _create_user_job(body, namespace="studio", studio_agent_session_id=sid)
+        # 同一请求 ID 重发（上次回包途中断开）：返回已建的任务，不再下单、不再排一次运行。
+        if request_id and (existing := _studio_job_for_request(request_id)) is not None:
+            return existing.model_dump(mode="json")
+        job = _create_user_job(
+            body, namespace="studio", studio_agent_session_id=sid,
+            job_id=_studio_request_job_id(request_id) if request_id else None,
+        )
     # The BackgroundTask only detaches a tracked asyncio task; the potentially long provider
     # lifecycle is not tied to Uvicorn's response-drain phase during shutdown.
     background.add_task(_start_studio_job_task, job.job_id)
+    return job.model_dump(mode="json")
+
+
+@router.get("/studio/jobs/by-request/{request_id}")
+def get_studio_job_by_request(request_id: str) -> dict:
+    """提交受理未知时核对：这个请求 ID 建过任务就返回它，没建过 404。"""
+    if not re.fullmatch(_STUDIO_REQUEST_ID_PATTERN, request_id):
+        raise HTTPException(422, detail="请求 ID 格式不对")
+    job = _studio_job_for_request(request_id)
+    if job is None:
+        raise HTTPException(404, detail="Atelier 没有收到这次提交")
+    return job.model_dump(mode="json")
+
+
+@router.post("/studio/jobs/{job_id}/requery")
+def requery_studio_job(job_id: str, background: BackgroundTasks) -> dict:
+    """失败卡「重新查询」：上游已有任务号的失败任务回到排队，凭原任务号续查，不重新下单。"""
+    with job_lock(job_id):
+        try:
+            job = read_job(job_id)
+        except FileNotFoundError as error:
+            raise HTTPException(404, detail="找不到这一轮，可能已被删除") from error
+        if job.namespace != "studio":
+            raise HTTPException(404, detail="找不到这一轮，可能已被删除")
+        if job.status == JobStatus.PENDING:
+            return job.model_dump(mode="json")
+        if job.status != JobStatus.FAILED:
+            raise HTTPException(409, detail="这一轮已经结束，不需要重新查询")
+        resumed = job.model_copy(update={
+            "status": JobStatus.PENDING, "error": None, "error_code": None,
+            "completed_at": None, "progress_phase": None, "cancel_requested_at": None,
+        })
+        # 与服务重启后的续查同一判据：只有凭任务号（或网关幂等键）能接回的才放行，绝不重新提交。
+        if not is_resumable_studio_job(resumed):
+            raise HTTPException(409, detail="这一轮没有可以续查的上游任务号")
+        job = write_job_under_lock(resumed)
+    background.add_task(_start_studio_job_task, job_id)
     return job.model_dump(mode="json")
 
 

@@ -1,5 +1,5 @@
 import { connectionFetch } from '@/api/connection';
-import { requestJson } from './http';
+import { ApiError, apiError, requestError, requestJson } from './http';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 export interface StudioJobCreate {
@@ -12,6 +12,37 @@ export interface StudioJobCreate {
   studio_agent_session_id?: string;
   /** 「再次生成」来自的失败轮次：网关未确认的失败、请求不变时由服务端接回原任务。 */
   reattach_job_id?: string;
+  /** 一次提交意图一个（`newStudioRequestId`），重试沿用：服务端同 ID 只建一个任务。 */
+  client_request_id?: string;
+}
+
+/** 客户端请求 ID：`<UTC YYYYmmddHHMMSS><8 位十六进制>`，与服务端任务 ID 同形。 */
+export function newStudioRequestId(): string {
+  const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  return stamp + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+}
+
+/** 服务端明确拒绝（4xx）：任务没建。连不上、5xx、回包读不出都算受理未知，要先按请求 ID 核对。 */
+export function submissionRejected(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+/** 受理未知时核对：这个请求 ID 建过任务就返回它，没建过返回 null；连不上照常抛错。 */
+export async function findStudioJobByRequest(requestId: string): Promise<Job | null> {
+  let resp: Response;
+  try {
+    resp = await connectionFetch(`/api/studio/jobs/by-request/${encodeURIComponent(requestId)}`);
+  } catch (error) {
+    throw requestError(error, '核对提交结果');
+  }
+  if (resp.status === 404) return null;
+  if (!resp.ok) throw await apiError(resp, '核对提交结果');
+  return (await resp.json()) as Job;
+}
+
+/** 失败卡「重新查询」：凭上游任务号续查，不重新下单。 */
+export async function requeryStudioJob(jobId: string): Promise<Job> {
+  return requestJson<Job>(`/api/studio/jobs/${encodeURIComponent(jobId)}/requery`, '重新查询', { method: 'POST' });
 }
 
 export async function createStudioJob(body: StudioJobCreate): Promise<Job> {

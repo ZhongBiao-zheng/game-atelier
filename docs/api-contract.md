@@ -350,9 +350,11 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
-`error_code`（2026-11-25）是失败分类码，取值 `insufficient_balance` / `invalid_key` / `model_unavailable` / `content_rejected` / `timeout` / `network` / `bad_endpoint` / `service_unavailable` / `unknown`（`schemas.JobErrorCode` ↔ `schema/jobs.ts`）。`job_runner` 写 `error` 时同时写（`_fail` / `_error_code`：先看异常类型与 HTTP 状态，再按报文关键词），写别的 `error` 或清空 `error` 时一并清掉；`error` 为空时接口不返回它。落盘位置是 `params._error_code`（读盘时搬回顶层），不进项目包：旧版顶层拒收未知字段，数据须可被旧版读取（ADR-0030）。前端只用它选文案与修复动作（`lib/errorPresentation.ts` 的 `presentJobError`），不参与换家与重发判断。`service_unavailable` 只给前端连接层用，runner 不写。
+`error_code`（2026-11-25）是失败分类码，取值 `insufficient_balance` / `invalid_key` / `model_unavailable` / `content_rejected` / `timeout` / `submission_unconfirmed` / `network` / `bad_endpoint` / `service_unavailable` / `unknown`（`schemas.JobErrorCode` ↔ `schema/jobs.ts`）。`job_runner` 写 `error` 时同时写（`_fail` / `_error_code`：先看异常类型与 HTTP 状态，再按报文关键词），写别的 `error` 或清空 `error` 时一并清掉；`error` 为空时接口不返回它。落盘位置是 `params._error_code`（读盘时搬回顶层），不进项目包：旧版顶层拒收未知字段，数据须可被旧版读取（ADR-0030）。前端只用它选文案与修复动作（`lib/errorPresentation.ts` 的 `presentJobError`），不参与换家与重发判断。`service_unavailable` 只给前端连接层用，runner 不写。
 
 `POST /api/studio/jobs` 手动提交图片或视频时，可传顶层字段 `studio_agent_session_id`，格式沿用 `CanvasAgentSessionId`。格式无效返回 422，指定的普通会话不存在返回 404。传入有效 ID 时保存会话归属，省略时会话字段留空，查询时计入默认会话。手动任务的 `studio_agent_turn_id` 始终为空。
+
+`POST /api/studio/jobs` 可带 `client_request_id`（`<UTC YYYYmmddHHMMSS><8 位十六进制>`，一次提交意图一个，重试沿用）：任务 ID 取 `job-<client_request_id>`，同一 ID 再发返回已建的任务，不再下单、不再排运行。回包途中断开时前端先 `GET /api/studio/jobs/by-request/{client_request_id}` 核对（有则返回任务，没有 404），查到就接上原任务，绝不自动重发。`POST /api/studio/jobs/{job_id}/requery` 把上游已有任务号的失败任务放回 `pending` 续查（判据同服务重启后的续查 `is_resumable_studio_job`），没有可续查的任务号返回 409。
 
 `run_job` 处理 Studio / Canvas 提交的任务。外部 Agent 仅通过 Canvas 工具访问已授权项目。
 

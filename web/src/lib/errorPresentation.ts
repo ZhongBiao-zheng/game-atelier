@@ -33,6 +33,8 @@ const FIXED: Record<Exclude<JobErrorCode, 'insufficient_balance' | 'timeout' | '
   model_unavailable: { message: '当前密钥未开通此模型', action: { label: '更换模型', kind: 'change_model' } },
   content_rejected: { message: '提示词或参考图未通过安全审核', action: { label: '修改提示词', kind: 'edit_prompt' } },
   network: { message: '无法连接供应商，请检查网络或代理设置', action: { label: '重试', kind: 'retry' } },
+  // 结局不明的提交不给「重试」：再发一次可能重复下单、重复计费。
+  submission_unconfirmed: { message: '提交结果未确认，供应商可能已收到并计费' },
   bad_endpoint: { message: '请求地址无效，未找到对应接口', action: { label: '修改地址', kind: 'edit_endpoint' } },
   service_unavailable: { message: 'Atelier 服务无响应', action: { label: '重新连接', kind: 'reconnect' } },
 };

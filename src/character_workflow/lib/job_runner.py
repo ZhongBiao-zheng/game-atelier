@@ -269,7 +269,7 @@ def _error_code(err: BaseException) -> JobErrorCode:
     if any(isinstance(item, NoSuchKeyError) for item in chain):
         return "invalid_key"
     if any(isinstance(item, SubmissionUnconfirmed) for item in chain):
-        return "timeout"
+        return "submission_unconfirmed"
     low = str(err).lower()
     if any(isinstance(item, requests.exceptions.SSLError) for item in chain):
         return "bad_endpoint"

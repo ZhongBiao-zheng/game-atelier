@@ -6,6 +6,8 @@ export type JobErrorCode =
   | 'model_unavailable'
   | 'content_rejected'
   | 'timeout'
+  /** 提交可能已到上游、结局不明（可能已计费），不是普通超时。 */
+  | 'submission_unconfirmed'
   | 'network'
   | 'bad_endpoint'
   | 'service_unavailable'

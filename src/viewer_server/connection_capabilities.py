@@ -233,6 +233,8 @@ POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
 POST /api/studio/jobs
+GET /api/studio/jobs/by-request/{request_id}
+POST /api/studio/jobs/{job_id}/requery
 DELETE /api/studio/jobs/{job_id}
 POST /api/studio/jobs/{job_id}/canvas
 GET /api/studio/agent/sessions

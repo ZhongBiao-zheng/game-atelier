@@ -2030,8 +2030,8 @@ describe('Studio compact mode errors', () => {
     fireEvent.click(screen.getByLabelText('生成'));
 
     const alert = await screen.findByRole('alert');
-    // 报错说清是哪一步失败（errorText：不带 HTTP 码，英文 `studio job failed: 500` 那种对画师没用）
-    expect(alert).toHaveTextContent('创建出图任务失败');
+    // 5xx 不能断定没建任务：说清可能已提交、再次生成会先核对（errorText 之外，也不带 HTTP 码）
+    expect(alert).toHaveTextContent('生成可能已提交');
     expect(alert).not.toHaveTextContent('HTTP');
   });
 

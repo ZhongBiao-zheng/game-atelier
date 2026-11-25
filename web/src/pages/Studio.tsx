@@ -7,7 +7,7 @@ import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable }
 import { useLocation, useSearch } from 'wouter';
 import { ScrollBottomIcon } from '@/components/ui/icons';
 
-import { addStudioResultToCanvas, createStudioJob, deleteStudioRound, getStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
+import { addStudioResultToCanvas, createStudioJob, deleteStudioRound, findStudioJobByRequest, getStudioJob, newStudioRequestId, requeryStudioJob, resolveImageReferencePaths, submissionRejected, uploadReferenceImage } from '@/api/studio';
 import { restoreTrash } from '@/api/trash';
 import { agentSessionPath } from '@/api/canvas';
 import { notify, clipName, UNDO_DURATION_MS } from '@/lib/notify';
@@ -50,10 +50,10 @@ import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
-import type { Job, JobKind, JobParams } from '@/schema/jobs';
+import type { Job, JobErrorCode, JobKind, JobParams } from '@/schema/jobs';
 import {
   DEFAULT_STUDIO_SESSION_ID, NEW_SESSION_DRAFT_KEY, deleteSessionInput, readSessionInput, readStudioDraft,
-  writeSessionInput, writeStudioDraft, type StudioInputMode, type StudioSessionInput,
+  markStudioInputSubmitted, writeSessionInput, writeStudioDraft, type StudioInputMode, type StudioSessionInput,
 } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
@@ -353,6 +353,7 @@ function StudioFull() {
   const referenceSlots = useRef({ referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs });
   referenceSlots.current = { referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs };
 
+  const draftKey = scopedId ?? NEW_SESSION_DRAFT_KEY;
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {
     writeStudioDraft({
@@ -360,12 +361,12 @@ function StudioFull() {
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
       sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
-    });
+    }, draftKey);
   }, [
     providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
     sizeParams, count, quality,
-    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, draftKey,
   ]);
 
   // ---- 草稿按对话存：切走时留在原对话，切回来原样恢复；新对话发出第一条建了会话时，输入跟着走。 ----
@@ -381,7 +382,6 @@ function StudioFull() {
   };
   const editorRef = useRef(editor);
   editorRef.current = editor;
-  const draftKey = scopedId ?? NEW_SESSION_DRAFT_KEY;
   const draftKeyRef = useRef(draftKey);
   const applySessionInput = useCallback((input: StudioSessionInput) => {
     sourceTitleFile.current = null;
@@ -409,6 +409,8 @@ function StudioFull() {
     }
     writeSessionInput(previous, current);
     setReplacedInput(null);
+    // 换到别的对话：还在取素材的重新编辑 / 复用参考 / 编辑为参考作废，结果不写进这段对话。
+    reEditSequence.current += 1;
     applySessionInput(stored ?? EMPTY_SESSION_INPUT);
   }, [draftKey, applySessionInput]);
   useEffect(() => {
@@ -540,13 +542,17 @@ function StudioFull() {
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = async (config: RoundConfig, jobId?: string) => {
+    const requestSequence = ++reEditSequence.current;
     let files: RoundReferenceFiles;
     try {
       files = await fetchRoundReferences(config, jobId);
     } catch (error) {
+      if (requestSequence !== reEditSequence.current) return;
       setAssetNotice(errorText(error, '参考素材恢复失败'));
       return;
     }
+    // 取素材期间切了对话或又点了别的：旧结果不写进当前输入。
+    if (requestSequence !== reEditSequence.current) return;
     const { images, videos, audios, sref, cref, oref } = files;
     const before = snapshotIfFilled();
     const routed = routeReusedImageFiles(model, config.model, { image: images, sref, cref, oref });
@@ -600,8 +606,11 @@ function StudioFull() {
         : mjRefs.image.some((f) => sourceOf(f) === path);
     // 已经导过同一张：不叠第二份。
     if (already) return;
+    const requestSequence = reEditSequence.current;
     try {
       const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
+      // 取图期间切了对话（或输入整套换过）：不写进别的对话的输入。
+      if (requestSequence !== reEditSequence.current) return;
       editRefSource.current.set(file, path);
       if (inputMode === 'agent') {
         if (file.type.startsWith('image/')) setAgentFiles(prev => [...prev, file].slice(0, 16));
@@ -834,11 +843,11 @@ function StudioFull() {
 
   const onSubmit = async (
     prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string,
-    overrideFiles?: SubmissionFiles,
+    overrideFiles?: SubmissionFiles, requestId?: string,
   ) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig, promptTemplate, reattachJobId, overrideFiles);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate, reattachJobId, overrideFiles, requestId);
       return;
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
@@ -883,6 +892,9 @@ function StudioFull() {
       : promptAssetSourceTitle ?? undefined;
 
     setPending(true);
+    // 这次提交意图的请求 ID：受理未知后重试沿用它，服务端同 ID 只建一个任务。
+    const clientRequestId = requestId ?? newStudioRequestId();
+    const submittedInput = overrideConfig ? null : editorRef.current.input;
     let sessionId: string;
     try {
       sessionId = await submissionSession(prompt);
@@ -928,7 +940,7 @@ function StudioFull() {
         srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e) {
-      failLocally(placeholder, baseConfig, e, files);
+      failLocally(placeholder, baseConfig, e, { files });
       return;
     }
 
@@ -1000,11 +1012,13 @@ function StudioFull() {
         model: effectiveModel,
         params: jobParams,
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
+        client_request_id: clientRequestId,
       });
     } catch (e) {
-      failLocally(myRound, config, e);
+      failLocally(myRound, config, e, { requestId: clientRequestId });
       return;
     }
+    if (submittedInput) markStudioInputSubmitted(sessionId, submittedInput);
     setPending(false);
     // 提交真正发出去了，复刻时的提示才算用完。
     setRecipeNotice(null);
@@ -1016,7 +1030,7 @@ function StudioFull() {
 
   const onSubmitVideo = async (
     prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string,
-    overrideFiles?: SubmissionFiles,
+    overrideFiles?: SubmissionFiles, requestId?: string,
   ) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
@@ -1037,6 +1051,9 @@ function StudioFull() {
     const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol, selectedModel?.declared);
 
     setPending(true);
+    // 这次提交意图的请求 ID：受理未知后重试沿用它，服务端同 ID 只建一个任务。
+    const clientRequestId = requestId ?? newStudioRequestId();
+    const submittedInput = overrideConfig ? null : editorRef.current.input;
     let sessionId: string;
     try {
       sessionId = await submissionSession(prompt);
@@ -1085,7 +1102,7 @@ function StudioFull() {
       vidPaths = !uploadsFiles && overrideConfig?.referenceVideos ? overrideConfig.referenceVideos : await upload(files.videos);
       audPaths = !uploadsFiles && overrideConfig?.referenceAudios ? overrideConfig.referenceAudios : await upload(files.audios);
     } catch (e) {
-      failLocally(placeholder, baseConfig, e, files);
+      failLocally(placeholder, baseConfig, e, { files });
       return;
     }
 
@@ -1178,11 +1195,13 @@ function StudioFull() {
         params: videoParams,
         kind: 'video',
         ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
+        client_request_id: clientRequestId,
       });
     } catch (e) {
-      failLocally(myRound, config, e);
+      failLocally(myRound, config, e, { requestId: clientRequestId });
       return;
     }
+    if (submittedInput) markStudioInputSubmitted(sessionId, submittedInput);
     setPending(false);
     setRecipeNotice(null);
 
@@ -1191,23 +1210,73 @@ function StudioFull() {
     setRounds(rs => rs.filter(r => r !== myRound));
   };
 
-  // 提交前就失败（上传参考或创建任务失败）：占位卡原地变成失败卡，带着配置与客户端 id，
-  // 可删、可重新编辑；上传失败时留下当时的文件，「再次生成」重新上传。
+  // 提交前就失败：占位卡原地变成失败卡，带着配置与客户端 id，可删、可重新编辑。分三种：
+  // 上传参考失败（留下当时的文件，「再次生成」重新上传）、服务端明确拒绝（没建任务）、
+  // 受理未知（回包途中断开，任务可能已建）——最后一种不给「再次生成」，先按请求 ID 核对。
   const localSubmissionFiles = useRef(new Map<string, SubmissionFiles>());
+  const localRequestIds = useRef(new Map<string, string>());
   function failLocally(
     round: RoundState & { sessionId: string; clientKey: string }, config: RoundConfig, error: unknown,
-    files?: SubmissionFiles,
+    { files, requestId }: { files?: SubmissionFiles; requestId?: string },
   ) {
     const clientKey = round.clientKey;
     if (files) localSubmissionFiles.current.set(clientKey, files);
+    const unknown = Boolean(requestId) && !submissionRejected(error);
+    if (unknown && requestId) localRequestIds.current.set(clientKey, requestId);
     setSubmitFailures(count => count + 1);
     setPending(false);
     const message = errorText(error, '生成没有提交成功');
+    const failure: RoundFailure = files
+      ? { message: `参考素材上传失败：${message}`, action: { label: '重试', kind: 'retry' } }
+      : unknown
+        ? { message: '没有收到 Atelier 的确认，这次生成可能已经提交', action: { label: '重新查询', kind: 'requery' } }
+        : { message };
     setRounds(rs => rs.map(r => r === round ? {
       kind: 'failed' as const, sessionId: round.sessionId, clientKey, submittedAt: new Date().toISOString(),
-      reason: error instanceof Error ? error.message : message, config,
-      failure: { message, action: { label: '重试', kind: 'retry' as const } },
+      reason: error instanceof Error ? error.message : message, config, failure,
     } : r));
+  }
+
+  // 受理未知的本地失败卡：按请求 ID 查到任务就接上它（卡片原地换成这一轮），查不到才允许重新提交。
+  function adoptSubmittedJob(job: Job, clientKey: string) {
+    localRequestIds.current.delete(clientKey);
+    localSubmissionFiles.current.delete(clientKey);
+    handoffs.current.set(job.job_id, { clientKey, startedAt: Date.parse(job.submitted_at) || Date.now() });
+    setPersistedJobs(items => upsertJob(items, job));
+    setRounds(rs => rs.filter(r => r.clientKey !== clientKey));
+  }
+
+  /** 返回 true = 已接上原任务；false = 服务端确认没收到；null = 核对本身失败（状态仍未知）。 */
+  async function reconcileLocalSubmission(clientKey: string): Promise<boolean | null> {
+    const requestId = localRequestIds.current.get(clientKey);
+    if (!requestId) return false;
+    let job: Job | null;
+    try {
+      job = await findStudioJobByRequest(requestId);
+    } catch (error) {
+      notify.error(errorText(error, '核对提交结果失败'));
+      return null;
+    }
+    if (!job) return false;
+    adoptSubmittedJob(job, clientKey);
+    return true;
+  }
+
+  async function recheckLocalSubmission(clientKey: string) {
+    if (await reconcileLocalSubmission(clientKey) !== false) return;
+    // 服务端确认没收到：这时再提交不会重复下单（仍沿用同一请求 ID）。
+    setRounds(rs => rs.map(r => r.clientKey === clientKey && r.kind === 'failed' ? {
+      ...r, failure: { message: 'Atelier 没有收到这次提交', action: { label: '重试', kind: 'retry' } },
+    } : r));
+  }
+
+  async function requeryRound(jobId: string) {
+    try {
+      const job = await requeryStudioJob(jobId);
+      setPersistedJobs(items => upsertJob(items, job));
+    } catch (error) {
+      notify.error(errorText(error, '重新查询失败'));
+    }
   }
 
   const renderRounds = (items: TimelineRound[], embedded = false): React.ReactNode => (
@@ -1689,6 +1758,7 @@ function StudioFull() {
 
   function dismissLocalRound(clientKey: string) {
     localSubmissionFiles.current.delete(clientKey);
+    localRequestIds.current.delete(clientKey);
     setRounds(items => items.filter(item => item.clientKey !== clientKey));
   }
 
@@ -1721,7 +1791,10 @@ function StudioFull() {
   function usePrompt(config: RoundConfig) {
     setClickPinned(true);
     if (composer.mode === 'agent') {
+      const filled = composer.text.trim() || composer.files.length > 0;
+      const before = filled ? editorRef.current : null;
       composer.setText(config.prompt);
+      offerUndo(before);
       return;
     }
     const before = snapshotIfFilled();
@@ -1795,10 +1868,13 @@ function StudioFull() {
   }
 
   // 「再次生成」按旧配置直接提交，不改输入壳（D6）。本地失败卡带着当时的文件重新上传，旧卡换成新的一轮。
+  // 受理未知的本地失败卡先按请求 ID 核对：查到就接上原任务，查不到才用同一请求 ID 重新提交，核对失败什么都不发。
   async function regenerate(config: RoundConfig, failedJobId?: string, clientKey?: string) {
+    const requestId = clientKey ? localRequestIds.current.get(clientKey) : undefined;
+    if (clientKey && requestId && await reconcileLocalSubmission(clientKey) !== false) return;
     const files = clientKey ? localSubmissionFiles.current.get(clientKey) : undefined;
     if (clientKey) dismissLocalRound(clientKey);
-    await onSubmit(config.prompt, config, undefined, failedJobId, files);
+    await onSubmit(config.prompt, config, undefined, failedJobId, files, requestId);
   }
 
   function regenerateHint(config: RoundConfig): string {
@@ -1839,6 +1915,9 @@ function StudioFull() {
       setLocation('/settings/providers');
     } else if (action.kind === 'reconnect') {
       window.location.reload();
+    } else if (action.kind === 'requery') {
+      if (round.jobId) void requeryRound(round.jobId);
+      else if (round.clientKey) void recheckLocalSubmission(round.clientKey);
     } else if (action.kind === 'retry' && config) {
       void regenerate(config, round.jobId, round.jobId ? undefined : round.clientKey);
     } else if ((action.kind === 'change_model' || action.kind === 'edit_prompt') && config) {
@@ -1988,10 +2067,27 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
     });
 }
 
-/** 失败任务 → 一句原因 + 修复动作。「重新查询」还没有对应接口，先只给原因（原文在技术详情里）。 */
+/** 失败任务 → 一句原因 + 修复动作。上游有任务号（或网关幂等键）可以续查的，结局不明时给「重新查询」，
+ *  不给「再次生成」；没法续查的只给原因（原文在技术详情里）。 */
 function jobFailure(job: Job, keys: KeyView[]): RoundFailure {
   const presentation = presentJobError(job, keys.find(key => key.alias === job.alias));
+  if (canRequeryStudioJob(job) && REQUERY_CODES.has(job.error_code ?? 'unknown')) {
+    return { message: presentation.message, action: { label: '重新查询', kind: 'requery' } };
+  }
   return presentation.action?.kind === 'requery' ? { message: presentation.message } : presentation;
+}
+
+const REQUERY_CODES = new Set<JobErrorCode>(['timeout', 'submission_unconfirmed', 'network', 'unknown']);
+const REQUERY_PROTOCOLS = new Set(['tuzi_images', 'atelier_gateway', 'declarative', 'evolink']);
+
+/** 与服务端 `jobs.is_resumable_studio_job` 同一判据的前端近似；放不放行以服务端为准（不行返回 409）。 */
+function canRequeryStudioJob(job: Job): boolean {
+  const params = job.params;
+  if ((params.provider_task_ids ?? []).some(Boolean)
+    && (REQUERY_PROTOCOLS.has(params.provider_task_protocol ?? '') || job.provider === 'comfyui')) {
+    return true;
+  }
+  return job.provider === 'atelier' && Boolean(params.gateway_unconfirmed && params.gateway_idempotency_key);
 }
 
 function hasFiles(files: SubmissionFiles): boolean {

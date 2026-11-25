@@ -1624,6 +1624,8 @@ function FailedCard({
   // 主修复动作至多一个；「重试」与操作行的「再次生成」是同一件事，那时不重复给。
   const action = !round.canceled && onFailureAction ? round.failure?.action : undefined;
   const showAction = action && !(action.kind === 'retry' && actionRowShown);
+  // 结局不明（上游可能还在跑、或提交可能已受理）：只给「重新查询」，不给「再次生成」，免得重复下单。
+  const requeryFirst = action?.kind === 'requery';
   const canDelete = round.jobId ? Boolean(onDeleteFailed) : Boolean(round.clientKey && onDismissLocal);
   const remove = () => {
     if (round.jobId) void onDeleteFailed?.(round.jobId);
@@ -1720,8 +1722,8 @@ function FailedCard({
       {config && showActions && (
         <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
-          <RegenerateButton config={config} hint={regenerateHint}
-            onClick={() => { void onRegenerate?.(config, round.jobId, round.jobId ? undefined : round.clientKey); }} />
+          {!requeryFirst && <RegenerateButton config={config} hint={regenerateHint}
+            onClick={() => { void onRegenerate?.(config, round.jobId, round.jobId ? undefined : round.clientKey); }} />}
         </div>
       )}
     </section>
