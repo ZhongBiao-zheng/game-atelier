@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { FavoriteIcon, HideIcon } from '@/components/ui/icons';
 import { RevealImage } from '@/components/ui/reveal-image';
@@ -40,6 +40,22 @@ export function Home() {
   }, [attempt]);
 
   const items = state.kind === 'success' ? state.items : [];
+  // 分列按「取到的那一批」定：撤下或放回一张只影响它所在的那一列，其余卡片不换列、不重挂。
+  const [layoutItems, setLayoutItems] = useState<GalleryItem[]>([]);
+  const covered = items.every(item => layoutItems.some(row => row.path === item.path));
+  const layoutBase = covered ? layoutItems : items;
+  useEffect(() => {
+    if (!covered) setLayoutItems(items);
+  }, [covered, items]);
+  const columnOf = useMemo(() => {
+    const map = new Map<string, number>();
+    distributeColumns(layoutBase, colCount).forEach((col, ci) => col.forEach(item => map.set(item.path, ci)));
+    return map;
+  }, [layoutBase, colCount]);
+  const columns = useMemo(
+    () => Array.from({ length: colCount }, (_, ci) => items.filter(item => (columnOf.get(item.path) ?? 0) === ci)),
+    [items, columnOf, colCount],
+  );
   const viewingIndex = viewingPath === null ? -1 : items.findIndex(item => item.path === viewingPath);
   const viewing = viewingIndex >= 0 ? items[viewingIndex] : null;
 
@@ -112,7 +128,7 @@ export function Home() {
        *（CSS columns 是列优先，会把高分作品竖着塞进左栏；故改 JS 轮转分列 + flex 竖向堆叠）。 */}
       {state.kind === 'success' && state.items.length > 0 && (
         <div className="flex items-start gap-6">
-          {distributeColumns(state.items, colCount).map((col, ci) => (
+          {columns.map((col, ci) => (
             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-6">
               {col.map((item) => (
                 <GalleryCard
