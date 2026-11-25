@@ -1078,7 +1078,7 @@ it('does not silently resubmit after the server rejects an input revision confli
   vi.mocked(submitCanvasRun).mockRejectedValueOnce(new Error('画布版本已更新，请刷新输入后再生成'));
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: 'flow-node-image-one' }));
-  fireEvent.click(await screen.findByRole('button', { name: '开始生成' }));
+  fireEvent.click(await screen.findByRole('button', { name: '生成' }));
   expect(await screen.findByText('画布版本已更新，请刷新输入后再生成')).toBeInTheDocument();
   expect(submitCanvasRun).toHaveBeenCalledOnce();
   expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'image-one', 7, 1);
@@ -1268,8 +1268,11 @@ it('stays in the editor when the forced save fails', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: '返回画布项目列表' }));
 
-  expect(await screen.findByText('自动保存失败，已留在当前画布。请检查服务后重试。')).toBeInTheDocument();
+  expect(await screen.findByText('自动保存失败，现在离开会丢掉未保存的改动。')).toBeInTheDocument();
   expect(onBack).not.toHaveBeenCalled();
+  // 不把人困在画布里：报错条给「仍然离开」。
+  fireEvent.click(await screen.findByRole('button', { name: '仍然离开' }));
+  expect(onBack).toHaveBeenCalled();
 });
 
 it('undoes a text field edit as one session snapshot', async () => {
@@ -1318,7 +1321,7 @@ it('submits one canvas run for the selected image node at the current server rev
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
-  fireEvent.click(await screen.findByRole('button', { name: '开始生成' }));
+  fireEvent.click(await screen.findByRole('button', { name: '生成' }));
 
   await waitFor(() => expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'image-one', 7, 2));
 });
@@ -1854,10 +1857,8 @@ it('surfaces the server detail when an automatic save fails instead of claiming 
   const editor = await addTextNodeWithBody('会保存失败的内容');
   fireEvent.keyDown(editor, { key: 'Tab' });
 
-  expect(await screen.findByRole('button', { name: '保存失败 · 重试' })).toBeTruthy();
-  expect(
-    await screen.findByText('existing canvas content versions are immutable（HTTP 422）'),
-  ).toBeTruthy();
+  // 规格 2.4：先静默退避重试，1.5s 后顶栏胶囊显示「保存重试中…」（原因在胶囊的 Hint 里）。
+  expect(await screen.findByText('保存重试中…', {}, { timeout: 3000 })).toBeTruthy();
   expect(screen.queryByText('保存冲突，内容已保留')).toBeNull();
 });
 
@@ -1903,7 +1904,7 @@ it('blocks generation by name when a connected input has no content yet', async 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
 
-  const generate = await screen.findByRole('button', { name: '开始生成' });
+  const generate = await screen.findByRole('button', { name: '生成' });
   expect(generate).toBeEnabled();
   fireEvent.click(generate);
   expect(
@@ -2023,7 +2024,7 @@ it('keeps a just-submitted job that an in-flight poll response predates', async 
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
-  fireEvent.click(await screen.findByRole('button', { name: '开始生成' }));
+  fireEvent.click(await screen.findByRole('button', { name: '生成' }));
   await waitFor(() => expect(submitCanvasRun).toHaveBeenCalled());
 
   releasePoll();
@@ -2111,7 +2112,7 @@ it('explains the missing-key block after the user tries to generate', async () =
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
 
-  const generate = screen.getByRole('button', { name: /开始生成/ });
+  const generate = screen.getByRole('button', { name: /^生成$/ });
   expect(generate).toBeEnabled();
   fireEvent.click(generate);
   expect(await screen.findByText('还没有配置任何模型密钥。')).toBeTruthy();
@@ -2819,13 +2820,13 @@ it('hides the generation composer throughout annotation and restores the draft a
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [source], content_versions: { 'source-v': { ...editSourceVersion, origin: { kind: 'job_output', job_id: 'job-source', candidate_id: 'candidate' } } } }));
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-annotation-result' }));
-  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: '生成' })).toBeInTheDocument();
   const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
   act(() => context().annotationController!.start(source));
-  expect(screen.queryByRole('button', { name: '开始生成' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '生成' })).not.toBeInTheDocument();
   expect(screen.getByRole('toolbar', { name: '标注工具' })).toBeInTheDocument();
   act(() => context().annotationController!.exit());
-  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: '生成' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留我的提示词');
 });
 

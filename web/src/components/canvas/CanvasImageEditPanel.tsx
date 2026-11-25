@@ -108,7 +108,7 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
           <SwapIcon swapKey={running || submitting}>
             {running || submitting ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
           </SwapIcon>
-          <SwapLabel active={running || submitting} on="生成中…" off="开始生成" />
+          <SwapLabel active={running || submitting} on="生成中…" off="生成" />
         </Button>
       </div>
     </section>

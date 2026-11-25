@@ -103,7 +103,7 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
         "revision": 0,
         "image_toolbar": {
             "tool_ids": [
-                "info", "download", "crop", "split", "removeBackground", "upscale",
+                "upscale", "removeBackground", "download", "crop", "split", "info",
             ],
         },
         "generation_defaults": {

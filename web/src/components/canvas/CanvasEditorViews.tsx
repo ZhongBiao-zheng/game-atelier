@@ -244,6 +244,8 @@ export interface CanvasNodeContextValue {
     targetNodeId: string,
     frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
   ) => void;
+  /** 生成提交在前端排队中的节点（前一个提交落地后自动提交）。 */
+  queuedNodeIds?: ReadonlySet<string>;
   /** 本机能不能抠图（进画布时预取）；false 时工具条和配置候选里都不出现抠图。 */
   mattingAvailable?: boolean;
   /** 删除节点（走撤销栈并给撤销 toast），节点「更多」与右键菜单用。 */
@@ -2440,10 +2442,10 @@ export function CanvasGenerationComposer({
   const activeJob = nodeRunState.job;
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
-  const textMode = draft.mode === 'text';
+  const queued = Boolean(context.queuedNodeIds?.has(node.id));
   const generationButtonState = running
     ? activeJob?.cancel_requested_at ? 'stopping' : 'running'
-    : submitting ? 'submitting' : 'idle';
+    : queued ? 'queued' : submitting ? 'submitting' : 'idle';
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const panelLabel = `${modeLabel}设置`;
@@ -2702,6 +2704,7 @@ export function CanvasGenerationComposer({
         mentionsEnabled={mentionsEnabled}
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
         className="max-h-[50vh]"
+        onSubmit={running || submitting || queued ? undefined : submitGeneration}
         onFocus={context.recordHistory}
         // 用独立 key：node.id 那把在合并任务结果时还兼作「正文有本地未存改动」的判据，
         // 结果节点自己就带生成面板，改下一轮提示词不能让刚出的图被当成本地正文挡在外面。
@@ -2932,18 +2935,19 @@ export function CanvasGenerationComposer({
             size="sm"
             variant={running ? 'outline' : 'default'}
             className="shrink-0 transition-colors"
-            disabled={running ? Boolean(activeJob?.cancel_requested_at) : submitting || Boolean(workflowReferenceProblem)}
+            disabled={running ? Boolean(activeJob?.cancel_requested_at) : submitting || queued || Boolean(workflowReferenceProblem)}
             onClick={running ? () => void context.cancelRun(activeJob!.canvas_run!.run_id) : submitGeneration}
           >
             <SwapIcon swapKey={generationButtonState}>
-              {generationButtonState === 'stopping' || generationButtonState === 'submitting'
+              {generationButtonState === 'stopping' || generationButtonState === 'submitting' || generationButtonState === 'queued'
                 ? <LoadingIcon className="animate-spin" aria-hidden="true" />
                 : generationButtonState === 'running' ? <StopIcon aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
             </SwapIcon>
             {generationButtonState === 'stopping' ? '停止中…'
               : generationButtonState === 'running' ? '停止'
-                : generationButtonState === 'submitting' ? '提交中…'
-                  : textMode ? '生成' : '开始生成'}
+                : generationButtonState === 'queued' ? '排队中'
+                  : generationButtonState === 'submitting' ? '提交中…'
+                    : '生成'}
           </Button>
         )}
       </div>

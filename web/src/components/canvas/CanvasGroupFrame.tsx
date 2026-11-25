@@ -43,7 +43,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
         onSave={title => context.renameNode(node.id, title)} />
       {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
         className="nodrag nopan flex shrink-0 items-center">
-        <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`删除 ${node.title}`} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
+        <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`解散分组 ${node.title}`} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
       </div>}
     </div>
   </div>;

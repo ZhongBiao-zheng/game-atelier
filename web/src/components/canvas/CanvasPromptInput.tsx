@@ -41,6 +41,8 @@ interface CanvasPromptInputProps {
   mentionsEnabled?: boolean;
   disabledMentionHint?: string;
   onChange: (value: string) => void;
+  /** ⌘↵ / Ctrl+↵ 提交（D5）；Enter 仍是换行，输入法组合期间的 Enter 不处理。 */
+  onSubmit?: () => void;
   onFocus?: () => void;
   /** 编辑会话开始 / 结束：焦点进来算开始；焦点去了本页别处才算结束，整个窗口失焦不算。 */
   onEditingChange?: (editing: boolean) => void;
@@ -57,6 +59,7 @@ export function CanvasPromptInput({
   mentionsEnabled = true,
   disabledMentionHint,
   onChange,
+  onSubmit,
   onFocus,
   onEditingChange,
   onPreviewReference,
@@ -400,6 +403,11 @@ export function CanvasPromptInput({
               closeMention();
               return;
             }
+          }
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && onSubmit) {
+            event.preventDefault();
+            onSubmit();
+            return;
           }
           if (
             (event.key === 'Backspace' || event.key === 'Delete')

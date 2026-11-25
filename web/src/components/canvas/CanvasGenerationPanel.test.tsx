@@ -74,7 +74,7 @@ it('submits the visible draft after a failed task without offering a separate re
   const currentDraft = { ...draft, model: 'gpt-image-2', alias: 'main', prompt: '修改后的新提示词' };
   const context = nodeContext({ keys: [key], jobsByRunId: new Map([['run-batch', job]]) });
   render(<CanvasGenerationComposer node={imageResultNode} draft={currentDraft} context={context} />);
-  fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
+  fireEvent.click(screen.getByRole('button', { name: '生成' }));
   expect(context.submitRun).toHaveBeenCalledWith(imageResultNode.id);
   expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument();
   expect(screen.queryByText(/原任务输入|本轮冻结输入/)).not.toBeInTheDocument();
@@ -341,7 +341,7 @@ it('renders the generation composer as an independent panel below the selected n
   expect(panel.parentElement).toHaveAttribute('data-canvas-node-panel-anchor', 'config-one');
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
   expect(within(panel).queryByRole('button', { name: '图片设置' })).not.toBeInTheDocument();
-  const generate = within(panel).getByRole('button', { name: '开始生成' });
+  const generate = within(panel).getByRole('button', { name: '生成' });
   expect(generate).toBeEnabled();
   fireEvent.click(generate);
   expect(reportError).toHaveBeenCalledWith('还没有配置任何模型密钥。');
@@ -774,7 +774,7 @@ it('renders connected references as chips and reports a disconnected reference o
   );
 
   expect(screen.getByLabelText('引用图片：雨夜列车')).toHaveTextContent('图片1');
-  expect(screen.getByRole('button', { name: '开始生成' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '生成' })).toBeEnabled();
 
   const reportError = vi.fn();
   const disconnected = nodeContext({
@@ -789,7 +789,7 @@ it('renders connected references as chips and reports a disconnected reference o
   );
   // 断连后引用 chip 不再渲染；按钮仍可点击，原因由画布顶部统一反馈。
   expect(screen.queryByLabelText(/引用已断开/)).not.toBeInTheDocument();
-  const generate = screen.getByRole('button', { name: '开始生成' });
+  const generate = screen.getByRole('button', { name: '生成' });
   expect(generate).toBeEnabled();
   fireEvent.click(generate);
   expect(reportError).toHaveBeenCalledWith(

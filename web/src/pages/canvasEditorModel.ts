@@ -1568,7 +1568,9 @@ export function normalizeCanvasVideoParams(
   if (caps.ratios.length) {
     params.ratio = caps.ratios.includes(String(currentRatio))
       ? String(currentRatio)
-      : caps.ratios.includes('16:9') ? '16:9' : caps.ratios[0];
+      // 模型支持「自适应」时默认用它，按首帧 / 参考图的朝向出片，竖图不用再手动改比例。
+      : caps.ratios.includes('adaptive') ? 'adaptive'
+        : caps.ratios.includes('16:9') ? '16:9' : caps.ratios[0];
   }
   if (caps.qualities?.length) {
     params.mode = caps.qualities.includes(currentQuality as VideoQuality)

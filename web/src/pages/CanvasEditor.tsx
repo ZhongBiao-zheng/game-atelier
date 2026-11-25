@@ -32,7 +32,7 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, RedoIcon, SelectIcon, SettingsIcon, ShowIcon, TextFileIcon, TextIcon, UndoIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, RedoIcon, SelectIcon, SettingsIcon, ShowIcon, StopIcon, TextFileIcon, TextIcon, UndoIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { currentHostNodeType, isHostPluginId, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -254,6 +254,8 @@ import {
 } from './canvasEditorModel';
 import { resolveRecipeModel } from './studioRecipe';
 import { useCanvasAgentIndicator } from '@/components/canvas/useCanvasAgentIndicator';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { errorText } from '@/lib/errorText';
 import { CanvasContextMenu, type CanvasContextMenuItem } from '@/components/canvas/CanvasContextMenu';
 import {
   isFreshCanvasProject,
@@ -476,6 +478,12 @@ const CANVAS_VIEWPORT_EASE_IN_OUT = cubicBezier(...MOTION_EASE.inOut);
 /** 带动作或多条的提示要留出读完、点按钮的时间。 */
 const TOOL_NOTICE_LONG_MS = 6000;
 const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
+const CANVAS_SAVE_FAILED_LEAVE_MESSAGE = '自动保存失败，现在离开会丢掉未保存的改动。';
+const SAVE_RETRY_QUIET_MS = 1500;
+const SAVE_RETRY_STUCK_MS = 15_000;
+const SAVE_RETRY_STUCK_ATTEMPTS = 4;
+const SAVE_RETRY_DELAYS_MS = [1000, 3000, 10_000];
+const SAVE_RETRY_PROBE_MS = 10_000;
 
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
@@ -580,6 +588,12 @@ function CanvasEditorInner({
   const [errorAction, setErrorAction] = useState<{ message: string; label: string; run: () => void } | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
+  // 自动保存失败后的退避重试（规格 2.4）：0–1.5s 静默；之后显示中性胶囊「保存重试中…」；
+  // 超过 15s 或连续失败 4 次转警示色并给「立即重试」，后台每 10s 继续试。
+  const [saveRetryPhase, setSaveRetryPhase] = useState<'none' | 'quiet' | 'retrying' | 'stuck'>('none');
+  const saveFailure = useRef<{ since: number; attempts: number } | null>(null);
+  const saveRetryTimer = useRef<number | null>(null);
+  const saveRetryPhaseTimer = useRef<number | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [compareViewId, setCompareViewId] = useState<string | null>(null);
   const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
@@ -1184,6 +1198,36 @@ function CanvasEditorInner({
     ? selectedNodeIds.values().next().value ?? null
     : null;
 
+  function clearSaveRetry() {
+    saveFailure.current = null;
+    if (saveRetryTimer.current !== null) window.clearTimeout(saveRetryTimer.current);
+    if (saveRetryPhaseTimer.current !== null) window.clearTimeout(saveRetryPhaseTimer.current);
+    saveRetryTimer.current = null;
+    saveRetryPhaseTimer.current = null;
+    setSaveRetryPhase('none');
+  }
+
+  function scheduleSaveRetry() {
+    const failure = saveFailure.current ?? { since: Date.now(), attempts: 0 };
+    failure.attempts += 1;
+    saveFailure.current = failure;
+    const elapsed = Date.now() - failure.since;
+    const stuck = failure.attempts >= SAVE_RETRY_STUCK_ATTEMPTS || elapsed > SAVE_RETRY_STUCK_MS;
+    setSaveRetryPhase(stuck ? 'stuck' : elapsed >= SAVE_RETRY_QUIET_MS ? 'retrying' : 'quiet');
+    if (!stuck && elapsed < SAVE_RETRY_QUIET_MS && saveRetryPhaseTimer.current === null) {
+      saveRetryPhaseTimer.current = window.setTimeout(() => {
+        saveRetryPhaseTimer.current = null;
+        if (saveFailure.current) setSaveRetryPhase(phase => phase === 'quiet' ? 'retrying' : phase);
+      }, SAVE_RETRY_QUIET_MS - elapsed);
+    }
+    if (saveRetryTimer.current !== null) window.clearTimeout(saveRetryTimer.current);
+    const delay = SAVE_RETRY_DELAYS_MS[failure.attempts - 1] ?? SAVE_RETRY_PROBE_MS;
+    saveRetryTimer.current = window.setTimeout(() => {
+      saveRetryTimer.current = null;
+      void flushSaveRef.current().catch(() => undefined);
+    }, delay);
+  }
+
   const flushSave = useCallback(function drainSaveQueue(force = false): Promise<void> {
     if (runSubmissionInFlight.current || libraryInsertInFlight.current || documentCommandInFlight.current) return Promise.resolve();
     if (saveInFlight.current) {
@@ -1252,6 +1296,7 @@ function CanvasEditorInner({
         }
         setSaveState('saved');
         setSaveErrorDetail(null);
+        clearSaveRetry();
       } catch (saveError) {
         if (!saveQueued.current && failedSnapshot) saveQueued.current = failedSnapshot;
         setSaveState('error');
@@ -1264,9 +1309,9 @@ function CanvasEditorInner({
           void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message));
           throw saveError;
         }
-        const detail = (saveError as Error).message;
-        setSaveErrorDetail(detail);
-        setError(detail);
+        // 不再弹报错条：按退避自动重试，状态只在顶栏胶囊里（规格 2.4）。原因放在胶囊的 Hint 里。
+        setSaveErrorDetail(errorText(saveError));
+        scheduleSaveRetry();
         throw saveError;
       }
     };
@@ -1275,6 +1320,12 @@ function CanvasEditorInner({
     });
     saveInFlight.current = promise;
     return promise;
+  }, [projectId]);
+  const flushSaveRef = useRef(flushSave);
+  flushSaveRef.current = flushSave;
+  useEffect(() => () => {
+    if (saveRetryTimer.current !== null) window.clearTimeout(saveRetryTimer.current);
+    if (saveRetryPhaseTimer.current !== null) window.clearTimeout(saveRetryPhaseTimer.current);
   }, [projectId]);
 
   // Agent 经 MCP 改画布（#92）：服务端 canvas.json 一落盘就广播 canvas-document-changed，
@@ -1479,12 +1530,29 @@ function CanvasEditorInner({
       try {
         await flushSave(true);
       } catch {
-        setError('自动保存失败，已留在当前画布。请检查服务后重试。');
+        setError(CANVAS_SAVE_FAILED_LEAVE_MESSAGE);
         return false;
       }
     }
     return true;
   }, [flushSave]);
+
+  /** 离开画布前先存；存不进去时报错条给「仍然离开」（明说会丢掉未保存的改动），不把人困在画布里。 */
+  const leaveCanvas = useCallback((go: () => void) => {
+    void persistNow().then(saved => {
+      if (saved) { go(); return; }
+      setErrorAction({
+        message: CANVAS_SAVE_FAILED_LEAVE_MESSAGE,
+        label: '仍然离开',
+        run: () => {
+          saveQueued.current = null;
+          clearSaveRetry();
+          setError(null);
+          go();
+        },
+      });
+    });
+  }, [persistNow]);
 
   const commit = useCallback((updater: (current: CanvasDocument) => CanvasDocument, record = false) => {
     // 新建的空项目一旦有了编辑就不再自动清理（D12）。
@@ -3036,8 +3104,16 @@ function CanvasEditorInner({
     return node.id;
   }
 
-  function handleUploads(files: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string) {
-    if (!files.length) return;
+  function handleUploads(allFiles: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string) {
+    if (!allFiles.length) return;
+    // 一次拖进来一批：跳过明显不是图片 / 视频 / 音频的文件，其余照常导入，最后一条汇总（Q11）。
+    // 浏览器给不出类型的（空 type）交给服务端判断。
+    const files = allFiles.filter(file => !file.type || /^(image|video|audio)\//.test(file.type));
+    const unsupported = allFiles.length - files.length;
+    if (!files.length) {
+      setError(unsupported === 1 ? '这个文件格式不支持，只能导入图片、视频或音频。' : `${unsupported} 个文件格式都不支持，只能导入图片、视频或音频。`);
+      return;
+    }
     // Each batch owns the document command window; later drops wait instead of racing revisions.
     const command = (uploadQueue.current ?? Promise.resolve()).then(async () => {
       if (latestDocument.current?.project_id !== projectId || !await persistNow()) return;
@@ -3097,8 +3173,14 @@ function CanvasEditorInner({
             setSelectedNodeIds(new Set(added));
             const addedIds = new Set(added);
             focusNewNodesHandler.current(latestDocument.current.nodes.filter(node => addedIds.has(node.id)));
-            if (failures.length) setError(failures.slice(0, 3).join('；') + (failures.length > 3 ? `；共 ${failures.length} 项失败` : ''));
-            else announceToolNotice(successNotice ?? `已添加 ${added.length} 个素材`);
+            if (failures.length || unsupported) {
+              const summary = [
+                `已导入 ${added.length} 项`,
+                unsupported ? `${unsupported} 项格式不支持` : null,
+                failures.length ? `${failures.length} 项失败` : null,
+              ].filter(Boolean).join('，');
+              setError(failures.length ? `${summary}：${failures.slice(0, 2).join('；')}` : summary);
+            } else announceToolNotice(successNotice ?? `已添加 ${added.length} 个素材`);
           }
         }
       }
@@ -3421,9 +3503,38 @@ function CanvasEditorInner({
       .finally(() => { canvasUiPreferencesSaveInFlight.current = false; });
   }, []);
 
+  /** 生成提交在前端排队（P1）：前一个提交落地后自动提交下一个，不再报「另一项生成正在提交」让人再点一次。
+   *  排队中的节点按钮显示「排队中」。只串行「提交」这一步，提交之后的生成照常并行。 */
+  const submissionChain = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingSubmissions = useRef(0);
+  const [queuedNodeIds, setQueuedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  const queueSubmission = useCallback(<T,>(nodeId: string, task: () => Promise<T>, fallback: T): Promise<T> => {
+    const mustWait = pendingSubmissions.current > 0 || runSubmissionInFlight.current;
+    pendingSubmissions.current += 1;
+    if (mustWait) setQueuedNodeIds(current => new Set(current).add(nodeId));
+    const unqueue = () => setQueuedNodeIds(current => {
+      if (!current.has(nodeId)) return current;
+      const next = new Set(current);
+      next.delete(nodeId);
+      return next;
+    });
+    const run = submissionChain.current.catch(() => undefined).then(async () => {
+      // 不走这条队列的提交（MJ 续查、媒体操作）还在途时也等它落地。
+      while (runSubmissionInFlight.current) await new Promise(resolve => window.setTimeout(resolve, 100));
+      unqueue();
+      if (latestDocument.current?.project_id !== projectIdRef.current) return fallback;
+      return task();
+    }).finally(() => {
+      pendingSubmissions.current -= 1;
+      unqueue();
+    });
+    submissionChain.current = run;
+    return run;
+  }, []);
+
   /** 返回这次提交的结果：submitted 已受理；not_sent / conflict 确定没有发出或被版本校验拒绝（可以再提交）；
    *  error 结果不明或被拒绝（不要自动再提交，可能已经在计费）。 */
-  const submitRun = useCallback(async (nodeId: string): Promise<SubmitRunOutcome> => {
+  const submitRunNow = useCallback(async (nodeId: string): Promise<SubmitRunOutcome> => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return { status: 'not_sent' };
@@ -3477,8 +3588,9 @@ function CanvasEditorInner({
     projectId,
     rememberGenerationDefault,
   ]);
+  const submitRun = useCallback((nodeId: string): Promise<SubmitRunOutcome> => queueSubmission(nodeId, () => submitRunNow(nodeId), { status: 'not_sent' } as SubmitRunOutcome), [queueSubmission, submitRunNow]);
 
-  const reversePrompt = useCallback(async (node: CanvasContentNode) => {
+  const reversePromptNow = useCallback(async (node: CanvasContentNode) => {
     if (node.type !== 'image' || !node.data.current_version_id) {
       setError('请选择一个已有内容的图片节点再反推提示词。');
       return;
@@ -3521,6 +3633,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
+  const reversePrompt = useCallback((node: CanvasContentNode): Promise<void> => queueSubmission(node.id, () => reversePromptNow(node), undefined), [queueSubmission, reversePromptNow]);
 
   const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
     const current = latestDocument.current;
@@ -3549,7 +3662,7 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([stack.id]));
   }, [commit, keys]);
 
-  const submitLayerDecomposition = useCallback(async (nodeId: string) => {
+  const submitLayerDecompositionNow = useCallback(async (nodeId: string) => {
     const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
     if (node?.type !== 'layer_stack' || node.data.base_version_id) {
       setError('这个拆分图层节点已不可提交。');
@@ -3597,6 +3710,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
+  const submitLayerDecomposition = useCallback((nodeId: string): Promise<void> => queueSubmission(nodeId, () => submitLayerDecompositionNow(nodeId), undefined), [queueSubmission, submitLayerDecompositionNow]);
 
   // 已完成的拆分节点不能再提交：改提示词重拆 = 从同一张来源图新建一个拆分节点放在下方并立即提交。
   const rerunLayerDecomposition = useCallback(async (
@@ -4716,7 +4830,7 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const upscaleImage = useCallback(async (node: CanvasContentNode, target: CanvasUpscaleTarget) => {
+  const upscaleImageNow = useCallback(async (node: CanvasContentNode, target: CanvasUpscaleTarget) => {
     if (runSubmissionInFlight.current) return;
     setPreview(null);
     setSubmittingNodeIds(current => new Set(current).add(node.id));
@@ -4762,6 +4876,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
+  const upscaleImage = useCallback((node: CanvasContentNode, target: CanvasUpscaleTarget): Promise<void> => queueSubmission(node.id, () => upscaleImageNow(node, target), undefined), [queueSubmission, upscaleImageNow]);
 
   const executeMediaOperation = useCallback(async (
     target: { nodeId: string; versionId: string },
@@ -5385,6 +5500,7 @@ function CanvasEditorInner({
     convertVideoFrameConnections,
     mattingAvailable,
     deleteNodes,
+    queuedNodeIds,
     selectNode: selectOnlyNode,
     previewContent,
     previewLayerStack,
@@ -5523,6 +5639,7 @@ function CanvasEditorInner({
     convertVideoFrameConnections,
     mattingAvailable,
     deleteNodes,
+    queuedNodeIds,
     submitLayerDecomposition,
     rerunLayerDecomposition,
     submitRun,
@@ -5816,10 +5933,6 @@ function CanvasEditorInner({
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center p-6">
             <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-glass p-6 text-center backdrop-blur-glass shell-glow">
               <p className="text-sm font-medium text-foreground">画布还是空的</p>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                从一个节点开始：文本节点写提示词，空的图片 / 视频节点填生成设置，
-                或者把本地素材直接拖进画布。节点之间连线，输出就会成为下一步的输入。
-              </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => addTextNode(null)}>
                   <TextIcon aria-hidden="true" />文本节点
@@ -5942,7 +6055,7 @@ function CanvasEditorInner({
 
         <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-start gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-            <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><BackIcon /></Button>
+            <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => leaveCanvas(onBack)}><BackIcon /></Button>
             <div className="h-6 w-px bg-border" />
             <div className="flex min-w-0 items-center">
                 <EditableText
@@ -5965,7 +6078,7 @@ function CanvasEditorInner({
                       value={projectId}
                       onValueChange={value => {
                         if (value === projectId) return;
-                        void persistNow().then(saved => { if (saved) onSwitchProject(value); });
+                        leaveCanvas(() => onSwitchProject(value));
                       }}
                     >
                       {projects.map(project => (
@@ -6051,42 +6164,76 @@ function CanvasEditorInner({
                 </DropdownMenu>
               </div>
           </div>
-          {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）；只有失败要露出来并给重试。 */}
-          {saveState === 'error' && (
+          {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）。失败后先静默退避重试，1.5s 后才露出
+              中性胶囊；15s 或连续 4 次仍不成转警示色并给「立即重试」（规格 2.4）。原因在 Hint 里。 */}
+          {saveState === 'error' && (saveRetryPhase === 'retrying' || saveRetryPhase === 'stuck') && (
             <div
               aria-live="polite"
-              className="pointer-events-auto max-w-24 truncate rounded-full border border-destructive/40 bg-glass px-3 py-2 text-xs text-destructive backdrop-blur-glass shell-glow sm:max-w-none"
+              className={cn(
+                'pointer-events-auto flex max-w-40 items-center gap-2 truncate rounded-full border bg-glass py-1 pl-3 pr-1 text-xs backdrop-blur-glass shell-glow sm:max-w-none',
+                saveRetryPhase === 'stuck' ? 'border-destructive/40 text-destructive' : 'border-border text-muted-foreground',
+              )}
             >
-              {/* 原文案是「保存冲突，内容已保留」。它把所有失败都说成冲突，还向用户保证内容没事——
-                  实际是本地已经和服务端分叉，之后的编辑都不落盘。这里只说失败，并给出重试入口。 */}
-              <Hint label={saveErrorDetail ?? undefined}><Button variant="bare"
-                type="button"
-                className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
-                onClick={() => void flushSave().catch(() => undefined)}
-              >
-                保存失败 · 重试
-              </Button></Hint>
+              <Hint label={saveErrorDetail ?? undefined}><span>{saveRetryPhase === 'stuck' ? '保存失败' : '保存重试中…'}</span></Hint>
+              {saveRetryPhase === 'stuck' && (
+                <Button variant="ghost" size="sm" className="h-7 rounded-full px-2.5 text-xs"
+                  onClick={() => void flushSave().catch(() => undefined)}>立即重试</Button>
+              )}
             </div>
           )}
           <AnimatePresence initial={false}>
           {runningNodeIds.length > 0 && (
             <CanvasChromeFade key="running" className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-              <Hint label="定位到生成中的节点"><Button
-                variant="ghost"
-                className="h-9 gap-2 px-3 font-normal"
-                onClick={() => {
-                  void runViewportCommand(() => fitView({
-                    nodes: runningNodeIds.map(id => ({ id })),
-                    duration: viewportMotionMs(MOTION_DURATION.fast),
-                    padding: 0.4,
-                    maxZoom: 1,
-                  }));
-                }}
-              >
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
-                生成中
-                <span className="text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
-              </Button></Hint>
+              {/* 「生成中 N」展开进行中的清单：逐项定位 / 停止，另有「全部停止」止损（批量提交后发现提示词写错）。 */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" className="h-9 gap-2 px-3 font-normal" aria-label={`生成中 ${runningNodeIds.length} 项`}>
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
+                    生成中
+                    <span className="text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-72 p-1">
+                  <div role="list" aria-label="生成中的节点" className="max-h-72 overflow-y-auto">
+                    {runningNodeIds.map(nodeId => {
+                      const node = document.nodes.find(item => item.id === nodeId);
+                      const job = node ? canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).job : undefined;
+                      const runId = job?.canvas_run?.run_id;
+                      return (
+                        <div key={nodeId} role="listitem" className="flex items-center gap-1 rounded-md pl-2 hover:bg-secondary/60">
+                          <Button variant="ghost" size="sm" className="h-8 min-w-0 flex-1 justify-start px-0 font-normal"
+                            onClick={() => void runViewportCommand(() => fitView({
+                              nodes: [{ id: nodeId }],
+                              duration: viewportMotionMs(MOTION_DURATION.fast),
+                              padding: 0.4,
+                              maxZoom: 1,
+                            }))}>
+                            <span className="truncate">{node?.title ?? nodeId}</span>
+                          </Button>
+                          {runId && (
+                            <Hint label={job?.cancel_requested_at ? '停止中…' : '停止'}><Button variant="ghost" size="icon" className="size-8 shrink-0"
+                              aria-label={`停止 ${node?.title ?? ''} 的生成`} disabled={Boolean(job?.cancel_requested_at)}
+                              onClick={() => void cancelRun(runId)}>
+                              <StopIcon size="sm" aria-hidden="true" />
+                            </Button></Hint>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1 border-t border-border pt-1">
+                    <Button variant="ghost" size="sm" className="h-8 w-full justify-center text-destructive hover:text-destructive"
+                      onClick={() => {
+                        for (const nodeId of runningNodeIds) {
+                          const node = document.nodes.find(item => item.id === nodeId);
+                          const job = node ? canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).job : undefined;
+                          const runId = job?.canvas_run?.run_id;
+                          if (runId && !job?.cancel_requested_at) void cancelRun(runId);
+                        }
+                      }}>全部停止</Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </CanvasChromeFade>
           )}
           </AnimatePresence>
@@ -6124,13 +6271,14 @@ function CanvasEditorInner({
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><SelectIcon /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
-              <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><CompareIcon /></ToolButton>
+              {/* 按使用频率排：文本、图片、视频、上传，再是语音、音乐，低频的对比放最后。 */}
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><TextIcon /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><ImageFileIcon /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><VideoFileIcon /></ToolButton>
+              <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><UploadIcon /></ToolButton>
               <ToolButton label="添加语音节点" onClick={() => addGenerationNode('audio', null, 'speech')}><AudioFileIcon /></ToolButton>
               <ToolButton label="添加音乐节点" onClick={() => addGenerationNode('audio', null, 'music')}><MusicFileIcon /></ToolButton>
-              <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><UploadIcon /></ToolButton>
+              <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><CompareIcon /></ToolButton>
               <PluginCanvasActionItems hostPlugins={hostPlugins} onRun={runPluginCanvasAction} layout="toolbar" />
             </div>
           </div>
@@ -6302,7 +6450,7 @@ function CanvasEditorInner({
               }))}
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
-            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings/providers'); })}
+            onOpenKeySettings={() => leaveCanvas(() => setLocation('/settings/providers'))}
           />
           </CanvasSidePanelMotion>
         )}
