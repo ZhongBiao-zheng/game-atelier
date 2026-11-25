@@ -187,7 +187,9 @@ export function UpdateSettings() {
     <h2 id="updates-title" className="px-1 text-xs font-normal text-muted-foreground">版本更新</h2>
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4.5 py-3.5">
       <div className="space-y-1"><p className="text-sm">{state?.current}</p><p className={`text-xs ${status === 'blocked' || status === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>{label}</p></div>
-      <Button variant="outline" size="sm" disabled={checking || status === 'checking' || status === 'downloading' || state?.maintenance} onClick={() => void update.check()}>重新检查</Button>
+      {status === 'ready' && state?.to
+        ? <Button size="sm" disabled={state.maintenance} onClick={update.requestApply}>更新到 {state.to}</Button>
+        : <Button variant="outline" size="sm" disabled={checking || status === 'checking' || status === 'downloading' || state?.maintenance} onClick={() => void update.check()}>重新检查</Button>}
     </div>
   </section>;
 }

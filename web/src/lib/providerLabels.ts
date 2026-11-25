@@ -8,7 +8,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   openrouter: 'OpenRouter',
   evolink: 'EvoLink',
   auto: '智能路由',
-  atelier: '局域网',
+  atelier: '团队网关',
 };
 
 export function providerLabel(provider?: string | null, alias?: string | null): string {

@@ -168,6 +168,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
         initial={shownForm.initial}
         mode={shownForm.mode}
         autoDetect={shownForm.path === 'key'}
+        guided
         submitLabel={shownForm.mode === 'edit' ? '完成' : '保存并开始'}
         onCreated={onSaved}
         onCancel={() => { void settle(null); }}
