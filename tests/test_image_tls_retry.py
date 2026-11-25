@@ -61,7 +61,7 @@ def upstream(ctx, actions):
                 if action == "success":
                     conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
                 elif action == "redirect":
-                    conn.sendall(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n")
+                    conn.sendall(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 # For "sent", close immediately after the full POST body.
 
     with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
