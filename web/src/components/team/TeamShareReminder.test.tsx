@@ -9,6 +9,7 @@ import type { UserProfile } from '@/schema/teamLibrary';
 import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 import { TeamShareReminder, type TeamShareReminderHandle } from './TeamShareReminder';
+import { Toaster } from '@/components/ui/sonner';
 
 vi.mock('@/api/teamLibraries', () => ({
   fetchProfile: vi.fn(),
@@ -38,6 +39,7 @@ async function renderReminder() {
   const ref = createRef<TeamShareReminderHandle>();
   render(
     <Router hook={location.hook}>
+      <Toaster />
       <TeamShareReminder ref={ref} />
     </Router>,
   );

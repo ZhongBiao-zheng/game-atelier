@@ -16,6 +16,7 @@ import {
 import { OPEN_ANNOUNCEMENT_EVENT, useAnnouncements, type Announcement } from '@/lib/announcements';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { useScrollFade } from '@/components/ui/scroll-fade';
 
 export const OPEN_CHANGELOG_EVENT = 'atelier:open-changelog';
 
@@ -152,8 +153,8 @@ export function ChangelogButton() {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(false);
-  /** 正文还没滚到底 —— 底部加渐隐，明示下面还有版本 */
-  const [fade, setFade] = useState(false);
+  /** 正文上下边缘渐隐，明示上下还有版本；宽度随滚动连续收放，到头不跳。 */
+  const fadeRef = useScrollFade<HTMLDivElement>();
   const announcements = useAnnouncements();
 
   useEffect(() => {
@@ -190,12 +191,6 @@ export function ChangelogButton() {
       saveSeenVersion(CURRENT_VERSION);
       setOpen(true);
     }
-  }
-
-  /** 渐隐只在「能滚且没到底」时挂。ref 回调里也测一次，面板首次渲染就拿到正确状态。 */
-  function measure(el: HTMLDivElement | null) {
-    if (!el) return;
-    setFade(el.scrollHeight - el.scrollTop - el.clientHeight > 8);
   }
 
   return (
@@ -254,13 +249,9 @@ export function ChangelogButton() {
           <span className="tabular-nums text-xs text-muted-foreground">当前 v{CURRENT_VERSION}</span>
         </div>
         <div
-          ref={measure}
-          onScroll={(e) => measure(e.currentTarget)}
+          ref={fadeRef}
           data-testid="changelog-body"
-          className={[
-            'flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto stable-scroll px-5 pb-5 pt-4',
-            fade ? 'scroll-fade-b' : '',
-          ].join(' ')}
+          className="scroll-fade-y flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto stable-scroll px-5 pb-5 pt-4"
         >
           {buildFeed(announcements).map((item, position) =>
             item.kind === 'version' ? (

@@ -35,7 +35,7 @@ describe('App onboarding gate', () => {
     const { act } = await import('@testing-library/react');
     await act(async () => { render(<App />); });
     await act(async () => { await vi.advanceTimersByTimeAsync(31_000); });
-    expect(screen.getByText('正在重启…')).toBeInTheDocument();
+    expect(screen.getByText('重启中…')).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
     instance = 'rollback';
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
@@ -60,7 +60,7 @@ describe('App onboarding gate', () => {
     vi.stubGlobal('fetch', network);
     const { act } = await import('@testing-library/react');
     await act(async () => { render(<App />); });
-    expect(screen.getByText('加载中…')).toBeInTheDocument();
+    expect(screen.getByText('启动中…')).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByLabelText('作品集首页')).toBeInTheDocument();
   });

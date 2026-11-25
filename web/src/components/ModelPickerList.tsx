@@ -1,5 +1,5 @@
 import { WorkflowIcon } from '@/components/ui/icons';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { modelModality, type ModelModality } from '@/api/keys';
 import { modelBrand, modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
@@ -12,6 +12,8 @@ import { routeChannel } from '@/lib/modelRoutes';
 import { formatModelDuration } from '@/lib/modelMetricFormat';
 import { audioCapsOf } from '@/lib/audioCaps';
 import { Button } from '@/components/ui/button';
+import { useScrollFade } from '@/components/ui/scroll-fade';
+import { prefersReducedMotion } from '@/lib/motion';
 
 export function ModelPickerList({ choices, selected, initialKind, sections = false, params = {}, onSelect }: {
   choices: ModelPickerChoice[];
@@ -21,7 +23,9 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
   params?: Partial<Record<'image' | 'video', JobParams>>;
   onSelect: (choice: ModelPickerChoice) => void;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fadeRef = useScrollFade<HTMLDivElement>();
+  const attachScroll = useCallback((element: HTMLDivElement | null) => { scrollRef.current = element; fadeRef(element); }, [fadeRef]);
   const headers = useRef<Partial<Record<ModelModality, HTMLElement | null>>>({});
   const target = useRef<{ kind: ModelModality; top: number } | null>(null);
   const { durations, prices } = useModelPickerMetrics(choices, params);
@@ -42,7 +46,8 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
     const top = Math.max(0, Math.min(sectionTop(kind), container.scrollHeight - container.clientHeight));
     setActive(kind);
     target.current = smooth ? { kind, top } : null;
-    container.scrollTo?.({ top, behavior: smooth ? 'smooth' : 'instant' });
+    // 减弱动态效果时页签跳转直接到位，不平滑滚动。
+    container.scrollTo?.({ top, behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'instant' });
   }
   useLayoutEffect(() => { if (sections && initialKind) goTo(initialKind, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap(group => group.choices);
@@ -54,8 +59,8 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
         </TabsTrigger>)}
       </TabsList>
     </Tabs>}
-    <div ref={scrollRef} role="listbox" aria-label="选择模型列表" tabIndex={-1}
-      data-testid="model-picker-scroll" className="min-h-0 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1"
+    <div ref={attachScroll} role="listbox" aria-label="选择模型列表" tabIndex={-1}
+      data-testid="model-picker-scroll" className="scroll-fade-y min-h-0 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1"
       onWheel={() => { target.current = null; }} onTouchStart={() => { target.current = null; }}
       onScroll={() => {
         const container = scrollRef.current;

@@ -345,12 +345,68 @@
     }
   }
 
-  /* 可滚动区底部渐隐：明示「下面还有内容」。硬切边缘在暗底上尤其像内容被截断。
+  /* 可滚动区上下边缘渐隐：明示「上面 / 下面还有内容」。硬切边缘在暗底上尤其像内容被截断。
      用 mask 而不是渐变遮罩层——DESIGN.md 禁 bg-gradient，且遮罩层会挡住滚动条。
-     滚到底时调用方摘掉这个类，否则最后一行会一直半透明。 */
-  .scroll-fade-b {
-    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+     渐隐宽度由 ui/scroll-fade.ts 按离顶 / 离底的距离连续写入（最多 24px），滚到头时随滚动收成 0，
+     不靠增删类名硬切。 */
+  .scroll-fade-y {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--scroll-fade-top, 0px), #000 calc(100% - var(--scroll-fade-bottom, 0px)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--scroll-fade-top, 0px), #000 calc(100% - var(--scroll-fade-bottom, 0px)), transparent);
+  }
+
+  /* 内容区换内容（翻页、换详情、控制台换页）：新内容淡入，不位移。 */
+  @keyframes contentSwapIn {
+    from { opacity: 0; }
+  }
+  .content-swap-in {
+    animation: contentSwapIn var(--motion-fast) var(--ease-atelier-subtle);
+  }
+  /* 启动后主内容第一次出现：200ms 淡入，接住加载页。 */
+  .content-reveal {
+    animation: contentSwapIn var(--motion-base) var(--ease-atelier-subtle);
+  }
+  /* 慢一步才出现的进程文案（启动页「启动中…」）：300ms 内完成的加载一个字都不闪。
+     延迟写在 --reveal-delay 上，跨两个挂载点接力时调用方可传负值接着播。 */
+  .delayed-reveal {
+    animation: contentSwapIn var(--motion-base) var(--ease-atelier-subtle) var(--reveal-delay, 300ms) both;
+  }
+
+  /* 勾选框的勾、单选的圆点：缩放淡入、取消时缩回淡出。只在用户碰过控件之后播（data-touched），
+     打开一列已勾选的清单不会一起弹；Radix 的 Presence 会等退场动画播完再卸载。 */
+  @keyframes indicatorIn {
+    from { opacity: 0; transform: scale(var(--indicator-scale)); }
+  }
+  @keyframes indicatorOut {
+    to { opacity: 0; transform: scale(var(--indicator-scale)); }
+  }
+  .indicator-pop { --indicator-scale: 0.6; }
+  [data-touched] > .indicator-pop[data-state='checked'] {
+    animation: indicatorIn var(--motion-fast) var(--ease-atelier-out);
+  }
+  [data-touched] > .indicator-pop[data-state='unchecked'] {
+    animation: indicatorOut var(--motion-fast) var(--ease-atelier-subtle) forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .indicator-pop { --indicator-scale: 1; }
+  }
+
+  /* 提示（sonner）：自带 400ms 进退场改走动效 token；退场按通用规则更短。sonner 卸载前只等 200ms，进场不能超过 base。 */
+  [data-sonner-toaster] [data-sonner-toast] {
+    transition-duration: var(--motion-base);
+    transition-timing-function: var(--ease-atelier-out);
+  }
+  [data-sonner-toaster] [data-sonner-toast][data-removed='true'] {
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--ease-atelier-subtle);
+  }
+
+  /* 桌面版窗口失焦：顶栏整体降对比度，像原生窗口一样表明「不是当前窗口」；150ms 淡变。
+     data-window-inactive 由 AppShell 监听 window blur / focus 写在 <html> 上，只在桌面壳里写。 */
+  :root[data-shell] :is(.app-titlebar, .canvas-editor-top) {
+    transition: opacity var(--motion-fast) var(--ease-atelier-subtle);
+  }
+  :root[data-window-inactive] :is(.app-titlebar, .canvas-editor-top) {
+    opacity: 0.6;
   }
 
   /* 创作台历史区顶部渐隐：顶部的对话入口与筛选没有底，内容滚上去会和标题叠字。
@@ -1012,7 +1068,9 @@
   opacity: 0.55;
   pointer-events: none;
 }
-.accent-preset:hover .accent-swatch::before { translate: 6% -6%; }
+@media (hover: hover) {
+  .accent-preset:hover .accent-swatch::before { translate: 6% -6%; }
+}
 @media (prefers-reduced-motion: reduce) {
   .accent-swatch::before { transition: none; }
 }
@@ -1031,3 +1089,16 @@
 .gateway-quota::-webkit-progress-value { background: currentColor; border-radius: 999px; }
 .gateway-quota::-moz-progress-bar { background: currentColor; border-radius: 999px; }
 .gateway-running { background: color-mix(in srgb, var(--status-done) 14%, transparent); color: var(--status-done); }
+
+/* 深浅色 / 主题色切换（lib/theme.ts 的 transitionTheme）：整屏 200ms 交叉淡入；切换期间关掉元素自己的过渡，
+   新旧主题不会在同一屏混着出现。 */
+:root[data-theme-switching] *,
+:root[data-theme-switching] ::before,
+:root[data-theme-switching] ::after {
+  transition: none !important;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--motion-base);
+  animation-timing-function: var(--ease-atelier-subtle);
+}

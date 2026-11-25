@@ -15,9 +15,15 @@ RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
 export const RadioGroupItem = React.forwardRef<
   React.ElementRef<typeof RadioGroupPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>
->(({ className, ...props }, ref) => (
+>(({ className, onClick, onKeyDown, ...props }, ref) => {
+  // 圆点缩放淡入只在用户碰过之后播（.indicator-pop），进页面时已选中的项不弹。
+  const [touched, setTouched] = React.useState(false);
+  return (
   <RadioGroupPrimitive.Item
     ref={ref}
+    data-touched={touched ? '' : undefined}
+    onClick={event => { setTouched(true); onClick?.(event); }}
+    onKeyDown={event => { setTouched(true); onKeyDown?.(event); }}
     className={cn(
       'aspect-square size-4 shrink-0 cursor-pointer rounded-full border border-input bg-transparent text-primary transition-[color,box-shadow,border-color] disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary',
       FOCUS_RING,
@@ -26,9 +32,10 @@ export const RadioGroupItem = React.forwardRef<
     )}
     {...props}
   >
-    <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
+    <RadioGroupPrimitive.Indicator className="indicator-pop flex items-center justify-center">
       <span className="size-2 rounded-full bg-primary" />
     </RadioGroupPrimitive.Indicator>
   </RadioGroupPrimitive.Item>
-));
+  );
+});
 RadioGroupItem.displayName = RadioGroupPrimitive.Item.displayName;

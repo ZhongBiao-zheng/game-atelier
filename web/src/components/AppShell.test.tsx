@@ -292,7 +292,7 @@ describe('in-app update controls', () => {
       return respond(path, init);
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     expect(screen.queryByRole('button', { name: '取消更新' })).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByRole('dialog')).toHaveTextContent('1 个 Agent 操作待确认');
@@ -317,7 +317,7 @@ describe('in-app update controls', () => {
     expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).instance).toBe('new');
     view.unmount();
     await renderUpdater();
-    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     network.mockImplementation(async (path: string) => new Response(JSON.stringify(path === '/api/connection/status'
@@ -335,14 +335,14 @@ describe('in-app update controls', () => {
     expect(screen.getByText('系统拒绝运行新版')).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重新检查' })); });
     expect(network.mock.calls.some(([path, init]) => path === '/api/update/check' && init?.method === 'POST')).toBe(true);
-    expect(screen.getByText('正在检查…')).toBeInTheDocument();
+    expect(screen.getByText('检查中…')).toBeInTheDocument();
   });
   it.each([false, true])('uses the %s service-mode restart budget, then clears persisted progress', async service => {
     updateServer();
     sessionStorage.setItem('atelier:pending-update', JSON.stringify({ id: 'update-one', instance: 'old', to: '5.130.0', service,
       restartAt: Date.now() - (service ? 6 : 4) * 60_000 }));
     await renderUpdater();
-    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     await act(async () => { await vi.advanceTimersByTimeAsync(62_000); });
     expect(screen.getByRole('alert')).toHaveTextContent('服务没有自动恢复，请双击启动器');
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();

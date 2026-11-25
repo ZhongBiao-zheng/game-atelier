@@ -1,10 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useLocation } from 'wouter';
 import { HEARTBEAT_MS, localConnection, useConnectionState } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
+import { StartupScreen } from '@/components/StartupScreen';
+import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 
+/** 断线条的出现延迟：网络抖一下就恢复时不闪条。 */
+const OUTAGE_NOTICE_DELAY_MS = 400;
 export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const connection = useConnectionState();
@@ -33,6 +38,15 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
     };
   }, []);
   useEffect(() => { if (ready) setActivated(true); }, [ready]);
+  // 断线条：自动恢复中的短暂断线先等 400ms，抖一下就好了不出条；已暂停（需要用户处理）立刻出。
+  const outage = activated && !ready;
+  const [outageNotice, setOutageNotice] = useState(false);
+  useEffect(() => {
+    if (!outage) { setOutageNotice(false); return; }
+    if (!busy) { setOutageNotice(true); return; }
+    const timer = setTimeout(() => setOutageNotice(true), OUTAGE_NOTICE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [outage, busy]);
   useEffect(() => {
     if (!blocked) return;
     // 画布的系统菜单粘贴可能以 body 为目标，不能只依赖 React 子树捕获。
@@ -107,27 +121,30 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         onBeforeInputCapture={preventEditing} onDropCapture={preventEditing} onSubmitCapture={preventEditing}>
         {activated && children}
       </fieldset>
-      {!activated && <main data-connection-controls className="flex min-h-dvh items-center justify-center p-6">
-        <div className="max-w-md space-y-3 text-center">
-          <p role="status" className="text-sm text-pretty">{busy ? '正在启动Atelier…' : '暂时无法连接Atelier服务'}</p>
-          {!busy && <>
-            <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
-            <div className="flex justify-center gap-2">
-              <Button onClick={reconnect}>重试</Button>
-            </div>
-          </>}
-        </div>
-      </main>}
-      {activated && !ready && <div
-        data-connection-controls
-        className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
-        style={{ marginTop: 'env(safe-area-inset-top)' }}>
-        <div role="status" className="min-w-0 flex-1">
-          <p className="text-pretty">{busy ? '正在恢复Atelier连接…' : 'Atelier服务连接已暂停'}</p>
-          <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>
-        </div>
-        {!busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}
-      </div>}
+      {!activated && <StartupScreen label={busy ? '启动中…' : '暂时无法连接Atelier服务'}>
+        {!busy && <>
+          <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
+          <div className="flex justify-center gap-2">
+            <Button onClick={reconnect}>重试</Button>
+          </div>
+        </>}
+      </StartupScreen>}
+      <AnimatePresence>
+        {outage && outageNotice && <motion.div
+          key="outage"
+          data-connection-controls
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+          exit={{ opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+          className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
+          style={{ marginTop: 'env(safe-area-inset-top)' }}>
+          <div role="status" className="min-w-0 flex-1">
+            <p className="text-pretty">{busy ? '恢复连接中…' : 'Atelier服务连接已暂停'}</p>
+            <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>
+          </div>
+          {!busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}
+        </motion.div>}
+      </AnimatePresence>
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
           （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
           画布编辑器没有顶栏，仍居中。 */}

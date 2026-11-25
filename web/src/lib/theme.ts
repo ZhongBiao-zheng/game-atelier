@@ -23,8 +23,28 @@ export function applyTheme(theme: ThemePreference) {
 }
 export function setTheme(theme: ThemePreference) {
   window.localStorage.setItem(KEY, theme);
-  applyTheme(theme);
+  transitionTheme(() => applyTheme(theme));
   window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+type ViewTransitionDocument = Document & { startViewTransition?: (update: () => void | Promise<void>) => { finished: Promise<void> } };
+
+/** 深浅色、主题色切换：浏览器支持 View Transition 时整屏 200ms 交叉淡入（tokens.css 的 ::view-transition 规则）；
+ *  不支持或系统要求减弱动态效果时一次到位。两种情况下切换那一帧都关掉元素自己的 transition——
+ *  否则带 transition-colors 的按钮慢慢变色、其余瞬切，同一屏新旧主题混着出现。 */
+export function transitionTheme(update: () => void | Promise<void>) {
+  const root = document.documentElement;
+  const reduced = typeof window.matchMedia !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const start = (document as ViewTransitionDocument).startViewTransition;
+  root.setAttribute('data-theme-switching', '');
+  const settle = () => requestAnimationFrame(() => requestAnimationFrame(() => root.removeAttribute('data-theme-switching')));
+  if (start && !reduced) {
+    void start.call(document, update).finished.finally(settle);
+    return;
+  }
+  const pending = update();
+  if (pending) void pending.finally(settle);
+  else settle();
 }
 function subscribeTheme(onStoreChange: () => void) {
   const handleStorage = (event: StorageEvent) => {

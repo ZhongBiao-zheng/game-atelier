@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpIcon, CloseIcon } from '@/components/ui/icons';
 import { applyUpdate, cancelUpdate, checkUpdate, fetchUpdateResult, fetchUpdateState, probeUpdateInstance, readPendingUpdate, savePendingUpdate, updateRecoveryExpired, updateNavigation, type PendingUpdate, type UpdateState } from '@/api/update';
 import { ApiError } from '@/api/http';
@@ -7,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { OPEN_CHANGELOG_EVENT } from '@/components/ChangelogButton';
 import { Hint } from '@/components/ui/tooltip';
+import { useRetained } from '@/components/ui/retained';
+import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 
 const reason = (error: unknown) => error instanceof ApiError ? error.reason ?? error.message : error instanceof Error ? error.message : '更新失败，请重试';
 const releaseUrl = (version: string) => `https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v${encodeURIComponent(version)}`;
@@ -113,11 +116,12 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
     finally { setChecking(false); }
   }
   const mode = state?.runtime_mode ?? (runtimeMode === 'bundle' ? 'legacy_bundle' : 'source');
-  // 结果到达后弹窗还在退场动画里：沿用最后一次的事务，否则会闪出「等待 0 个任务 / 正在更新到 …」。
+  // 结果到达后弹窗还在退场动画里：沿用最后一次的事务，否则会闪出「等待 0 个任务 / 更新到 … 中」。
   const shownPending = useRef(pending);
   if (pending) shownPending.current = pending;
   const shown = pending ?? shownPending.current;
   const restarting = Boolean(shown?.restartAt);
+  const shownMessage = useRetained(message);
   return <UpdateContext.Provider value={{ state, mode, latest: latestRelease, requestApply: () => setConfirm(true), check, checking }}>
     {children}
     <Dialog open={confirm} onOpenChange={value => { if (!submitting) setConfirm(value); }}>
@@ -130,15 +134,22 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
     </Dialog>
     <Dialog open={Boolean(pending)}>
       <DialogContent hideClose data-connection-controls onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
-        <DialogTitle>{restarting ? '正在重启…' : `等待 ${state?.waiting ?? 0} 个任务完成`}</DialogTitle>
-        <DialogDescription>正在更新到 {shown?.to}…</DialogDescription>
+        <DialogTitle>{restarting ? '重启中…' : `等待 ${state?.waiting ?? 0} 个任务完成`}</DialogTitle>
+        <DialogDescription>更新到 {shown?.to} 中…</DialogDescription>
         {!restarting && Boolean(state?.waiting_counts?.approvals) && <p className="text-sm text-muted-foreground">{state?.waiting_counts?.approvals} 个 Agent 操作待确认</p>}
         {!restarting && <div className="flex justify-end"><Button variant="outline" onClick={() => void cancel()}>取消更新</Button></div>}
       </DialogContent>
     </Dialog>
-    {message && createPortal(<div data-connection-controls role="alert" className="fixed inset-x-3 bottom-6 z-50 mx-auto flex w-fit max-w-lg items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 text-sm">
-      <span>{message}</span><Button variant="bare" type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><CloseIcon aria-hidden /></Button>
-    </div>, document.body)}
+    {/* 提示条要在连接闸门禁用业务界面时也能关，所以不走 Toaster（它在闸门的 fieldset 里），自己挂到 body 并补进出场。 */}
+    {createPortal(<AnimatePresence>
+      {message && <motion.div key="update-message" data-connection-controls role="alert"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+        exit={{ opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+        className="fixed inset-x-3 bottom-6 z-50 mx-auto flex w-fit max-w-lg items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 text-sm">
+        <span>{shownMessage}</span><Button variant="bare" type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><CloseIcon aria-hidden /></Button>
+      </motion.div>}
+    </AnimatePresence>, document.body)}
   </UpdateContext.Provider>;
 }
 
@@ -160,8 +171,8 @@ export function UpdateSettings() {
   if (!update || update.mode !== 'bundle') return null;
   const { state, checking } = update;
   const status = state?.status;
-  const label = status === 'downloading' ? `正在下载${state?.bytes ? ` · ${(state.bytes / 1024 / 1024).toFixed(1)} MB` : ''}`
-    : status === 'checking' || checking ? '正在检查…' : status === 'ready' ? `新版本 ${state?.to} 已就绪`
+  const label = status === 'downloading' ? `下载中…${state?.bytes ? ` · ${(state.bytes / 1024 / 1024).toFixed(1)} MB` : ''}`
+    : status === 'checking' || checking ? '检查中…' : status === 'ready' ? `新版本 ${state?.to} 已就绪`
       : state?.reason || '已是最新版本';
   return <section id="updates" aria-labelledby="updates-title" className="space-y-2">
     <h2 id="updates-title" className="px-1 text-xs font-normal text-muted-foreground">版本更新</h2>

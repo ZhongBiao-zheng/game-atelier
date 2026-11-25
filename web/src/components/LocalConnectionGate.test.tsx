@@ -137,7 +137,10 @@ describe('local connection gate', () => {
     vi.useFakeTimers();
     network.mockRejectedValue(new TypeError('Failed to fetch'));
     await act(async () => { await connectionFetch('/api/config', { method: 'PUT' }).catch(() => {}); });
-    expect(screen.getByText('正在恢复Atelier连接…')).toBeInTheDocument();
+    // 自动恢复中的断线先等 400ms 才出条，抖一下就恢复时不闪。
+    expect(screen.queryByText('恢复连接中…')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getByText('恢复连接中…')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(editor).toHaveValue('尚未保存的手稿');
     server();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });

@@ -5,6 +5,7 @@ import { FirstRunGuide } from './pages/onboarding/FirstRunGuide';
 import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
 import { LocalConnectionGate } from '@/components/LocalConnectionGate';
+import { StartupScreen } from '@/components/StartupScreen';
 import { ApiError } from '@/api/http';
 import { probeUpdateInstance, readPendingUpdate, savePendingUpdate, updateNavigation, updateRecoveryExpired } from '@/api/update';
 
@@ -72,14 +73,13 @@ function ConnectedApp() {
       </div>
     );
   }
-  if (!state) {
-    return (
-      <div className="grid h-screen place-items-center bg-background text-muted-foreground">
-        <span className="font-display text-display italic">{readPendingUpdate() ? '正在重启…' : '加载中…'}</span>
-      </div>
-    );
-  }
+  if (!state) return <StartupScreen label={readPendingUpdate() ? '重启中…' : '启动中…'} />;
 
+  // 主内容第一次出现时 200ms 淡入，接住启动页；之后在引导与主界面之间切换不再重播。
+  return <div className="content-reveal">{connectedView(state, reload)}</div>;
+}
+
+function connectedView(state: OnboardingState, reload: () => void) {
   switch (state.status) {
     case 'needs_data_root':
       return <DataRootPage onComplete={reload} />;

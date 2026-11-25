@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AddIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, LoadingIcon } from '@/components/ui/icons';
 
 import { listKeys, patchKey, previewModels, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { RevealImage } from '@/components/ui/reveal-image';
+import { useRetained } from '@/components/ui/retained';
 import {
   KEYS_CHANGED_EVENT,
   OPEN_ANNOUNCEMENT_EVENT,
@@ -55,17 +58,19 @@ export function AnnouncementHost() {
     return () => window.removeEventListener(OPEN_ANNOUNCEMENT_EVENT, open);
   }, [announcements]);
 
-  if (!announcement) return null;
-  const siblings = announcementsInSameRelease(announcement, announcements);
-  const index = siblings.findIndex(item => item.id === announcement.id);
+  // 关闭后沿用最后一条公告的内容，让退场动画带着原内容播完。
+  const shown = useRetained(announcement);
+  if (!shown) return null;
+  const siblings = announcementsInSameRelease(shown, announcements);
+  const index = siblings.findIndex(item => item.id === shown.id);
   const step = (offset: -1 | 1) => {
     const target = siblings[index + offset];
     return target ? () => setOpenedId(target.id) : undefined;
   };
   return (
     <AnnouncementDialog
-      key={announcement.id}
-      announcement={announcement}
+      open={Boolean(announcement)}
+      announcement={shown}
       pager={siblings.length > 1 ? { index, total: siblings.length, onPrevious: step(-1), onNext: step(1) } : undefined}
       onClose={() => {
         markAnnouncementsSeen(announcements);
@@ -83,10 +88,37 @@ export interface AnnouncementPager {
   onNext?: () => void;
 }
 
-export function AnnouncementDialog({ announcement, pager, onClose }: {
+/** 公告弹窗。翻页只换内容区（按公告 id 重挂、淡入），弹窗与遮罩不动，翻页时遮罩不会亮一下。 */
+export function AnnouncementDialog({ open = true, announcement, pager, onClose }: {
+  open?: boolean;
   announcement: Announcement;
   pager?: AnnouncementPager;
   onClose: () => void;
+}) {
+  const paged = useRef(false);
+  const firstId = useRef(announcement.id);
+  if (announcement.id !== firstId.current) paged.current = true;
+  return (
+    <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
+      <DialogContent hideClose className="max-w-md gap-0 overflow-hidden p-0">
+        <DialogClose
+          aria-label="关闭"
+          className="absolute right-5 top-5 z-10 grid size-8 place-items-center rounded-full bg-scrim text-white backdrop-blur-glass transition-colors hover:bg-scrim/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <CloseIcon aria-hidden="true" />
+        </DialogClose>
+        <AnnouncementBody key={announcement.id} announcement={announcement} pager={pager} onClose={onClose}
+          className={paged.current ? 'content-swap-in' : undefined} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AnnouncementBody({ announcement, pager, onClose, className }: {
+  announcement: Announcement;
+  pager?: AnnouncementPager;
+  onClose: () => void;
+  className?: string;
 }) {
   const [step, setStep] = useState<Step>({ kind: 'intro' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -152,20 +184,12 @@ export function AnnouncementDialog({ announcement, pager, onClose }: {
   }
 
   return (
-    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
-      <DialogContent hideClose className="max-w-md gap-0 overflow-hidden p-0">
-        <DialogClose
-          aria-label="关闭"
-          className="absolute right-5 top-5 z-10 grid size-8 place-items-center rounded-full bg-scrim text-white backdrop-blur-glass transition-colors hover:bg-scrim/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <CloseIcon aria-hidden="true" />
-        </DialogClose>
-
+      <div className={className}>
         {(step.kind === 'intro' || step.kind === 'scanning') && (
           <>
             {/* 卡片式（Mobbin：Perplexity / Recraft）：图片铺满顶部，圆角交给外框 overflow-hidden 裁。 */}
             {!imageFailed && (
-              <img
+              <RevealImage
                 src={announcement.imageUrl}
                 alt=""
                 className="aspect-video w-full bg-secondary object-cover"
@@ -197,7 +221,9 @@ export function AnnouncementDialog({ announcement, pager, onClose }: {
                   </div>
                 )}
                 <Button size="sm" className="shrink-0" disabled={step.kind === 'scanning'} onClick={() => void scan()}>
-                  {step.kind === 'scanning' ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AddIcon aria-hidden="true" />}
+                  <SwapIcon swapKey={step.kind === 'scanning'}>
+                    {step.kind === 'scanning' ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AddIcon aria-hidden="true" />}
+                  </SwapIcon>
                   <SwapLabel active={step.kind === 'scanning'} on="查找中…" off="快速添加" />
                 </Button>
               </div>
@@ -252,7 +278,6 @@ export function AnnouncementDialog({ announcement, pager, onClose }: {
             </DialogFooter>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
   );
 }

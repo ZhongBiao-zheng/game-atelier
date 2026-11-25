@@ -11,7 +11,7 @@ import {
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { toast as showToast, Toaster } from '@/components/ui/sonner';
+import { toast as showToast } from '@/components/ui/sonner';
 
 /** AppShell 持有句柄：SSE `team-library-changed` 交给 notify，SSE（重）连上时 refreshProfile。 */
 export interface TeamShareReminderHandle {
@@ -26,7 +26,6 @@ const MERGE_THRESHOLD = 3;
 const MAX_SINGLE_TOASTS = 3;
 const VISIBLE_MS = 8000;
 const THUMB_WIDTH = 96;
-const TOASTER_ID = 'team-reminder';
 /** sonner 的提示是模块级状态：id 带上实例序号，重新挂载时不会撞上上一个实例留下的同名提示。 */
 let instanceSeq = 0;
 
@@ -186,7 +185,7 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
     for (const item of toasts) {
       shownRef.current.add(item.id);
       showToast.custom(() => <ReminderCard toast={item} onAction={runAction} onClose={() => dismiss(item.id)} />, {
-        id: toastKey(item.id), toasterId: TOASTER_ID, duration: Infinity, unstyled: true,
+        id: toastKey(item.id), duration: Infinity, unstyled: true,
         onDismiss: () => dismiss(item.id),
       });
     }
@@ -201,8 +200,8 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
     };
   }, [toastKey]);
 
-  // 右上角、顶栏（lg:h-20）下方：避开 Studio 底部输入壳与画布右下的批量结果 / MiniMap。
-  return <Toaster id={TOASTER_ID} position="top-right" offset={{ top: 96, right: 16 }} gap={8} expand visibleToasts={MAX_SINGLE_TOASTS + 1} />;
+  // 呈现走全站唯一的 Toaster（AppShell 挂载）。
+  return null;
 });
 
 function ReminderCard({ toast, onAction, onClose }: {

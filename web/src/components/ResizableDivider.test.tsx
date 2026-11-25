@@ -6,6 +6,8 @@ import { ResizableDivider } from './ResizableDivider';
 beforeEach(() => {
   // jsdom 不实现 pointer capture
   Element.prototype.setPointerCapture = vi.fn();
+  // 回调按帧合并：测试里让帧立即到来
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 0; });
 });
 
 function setup(props: Partial<Parameters<typeof ResizableDivider>[0]> = {}) {

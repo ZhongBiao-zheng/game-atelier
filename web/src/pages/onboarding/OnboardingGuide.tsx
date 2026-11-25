@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { checkComfyUI } from '@/api/comfyui';
 import { getChatGPTSubscription, listKeys, type ChatGPTSubscriptionStatus, type KeyCreatePayload, type KeyView } from '@/api/keys';
 import { recordOnboardingEvent, type OnboardingPath } from '@/api/onboarding';
@@ -6,6 +6,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { Button } from '@/components/ui/button';
 import { BackIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, HelpIcon } from '@/components/ui/icons';
 import { Hint } from '@/components/ui/tooltip';
+import { useRetained } from '@/components/ui/retained';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { RECOMMENDED_PROVIDERS, hasUsableModel, type GuideSource, type GuideStepId, type GuideVendor, type RecommendedProvider } from '@/lib/onboardingGuide';
 import { cn } from '@/lib/utils';
@@ -38,6 +39,10 @@ function editInitial(key: KeyView): Partial<KeyCreatePayload> {
 export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDone: () => void }) {
   const [vendor, setVendor] = useState<RecommendedProvider | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
+  // 表单关闭后带着原内容播完退场；每份新表单换一个序号作 key，再打开同一条路径也是新表单。
+  const shownForm = useRetained(form);
+  const formSession = useRef<{ form: FormState | null; n: number }>({ form: null, n: 0 });
+  if (form && form !== formSession.current.form) formSession.current = { form, n: formSession.current.n + 1 };
   const [opened, setOpened] = useState<Set<GuideStepId>>(new Set());
   const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null | 'error'>(null);
   const [comfy, setComfy] = useState<'checking' | 'running' | 'stopped'>('checking');
@@ -90,7 +95,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
     void settle(form);
   };
 
-  const subscriptionLine = subscription === null ? '读取中…' : subscription === 'error' || !subscription.available
+  const subscriptionLine = subscription === null ? '加载中…' : subscription === 'error' || !subscription.available
     ? '未登录' : subscription.email ?? '已登录';
   const comfyLine = { checking: '检测中…', running: '运行中', stopped: '未运行' }[comfy];
 
@@ -130,13 +135,14 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
         </div>
       </> : <VendorSteps item={vendor} opened={opened} onBack={() => setVendor(null)}
         onOpenStep={step => openStep(vendor, step)} onPaste={() => openKeyForm(vendor)} />}
-      {form && <KeyForm
-        key={`${form.path}-${form.mode}`}
-        presetId={form.presetId}
-        initial={form.initial}
-        mode={form.mode}
-        autoDetect={form.path === 'key'}
-        submitLabel={form.mode === 'edit' ? '完成' : '保存并开始'}
+      {shownForm && <KeyForm
+        key={formSession.current.n}
+        open={Boolean(form)}
+        presetId={shownForm.presetId}
+        initial={shownForm.initial}
+        mode={shownForm.mode}
+        autoDetect={shownForm.path === 'key'}
+        submitLabel={shownForm.mode === 'edit' ? '完成' : '保存并开始'}
         onCreated={onSaved}
         onCancel={() => { void settle(null); }}
       />}

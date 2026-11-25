@@ -8,6 +8,7 @@ import { ChangelogButton } from '@/components/ChangelogButton';
 import { AtelierMark } from '@/components/AtelierMark';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
 import { DesktopDownloadNotice } from '@/components/DesktopDownloadNotice';
+import { Toaster } from '@/components/ui/sonner';
 import { useSSE } from '@/hooks/useSSE';
 import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
@@ -98,6 +99,25 @@ function AppShellContent() {
     window.addEventListener(DESKTOP_NAVIGATE_EVENT, navigate);
     return () => window.removeEventListener(DESKTOP_NAVIGATE_EVENT, navigate);
   }, [setLocation]);
+  useEffect(() => {
+    // 桌面版窗口失焦：<html> 写 data-window-inactive，顶栏降对比度（tokens.css）。焦点进了插件 iframe 不算失焦，
+    // blur 之后等一拍用 document.hasFocus() 判。浏览器里没有 data-shell，不监听。
+    const root = document.documentElement;
+    if (!root.dataset.shell) return;
+    let timer: number | undefined;
+    const sync = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => root.toggleAttribute('data-window-inactive', !document.hasFocus()), 0);
+    };
+    window.addEventListener('blur', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('blur', sync);
+      window.removeEventListener('focus', sync);
+      root.removeAttribute('data-window-inactive');
+    };
+  }, []);
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
@@ -176,6 +196,7 @@ function AppShellContent() {
       </ContentTag>
       {/* 窗口按钮旁的拖动把手，只在桌面版显示（沉浸式画布没有顶栏时靠它移动窗口）。 */}
       <div aria-hidden className="desktop-window-handle" />
+      <Toaster />
       <TeamShareReminder ref={reminderRef} />
       <DesktopDownloadNotice />
       <AnnouncementHost />
