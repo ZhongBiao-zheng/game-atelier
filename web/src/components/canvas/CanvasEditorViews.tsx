@@ -158,6 +158,7 @@ import {
   resolveCanvasGenerationDraft,
   canvasNodeHasHideableContent,
   type CanvasPendingInput,
+  canvasUpscaleAutoChoice,
 } from '@/pages/canvasEditorModel';
 import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
 import { SwapIcon } from '@/components/ui/swap-icon';
@@ -243,6 +244,10 @@ export interface CanvasNodeContextValue {
     targetNodeId: string,
     frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
   ) => void;
+  /** 本机能不能抠图（进画布时预取）；false 时工具条和配置候选里都不出现抠图。 */
+  mattingAvailable?: boolean;
+  /** 删除节点（走撤销栈并给撤销 toast），节点「更多」与右键菜单用。 */
+  deleteNodes?: (nodeIds: ReadonlySet<string>) => void;
   /** 切换视频生成方式时搬已有连线：全能参考 ↔ 首尾帧槽位。 */
   convertVideoFrameConnections?: (targetNodeId: string, toFrameSlots: boolean, maxFrames: number) => void;
   selectNode: (id: string) => void;
@@ -628,7 +633,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
   }
 
-  // 隐藏是固定按钮，排在「更多」之前，让「更多」落在工具条最右；图片节点的保存与分享收在「更多」里。
+  // 遮盖内容是固定按钮，排在「更多」之前；图片节点的遮盖、保存与分享收在「更多」里（U2）。
   const fixedToolbarButtons = (
     <>
       {isCanvasContentNode(node) && node.type !== 'image' && isSavableCanvasVersion(content) && (
@@ -641,12 +646,13 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           <ShareIcon />
         </MediaToolButton>
       )}
-      {(hasHideableContent || node.hidden) && <MediaToolButton
-        label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
-        text={node.hidden ? '显示' : '隐藏'}
+      {/* 遮盖后由内容区右上的「显示」按钮恢复，工具条上不再重复一个。 */}
+      {hasHideableContent && !node.hidden && <MediaToolButton
+        label={`遮盖 ${node.title} 的内容`}
+        text="遮盖内容"
         onClick={toggleHidden}
       >
-        <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <ShowIcon /> : <HideIcon />}</SwapIcon>
+        <HideIcon />
       </MediaToolButton>}
     </>
   );
@@ -761,7 +767,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {emptyMediaNode ? (
             <MediaToolButton
               label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
-              text="上传附件"
+              text="上传素材"
               disabled={replacingMedia}
               onClick={() => context.replaceMedia(emptyMediaNode)}
             >
@@ -786,11 +792,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
                         <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoadingIcon className="animate-spin" /> : <AiIcon />}</SwapIcon>
                       </MediaToolButton>
                     )}
-                    {fixedToolbarButtons}
                   </>
                 )}
                 onSave={isSavableCanvasVersion(content) ? () => void context.saveAsset(node) : undefined}
                 onShare={context.shareResult && isShareableCanvasVersion(content) ? () => context.shareResult?.(node) : undefined}
+                onToggleHidden={hasHideableContent || node.hidden ? toggleHidden : undefined}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
           ) : (
@@ -921,6 +927,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           >
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
+        )}
+        {node.hidden && (
+          <Hint label="显示内容"><Button variant="ghost" size="icon"
+            type="button"
+            aria-label={`显示 ${node.title} 的内容`}
+            className="nodrag absolute right-2 top-2 z-20 size-8 rounded-full border-border bg-glass text-muted-foreground backdrop-blur-glass hover:text-foreground"
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.stopPropagation();
+              toggleHidden();
+            }}
+          ><ShowIcon aria-hidden="true" /></Button></Hint>
         )}
         <div
           data-canvas-node-hidden={node.hidden ? 'true' : undefined}
@@ -1748,7 +1766,6 @@ function CanvasNodeToolbar({
   onEditText: () => void;
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
-  const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
   const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
   const plugins = usePlugins();
   // 文本节点工具栏上的插件按钮（清单 text_actions）：插件关闭时不出现。
@@ -1850,7 +1867,8 @@ function CanvasNodeToolbar({
       >
         <ShowIcon />
       </MediaToolButton>}
-      {content && content.kind !== 'text' ? (
+      {/* 空的媒体节点走外层「上传素材」那一支，到这里的都已有内容。 */}
+      {content && content.kind !== 'text' && (
         <MediaToolLink
           label={`下载 ${node.title}`}
           text="下载"
@@ -1858,20 +1876,6 @@ function CanvasNodeToolbar({
         >
           <DownloadIcon />
         </MediaToolLink>
-      ) : mediaNode ? (
-        <MediaToolButton label={`下载 ${node.title}`} text="下载" disabled onClick={() => undefined}>
-          <DownloadIcon />
-        </MediaToolButton>
-      ) : null}
-      {mediaNode && !content && (
-        <MediaToolButton
-          label={`上传到 ${node.title}`}
-          text="上传"
-          disabled={replacing}
-          onClick={() => context.replaceMedia(mediaNode)}
-        >
-          <SwapIcon swapKey={Boolean(replacing)}>{replacing ? <LoadingIcon className="animate-spin" /> : <ReplaceFileIcon />}</SwapIcon>
-        </MediaToolButton>
       )}
       {node.type === 'video' && (
         <MediaToolButton
@@ -1994,6 +1998,22 @@ function updateToolbarTabStops(controls: HTMLElement[], active: HTMLElement | nu
   });
 }
 
+const DELETE_KEY_HINT = /Mac/i.test(navigator.userAgent) ? '⌫' : 'Delete';
+
+/** AI高清某一档会用哪个模型：指定了就用指定的，否则按服务端同一规则自动选 Nano Banana。 */
+function upscaleModelName(context: CanvasNodeContextValue, target: CanvasUpscaleTarget): string | null {
+  const selection = context.canvasUiPreferences.upscale.tiers[target]?.selection;
+  const providers = context.generationProviders ?? context.keys;
+  if (selection) {
+    const key = providerForAlias(providers, selection.alias);
+    return key?.models.find(model => model.id === selection.model)?.name ?? selection.model;
+  }
+  const auto = CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.autoQuality
+    ? canvasUpscaleAutoChoice(context.keys)
+    : null;
+  return auto ? auto.model.name || auto.model.id : null;
+}
+
 type ImageToolbarAction = {
   id: CanvasImageQuickToolId;
   label: string;
@@ -2015,6 +2035,7 @@ function ImageNodeToolbar({
   context,
   onSave,
   onShare,
+  onToggleHidden,
   trailing,
   onOverlayOpenChange,
 }: {
@@ -2025,6 +2046,7 @@ function ImageNodeToolbar({
   context: CanvasNodeContextValue;
   onSave?: () => void;
   onShare?: () => void;
+  onToggleHidden?: () => void;
   /** 排在「更多」之前的固定按钮。 */
   trailing?: React.ReactNode;
   onOverlayOpenChange: (open: boolean) => void;
@@ -2050,7 +2072,9 @@ function ImageNodeToolbar({
   const resizeUnlocked = node.data.display.free_resize;
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
-  const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
+  // 本机不支持抠图时不列抠图，后面的工具顺延（默认顺延出裁剪）。
+  const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids)
+    .filter(definition => definition.id !== 'removeBackground' || context.mattingAvailable !== false);
   const actions = definitions.flatMap(definition => {
     const Icon = definition.icon;
     const common = { id: definition.id, text: definition.label };
@@ -2108,10 +2132,11 @@ function ImageNodeToolbar({
         icon: <Icon />,
         disabled: !currentVersionId || submitting || replacing || targets.length === 0,
         run: () => undefined,
+        // 一次点击即提交计费重绘：菜单上写清用哪个模型。
         menu: targets.map(target => ({
           id: target.id,
           title: target.id,
-          detail: `长边 ${target.longEdge}px`,
+          detail: upscaleModelName(context, target.id) ?? `长边 ${target.longEdge}px`,
           onSelect: () => context.upscaleImage(node, target.id),
         })),
       };
@@ -2150,8 +2175,23 @@ function ImageNodeToolbar({
 
   const layerActionDisabled = !currentVersionId || submitting || replacing;
   const compareSource = canvasCompareSource(imageContent, context.jobsByResultNodeId.get(node.id), context.resolveVersion);
-  const inlineActions = actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT);
-  const overflowActions = actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT);
+  const editDisabled = !currentVersionId || submitting || replacing;
+  // U2：外露局部修改 + 自定义工具条前 3 项 + 保存到资产（默认：局部修改、AI高清、抠图、下载、保存到资产），
+  // 其余一律进「更多」。
+  const inpaintAction: ImageToolbarAction = {
+    id: 'inpaint' as CanvasImageQuickToolId, label: `局部修改 ${node.title}`, text: '局部修改',
+    icon: <BrushIcon />, disabled: editDisabled, run: () => context.openMaskEdit(node, 'inpaint'),
+  };
+  const inlineActions = [inpaintAction, ...actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT)];
+  const overflowActions: ImageToolbarAction[] = [
+    ...actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT),
+    { id: 'annotate' as CanvasImageQuickToolId, label: `标注 ${node.title}`, text: '标注', icon: <EditIcon />,
+      disabled: editDisabled, run: () => context.annotationController?.start(node) },
+    { id: 'outpaint' as CanvasImageQuickToolId, label: `扩图 ${node.title}`, text: '扩图', icon: <OutpaintIcon />,
+      disabled: editDisabled, run: () => context.openMaskEdit(node, 'outpaint') },
+    { id: 'layers' as CanvasImageQuickToolId, label: `拆分 ${node.title} 的图层`, text: '拆分图层', icon: <LayersIcon />,
+      disabled: layerActionDisabled, run: () => context.createLayerDecomposition(node) },
+  ];
 
   function openSettings() {
     setSettingsError(context.canvasUiPreferencesError);
@@ -2223,38 +2263,16 @@ function ImageNodeToolbar({
           <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolButton>
       ))}
-      <MediaToolButton label={`标注 ${node.title}`} text="标注" disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.annotationController?.start(node)}><EditIcon /></MediaToolButton>
-      <MediaToolButton
-        label={`拆分 ${node.title} 的图层`}
-        text="拆分图层"
-        disabled={layerActionDisabled}
-        onClick={() => context.createLayerDecomposition(node)}
-      ><LayersIcon /></MediaToolButton>
-      <MediaToolButton
-        label={`局部修改 ${node.title}`}
-        text="局部修改"
-        disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.openMaskEdit(node, 'inpaint')}
-      ><BrushIcon /></MediaToolButton>
-      <MediaToolButton
-        label={`扩图 ${node.title}`}
-        text="扩图"
-        disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.openMaskEdit(node, 'outpaint')}
-      ><OutpaintIcon /></MediaToolButton>
-      {compareSource && context.createCompareNode && <MediaToolButton
-        label={`对比 ${node.title} 与原图`}
-        text="对比"
-        disabled={replacing}
-        onClick={() => context.createCompareNode?.(node, compareSource)}
-      ><CompareIcon /></MediaToolButton>}
+      {onSave && (
+        <MediaToolButton label={`保存 ${node.title}`} text="保存到资产" onClick={onSave}><SaveAssetIcon /></MediaToolButton>
+      )}
       {context.finalizeNode && <CanvasFinalizationMenu
         node={node} content={imageContent} context={context}
         disabled={!currentVersionId || replacing || submitting}
         onOverlayOpenChange={updateMenuOpen}
       />}
       {trailing}
+      <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border" />
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
           <MediaToolButton label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>
@@ -2299,17 +2317,24 @@ function ImageNodeToolbar({
               {action.icon}{action.text}
             </DropdownMenuItem>
           ))}
+          {compareSource && context.createCompareNode && (
+            <DropdownMenuItem aria-label={`对比 ${node.title} 与原图`} disabled={replacing} className="gap-2"
+              onSelect={() => context.createCompareNode?.(node, compareSource)}>
+              <CompareIcon />对比
+            </DropdownMenuItem>
+          )}
+          {onToggleHidden && (
+            <DropdownMenuItem aria-label={node.hidden ? `显示 ${node.title} 的内容` : `遮盖 ${node.title} 的内容`}
+              className="gap-2" onSelect={onToggleHidden}>
+              {node.hidden ? <ShowIcon /> : <HideIcon />}{node.hidden ? '显示内容' : '遮盖内容'}
+            </DropdownMenuItem>
+          )}
           {context.setPromptPreview && content?.kind === 'image' && (content.origin.kind === 'job_output' || content.origin.kind === 'layer_decomposition') && (
             <DropdownMenuItem onSelect={() => context.setPromptPreview?.(node)}><AddImageIcon />设为效果图</DropdownMenuItem>
           )}
-          {onSave && (
-            <DropdownMenuItem aria-label={`保存 ${node.title}`} className="gap-2" onSelect={onSave}>
-              <SaveAssetIcon />保存到资产
-            </DropdownMenuItem>
-          )}
           {onShare && (
             <DropdownMenuItem aria-label={`分享 ${node.title}`} className="gap-2" onSelect={onShare}>
-              <ShareIcon />分享
+              <ShareIcon />分享到团队库
             </DropdownMenuItem>
           )}
           {content?.kind === 'image' && context.createPluginNodeFromMedia && pluginImageActions.length > 0 && <>
@@ -2324,6 +2349,13 @@ function ImageNodeToolbar({
           <DropdownMenuItem aria-label="配置图片快捷工具" className="gap-2" onSelect={openSettings}>
             <ParamsIcon />自定义工具条
           </DropdownMenuItem>
+          {context.deleteNodes && <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem aria-label={`删除 ${node.title}`} className="gap-2 text-destructive"
+              onSelect={() => context.deleteNodes?.(new Set([node.id]))}>
+              <DeleteIcon />删除<span aria-hidden="true" className="ml-auto pl-4 font-mono text-xs text-muted-foreground">{DELETE_KEY_HINT}</span>
+            </DropdownMenuItem>
+          </>}
         </DropdownMenuContent>
       </DropdownMenu>
       <CanvasImageToolbarPreferencesDialog
@@ -3501,15 +3533,16 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
     { label, text, destructive = false, disabled = false, onClick, children, className, ...rest },
     ref,
   ) {
+    // U2：节点工具条一律纯图标，名字放在 Hint 里（aria-label 仍是带节点名的完整说法）。
     return (
-      <Hint label={label}><Button variant="bare"
+      <Hint label={text || label}><Button variant="bare"
         {...rest}
         ref={ref}
         type="button"
         aria-label={label}
         disabled={disabled}
         className={cn(
-          'nodrag flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
+          'nodrag grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
           destructive && 'hover:text-destructive',
           className,
         )}
@@ -3519,7 +3552,6 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
         }}
       >
         <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
-        <span className="text-xs">{text}</span>
       </Button></Hint>
     );
   },
@@ -3532,17 +3564,13 @@ function MediaToolLink({ label, text, href, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <Hint label={label}><a
+    <Hint label={text || label}><a
       href={href}
       aria-label={label}
-      className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        text ? 'gap-1 px-2' : 'w-7',
-      )}
+      className="nodrag grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       onClick={event => event.stopPropagation()}
     >
       <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
-      {text && <span className="text-xs">{text}</span>}
     </a></Hint>
   );
 }

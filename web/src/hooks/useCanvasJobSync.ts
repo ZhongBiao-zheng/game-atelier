@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getCanvasDocument, listCanvasJobs } from '@/api/canvas';
-import { useSSE } from '@/hooks/useSSE';
+import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import { acceptCanvasJobs, upsertCanvasJob } from '@/pages/canvasEditorModel';
 import type { CanvasDocument } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -26,13 +26,18 @@ export function useCanvasJobSync({
   mergeRunDocument,
   onError,
   onDocumentChanged,
+  onCanvasAgent,
 }: {
   projectId: string;
   mergeRunDocument: (remote: CanvasDocument, runIds: ReadonlySet<string>, nodeIds?: ReadonlySet<string>) => void;
   onError: (message: string) => void;
   /** 本项目的画布文档在服务端落盘（含 Agent 改动）→ 带上新 revision；由编辑器决定重载还是提示。 */
   onDocumentChanged?: (revision: number | null) => void;
+  /** 本项目画布 Agent 的会话事件；借这条常驻连接给 Agent 按钮的状态点用，不再另开一条 SSE。 */
+  onCanvasAgent?: (data: CanvasAgentEventPayload) => void;
 }): CanvasJobSync {
+  const onCanvasAgentRef = useRef(onCanvasAgent);
+  onCanvasAgentRef.current = onCanvasAgent;
   const onDocumentChangedRef = useRef(onDocumentChanged);
   onDocumentChangedRef.current = onDocumentChanged;
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -190,6 +195,9 @@ export function useCanvasJobSync({
         if (jobsEpoch.current !== epoch) return;
         setJobs(current => acceptCanvasJobs(current, canvasJobs));
       }, () => undefined);
+    },
+    onCanvasAgent: data => {
+      if (data.project_id === projectId) onCanvasAgentRef.current?.(data);
     },
     onJobChanged: data => {
       // job-changed 是全局广播，角色出图和 Studio 出图也会进来。认得的才拉。

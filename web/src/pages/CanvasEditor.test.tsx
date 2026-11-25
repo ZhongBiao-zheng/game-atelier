@@ -339,6 +339,8 @@ vi.mock('@/api/canvas', () => ({
   canvasMediaUrlAtWidth: vi.fn(() => '/media'),
   canvasThumbnailWidth: vi.fn(() => 1024),
   cancelCanvasRun: vi.fn(),
+  discardEmptyCanvasProject: vi.fn(async () => false),
+  listCanvasAgentSessions: vi.fn(async () => ({ sessions: [], corrupt_session_ids: [] })),
   createCanvasReversePromptConfig: vi.fn(),
   dismissCanvasCandidate: vi.fn(),
   getCanvasDocument: vi.fn(),
@@ -1111,7 +1113,9 @@ it('creates an editable layer-decomposition node before calling the model', asyn
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-source-image' }));
-  fireEvent.click(screen.getByRole('button', { name: '拆分 源图 的图层' }));
+  // U2：拆分图层在「更多」里。
+  fireEvent.keyDown(await screen.findByRole('button', { name: '源图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '拆分 源图 的图层' }));
 
   expect(await screen.findByLabelText('图层拆分设置')).toBeInTheDocument();
   expect(screen.getByRole('img', { name: '待拆分图片' })).toBeInTheDocument();
@@ -1232,7 +1236,7 @@ it('keeps the server-owned content hash when typing continues during a save', as
   expect(versionId).toBeTruthy();
 
   // 第一次保存还在飞，画师又改了一笔：排队的快照就此带着占位 sha256。
-  fireEvent.click(screen.getByRole('button', { name: '隐藏 文本 的内容' }));
+  fireEvent.click(screen.getByRole('button', { name: '遮盖 文本 的内容' }));
   releaseFirstSave();
 
   await waitFor(
@@ -2547,8 +2551,8 @@ it('saves a generated canvas result as a generation asset', async () => {
   vi.mocked(saveGenerationFromCanvas).mockResolvedValue(generationAsset);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
-  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
+  // U2：「保存到资产」外露在工具条上。
+  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
   fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
   await waitFor(() => expect(saveGenerationFromCanvas).toHaveBeenCalledWith(expect.objectContaining({
     canvas_project_id: 'canvas-one', node_id: 'result-image', version_id: 'v-generated',
@@ -2563,8 +2567,8 @@ it('saves an uploaded canvas image as a plain media asset', async () => {
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
   expect(screen.queryByRole('button', { name: '分享 成图' })).not.toBeInTheDocument();
-  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
+  // U2：「保存到资产」外露在工具条上。
+  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
   expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
   expect(saveGenerationFromCanvas).not.toHaveBeenCalled();
 });

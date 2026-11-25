@@ -342,7 +342,7 @@ it('shows plugin image actions only while the plugin is enabled', async () => {
   setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: false, manifest: null }]);
   const { rerender } = render(view());
   fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
-  await screen.findByRole('menuitem', { name: 'AI高清 图片' });
+  await screen.findByRole('menuitem', { name: '裁剪 图片' });
   expect(screen.queryByRole('menuitem', { name: plugin.contributes.image_actions[0].label })).toBeNull();
   fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
@@ -639,18 +639,18 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
   for (const label of ['删除 图片', '将 图片 存入资产库', '复制 图片 的生成提示词', '反推 图片 的提示词', '替换 图片']) {
     expect(within(toolbar).queryByRole('button', { name: label })).not.toBeInTheDocument();
   }
+  // U2：外露局部修改 + 自定义顺序的前 3 个快捷工具；其余快捷工具、拆分图层和工具条设置都在「更多」里。
+  expect(within(toolbar).getByRole('button', { name: '局部修改 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
-  expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
-  // 拆分图层占原「图生图」的位置，常驻工具条。
-  fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
-  expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
-  // 第 4 个之后的快捷工具和工具条设置都在「更多」里。
+  expect(within(toolbar).queryByRole('button', { name: '切分 图片' })).not.toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '拆分 图片 的图层' })).not.toBeInTheDocument();
   const moreButton = within(toolbar).getByRole('button', { name: '图片 的更多工具' });
   expect(within(toolbar).queryByRole('button', { name: 'AI高清 图片' })).not.toBeInTheDocument();
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   expect(await screen.findByRole('menuitem', { name: 'AI高清 图片' })).toBeInTheDocument();
-  expect(screen.queryByRole('menuitem', { name: '拆分 图片 的图层' })).not.toBeInTheDocument();
-  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+  expect(screen.getByRole('menuitem', { name: '切分 图片' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: '拆分 图片 的图层' }));
+  expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
   act(() => moreButton.focus());
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   fireEvent.click(await screen.findByRole('menuitem', { name: '配置图片快捷工具' }));
@@ -943,7 +943,7 @@ it('hide toggles the node hidden flag and flips the button label', () => {
       <NodeCard data={{ domain: written }} selected />
     </CanvasNodeContext.Provider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: '隐藏 文本 的内容' }));
+  fireEvent.click(screen.getByRole('button', { name: '遮盖 文本 的内容' }));
   expect(context.recordHistory).toHaveBeenCalled();
   const updater = (context.updateNode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as (node: CanvasNode) => CanvasNode;
   expect(updater(written).hidden).toBe(true);
@@ -973,7 +973,7 @@ it('offers hide on image edit, plugin and connected compare nodes', () => {
         <NodeCard data={{ domain: node }} selected />
       </CanvasNodeContext.Provider>,
     );
-    fireEvent.click(screen.getByRole('button', { name: `隐藏 ${node.title} 的内容` }));
+    fireEvent.click(screen.getByRole('button', { name: `遮盖 ${node.title} 的内容` }));
     const updater = (context.updateNode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as (item: CanvasNode) => CanvasNode;
     expect(updater(node).hidden).toBe(true);
     unmount();
@@ -987,7 +987,7 @@ it('does not offer hide on a compare node without images', () => {
       <NodeCard data={{ domain: compare }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.queryByRole('button', { name: '隐藏 对比 的内容' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '遮盖 对比 的内容' })).toBeNull();
 });
 
 it('keeps hide fixed before a trailing more menu that holds save and share for images', async () => {
@@ -1015,8 +1015,8 @@ it('keeps hide fixed before a trailing more menu that holds save and share for i
 
   const imageButtons = within(screen.getByRole('toolbar', { name: '图片 节点工具' })).getAllByRole('button')
     .map(button => button.getAttribute('aria-label'));
-  expect(imageButtons.slice(-2)).toEqual(['隐藏 图片 的内容', '图片 的更多工具']);
-  expect(imageButtons).not.toContain('保存 图片');
+  expect(imageButtons.slice(-2)).toEqual(['保存 图片', '图片 的更多工具']);
+  expect(imageButtons).not.toContain('遮盖 图片 的内容');
   expect(imageButtons).not.toContain('将 图片 存入资产库');
 
   const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
@@ -1026,9 +1026,11 @@ it('keeps hide fixed before a trailing more menu that holds save and share for i
   expect(within(textToolbar).getByRole('button', { name: '保存 文本' })).toBeInTheDocument();
   expect(within(textToolbar).queryByRole('button', { name: '分享 文本' })).not.toBeInTheDocument();
 
-  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 图片' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存 图片' }));
   expect(context.saveAsset).toHaveBeenCalledWith(generatedImage);
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  expect(await screen.findByRole('menuitem', { name: '遮盖 图片 的内容' })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
   fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
   fireEvent.click(await screen.findByRole('menuitem', { name: '分享 图片' }));
   expect(context.shareResult).toHaveBeenCalledWith(generatedImage);
@@ -1236,7 +1238,7 @@ it('ignores host_call image actions from plugins outside the host allowlist', as
   setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]);
   render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: image }} selected /></CanvasNodeContext.Provider>);
   fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
-  await screen.findByRole('menuitem', { name: 'AI高清 图片' });
+  await screen.findByRole('menuitem', { name: '裁剪 图片' });
   expect(screen.queryByRole('menuitem', { name: '冒充宿主' })).toBeNull();
   act(() => setPluginsSnapshot([]));
 });

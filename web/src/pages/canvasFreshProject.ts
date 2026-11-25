@@ -45,7 +45,7 @@ export function scheduleFreshCanvasProjectCleanup(
   window.setTimeout(() => {
     if (!freshProjectIds.has(projectId) || openEditors.has(projectId)) return;
     freshProjectIds.delete(projectId);
-    void discard(projectId)
+    void Promise.resolve().then(() => discard(projectId))
       .then(discarded => {
         if (discarded) {
           window.dispatchEvent(new CustomEvent(CANVAS_PROJECT_DISCARDED_EVENT, { detail: projectId }));

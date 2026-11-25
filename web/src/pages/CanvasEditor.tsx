@@ -32,7 +32,7 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, RedoIcon, SelectIcon, SettingsIcon, ShowIcon, TextFileIcon, TextIcon, UndoIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { currentHostNodeType, isHostPluginId, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -253,6 +253,8 @@ import {
   canvasNodeActiveRunId,
 } from './canvasEditorModel';
 import { resolveRecipeModel } from './studioRecipe';
+import { useCanvasAgentIndicator } from '@/components/canvas/useCanvasAgentIndicator';
+import { CanvasContextMenu, type CanvasContextMenuItem } from '@/components/canvas/CanvasContextMenu';
 import {
   isFreshCanvasProject,
   openCanvasEditor,
@@ -526,19 +528,29 @@ function CanvasEditorInner({
     return () => { cancelled = true; };
   }, []);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
+  // 本机能不能抠图：进画布时问一次，不支持就不在工具条上露出抠图（点了才报错的入口不该出现）。
+  const [mattingAvailable, setMattingAvailable] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve().then(() => getCanvasMattingModel())
+      .then(status => { if (!cancelled) setMattingAvailable(status?.available !== false); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
-  // Agent 面板与资产面板占同一块位置：任一处打开资产面板都把 Agent 收起。
+  // 宽屏（≥1280px）资产库与 Agent 面板并列：资产库靠左、Agent 靠右。窄屏仍共用右侧一个位置，
+  // 打开资产库时 Agent 面板只是藏起来，不卸载（等待中的确认卡、流式回复都还在），关掉资产库就回来。
+  const wideViewport = useWideCanvasViewport();
   const [agentOpen, setAgentOpen] = useState(false);
-  // 与资产面板互斥：开 Agent 前先让资产面板走完关闭过渡。
+  const agentHidden = agentOpen && Boolean(libraryMode) && !wideViewport;
   function toggleAgent() {
     setAddOpen(false);
     setCreateMenu(null);
-    if (agentOpen) { setAgentOpen(false); return; }
-    if (!libraryMode) { setAgentOpen(true); return; }
+    if (agentOpen && !agentHidden) { setAgentOpen(false); return; }
+    if (!libraryMode || wideViewport) { setAgentOpen(true); return; }
     creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
   }
-  useEffect(() => { if (libraryMode) setAgentOpen(false); }, [libraryMode]);
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
   const libraryModeRef = useRef(libraryMode);
   libraryModeRef.current = libraryMode;
@@ -555,6 +567,9 @@ function CanvasEditorInner({
   const [materialPick, setMaterialPick] = useState<MaterialPickState | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
+  // 右键菜单：nodeId 为空是画布空白处，否则是节点（作用于当前选择）。
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flow: XYPosition; nodeId: string | null } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
   const [generationPreferencesTab, setGenerationPreferencesTab] = useState<CanvasGenerationPreferencesTab>('image');
@@ -867,11 +882,13 @@ function CanvasEditorInner({
   // 出图记录的同步整体在 useCanvasJobSync 里：epoch 记账、兜底轮询、SSE 订阅都归它，
   // 这里只把「结果并回文档」这一半交出去。必须声明在下面那个切项目的 effect 之前——
   // 那个 effect 的依赖数组要引用 acceptJobs / resetJobSync。
+  const { indicator: agentIndicator, onAgentEvent } = useCanvasAgentIndicator(projectId);
   const { jobs, acceptJobs, applyLocalJob, reset: resetJobSync } = useCanvasJobSync({
     projectId,
     mergeRunDocument,
     onError: setError,
     onDocumentChanged: revision => remoteDocumentChanged.current(revision),
+    onCanvasAgent: onAgentEvent,
   });
   const jobsByRunId = useMemo(() => new Map(
     jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
@@ -2214,6 +2231,66 @@ function CanvasEditorInner({
   const hideableSelectionAllHidden = hideableSelection.length > 0
     && hideableSelection.every(node => node.hidden);
 
+  /** 节点右键菜单（U1 / P1）：作用于当前选择。 */
+  function nodeContextMenuItems(): CanvasContextMenuItem[] {
+    const current = latestDocument.current;
+    const selected = current?.nodes.filter(node => selectedNodeIds.has(node.id)) ?? [];
+    const single = selected.length === 1 ? selected[0] : null;
+    const versionId = single && canvasNodeProvidesContent(single) ? single.data.current_version_id : null;
+    const version = versionId ? current?.content_versions[versionId] : undefined;
+    const items: CanvasContextMenuItem[] = [
+      { key: 'duplicate', label: '创建副本', icon: <CopyIcon />, disabled: !selected.length, onSelect: () => {
+        if (!current || !selected.length) return;
+        const ids = new Set(selected.map(node => node.id));
+        pasteCanvasNodes({
+          schema_version: 1,
+          source_project_id: projectId,
+          nodes: selected.map(node => structuredClone(node)),
+          connections: current.connections
+            .filter(edge => ids.has(edge.source_node_id) && ids.has(edge.target_node_id))
+            .map(edge => structuredClone(edge)),
+        });
+      } },
+    ];
+    if (hideableSelection.length) {
+      items.push({
+        key: 'hide',
+        label: hideableSelectionAllHidden ? '显示内容' : '遮盖内容',
+        icon: hideableSelectionAllHidden ? <ShowIcon /> : <HideIcon />,
+        onSelect: toggleSelectionHidden,
+      });
+    }
+    if (selected.length > 1) {
+      items.push({ key: 'group', label: '分组', icon: <LayersIcon />, shortcut: `${CANVAS_MOD_KEY} G`, onSelect: () => groupSelectionRef.current() });
+    }
+    if (version && version.kind !== 'text') {
+      items.push({ key: 'download', label: '下载', icon: <DownloadIcon />, href: canvasDownloadUrl(projectId, version.version_id) });
+    }
+    items.push('separator', {
+      key: 'delete', label: '删除', icon: <DeleteIcon />, destructive: true,
+      shortcut: CANVAS_DELETE_KEYS.includes('Backspace') ? '⌫' : 'Delete',
+      onSelect: () => deleteCanvasItems(new Set(selected.map(node => node.id)), new Set()),
+    });
+    return items;
+  }
+
+  /** 画布空白处右键菜单：撤销 / 重做、粘贴、在指针处添加节点。 */
+  function paneContextMenuItems(flow: XYPosition, screen: XYPosition): CanvasContextMenuItem[] {
+    const menu: CreateMenuState = { screen, flow };
+    const clipboard = nodeClipboard.current;
+    return [
+      { key: 'undo', label: '撤销', icon: <UndoIcon />, shortcut: CANVAS_UNDO_KEYS, disabled: !canUndo, onSelect: undo },
+      { key: 'redo', label: '重做', icon: <RedoIcon />, shortcut: CANVAS_REDO_KEYS, disabled: !canRedo, onSelect: redo },
+      ...(clipboard ? [{ key: 'paste', label: '粘贴', icon: <CopyIcon />, shortcut: `${CANVAS_MOD_KEY} V`,
+        onSelect: () => pasteCanvasNodes(clipboard) }] : []),
+      'separator',
+      { key: 'text', label: '文本', icon: <TextIcon />, onSelect: () => addTextNode(menu) },
+      { key: 'image', label: '图片', icon: <ImageFileIcon />, onSelect: () => addGenerationNode('image', menu) },
+      { key: 'video', label: '视频', icon: <VideoFileIcon />, onSelect: () => addGenerationNode('video', menu) },
+      { key: 'upload', label: '上传素材', icon: <UploadIcon />, onSelect: () => uploadRef.current?.click() },
+    ];
+  }
+
   const toggleSelectionHidden = useCallback(() => {
     const ids = new Set(hideableSelection.map(node => node.id));
     if (ids.size === 0) return;
@@ -2226,40 +2303,90 @@ function CanvasEditorInner({
     }), true);
   }, [commit, hideableSelection, hideableSelectionAllHidden]);
 
-  const deleteSelection = useCallback(() => {
-    if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
-    const nodeIds = selectedNodeIds;
-    const blocked = canvasDeletionBlockedMessage(
-      latestDocument.current?.nodes ?? [],
-      nodeIds,
-      jobsByRunId,
-    );
+  // 「停止并删除」：先停掉正在生成的节点，等它们的任务结束后再删（见下方 effect）。
+  const [deleteAfterStop, setDeleteAfterStop] = useState<ReadonlySet<string> | null>(null);
+  const cancelRunRef = useRef<(runId: string) => Promise<void>>(async () => undefined);
+
+  const deleteCanvasItems = useCallback((
+    nodeIds: ReadonlySet<string>,
+    connectionIds: ReadonlySet<string>,
+  ) => {
+    if (nodeIds.size === 0 && connectionIds.size === 0) return;
+    const nodes = latestDocument.current?.nodes ?? [];
+    const blocked = canvasDeletionBlockedMessage(nodes, nodeIds, jobsByRunId);
     if (blocked) {
       setError(blocked);
+      setErrorAction({
+        message: blocked,
+        label: '停止并删除',
+        run: () => {
+          setError(null);
+          setDeleteAfterStop(new Set(nodeIds));
+          for (const node of nodes) {
+            const runId = nodeIds.has(node.id) ? canvasNodeActiveRunId(node) : null;
+            const job = runId ? jobsByRunId.get(runId) : undefined;
+            if (runId && (job?.status === 'pending' || job?.status === 'pending_confirm')) {
+              void cancelRunRef.current(runId);
+            }
+          }
+        },
+      });
       return;
     }
+    // 删除后右上角给撤销（规格 2.1）：撤销回到删除前那一步。
+    const announce = (snapshot: CanvasDocument | null) => {
+      if (!snapshot) return;
+      const message = nodeIds.size
+        ? nodeIds.size === 1 ? '已删除节点' : `已删除 ${nodeIds.size} 个节点`
+        : connectionIds.size === 1 ? '已删除连线' : `已删除 ${connectionIds.size} 条连线`;
+      notify.undo(message, () => undoToRef.current(snapshot));
+    };
+    let snapshot: CanvasDocument | null = null;
     // 只删连线时先让线 150ms 淡出再删（Q15）；带节点的删除照旧立即生效。
     if (nodeIds.size === 0 && motionAvailable()) {
-      const edgeIds = new Set(selectedConnectionIds);
+      const edgeIds = new Set(connectionIds);
       setSelectedConnectionIds(new Set());
-      void Promise.all([...edgeIds].map(fadeOutCanvasEdge)).then(() => commit(current => (
-        removeCanvasConnections(current, edge => edgeIds.has(edge.id))
-      ), true));
+      void Promise.all([...edgeIds].map(fadeOutCanvasEdge)).then(() => {
+        commit(current => {
+          snapshot = current;
+          return removeCanvasConnections(current, edge => edgeIds.has(edge.id));
+        }, true);
+        window.requestAnimationFrame(() => announce(snapshot));
+      });
       requestAnimationFrame(() => editorRegionRef.current?.focus());
       return;
     }
     commit(current => {
+      snapshot = current;
       const next = removeCanvasConnections(current, edge => (
-        selectedConnectionIds.has(edge.id)
+        connectionIds.has(edge.id)
         || nodeIds.has(edge.source_node_id)
         || nodeIds.has(edge.target_node_id)
       ));
       return { ...next, nodes: next.nodes.filter(node => !nodeIds.has(node.id)) };
     }, true);
+    window.requestAnimationFrame(() => announce(snapshot));
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
     requestAnimationFrame(() => editorRegionRef.current?.focus());
-  }, [commit, jobsByRunId, selectedConnectionIds, selectedNodeIds]);
+  }, [commit, jobsByRunId]);
+
+  const deleteSelection = useCallback(() => {
+    deleteCanvasItems(selectedNodeIds, selectedConnectionIds);
+  }, [deleteCanvasItems, selectedConnectionIds, selectedNodeIds]);
+  const deleteNodes = useCallback((nodeIds: ReadonlySet<string>) => {
+    deleteCanvasItems(nodeIds, new Set());
+  }, [deleteCanvasItems]);
+
+  useEffect(() => {
+    if (!deleteAfterStop) return;
+    const nodes = latestDocument.current?.nodes ?? [];
+    const remaining = new Set([...deleteAfterStop].filter(id => nodes.some(node => node.id === id)));
+    if (!remaining.size) { setDeleteAfterStop(null); return; }
+    if (canvasDeletionBlockedMessage(nodes, remaining, jobsByRunId)) return;
+    setDeleteAfterStop(null);
+    deleteCanvasItems(remaining, new Set());
+  }, [deleteAfterStop, deleteCanvasItems, jobsByRunId]);
 
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
@@ -3521,6 +3648,7 @@ function CanvasEditorInner({
       setError((cancelError as Error).message);
     }
   }, [applyLocalJob, projectId]);
+  cancelRunRef.current = cancelRun;
 
   const resumeMjEdit = useCallback(async (runId: string) => {
     if (runSubmissionInFlight.current) return;
@@ -3575,6 +3703,17 @@ function CanvasEditorInner({
   // 镜头不进撤销栈。以前这里每次平移 / 缩放都 push 一条历史，于是 Ctrl+Z 撤的是取景而不是编辑，
   // 平移次数够多时真正想撤的那次修改已经被 50 条上限挤出去了。视口仍然会落盘（它属于文档），
   // 只是不再是一个可撤销的动作。
+  /** 显示类设置（画布背景、显示图片信息）和视口一样不进撤销栈：⌘Z 应该撤掉刚做的编辑，而不是先撤掉背景。 */
+  const commitDisplaySetting = useCallback((settings: Partial<CanvasDocument['settings']>) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const next = { ...current, settings: { ...current.settings, ...settings }, updated_at: new Date().toISOString() };
+    latestDocument.current = next;
+    setDocument(next);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+  }, []);
+
   const commitViewportDocument = useCallback((viewport: Viewport) => {
     const current = latestDocument.current;
     if (!current || current.project_id !== projectId || sameViewport(current.viewport, viewport)) return false;
@@ -3712,6 +3851,9 @@ function CanvasEditorInner({
   }, [announceHistoryChange, document, jobsByRunId]);
   undoToRef.current = undoTo;
   const undo = useCallback(() => undoTo(), [undoTo]);
+  // 菜单里的撤销 / 重做按栈是否为空置灰；栈是 ref，跟着文档变化重算即可。
+  const canUndo = Boolean(document) && history.current.past.length > 0;
+  const canRedo = Boolean(document) && history.current.future.length > 0;
 
   const redo = useCallback(() => {
     const next = history.current.future.pop();
@@ -5241,6 +5383,8 @@ function CanvasEditorInner({
     reorderMaterialConnections,
     setVideoFrameConnections,
     convertVideoFrameConnections,
+    mattingAvailable,
+    deleteNodes,
     selectNode: selectOnlyNode,
     previewContent,
     previewLayerStack,
@@ -5377,6 +5521,8 @@ function CanvasEditorInner({
     setTextEditing,
     setVideoFrameConnections,
     convertVideoFrameConnections,
+    mattingAvailable,
+    deleteNodes,
     submitLayerDecomposition,
     rerunLayerDecomposition,
     submitRun,
@@ -5551,6 +5697,21 @@ function CanvasEditorInner({
             // 选择」一直因此失效。取材模式不参与：那时点击的语义是「挑这一个」。
             if (!materialPick && (event.shiftKey || event.metaKey || event.ctrlKey)) return;
             selectOnlyNode(node.id);
+          }}
+          onNodeContextMenu={(event, node) => {
+            event.preventDefault();
+            if (materialPick) return;
+            setCreateMenu(null);
+            setAddOpen(false);
+            if (!latestSelectedNodeIds.current.has(node.id)) selectOnlyNode(node.id);
+            setContextMenu({ x: event.clientX, y: event.clientY, flow: screenToFlowPosition({ x: event.clientX, y: event.clientY }), nodeId: node.id });
+          }}
+          onPaneContextMenu={event => {
+            event.preventDefault();
+            if (materialPick) return;
+            setCreateMenu(null);
+            setAddOpen(false);
+            setContextMenu({ x: event.clientX, y: event.clientY, flow: screenToFlowPosition({ x: event.clientX, y: event.clientY }), nodeId: null });
           }}
           onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
           onNodeMouseLeave={(_, node) => setHoveredNodeId(current => current === node.id ? null : current)}
@@ -5813,8 +5974,6 @@ function CanvasEditorInner({
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => setSpecsOpen(true)}>规范</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -5824,8 +5983,19 @@ function CanvasEditorInner({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="bottom" align="start" className="w-48 rounded-xl">
+                    {/* U1：不放常驻撤销按钮，撤销 / 重做在画布菜单与右键菜单里，带快捷键提示。 */}
+                    <DropdownMenuItem className="gap-2" disabled={!canUndo} onSelect={undo}>
+                      <UndoIcon aria-hidden="true" />撤销<MenuShortcut keys={CANVAS_UNDO_KEYS} />
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" disabled={!canRedo} onSelect={redo}>
+                      <RedoIcon aria-hidden="true" />重做<MenuShortcut keys={CANVAS_REDO_KEYS} />
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem className="gap-2" onSelect={beginProjectRename}>
                       <EditIcon aria-hidden="true" />重命名
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" onSelect={() => setSpecsOpen(true)}>
+                      <TextFileIcon aria-hidden="true" />规范
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="gap-2"
@@ -5856,10 +6026,7 @@ function CanvasEditorInner({
                       onValueChange={value => {
                         if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
                         if (value === document.settings.background) return;
-                        commit(current => ({
-                          ...current,
-                          settings: { ...current.settings, background: value },
-                        }), true);
+                        commitDisplaySetting({ background: value });
                       }}
                     >
                       {([
@@ -5876,10 +6043,7 @@ function CanvasEditorInner({
                     <DropdownMenuCheckboxItem
                       checked={document.settings.show_image_info}
                       className="gap-2"
-                      onCheckedChange={checked => commit(current => ({
-                        ...current,
-                        settings: { ...current.settings, show_image_info: checked },
-                      }), true)}
+                      onCheckedChange={checked => commitDisplaySetting({ show_image_info: checked })}
                     >
                       <InfoIcon aria-hidden="true" />显示图片信息
                     </DropdownMenuCheckboxItem>
@@ -5927,14 +6091,27 @@ function CanvasEditorInner({
           )}
           </AnimatePresence>
           <div className={cn('pointer-events-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow', runningNodeIds.length === 0 && 'ml-auto')}>
-            <Button
-              variant="ghost"
-              aria-label="Agent"
-              aria-expanded={agentOpen}
-              aria-controls="canvas-agent-panel"
-              onClick={toggleAgent}
-              className={cn('h-9 gap-1.5 px-3', agentOpen && 'bg-secondary text-primary hover:text-primary')}
-            ><AiIcon />Agent</Button>
+            {/* 状态点从会话列表读，面板关着也看得见：运行中只点不配字，待确认用强调色加「待确认」。 */}
+            <Hint label={agentIndicator === 'running' ? '运行中…' : agentIndicator === 'awaiting' ? '有待确认的操作' : undefined}>
+              <Button
+                variant="ghost"
+                aria-label={agentIndicator === 'awaiting' ? 'Agent（待确认）' : agentIndicator === 'running' ? 'Agent（运行中）' : 'Agent'}
+                aria-expanded={agentOpen && !agentHidden}
+                aria-controls="canvas-agent-panel"
+                onClick={toggleAgent}
+                className={cn('h-9 gap-1.5 px-3', agentOpen && !agentHidden && 'bg-secondary text-primary hover:text-primary')}
+              >
+                <AiIcon />Agent
+                {agentIndicator === 'running' && (
+                  <span aria-hidden="true" className="size-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
+                )}
+                {agentIndicator === 'awaiting' && (
+                  <span className="flex items-center gap-1 text-xs text-primary">
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />待确认
+                  </span>
+                )}
+              </Button>
+            </Hint>
           </div>
         </div>
 
@@ -6006,6 +6183,16 @@ function CanvasEditorInner({
           }}
         />
 
+        {contextMenu && (
+          <CanvasContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            label={contextMenu.nodeId ? '节点菜单' : '画布菜单'}
+            onClose={closeContextMenu}
+            items={contextMenu.nodeId ? nodeContextMenuItems() : paneContextMenuItems(contextMenu.flow, contextMenu)}
+          />
+        )}
+
         {/* 「创建并连接」：在松手处 150ms 淡入放大，关掉 150ms 淡出。left / top 管位置（平移时直接改写），动画只动透明度与缩放。 */}
         <AnimatePresence>
         {createMenu && (
@@ -6024,7 +6211,7 @@ function CanvasEditorInner({
         )}
         </AnimatePresence>
 
-        {/* 资产库与 Agent 面板共用右侧一个位置：从右侧滑入淡入，收起淡出，互切时交叉淡化。 */}
+        {/* 资产库与 Agent 面板：窄屏共用右侧一个位置（互切时交叉淡化）；宽屏并列，资产库挪到左侧。 */}
         <AnimatePresence initial={false}>
         {libraryMode && (
           <CanvasSidePanelMotion key="library">
@@ -6033,7 +6220,7 @@ function CanvasEditorInner({
             ref={creationAssetPanelRef}
             refreshKey={assetsRevision}
             onAssetsChanged={refreshProjectAssets}
-            className="canvas-library-panel"
+            className={cn('canvas-library-panel', wideViewport && agentOpen && 'left-20! right-auto!')}
             projectId={projectId}
             canvasTargets={projects.map(project => ({ projectId: project.project_id, name: project.name }))}
             initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
@@ -6101,11 +6288,11 @@ function CanvasEditorInner({
           </CanvasSidePanelMotion>
         )}
 
-        {agentOpen && !libraryMode && (
+        {agentOpen && (
           <CanvasSidePanelMotion key="agent">
           <CanvasAgentPanel
             key={projectId}
-            className="canvas-library-panel"
+            className={cn('canvas-library-panel', agentHidden && 'hidden')}
             projectId={projectId}
             selectedNodes={document.nodes
               .filter(node => selectedNodeIds.has(node.id))
@@ -6369,6 +6556,15 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
   </>;
 }
 
+const CANVAS_MOD_KEY = /Mac/i.test(navigator.userAgent) ? '⌘' : 'Ctrl';
+const CANVAS_UNDO_KEYS = `${CANVAS_MOD_KEY} Z`;
+const CANVAS_REDO_KEYS = `${CANVAS_MOD_KEY} ⇧ Z`;
+
+/** 菜单项右侧的快捷键提示。 */
+function MenuShortcut({ keys }: { keys: string }) {
+  return <span aria-hidden="true" className="ml-auto pl-4 font-mono text-xs text-muted-foreground">{keys}</span>;
+}
+
 const CANVAS_SHORTCUTS = [
   { keys: ['鼠标中键', '拖动'], label: '平移画布' },
   { keys: ['Space / Ctrl', '拖动'], label: '临时平移画布' },
@@ -6382,6 +6578,7 @@ const CANVAS_SHORTCUTS = [
   { keys: ['⌘ / Ctrl', 'Z'], label: '撤销' },
   { keys: ['⌘ / Ctrl', 'Shift', 'Z'], label: '重做' },
   { keys: ['⌘ / Ctrl', 'Y'], label: '重做' },
+  { keys: ['⌘ / Ctrl', '↵'], label: '生成（在提示词框里）' },
   { keys: [CANVAS_DELETE_KEYS.join(' / ')], label: '删除选中节点或连接' },
   { keys: ['Esc'], label: '关闭浮层或清空选择' },
   { keys: ['粘贴文本 / 图片'], label: '从系统剪贴板创建节点' },
@@ -6597,8 +6794,11 @@ function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 }
 
+/** 画布级快捷键的焦点守卫：任何文本输入（input / textarea / 可编辑内容）、弹窗与菜单里一律不触发。 */
 function isCanvasShortcutBlockedTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]'));
+  if (!(target instanceof Element)) return false;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  return Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="menu"]'));
 }
 
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -6759,6 +6959,23 @@ function canvasPromptSyncTargets(document: CanvasDocument, changedNodeId: string
     ) targets.add(connection.target_node_id);
   }
   return targets;
+}
+
+/** ≥1280px：资产库与 Agent 面板并列。 */
+function useWideCanvasViewport() {
+  const query = '(min-width: 80rem)';
+  const [wide, setWide] = useState(() => (
+    typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false
+  ));
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const update = () => setWide(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return wide;
 }
 
 function useNarrowCanvasViewport() {
