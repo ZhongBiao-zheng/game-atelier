@@ -26,3 +26,9 @@ def test_only_explicit_requests_trigger_multiple_images():
     assert "没说张数就出 1 张" in CORE
     assert "明确要比较但没给数字时出 3 张" in CORE
     assert "需求适合探索多个方向" not in CORE
+
+
+def test_report_budget_applies_across_tool_calls():
+    assert "所有 assistant 文字合计不超过 150 字" in CORE
+    assert "最多 3 条，每条一行、不超过 25 字" in CORE
+    assert "（本张）" in CORE
