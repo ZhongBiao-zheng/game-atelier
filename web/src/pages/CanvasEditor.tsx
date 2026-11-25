@@ -5970,8 +5970,8 @@ function CanvasEditorInner({
             {hideableSelection.length > 0 && (
               <Button type="button" variant="ghost" size="sm" onClick={toggleSelectionHidden}>
                 {hideableSelectionAllHidden
-                  ? <><ShowIcon aria-hidden="true" />显示</>
-                  : <><HideIcon aria-hidden="true" />隐藏</>}
+                  ? <><ShowIcon aria-hidden="true" />显示内容</>
+                  : <><HideIcon aria-hidden="true" />遮盖内容</>}
               </Button>
             )}
             <Button
