@@ -761,7 +761,13 @@ function CanvasEditorInner({
           return { ...node, data: { ...node.data, active_run_id: serverNode.data.active_run_id } };
         }
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
-        if (!resultNodeIds.has(node.id) && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
+        // 本地仍挂着这批 run 的节点也要认领：逐张提交的多图，终态那一轮服务端已清掉封面的
+        // active_run_id，新版本又不挂在封面上，只按服务端两样认领会把本地的旧 run 留下来。
+        if (
+          !resultNodeIds.has(node.id)
+          && !runIds.has(serverNode.data.active_run_id ?? '')
+          && !runIds.has(node.data.active_run_id ?? '')
+        ) return node;
         // A same-revision Job response cannot replace text created locally while it was in flight.
         const localVersion = node.data.current_version_id;
         const hasUnsavedContent = activeTextEditingNodeIds.current.has(node.id)
@@ -1399,9 +1405,14 @@ function CanvasEditorInner({
   // 结果组：成员 → 封面。封面没展开、或正在重新生成时，成员收起不显示，连到成员的线画到封面上。
   // 按内容签名缓存：打字、拖动都会换 document.nodes，但结果组关系没变时要给出同一个对象，
   // 否则节点上下文和全部连线每次都跟着重算（见「引用变化打穿 memo」）。
+  // 「重新生成中」按 job 状态判断：封面上残留的旧 active_run_id 不能让成员一直收起。
   const resultStackSignature = JSON.stringify([...resultStackOwners(document?.nodes ?? [])].map(([memberId, coverId]) => {
     const cover = document?.nodes.find(node => node.id === coverId);
-    return [memberId, coverId, cover?.type === 'image' && Boolean(cover.data.active_run_id)];
+    const runId = cover?.type === 'image' ? cover.data.active_run_id : null;
+    const running = Boolean(runId) && jobs.some(job => (
+      job.canvas_run?.run_id === runId && (job.status === 'pending' || job.status === 'pending_confirm')
+    ));
+    return [memberId, coverId, running];
   }));
   const resultStackEntries = useMemo(
     () => JSON.parse(resultStackSignature) as Array<[string, string, boolean]>,

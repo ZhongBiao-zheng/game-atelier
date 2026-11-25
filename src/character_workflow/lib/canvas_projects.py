@@ -345,11 +345,33 @@ def _normalized_web_document(
                     edit_runs.setdefault(owner_id, []).append(job)
         return edit_runs.get(node_id, [])
 
+    ended_runs = None
+
+    def run_ended_on(run_id, node_id):
+        """这个 Run 确实以该节点为结果、且已经结束。查不到的 run id 交给下面的校验。"""
+        nonlocal ended_runs
+        if ended_runs is None:
+            ended_runs = {
+                (job.canvas_run.run_id, job.canvas_run.result_node_id)
+                for job in list_jobs()
+                if job.canvas_project_id == current.project_id and job.canvas_run
+                and job.status not in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}
+            }
+        return (run_id, node_id) in ended_runs
+
     nodes = []
     for node in submitted.nodes:
         previous = previous_nodes.get(node.id)
+        # 图片节点挂着已结束的 Run 是残留：前端合并漏掉终态时会把旧值存回来，结果组成员就一直
+        # 被当成「重新生成中」收起。提交的和已存下的都在这里清掉。
+        if (isinstance(node, CanvasImageNode) and node.data.active_run_id is not None
+                and run_ended_on(node.data.active_run_id, node.id)):
+            node = node.model_copy(update={"data": node.data.model_copy(update={"active_run_id": None})})
         submitted_run = getattr(node.data, "active_run_id", None)
         previous_run = getattr(previous.data, "active_run_id", None) if previous else None
+        if (isinstance(previous, CanvasImageNode) and previous_run is not None
+                and run_ended_on(previous_run, node.id)):
+            previous_run = None
         # The Job is authoritative after a node was deleted and restored by undo. Restore
         # only its real pending Run; a stale terminal Run from undo never becomes active.
         related_runs = runs_for(node.id) if (
