@@ -155,13 +155,13 @@ function compareTime(a: string, b: string) {
   return fraction(a).localeCompare(fraction(b));
 }
 
-export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJob, last, onPickSuggestion }: {
+export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, renderJobs, last, onPickSuggestion }: {
   turn: StudioAgentTurn;
   session: StudioAgentSession;
   agent: Controller;
   jobs: Job[];
   messages: StudioAgentSession['messages'];
-  renderJob: (job: Job) => ReactNode;
+  renderJobs: (jobs: Job[]) => ReactNode;
   last: boolean;
   onPickSuggestion?: (text: string) => void;
 }) {
@@ -173,9 +173,9 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   const title = running || awaiting ? '任务响应中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
   const user = messages.find(m => m.role === 'user');
-  const replies = messages.filter(m => ['assistant', 'system'].includes(m.role));
   const sortedJobs = [...jobs].sort((a, b) => compareTime(a.submitted_at, b.submitted_at) || a.job_id.localeCompare(b.job_id));
   const hasJobs = sortedJobs.length > 0;
+  const replies = messages.filter(m => m.role === 'assistant' || (!hasJobs && m.role === 'system'));
   const parsedReplies = replies.map(message => ({ message, ...parseAgentReply(message.text) }));
   const visibleReplies = parsedReplies.filter(item => item.body.length > 0);
   // 只有整条时间线的最后一轮、且已正常结束，才显示它的推荐追问。
@@ -231,27 +231,7 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
         <AgentMarkdown text={parseAgentReply(agent.streaming).body || agent.streaming} />
       </div>
     )}
-    {hasJobs && sortedJobs.length === 1 && (
-      <div className="space-y-6 pt-1">
-        {sortedJobs.map(job => <div key={job.job_id}>{renderJob(job)}</div>)}
-      </div>
-    )}
-    {hasJobs && sortedJobs.length > 1 && (
-      <div data-testid="agent-multi-job-batch" className="space-y-3 pt-1">
-        <div className="flex flex-wrap items-start gap-3">
-          {sortedJobs.map((job, idx) => (
-            <div key={job.job_id} className="space-y-1.5">
-              <div className="flex max-w-[251.5px] items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary font-medium tabular-nums text-foreground">
-                  {idx + 1}
-                </span>
-              </div>
-              {renderJob(job)}
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
+    {hasJobs && <div data-testid="agent-multi-job-batch" className="pt-1">{renderJobs(sortedJobs)}</div>}
     {onPickSuggestion && <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />}
     {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
   </section>;

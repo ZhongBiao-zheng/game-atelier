@@ -273,3 +273,20 @@ it('首屏与切换各拉一次任务，普通会话更新不拉；生成完成�
     state.mockRestore();
   }
 });
+
+it('同一回合的多个任务共用缩略图组，详情跟随当前图片', async () => {
+  const { requests } = server();
+  const respond = requests.getMockImplementation()!;
+  requests.mockImplementation((url, init) => url === base + '/' + ordinary + '/jobs'
+    ? Promise.resolve(Response.json({ jobs: ['近景', '远景'].map((prompt, i) => job('batch-' + i, prompt, ordinary, 'turn-art')) }))
+    : respond(url, init));
+  updateStudioView({ activeSessionId: ordinary });
+  mount();
+  const batch = await screen.findByTestId('agent-multi-job-batch');
+  const images = batch.querySelectorAll('figure');
+  expect(images).toHaveLength(2);
+  expect(within(batch).getAllByTestId('studio-round-list')).toHaveLength(1);
+  expect(batch).not.toHaveTextContent(/近景|远景|再次生成|重新编辑/);
+  fireEvent.click(images[1].querySelector('img')!);
+  expect(await screen.findByText('远景')).toBeVisible();
+});

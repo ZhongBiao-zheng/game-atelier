@@ -943,7 +943,7 @@ function StudioFull() {
           rounds={items} embedded={embedded}
           renderAgent={entry => session && <StudioAgentTurnCard turn={entry.turn} session={session}
             agent={composer.agent} messages={entry.messages} jobs={entry.jobs}
-            renderJob={job => renderRounds(studioJobsToRounds([job], keys), true)}
+            renderJobs={jobs => renderRounds(studioJobsToRounds(jobs, keys), true)}
             last={!pending && !hasHistoryFilters(historyFilters) && timeline.at(-1) === entry}
             onPickSuggestion={text => {
               composer.switchMode('agent');

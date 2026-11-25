@@ -259,6 +259,7 @@ export function RoundList({
     round.kind === 'done' && round.config.kind !== 'video'
       ? round.imagePaths.map((path, index) => ({
         src: imageSrc(path),
+        config: round.config,
         name: path.split('/').pop() || `${round.jobId}-${index + 1}.png`,
       }))
       : []
@@ -346,6 +347,59 @@ export function RoundList({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasEarlierHistory, historyAutoLoadArmed]);
+  const renderMedia = (r: RoundState, mediaActive: boolean) => (
+    <>
+    {r.kind === 'pending' && (
+      <PendingBatch
+        round={r}
+        embedded={embedded}
+        showActions={!embedded || rounds.length === 1}
+        onCancel={onCancel}
+        onReEdit={onReEdit}
+        reuseParameter={reuseParameter}
+        onRegenerate={onRegenerate}
+        onReuseReferences={onReuseReferences}
+        mediaActive={mediaActive}
+      />
+    )}
+    {r.kind === 'done' && (
+      <DoneBatch
+        round={r}
+        embedded={embedded}
+        showActions={!embedded || rounds.length === 1}
+        favorites={favorites}
+        onToggleFavorite={onToggleFavorite}
+        hiddenPaths={hiddenPaths}
+        onToggleHidden={onToggleHidden}
+        onReEdit={onReEdit}
+        reuseParameter={reuseParameter}
+        onRegenerate={onRegenerate}
+        onDeleteBatch={onDeleteBatch}
+        onLightbox={setLightboxSrc}
+        onReuseReferences={onReuseReferences}
+        onEditAsReference={onEditAsReference}
+        onSavePromptAsset={onSavePromptAsset}
+        onSaveResultAsset={onSaveResultAsset}
+        onShareResult={onShareResult}
+        onSetPromptPreview={onSetPromptPreview}
+        mediaActive={mediaActive}
+      />
+    )}
+    {r.kind === 'failed' && (
+      <FailedCard
+        round={r}
+        embedded={embedded}
+        showActions={!embedded || rounds.length === 1}
+        onDeleteFailed={onDeleteFailed}
+        onReEdit={onReEdit}
+        reuseParameter={reuseParameter}
+        onRegenerate={onRegenerate}
+        onReuseReferences={onReuseReferences}
+        mediaActive={mediaActive}
+      />
+    )}
+    </>
+  );
   if (rounds.length === 0) return null;
   return (
     <>
@@ -361,7 +415,11 @@ export function RoundList({
             className="h-px w-full"
           />
         )}
-        {mountedRounds.map((r, index) => {
+        {embedded ? <MediaActivationBoundary>
+          {active => <div className={ROUND_MEDIA_CLASS}>{rounds.map(r => r.kind !== 'agent' && (
+            <Fragment key={r.jobId}>{renderMedia(r, active)}</Fragment>
+          ))}</div>}
+        </MediaActivationBoundary> : mountedRounds.map((r, index) => {
           const date = roundDate(r);
           const startsDate = index === 0 || roundDate(mountedRounds[index - 1]) !== date;
           const stableKey =
@@ -375,51 +433,7 @@ export function RoundList({
             {!embedded && startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
             {r.kind === 'agent' ? renderAgent?.(r) : <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
-              <>
-              {r.kind === 'pending' && (
-                <PendingBatch
-                  round={r}
-                  onCancel={onCancel}
-                  onReEdit={onReEdit}
-                  reuseParameter={reuseParameter}
-                  onRegenerate={onRegenerate}
-                  onReuseReferences={onReuseReferences}
-                  mediaActive={mediaActive}
-                />
-              )}
-              {r.kind === 'done' && (
-                <DoneBatch
-                  round={r}
-                  favorites={favorites}
-                  onToggleFavorite={onToggleFavorite}
-                  hiddenPaths={hiddenPaths}
-                  onToggleHidden={onToggleHidden}
-                  onReEdit={onReEdit}
-                  reuseParameter={reuseParameter}
-                  onRegenerate={onRegenerate}
-                  onDeleteBatch={onDeleteBatch}
-                  onLightbox={setLightboxSrc}
-                  onReuseReferences={onReuseReferences}
-                  onEditAsReference={onEditAsReference}
-                  onSavePromptAsset={onSavePromptAsset}
-                  onSaveResultAsset={onSaveResultAsset}
-                  onShareResult={onShareResult}
-                  onSetPromptPreview={onSetPromptPreview}
-                  mediaActive={mediaActive}
-                />
-              )}
-              {r.kind === 'failed' && (
-                <FailedCard
-                  round={r}
-                  onDeleteFailed={onDeleteFailed}
-                  onReEdit={onReEdit}
-                  reuseParameter={reuseParameter}
-                  onRegenerate={onRegenerate}
-                  onReuseReferences={onReuseReferences}
-                  mediaActive={mediaActive}
-                />
-              )}
-              </>
+                renderMedia(r, mediaActive)
               )}
             </MediaActivationBoundary>}
             </Fragment>
@@ -433,6 +447,10 @@ export function RoundList({
           onPrevious={lightboxStep(-1)}
           onNext={lightboxStep(1)}
           downloadName={lightboxItems[lightboxIndex]?.name}
+          details={embedded && lightboxItems[lightboxIndex] && <>
+            <p>{lightboxItems[lightboxIndex].config.prompt}</p>
+            <SpecChips config={lightboxItems[lightboxIndex].config} />
+          </>}
         />
       )}
     </>
@@ -440,7 +458,7 @@ export function RoundList({
 }
 
 function PendingBatch({
-  round,
+  round, embedded, showActions,
   onCancel,
   onReEdit,
   reuseParameter,
@@ -448,6 +466,8 @@ function PendingBatch({
   onReuseReferences,
   mediaActive,
 }: {
+  embedded: boolean;
+  showActions: boolean;
   round: Extract<RoundState, { kind: 'pending' }>;
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -465,13 +485,23 @@ function PendingBatch({
   const elapsedSec = Math.max(0, Math.floor((now - round.startedAt) / 1000));
   const submittedAt = formatBeijingTime(new Date(round.startedAt).toISOString()).slice(11);
 
+  const cancel = round.jobId && onCancel && (
+    <ActionButton
+      data-testid="studio-cancel-round"
+      disabled={round.cancelRequested}
+      onClick={() => { void onCancel(round.jobId!); }}
+    >
+      <StopIcon size="sm" className="mr-1.5 fill-current" aria-hidden />
+      {round.cancelRequested ? '停止中' : '停止'}
+    </ActionButton>
+  );
   return (
     <>
-      <div className="mb-3">
+      {!embedded && <div className="mb-3">
         <WaitingCopy startedAt={round.startedAt} now={now} phase={round.progressPhase} />
-      </div>
-      <section className={ROUND_SECTION_CLASS}>
-        <div className={ROUND_HEADER_CLASS}>
+      </div>}
+      <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
+        {!embedded && <div className={ROUND_HEADER_CLASS}>
           <div className={ROUND_PROMPT_ROW_CLASS}>
             <ReferenceStack
               config={round.config}
@@ -495,39 +525,32 @@ function PendingBatch({
               <span className="basis-full break-words font-mono text-muted-foreground">{shownMjFlags}</span>
             )}
           </SpecChips>
-        </div>
-        <div className={ROUND_MEDIA_CLASS}>
+        </div>}
+        <div className={embedded ? "contents" : ROUND_MEDIA_CLASS}>
           {Array.from({ length: Math.max(1, round.config.n ?? 1) }, (_, i) => (
             <div
               key={i}
+              data-round-job={embedded && i === 0 ? round.jobId : undefined}
               data-testid={i === 0 && round.jobId ? `studio-pending-${round.jobId}` : undefined}
               data-skeleton
               aria-busy="true"
               style={aspectStyle(round.config)}
               className="relative flex w-[251.5px] items-center justify-center rounded-lg bg-card/40"
             >
+              {i === 0 && !showActions && cancel && <div className="absolute bottom-2 right-2">{cancel}</div>}
               <ProgressBadge round={round} now={now} />
               <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
           ))}
         </div>
-        <div className={ROUND_ACTIONS_CLASS}>
+        {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
           <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
-          {round.jobId && onCancel && (
-            <ActionButton
-              data-testid="studio-cancel-round"
-              disabled={round.cancelRequested}
-              onClick={() => { void onCancel(round.jobId!); }}
-            >
-              <StopIcon size="sm" className="mr-1.5 fill-current" aria-hidden />
-              {round.cancelRequested ? '停止中' : '停止'}
-            </ActionButton>
-          )}
+          {cancel}
           <Hint label="耗时 · 提交时间"><p data-testid="pending-run-meta" className={ROUND_RUN_META_CLASS}>
             {elapsedSec}s · {submittedAt}
           </p></Hint>
-        </div>
+        </div>}
       </section>
     </>
   );
@@ -1010,7 +1033,7 @@ function ShareResultButton({ index, onClick }: { index: number; onClick: () => v
 }
 
 function DoneBatch({
-  round,
+  round, embedded, showActions,
   favorites,
   onToggleFavorite,
   hiddenPaths,
@@ -1028,6 +1051,8 @@ function DoneBatch({
   onSetPromptPreview,
   mediaActive,
 }: {
+  embedded: boolean;
+  showActions: boolean;
   round: Extract<RoundState, { kind: 'done' }>;
   favorites?: string[];
   onToggleFavorite?: (path: string) => void | Promise<void>;
@@ -1071,8 +1096,8 @@ function DoneBatch({
     : undefined;
 
   return (
-    <section className={ROUND_SECTION_CLASS}>
-      <div className={ROUND_HEADER_CLASS}>
+    <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
+      {!embedded && <div className={ROUND_HEADER_CLASS}>
         <div className={ROUND_PROMPT_ROW_CLASS}>
           <ReferenceStack
             config={round.config}
@@ -1111,14 +1136,15 @@ function DoneBatch({
             </ul>
           )}
         </div>
-      </div>
-      <div className={ROUND_MEDIA_CLASS}>
+      </div>}
+      <div className={embedded ? "contents" : ROUND_MEDIA_CLASS}>
         {round.config.kind === 'video'
           ? round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
               return (
                 <figure
                   key={path}
+                  data-round-job={embedded && index === 0 ? round.jobId : undefined}
                   data-testid={`studio-result-video-${index + 1}`}
                   className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
                 >
@@ -1176,6 +1202,7 @@ function DoneBatch({
               return (
                 <figure
                   key={path}
+                  data-round-job={embedded && index === 0 ? round.jobId : undefined}
                   data-testid={`studio-result-thumb-${index + 1}`}
                   className="media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
                   onClick={() => onLightbox?.(imageSrc(path))}
@@ -1243,7 +1270,7 @@ function DoneBatch({
               );
             })}
       </div>
-      <div className={ROUND_ACTIONS_CLASS}>
+      {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
@@ -1281,7 +1308,7 @@ function DoneBatch({
             )}
           </p></Hint>
         )}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1304,7 +1331,7 @@ const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButt
 );
 
 function FailedCard({
-  round,
+  round, embedded, showActions,
   onDeleteFailed,
   onReEdit,
   reuseParameter,
@@ -1312,6 +1339,8 @@ function FailedCard({
   onReuseReferences,
   mediaActive,
 }: {
+  embedded: boolean;
+  showActions: boolean;
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -1325,8 +1354,8 @@ function FailedCard({
   const [detailOpen, setDetailOpen] = useState(false);
 
   return (
-    <section className={ROUND_SECTION_CLASS}>
-      {config && (
+    <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
+      {config && !embedded && (
         <div className={ROUND_HEADER_CLASS}>
           <div className={ROUND_PROMPT_ROW_CLASS}>
             <ReferenceStack
@@ -1349,6 +1378,7 @@ function FailedCard({
         </div>
       )}
       <div
+        data-round-job={embedded ? round.jobId : undefined}
         data-testid={round.canceled ? 'studio-canceled-note' : undefined}
         className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
@@ -1384,7 +1414,7 @@ function FailedCard({
           </Button></Hint>
         )}
       </div>
-      {config && (
+      {config && showActions && (
         <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(config, round.jobId); }}>再次生成</ActionButton>

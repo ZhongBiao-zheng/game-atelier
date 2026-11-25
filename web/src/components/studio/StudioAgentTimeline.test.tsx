@@ -127,3 +127,13 @@ it('新建对话用主色浅底并排在对话标题前，标题不再套胶囊'
   expect(title).toHaveClass('text-base', 'font-semibold');
   expect(title).not.toHaveClass('border', 'bg-glass');
 });
+
+it('已有作品且看图后静默结束时，回复区保留建议与追问', () => {
+  const agent = makeAgent('idle');
+  agent.session!.messages[2].text = '① 猫靠近镜头（本张）\n→ 再试背影';
+  agent.session!.messages.push(makeMessage('system', '模型没有补充说明', 5));
+  render(<TurnCards agent={agent} jobs={jobs} renderJobs={() => '作品'} onPickSuggestion={vi.fn()} />);
+  expect(screen.getByText('① 猫靠近镜头（本张）')).toBeVisible();
+  expect(screen.getByRole('button', { name: '再试背影' })).toBeVisible();
+  expect(screen.queryByText('模型没有补充说明')).toBeNull();
+});

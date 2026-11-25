@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, DownloadIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
@@ -21,13 +21,14 @@ export function Lightbox({
   onClose,
   onPrevious,
   onNext,
-  downloadName,
+  downloadName, details,
 }: {
   src: string;
   onClose: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
   downloadName?: string;
+  details?: ReactNode;
 }) {
   const onCloseRef = useRef(onClose);
   const onPreviousRef = useRef(onPrevious);
@@ -62,6 +63,7 @@ export function Lightbox({
         className="media-checker max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
         onClick={(e) => e.stopPropagation()}
       />
+      {details && <div className="absolute inset-x-4 bottom-4 mx-auto max-h-[25vh] max-w-xl overflow-auto break-words rounded-lg bg-card p-3 text-sm text-foreground" onClick={event => event.stopPropagation()}>{details}</div>}
       <Button variant="bare"
         type="button"
         aria-label="关闭"
