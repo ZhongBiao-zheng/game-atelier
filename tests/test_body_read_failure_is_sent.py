@@ -63,7 +63,7 @@ def test_post_json_submits_once_when_the_body_stalls():
                                     {"model": "gpt-image-2", "prompt": "x"}, timeout=(1, 1))
         assert server.connections == 1
     hint = _friendly_error(error.value)
-    assert "请求可能已经执行" in hint and "厂商后台核对" in hint
+    assert "请求可能已经执行" in hint and "供应商后台核对" in hint
 
 
 def test_body_timeout_is_classified_as_sent_everywhere():

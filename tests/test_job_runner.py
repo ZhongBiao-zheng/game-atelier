@@ -563,7 +563,7 @@ def test_friendly_error_genuine_connect_failure_still_network():
         "(Caused by NewConnectionError('Failed to establish a new connection: "
         "[Errno 61] Connection refused'))"
     )
-    assert "网络连不上厂商接口" in job_runner._friendly_error(err)
+    assert "网络连不上供应商接口" in job_runner._friendly_error(err)
 
 
 def test_friendly_error_provider_cors_points_to_server_api_url_not_browser():
@@ -577,8 +577,8 @@ def test_friendly_error_provider_cors_points_to_server_api_url_not_browser():
 def test_friendly_error_generic_network_error_names_server_to_provider_hop():
     err = Exception("ERR_NETWORK Network Error")
     msg = job_runner._friendly_error(err)
-    assert "viewer-server" in msg
-    assert "厂商接口" in msg
+    assert "Atelier 服务" in msg
+    assert "供应商接口" in msg
 
 
 def test_friendly_error_dns_is_not_misread_as_invalid_image_resolution():
@@ -587,7 +587,7 @@ def test_friendly_error_dns_is_not_misread_as_invalid_image_resolution():
         "([Errno 8] nodename nor servname provided)"
     )
     msg = job_runner._friendly_error(err)
-    assert "无法解析厂商接口域名" in msg
+    assert "无法解析供应商接口域名" in msg
     assert "出图尺寸" not in msg
 
 
@@ -678,13 +678,13 @@ def test_friendly_error_ssl_handshake_failure_is_not_generic_network_error():
     assert "TLS / SSL 握手失败" in msg
     assert "协议或端口" in msg
     assert "证书失败" not in msg
-    assert "网络连不上厂商接口" not in msg
+    assert "网络连不上供应商接口" not in msg
 
 
 def test_friendly_error_read_timeout_still_upstream_overload():
     err = Exception("HTTPSConnectionPool(host='api.openai-hk.com', port=443): Read timed out. (read timeout=180.0)")
     msg = job_runner._friendly_error(err)
-    assert "厂商接口超时未响应" in msg
+    assert "供应商接口超时未响应" in msg
     assert "上传参考图" not in msg  # read 超时 ≠ 上传超时，别串台
 
 
@@ -778,7 +778,10 @@ def test_friendly_error_never_swallows_task_id():
 
 def test_friendly_error_passes_unknown_errors_through():
     err = Exception("something nobody has a translation for")
-    assert job_runner._friendly_error(err) == "something nobody has a translation for"
+    # 认不出的英文报错兜一句中文类别，原文附在后面（审查 01 P8）。
+    assert job_runner._friendly_error(err) == (
+        "生成失败，供应商返回了无法识别的错误（原始报错：something nobody has a translation for）"
+    )
 
 
 def _studio_job(job_id: str, kind: JobKind, **over) -> Job:

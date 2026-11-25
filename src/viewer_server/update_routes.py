@@ -83,6 +83,19 @@ def work_request(path: str, method: str) -> bool:
     return False
 
 
+MOVING_CODE = "moving_data_root"
+
+
+def moving_blocks(path: str, method: str) -> bool:
+    if method in {"GET", "HEAD", "OPTIONS"} or path.startswith("/api/connection/"):
+        return False
+    if not (path.startswith("/api/") or path.startswith("/gateway/")):
+        return False
+    from character_workflow.lib import data_root_move
+
+    return data_root_move.active()
+
+
 class UpdateAdmissionMiddleware:
     """Register before dispatch, and retain the admission through BackgroundTasks/streaming."""
     def __init__(self, app):
@@ -105,6 +118,11 @@ class UpdateAdmissionMiddleware:
         if (gate.initializing and path.startswith("/api/")
                 and (scope["method"], path) not in initialization_routes):
             await JSONResponse({"detail": "正在更新，请稍后", "code": UPDATING_CODE},
+                               status_code=503)(scope, receive, send)
+            return
+        if moving_blocks(path, scope["method"]):
+            # 更换数据目录复制期间的写入只会落进旧目录，复制完就丢了；请求未受理，可原样重发。
+            await JSONResponse({"detail": "正在迁移数据目录，完成后再试", "code": MOVING_CODE},
                                status_code=503)(scope, receive, send)
             return
         if not work_request(path, scope["method"]):

@@ -833,6 +833,8 @@ def main() -> int:
     parser.add_argument("--update-id")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
+    parser.add_argument("--cached-update", action="store_true",
+                        help="With --check: read the update cache only, never wait for the network.")
     parser.add_argument("--print-data-root", action="store_true",
                         help="Print the data root the server uses (desktop shell contract).")
     parser.add_argument(
@@ -886,7 +888,7 @@ def main() -> int:
         result = check()
         # 页面首屏要等这个结果。运行包的更新由服务端自己检查（UpdateService），这里只读缓存，
         # 不让首屏等最多 3 秒的联网（GitHub 连不上时失败缓存 1 小时，之后每次都要等）。
-        result["update"] = update_info(network=not is_bundle())
+        result["update"] = update_info(network=not is_bundle() and not args.cached_update)
         result["runtime_mode"] = "bundle" if is_bundle() else "source"
         print(json.dumps(result, ensure_ascii=False))
         return 0

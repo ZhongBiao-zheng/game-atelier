@@ -26,7 +26,8 @@ POST /api/jobs/{job_id}/cancel
 POST /api/config
 GET /api/onboarding/status
 POST /api/folder-picker
-POST /api/onboarding/data-root
+GET /api/data-root
+POST /api/data-root
 POST /api/onboarding/events
 GET /api/onboarding/metrics
 POST /api/onboarding/key-probe
@@ -282,7 +283,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/http-protocols", "/api/http-protocols/validate", "/api/http-protocols/{identifier}",
     "/api/http-protocols/assist/models", "/api/http-protocols/assist",
     "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
-    "/api/onboarding/data-root", "/api/onboarding/events", "/api/onboarding/metrics",
+    "/api/data-root", "/api/onboarding/events", "/api/onboarding/metrics",
     # 引导里的 Key 探针会把密钥发给固定的厂商地址，只给本机页面。
     "/api/onboarding/key-probe",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。

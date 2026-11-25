@@ -357,3 +357,13 @@ def start_watchers() -> Observer:
     # 这里只读挂载表、每个库起一条 daemon 线程就返回，不会拖住 server 启动。
     rescan_team_libraries()
     return observer
+
+
+def restart_watchers() -> None:
+    """更换数据目录后把文件监听挪到新目录；服务退出时仍由 lifespan 停掉最初那个 observer。"""
+    old = _observer
+    if old is None:
+        return
+    old.stop()
+    old.join(timeout=2)
+    start_watchers()

@@ -56,7 +56,7 @@ def emit(**row):
 def main():
     try:
         configured_keys = keys.read_keys_db().keys
-    except (ValueError, OSError, keys.KeysFileCorruptedError):
+    except (ValueError, OSError):
         raise SystemExit("无法读取本机渠道配置") from None
     token = next((key.access_key for key in configured_keys if key.enabled
                   and key.access_key and urlsplit(key.base_url or "").hostname == "api.tu-zi.com"), None)

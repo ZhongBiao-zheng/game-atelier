@@ -196,10 +196,31 @@ def _friendly_error(err: BaseException) -> str:
     raw = _redact_local_paths(str(err))
     if str(err).startswith("视频提交结果未确认"):
         return raw
-    hint = _error_hint(str(err).lower())
+    hint = _error_hint(str(err).lower()) or _fallback_hint(str(err))
     if hint is None:
         return raw
     return f"{hint}（原始报错：{raw}）"
+
+
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _fallback_hint(text: str) -> str | None:
+    """认不出的英文报错按 HTTP 状态兜一句中文类别；原文仍附在后面。已是中文的报错原样透出。"""
+    if _CJK.search(text):
+        return None
+    status = _http_status(text)
+    if status in (401, 403):
+        return f"供应商拒绝了这次请求（{status}）：密钥无效或没有权限"
+    if status == 404:
+        return "供应商找不到这个接口或模型（404）"
+    if status == 429:
+        return "供应商限流（429）：请求太频繁，请稍后重试"
+    if status is not None and status >= 500:
+        return f"供应商服务出错（{status}），请稍后重试"
+    if status is not None and status >= 400:
+        return f"供应商拒绝了这次请求（{status}）：请检查提示词、参考图或参数"
+    return "生成失败，供应商返回了无法识别的错误"
 
 
 def _fail(job_id: str, err: BaseException, status: JobStatus = JobStatus.FAILED) -> Job:
@@ -387,20 +408,20 @@ def _error_hint(low: str) -> str | None:
     # `transaction token_count_reserve failed: stage=token_idempotency db_code=mysql:1290`。
     # 与我们的参数无关，也没扣到费，稍后重试即可。
     if "token_count_reserve" in low or "db_code=mysql" in low:
-        return "聚合商计费系统暂时不可用（上游数据库故障，请求未执行），请稍后重试。"
+        return "中转计费系统暂时不可用（上游数据库故障，请求未执行），请稍后重试。"
     if (
         "cors" in low
         or "cross-origin" in low
         or "access-control-allow-origin" in low
     ):
         return (
-            "厂商接口返回了跨域 / 浏览器端点错误。画布生成实际由本地服务端直连，不受浏览器"
-            "跨域限制；这通常表示 Base URL 配成了网页地址。请在设置页改成厂商的服务端 API 地址后重试。"
+            "供应商接口返回了跨域 / 浏览器端点错误。画布生成实际由本地服务端直连，不受浏览器"
+            "跨域限制；这通常表示请求地址配成了网页地址。请在设置页改成供应商的服务端 API 地址后重试。"
         )
     if "proxy" in low and ("connect" in low or "proxyerror" in low or "max retries" in low):
         return (
-            "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
-            "关闭代理，或把厂商域名加入直连/绕过规则后重试。"
+            "连不上本机代理（VPN / Clash 等）。这些国内供应商无需翻墙：请在代理工具里"
+            "关闭代理，或把供应商域名加入直连/绕过规则后重试。"
         )
     if (
         "name resolution" in low
@@ -409,22 +430,22 @@ def _error_hint(low: str) -> str | None:
         or "nodename nor servname" in low
     ):
         return (
-            "viewer-server 无法解析厂商接口域名：请检查 Base URL 拼写、DNS 与网络连接后重试。"
+            "Atelier 服务无法解析供应商接口域名：请检查请求地址拼写、DNS 与网络连接后重试。"
         )
     if "certificate_verify_failed" in low or "certificate verify failed" in low:
         return (
-            "viewer-server 校验厂商接口的 TLS 证书失败：请确认 Base URL 是官方 HTTPS API 地址，"
+            "Atelier 服务校验供应商接口的 TLS 证书失败：请确认请求地址是官方 HTTPS API 地址，"
             "并检查系统时间或代理是否替换了证书后重试。"
         )
     if "tls" in low or "sslerror" in low or "[ssl:" in low or "ssl handshake" in low:
         return (
-            "viewer-server 与厂商接口的 TLS / SSL 握手失败：通常是 Base URL 协议或端口不匹配，"
+            "Atelier 服务与供应商接口的 TLS / SSL 握手失败：通常是请求地址协议或端口不匹配，"
             "也可能是代理中途改写连接。请核对官方 HTTPS API 地址、端口和代理直连规则后重试。"
         )
     if "err_network" in low or "network error" in low:
         return (
-            "viewer-server 到厂商接口的网络请求失败：这不是浏览器跨域问题。"
-            "请检查厂商 Base URL、网络和代理直连规则后重试。"
+            "Atelier 服务到供应商接口的网络请求失败：这不是浏览器跨域问题。"
+            "请检查供应商请求地址、网络和代理直连规则后重试。"
         )
     # 画布内部不变式被打破（事务、Run 上下文、归属、版本冲突）。canvas_runs 里这些断言是给开发者
     # 定位用的英文原文，翻译掉反而更难查；但它们会经 _friendly_error 原样落进 job.error、
@@ -438,8 +459,8 @@ def _error_hint(low: str) -> str | None:
         or "canvas document project_id does not match" in low
     ):
         return (
-            "画布内部状态校验未通过：这不是网络或厂商的问题，产物没有挂到画布上。"
-            "请重启 viewer-server 后重试；如果反复出现，把下面的原始报错一起发出来。"
+            "画布内部状态校验未通过：这不是网络或供应商的问题，产物没有挂到画布上。"
+            "请重新打开 Atelier 后重试；如果反复出现，把下面的原始报错一起发出来。"
         )
     # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
     if "write operation timed out" in low or ("aborted" in low and "write" in low):
@@ -450,14 +471,14 @@ def _error_hint(low: str) -> str | None:
     # 确定性错误排在网络类之前：它们重试无用，被翻成「稍后重试」会让画师白等。
     if "no_endpoints_available" in low or "无可用端点" in low:
         return (
-            "该模型在厂商网关下没有可用端点：通常是账号未开通这个模型，或它不支持当前"
-            "调用协议。请到厂商控制台确认已开通，或在设置页重新拉一次模型列表后换用同族其他模型。"
+            "该模型在供应商网关下没有可用端点：通常是账号未开通这个模型，或它不支持当前"
+            "调用协议。请到供应商控制台确认已开通，或在设置页重新拉一次模型列表后换用同族其他模型。"
         )
     # 实测 OpenAI-HK 的 nano-banana-hd：请求不合它意时不报错，跑满 28s 回
     # {"data":[{"revised_prompt":"NO_IMAGE"}]}——有响应、没图，还很可能已计费。
     if "no downloadable image" in low or "response missing data" in low or "no_image" in low:
         return (
-            "厂商返回了响应但里面没有图片：常见原因是提示词被内容审核拦下，或该模型对这次"
+            "供应商返回了响应但里面没有图片：常见原因是提示词被内容审核拦下，或该模型对这次"
             "请求只回了文字。请调整提示词后重试，或换模型。"
         )
     if "must be at least" in low and "pixel" in low:
@@ -472,7 +493,7 @@ def _error_hint(low: str) -> str | None:
         or ("too large" in low and ("image" in low or "payload" in low or "body" in low))
     ):
         return (
-            "参考图太大被厂商拒收：请把参考图压缩、或把长边缩小（一般 2000 像素以内足够）后重试。"
+            "参考图太大被供应商拒收：请把参考图压缩、或把长边缩小（一般 2000 像素以内足够）后重试。"
         )
     # 尺寸/分辨率不合规（上限、必须为 N 的倍数、比例不支持等）—— 确定性错误，重试无用。
     if ("resolution" in low or "dimension" in low or "image size" in low or "width" in low) and (
@@ -480,7 +501,7 @@ def _error_hint(low: str) -> str | None:
     ):
         return (
             "参考图或出图尺寸不被该模型接受（超出上限 / 比例或边长不合规）："
-            "请缩小参考图、或换一个尺寸后重试。原始报文里有厂商给的具体限制。"
+            "请缩小参考图、或换一个尺寸后重试。原始报文里有供应商给的具体限制。"
         )
     if (
         "quota" in low
@@ -491,13 +512,13 @@ def _error_hint(low: str) -> str | None:
         or "额度" in low
         or "欠费" in low
     ):
-        return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
+        return "供应商额度 / 余额不足：请到供应商官网充值或检查账户额度后重试。"
     # 响应头已到、读响应体时中断（连接中途断开 / 响应不完整）：请求已被厂商受理。
     # 读体超时与等响应头超时的报文都是 "Read timed out"，分不开，统一走下面的超时文案。
     if ("connection broken" in low or "incompleteread" in low
             or "incomplete read" in low or "读取响应体时失败" in low):
         return (
-            "已收到厂商响应，但读取结果时失败：请求可能已经执行，请先在厂商后台核对再重试，"
+            "已收到供应商响应，但读取结果时失败：请求可能已经执行，请先在供应商后台核对再重试，"
             "避免重复计费。"
         )
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
@@ -509,23 +530,23 @@ def _error_hint(low: str) -> str | None:
         or "connection aborted" in low
     ):
         return (
-            "厂商网关中途断开连接：通常是该生成过重 / 上游太慢，超出了厂商网关的等待时限"
-            "（与本机网络无关）。请换更小的生成规模，或换模型 / 换厂商（如 seedream）重试。"
+            "供应商网关中途断开连接：通常是该生成过重 / 上游太慢，超出了供应商网关的等待时限"
+            "（与本机网络无关）。请换更小的生成规模，或换模型 / 换供应商（如 seedream）重试。"
         )
     if "timed out" in low or "timeout" in low:
         # 同步出图端点在图出完之前一个字节都不吐，所以读超时几乎必然意味着上游仍在生成、
         # 并且这次调用**已经计费**。别引导画师无脑重试（那是再买一次），先去后台确认。
         return (
-            "厂商接口超时未响应：请求可能已经执行，请先在厂商后台核对再重试。"
+            "供应商接口超时未响应：请求可能已经执行，请先在供应商后台核对再重试。"
             "这类超时通常意味着上游仍在出图、且这次调用已经计费；确认没出再重试或换模型，避免重复付费。"
         )
     if "max retries" in low or "failed to establish" in low or (
         "connection" in low and "refused" in low
     ):
-        return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
+        return "网络连不上供应商接口：请检查网络 / 代理设置，确认供应商域名可访问后重试。"
     if "gateway" in low or "网关" in low or "bad response status code" in low:
         return (
-            "厂商网关请求失败：请先核对厂商任务记录，再决定是否重试。"
+            "供应商网关请求失败：请先核对供应商任务记录，再决定是否重试。"
         )
     return None
 

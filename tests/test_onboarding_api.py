@@ -24,29 +24,25 @@ def test_onboarding_status_returns_bootstrap_check_payload(client):
 
 
 def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
+    # 目标已是 Atelier 数据目录（有 .config/）→ 直接切换指针，不复制。
     new_root = tmp_path / "switched-root"
-    cfg_home = tmp_path / "cfg"
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
-    monkeypatch.setenv("APPDATA", str(cfg_home))
-    # Clear the data-root override so bootstrap writes to global config
-    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", "")
-    # The root change invalidates the old connection; reconnect before editing configuration.
-    assert client.post("/api/connection/local-session", json={}).status_code == 200
-    assert client.post("/api/connection/editor-lease", json={
-        "client_id": client.headers["X-Atelier-Client"],
-    }).status_code == 200
-    resp = client.post("/api/onboarding/data-root", json={"path": str(new_root)})
+    (new_root / ".config").mkdir(parents=True)
+    cfg_file = tmp_path / "cfg" / "data-root"
+    from character_workflow.lib import data_root as data_root_module
+
+    monkeypatch.setattr(data_root_module, "_global_config_file", lambda: cfg_file)
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", os.environ["GAME_ATELIER_DATA_ROOT"])
+    resp = client.post("/api/data-root", json={"path": str(new_root)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["data_root"] == str(new_root.resolve())
-    assert new_root.exists()
-    for sub in (".config", ".runtime", "projects", "characters"):
-        assert (new_root / sub).is_dir()
+    assert body["move"]["phase"] == "done"
+    assert cfg_file.read_text(encoding="utf-8").strip() == str(new_root.resolve())
     assert os.environ["GAME_ATELIER_DATA_ROOT"] == str(new_root.resolve())
 
 
 def test_post_data_root_validates_payload(client):
-    resp = client.post("/api/onboarding/data-root", json={})
+    resp = client.post("/api/data-root", json={})
     assert resp.status_code == 422
 
 

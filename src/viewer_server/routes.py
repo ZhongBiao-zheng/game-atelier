@@ -782,22 +782,63 @@ def _bootstrap_script() -> Path:
     return Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
 
 
-@router.get("/onboarding/status")
-def onboarding_status() -> dict:
-    """Proxies `bootstrap.py --check` so Web 不用知道状态机细节。"""
+def _bootstrap_check(*extra: str) -> dict:
     proc = subprocess.run(
-        [sys.executable, str(_bootstrap_script()), "--check"],
+        [sys.executable, str(_bootstrap_script()), "--check", *extra],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        raise HTTPException(500, f"检查 Python 运行环境失败（bootstrap --check）：{proc.stderr}")
+        raise HTTPException(500, detail={
+            "message": "无法读取 Atelier 运行环境", "recovery": "重新打开 Atelier 后再试",
+            "raw": proc.stderr[-2000:],
+        })
+    return json.loads(proc.stdout)
+
+
+_update_refresh = threading.Lock()
+
+
+def _refresh_update_cache() -> None:
+    """首屏只读更新缓存；联网检查放到后台，结果写缓存，下次读状态时生效。"""
+    if not _update_refresh.acquire(blocking=False):
+        return
+
+    def run() -> None:
+        try:
+            subprocess.run(
+                [sys.executable, str(_bootstrap_script()), "--check"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        finally:
+            _update_refresh.release()
+
+    threading.Thread(target=run, name="update-cache-refresh", daemon=True).start()
+
+
+@router.get("/onboarding/status")
+def onboarding_status() -> dict:
+    """Proxies `bootstrap.py --check` so Web 不用知道状态机细节。"""
     from character_workflow.lib import onboarding_metrics
 
-    body = json.loads(proc.stdout)
+    body = _bootstrap_check("--cached-update")
     if body.get("status") == "needs_data_root":
+        # 首启不再问存放位置：服务本来就按默认目录运行，这里把默认目录固定下来（设置里随时可换）。
         onboarding_metrics.note_first_seen()
+        default_root = Path.home() / "game-atelier"
+        _init_data_root(str(default_root))
+        onboarding_metrics.record_data_root_set(default_root.resolve())
+        body = _bootstrap_check("--cached-update")
+    if body.get("status") == "needs_keys_repair":
+        # 损坏的 keys.json 没人能修：备份后按空库继续，首启引导重新添加。
+        keys.recover_corrupted_keys_file()
+        body["status"] = "needs_first_key"
+    if body.get("runtime_mode") == "source" and not os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
+        _refresh_update_cache()
     root = body.get("data_root")
     body["onboarding_skipped"] = bool(root) and onboarding_metrics.is_skipped(Path(root))
+    body["keys_recovered"] = keys.keys_recovery_notice()
     return body
 
 
@@ -813,22 +854,54 @@ def folder_picker(payload: _FolderPickerPayload) -> dict:
     )
 
 
-@router.post("/onboarding/data-root")
-def set_data_root(payload: _DataRootPayload) -> dict:
-    """Web 选完目录后落 global config，Skill 下次启动会从 global config 读。"""
+def _init_data_root(path: str) -> dict:
     proc = subprocess.run(
-        [sys.executable, str(_bootstrap_script()), "--init-data-root", payload.path],
+        [sys.executable, str(_bootstrap_script()), "--init-data-root", path],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        raise HTTPException(500, f"初始化数据目录失败（init-data-root）：{proc.stderr}")
-    body = json.loads(proc.stdout)
-    if root := body.get("data_root"):
-        os.environ["GAME_ATELIER_DATA_ROOT"] = root
+        raise HTTPException(500, detail={
+            "message": "无法创建数据目录", "recovery": "检查磁盘权限后重试", "raw": proc.stderr[-2000:],
+        })
+    return json.loads(proc.stdout)
+
+
+@router.get("/data-root")
+def data_root_state() -> dict:
+    """当前数据目录与更换进度（复制中 / 校验中 / 完成 / 失败）。"""
+    from character_workflow.lib import data_root_move
+
+    return {"data_root": str(data_root.resolve_data_root()), "move": data_root_move.snapshot()}
+
+
+@router.post("/data-root")
+def change_data_root(payload: _DataRootPayload) -> dict:
+    """更换数据目录：空目标复制并切换、已有 Atelier 数据直接切换、其他非空目录拒绝（规格 D1）。"""
+    from character_workflow.lib import data_root_move
+    from viewer_server.update_routes import active_work
+    from viewer_server.watcher import restart_watchers
+
+    if not payload.path.strip():
+        raise HTTPException(422, detail="请选择一个文件夹")
+    busy = active_work()
+    running = busy["jobs"] + busy["agents"] + busy["gateway"]
+    if running:
+        raise HTTPException(409, detail=f"有 {running} 个生成正在进行，完成后再更换数据目录")
+
+    def switched() -> None:
+        root = data_root.resolve_data_root()
         from character_workflow.lib import onboarding_metrics
 
-        onboarding_metrics.record_data_root_set(Path(root))
-    return body
+        onboarding_metrics.record_data_root_set(root)
+        restart_watchers()
+
+    try:
+        move = data_root_move.start(payload.path, on_switched=switched)
+    except data_root_move.MoveRejected as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(409, detail={"message": "无法读取选中的文件夹", "raw": str(error)}) from error
+    return {"data_root": str(data_root.resolve_data_root()), "move": move}
 
 
 @router.post("/onboarding/events", status_code=204)

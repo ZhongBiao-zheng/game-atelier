@@ -200,8 +200,51 @@ class NoSuchAliasError(Exception):
     ...
 
 
-class KeysFileCorruptedError(Exception):
-    ...
+RECOVERED_MARKER = "keys-recovered.json"
+
+
+def _recovered_marker() -> Path:
+    return data_root.config_dir() / RECOVERED_MARKER
+
+
+def recover_corrupted_keys_file() -> str | None:
+    """keys.json 解析不了 → 原文件改名备份，之后按空库继续；返回备份文件名，无事可做返回 None。
+
+    损坏的配置没人能修：读取和保存都会失败，用户卡在首启。备份保留原文件（含密钥，留在 .config/ 内），
+    并写一个标记让界面说明一次「供应商配置损坏，已备份」；第一次成功写入供应商后标记清除。
+    """
+    path = data_root.keys_file()
+    try:
+        raw = json.loads(read_text_with_retry(path))
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raw = None
+    if isinstance(raw, dict):
+        return None
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        _replace_with_retry(path, backup)
+    except FileNotFoundError:
+        return None  # 另一个进程刚备份过
+    marker = _recovered_marker()
+    marker.write_text(
+        json.dumps({"backup": backup.name, "at": datetime.now().isoformat(timespec="seconds")}),
+        encoding="utf-8",
+    )
+    return backup.name
+
+
+def keys_recovery_notice() -> dict | None:
+    """最近一次自动备份损坏配置的记录；界面据此提示重新添加供应商。"""
+    try:
+        value = json.loads(_recovered_marker().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def read_keys_db() -> KeysDB:
@@ -210,8 +253,12 @@ def read_keys_db() -> KeysDB:
         return KeysDB()
     try:
         raw = json.loads(read_text_with_retry(path))
-    except json.JSONDecodeError as e:
-        raise KeysFileCorruptedError(f"{path}: {e}") from e
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raw = None
+    if not isinstance(raw, dict):
+        # 不取 keys_lock：调用方常已持锁（锁不可重入）。备份前会再读一遍确认仍是坏的。
+        recover_corrupted_keys_file()
+        return KeysDB()
     _migrate_legacy_providers(raw)
     db = KeysDB.model_validate(raw)
     _backfill_model_protocols(db)
@@ -298,6 +345,7 @@ def write_keys_db(db: KeysDB) -> None:
         _replace_with_retry(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+    _recovered_marker().unlink(missing_ok=True)
     # 引用集合只在这里变：每次写完顺手清掉没人引用、过了宽限期的图标文件（调用方已持 keys_lock）。
     from character_workflow.lib import provider_icons
     provider_icons.prune(provider_icons.referenced_shas([k.icon for k in db.keys]))
