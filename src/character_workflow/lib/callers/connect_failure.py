@@ -29,6 +29,7 @@ import ssl
 import traceback
 
 import requests
+from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPSConnectionPool
 from urllib3 import exceptions as urllib3_exceptions
 
@@ -92,7 +93,12 @@ def initial_handshake_eof(error: requests.exceptions.SSLError) -> bool:
     if not isinstance(eof, ssl.SSLEOFError):
         return False
     frames = {frame.f_code for frame, _ in traceback.walk_tb(eof.__traceback__)}
-    return {HTTPSConnectionPool._validate_conn.__code__, ssl.SSLSocket.do_handshake.__code__} <= frames
+    if ssl.SSLSocket.do_handshake.__code__ not in frames:
+        return False
+    # urlopen establishes the CONNECT tunnel before _make_request. On that path
+    # TLS to the origin runs inside _prepare_proxy, before _validate_conn is reached.
+    return (HTTPSConnectionPool._validate_conn.__code__ in frames or
+            {HTTPSConnectionPool._prepare_proxy.__code__, HTTPSConnection.connect.__code__} <= frames)
 
 
 def transport_causes(error: BaseException):

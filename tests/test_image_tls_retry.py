@@ -42,7 +42,7 @@ def server_tls(tmp_path, monkeypatch):
 
 
 @contextmanager
-def upstream(ctx, actions):
+def upstream(ctx, actions, *, tunnel=False):
     connections, bodies = [], []
 
     class Handler(socketserver.BaseRequestHandler):
@@ -50,6 +50,12 @@ def upstream(ctx, actions):
             index = len(connections)
             connections.append(index)
             action = actions[index] if index < len(actions) else "success"
+            if tunnel:
+                with self.request.makefile("rb") as stream:
+                    request_line = stream.readline()
+                    assert request_line.startswith(b"CONNECT ")
+                    parse_headers(stream)
+                self.request.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
             if action == "handshake":
                 self.request.recv(16384)  # consume ClientHello before closing the socket
                 self.request.shutdown(socket.SHUT_WR)
@@ -153,3 +159,50 @@ def test_response_status_tls_eof_with_received_body_is_not_replayed(server_tls, 
             openai_image._post_json(url, "fake", {"prompt": "test"}, timeout=3, on_tls_event=warnings.append)
     assert len(connections) == len(bodies) == len(warnings) == 1
     assert "stage=read_status" in warnings[0] and "retry=0 result=not_retried" in warnings[0]
+
+
+@pytest.mark.parametrize(("actions", "expected_connections", "expected_posts"), [
+    (["handshake", "success"], 2, 1), (["handshake", "handshake"], 2, 0),
+    (["sent"], 1, 1), (["redirect", "handshake"], 2, 1),
+])
+def test_connect_tunnel_matches_live_tuzi_handshake_trace(
+    server_tls, monkeypatch, actions, expected_connections, expected_posts
+):
+    import traceback
+    from character_workflow.lib.callers.connect_failure import initial_handshake_eof, transport_causes
+
+    # Module/function signatures observed on the free Tuzi GET through the HTTP proxy.
+    # Validate the transport evidence as well as the actual number of paid POST bodies.
+    observed = [
+        "urllib3.connectionpool.urlopen", "urllib3.connectionpool._prepare_proxy",
+        "urllib3.connection.connect", "urllib3.connection._ssl_wrap_socket_and_match_hostname",
+        "urllib3.util.ssl_.ssl_wrap_socket", "urllib3.util.ssl_._ssl_wrap_socket_impl",
+        "ssl.wrap_socket", "ssl._create", "ssl.do_handshake",
+    ]
+    matches = []
+
+    def check(error):
+        eof = next(c for c in transport_causes(error) if isinstance(c, ssl.SSLEOFError))
+        frames = [f"{frame.f_globals['__name__']}.{frame.f_code.co_name}"
+                  for frame, _ in traceback.walk_tb(eof.__traceback__)]
+        # SSL helpers can differ across supported Python versions.
+        matches.append([frame for frame in frames if frame in observed])
+        return initial_handshake_eof(error)
+
+    monkeypatch.setattr(openai_image, "initial_handshake_eof", check)
+    with upstream(server_tls, actions, tunnel=True) as (proxy, connections, bodies):
+        for var in ("NO_PROXY", "no_proxy"):
+            monkeypatch.setenv(var, "")
+        monkeypatch.setenv("https_proxy", proxy.replace("https://", "http://").removesuffix("/images"))
+        # The fixture terminates CONNECT and TLS locally; the origin port is never contacted.
+        def submit():
+            return openai_image._post_json("https://127.0.0.1:1/images", "test", {"model": "x"}, timeout=3)
+        if actions[-1] == "success":
+            assert submit() == {}
+        else:
+            with pytest.raises(openai_image.OpenAIImageError):
+                submit()
+    assert (len(connections), len(bodies)) == (expected_connections, expected_posts)
+    if "handshake" in actions:
+        assert len(matches) == 1
+        assert matches[0][:3] == observed[:3] and matches[0][-1] == observed[-1]
