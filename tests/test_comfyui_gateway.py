@@ -218,22 +218,32 @@ def test_member_caller_sends_mask_and_values(live_gateway, host, tmp_path):
 
 
 def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, host, monkeypatch):
-    from character_workflow.lib import job_runner
+    from character_workflow.lib import comfyui_workflows as workflows, job_runner
     from character_workflow.lib.callers import comfyui
     from character_workflow.lib.jobs import read_job, save_job
     from character_workflow.lib.schemas import Job, JobParams
 
     workflow = imported()
+    # 闸门没打开时主机会一直等到工作流超时；超时缩短到 30 秒，失败落成断言而不是挂住整个 CI job。
+    workflows.save_workflow("local", name=workflow.name, api_workflow=workflow.api_workflow,
+                            inputs=workflow.inputs, identifier=workflow.id, timeout_seconds=30)
     atelier_gateway.sync_gateway_key("Hub")
-    # 假 ComfyUI 只在一次主机轮询里报「运行中」，这段窗口就是主机的轮询间隔。成员每 0.01 秒查一次网关，
-    # 窗口取 0.04 秒时慢的 CI 机器会整段错过（macOS 偶发只见 queued → downloading）；0.3 秒留出约 30 倍余量。
-    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.3)
+    # 成员靠轮询网关看到主机的阶段，比成员一次轮询还短的阶段会被跳过。按时长留窗口不可靠
+    # （Windows CI 曾整段错过 0.6 秒的排队窗口），所以假 ComfyUI 停在每个阶段，直到成员看见了才往下走。
+    host.delay = 10**9  # 排在别人的任务后面，不进入运行
+    # 主机每轮询一次就重写一次任务文件；停在某阶段期间别让它每毫秒写一次。
+    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.05)
     phases = []
     update = job_runner.update_job_phase
 
     def observe(job_id, phase):
         update(job_id, phase)
         phases.append(read_job(job_id).progress_phase)
+        if phase == "queued:1":
+            # 让出运行位但不出结果：主机报「运行中」，直到成员看见。
+            host.mode, host.foreign_running, host.delay = "timeout", False, -1
+        elif phase == "sent" and "queued:1" in phases:
+            host.mode = "success"
 
     monkeypatch.setattr(job_runner, "update_job_phase", observe)
     save_job(Job(job_id="member-queue", character_id="A", prompt="cat", model=workflow.id,
@@ -242,6 +252,7 @@ def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, h
                  submitted_at="2026-11-02T00:00:00+00:00"))
     done = job_runner.run_job("member-queue")
     assert done.status.value == "done", done.error
+    assert "queued:1" in phases, phases
     queued = phases.index("queued:1")
     assert "sent" in phases[queued + 1:]
     assert done.progress_phase is None
