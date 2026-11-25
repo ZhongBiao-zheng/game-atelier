@@ -31,6 +31,10 @@
 | 通知提示 | `Toaster` + `toast`（`ui/sonner.tsx`） | 需要独立一组时给 `Toaster` 传 `id`，`toast` 里用 `toasterId` |
 | 菜单 | `DropdownMenu` | |
 | 标签 | `Badge` / `MetaTag` | 参数标签用 `MetaTag` |
+| 展开收起 | `Collapse` | 高度 0↔auto，收起播完再卸载，中途反向从当前高度接上 |
+| 图标换态 | `SwapIcon` | `swapKey` 变化时新图标淡入放大；`variant="pop"` 只给喜欢、复制成功等正向确认 |
+| 按钮文案换态 | `SwapLabel` | 两段文案叠格占宽，切换时按钮不跳 |
+| 图片出现 | `RevealImage` | 解码完成再淡入，已缓存的不播；`onReady` 供父级交叉淡化后卸掉旧层 |
 
 缺组件时先在 `components/ui/` 补齐再用，不在页面里写原生控件。
 
