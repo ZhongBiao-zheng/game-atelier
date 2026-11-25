@@ -2030,9 +2030,9 @@ describe('Studio compact mode errors', () => {
     fireEvent.click(screen.getByLabelText('生成'));
 
     const alert = await screen.findByRole('alert');
-    // 报错要说清是哪一步失败 + 状态码（英文 `studio job failed: 500` 那种对画师没用）
+    // 报错说清是哪一步失败（errorText：不带 HTTP 码，英文 `studio job failed: 500` 那种对画师没用）
     expect(alert).toHaveTextContent('创建出图任务失败');
-    expect(alert).toHaveTextContent('500');
+    expect(alert).not.toHaveTextContent('HTTP');
   });
 
   it('freezes the same CNY cost snapshot when submitting from compact mode', async () => {
