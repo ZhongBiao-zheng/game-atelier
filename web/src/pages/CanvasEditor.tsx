@@ -34,7 +34,7 @@ import {
 } from '@xyflow/react';
 import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { currentHostNodeType, isHostPluginId, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -72,7 +72,10 @@ import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { withAutoProvider } from '@/lib/modelRoutes';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
-import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
+import { canvasEdgeTypes, fadeOutCanvasEdge } from '@/components/canvas/CanvasConnectionEdge';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { flashCanvasEdges, flashCanvasNodes, markCanvasNodesEntering } from '@/components/canvas/canvasNodeAttention';
+import { canvasHistoryAffectedNodes, canvasHistoryHint, canvasRectsIntersect, canvasRemoteNodeChanges, type CanvasHistoryHint } from '@/pages/canvasHistoryAttention';
 import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import {
   AddMenuButton,
@@ -90,8 +93,8 @@ import {
   type CanvasStackMemberMotion,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
-import { AnimatePresence, motion } from 'motion/react';
-import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
+import { AnimatePresence, cubicBezier, motion } from 'motion/react';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
@@ -449,6 +452,12 @@ type CanvasLibraryMode = 'assets' | 'prompts' | 'team';
 interface CanvasNoticeAction { label: string; run: () => void }
 
 const TOOL_NOTICE_MS = 1800;
+/** 撤销 / 重做的边缘胶囊停留时长（Q7）。 */
+const CANVAS_HISTORY_HINT_MS = 1500;
+/** 读得比这快就不显示加载转圈（Q12：延迟 300ms 后显示）。 */
+const CANVAS_LOADING_DELAY_MS = 300;
+/** 屏上 A→B 的视口平移用 in-out 曲线（与 --ease-atelier-in-out 同值）。 */
+const CANVAS_VIEWPORT_EASE_IN_OUT = cubicBezier(...MOTION_EASE.inOut);
 /** 带动作或多条的提示要留出读完、点按钮的时间。 */
 const TOOL_NOTICE_LONG_MS = 6000;
 const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
@@ -560,8 +569,9 @@ function CanvasEditorInner({
   const selectionRectActive = useRef(false);
   // 框选命中由我们自己按文档几何算，不用 xyflow 的 getNodesInside：它把没测量过连接点的节点
   // （onlyRenderVisibleElements 下从没渲染过的屏外节点）一律当成「在框内」，随手一框就选中一大片。
-  // 框选期间节点设为不可选，让 xyflow 那一路选不出任何东西。
-  const [sweeping, setSweeping] = useState(false);
+  // 框选期间节点设为不可选，让 xyflow 那一路选不出任何东西。只改 xyflow 的内部节点，不进 flowNodes：
+  // 原来翻 selectable 会让 flowNodes 整体重建两次（开始、结束各一次），每个节点外壳都跟着重渲染。
+  const sweepUnsubscribe = useRef<(() => void) | null>(null);
   // 展开中的结果组（封面 id）。只是界面状态，刷新后全部收起。
   const [expandedResultStackIds, setExpandedResultStackIds] = useState<ReadonlySet<string>>(() => new Set());
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
@@ -576,6 +586,9 @@ function CanvasEditorInner({
   const [mediaReplaceTarget, setMediaReplaceTarget] = useState<MediaReplaceTarget | null>(null);
   const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
   const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
+  // 撤销 / 重做改动全在视口外时，边缘显示 1.5s 的「已撤销 · 左侧 2 处」。
+  const [historyHint, setHistoryHint] = useState<CanvasHistoryHint | null>(null);
+  const historyHintTimer = useRef<number | null>(null);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
@@ -598,7 +611,6 @@ function CanvasEditorInner({
   const flowNodeCache = useRef(new Map<string, {
     node: CanvasNode;
     selected: boolean;
-    selectable: boolean;
     liveLayout: LiveNodeLayout | undefined;
     hidden: boolean;
     stackMember: boolean;
@@ -1193,7 +1205,15 @@ function CanvasEditorInner({
     activeTextEditingNodeIds.current.clear();
     autosaveObservedDirtyVersion.current = 0;
     serverRevision.current = remote.revision;
-    setDocument(normalizeCanvasGroups(hydrated.document));
+    const reloaded = normalizeCanvasGroups(hydrated.document);
+    // 别处（多半是 Agent）改了画布：新放上来的节点淡入放大，被改动的节点闪一圈描边（Q15），看得出改了哪里。
+    const before = latestDocument.current;
+    if (before?.project_id === reloaded.project_id) {
+      const { added, changed } = canvasRemoteNodeChanges(before, reloaded);
+      markCanvasNodesEntering(added, 0.96);
+      flashCanvasNodes(changed);
+    }
+    setDocument(reloaded);
     // 与首屏加载相同：补出来的空文本版本还没落盘，要再保存一次。
     dirtyVersion.current = hydrated.versionIds.size ? 1 : 0;
     setDirtySignal(dirtyVersion.current);
@@ -1413,7 +1433,6 @@ function CanvasEditorInner({
       activeIds.add(node.id);
       const selected = selectedNodeIds.has(node.id);
       const liveLayout = liveNodeLayout?.nodeId === node.id ? liveNodeLayout : undefined;
-      const selectable = !sweeping;
       const stackMember = resultStackOwnerById.has(node.id);
       const hidden = collapsedStackMemberIds.has(node.id);
       const currentImageVersionId = node.type === 'image' ? node.data.current_version_id : null;
@@ -1425,7 +1444,6 @@ function CanvasEditorInner({
       if (
         cached?.node === node
         && cached.selected === selected
-        && cached.selectable === selectable
         && cached.liveLayout === liveLayout
         && cached.hidden === hidden
         && cached.stackMember === stackMember
@@ -1448,13 +1466,12 @@ function CanvasEditorInner({
           ...(node.type === 'group' ? { pointerEvents: 'none' as const } : {}),
         },
         selected,
-        selectable,
         hidden,
         // 成员的位置由封面决定（拖封面整组移动），自己不能单独拖走。
         draggable: !stackMember,
         data: { domain: node },
       };
-      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, hidden, stackMember, shownVersionId, flowNode });
+      flowNodeCache.current.set(node.id, { node, selected, liveLayout, hidden, stackMember, shownVersionId, flowNode });
       return flowNode;
     });
     for (const id of flowNodeCache.current.keys()) {
@@ -1473,7 +1490,7 @@ function CanvasEditorInner({
           height: mediaPlaceholder.size.height,
           zIndex: maximumPersistedZIndex + 2,
         },
-        data: { label: mediaPlaceholder.label },
+        data: { label: mediaPlaceholder.label, leaving: mediaPlaceholder.leaving },
         selectable: false,
         draggable: true,
         connectable: false,
@@ -1482,7 +1499,7 @@ function CanvasEditorInner({
       });
     }
     return next;
-  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, revealRevision, selectedNodeIds, sweeping]);
+  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, revealRevision, selectedNodeIds]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -1650,11 +1667,13 @@ function CanvasEditorInner({
       return;
     }
     setError(null);
+    const connectionId = makeId('connection');
+    flashCanvasEdges([connectionId]);
     commit(current => {
       const next: CanvasDocument = {
         ...current,
         connections: [...current.connections, {
-          id: makeId('connection'),
+          id: connectionId,
           role: 'input',
           source_node_id: connection.source!,
           target_node_id: connection.target!,
@@ -1917,14 +1936,24 @@ function CanvasEditorInner({
     sweepHits.current = new Set();
     // xyflow 在这个回调返回后、React 重渲染之前就会按自己的规则算一次命中，并把 selected 直接
     // 写进内部节点对象（画面会闪一帧「全部选中」）。这里同步把内部节点置为不可选，堵住这一帧；
-    // 随后的 setSweeping 渲染会正式下发 selectable:false。
-    for (const node of flowStore.getState().nodeLookup.values()) node.selectable = false;
-    setSweeping(true);
+    // 框选途中节点因选中变化被 xyflow 按新的 flowNodes 重建时，内部节点会拿回可选，订阅 store 再压回去。
+    const lockSelectable = (state: { nodeLookup?: ReadonlyMap<string, { selectable?: boolean }> }) => {
+      for (const node of state.nodeLookup?.values() ?? []) if (node.selectable !== false) node.selectable = false;
+    };
+    lockSelectable(flowStore.getState());
+    sweepUnsubscribe.current?.();
+    sweepUnsubscribe.current = flowStore.subscribe(lockSelectable);
   }, [flowStore]);
 
   const onSelectionEnd = useCallback(() => {
     selectionRectActive.current = false;
-    setSweeping(false);
+    sweepUnsubscribe.current?.();
+    sweepUnsubscribe.current = null;
+    // 还原成 flowNodes 里给的值（缺省可选；占位节点本来就不可选）。
+    for (const node of flowStore.getState().nodeLookup.values()) {
+      const internal = node as { selectable?: boolean; internals?: { userNode?: { selectable?: boolean } } };
+      internal.selectable = internal.internals?.userNode?.selectable;
+    }
     // 选区框（nodesselection-rect）由 xyflow 按它自己的命中数决定显隐，而它这一路被我们
     // 关掉了，永远是空的。它在本回调之后同步把 nodesSelectionActive 写成 false，
     // 所以放到微任务里按我们的命中结果再写一次。
@@ -2021,6 +2050,16 @@ function CanvasEditorInner({
     );
     if (blocked) {
       setError(blocked);
+      return;
+    }
+    // 只删连线时先让线 150ms 淡出再删（Q15）；带节点的删除照旧立即生效。
+    if (nodeIds.size === 0 && motionAvailable()) {
+      const edgeIds = new Set(selectedConnectionIds);
+      setSelectedConnectionIds(new Set());
+      void Promise.all([...edgeIds].map(fadeOutCanvasEdge)).then(() => commit(current => (
+        removeCanvasConnections(current, edge => edgeIds.has(edge.id))
+      ), true));
+      requestAnimationFrame(() => editorRegionRef.current?.focus());
       return;
     }
     commit(current => {
@@ -2279,6 +2318,7 @@ function CanvasEditorInner({
           saveQueued.current = null;
           setSaveState('saved');
         }
+        markCanvasNodesEntering(placedInsertedNodes.map(node => node.id));
         setDocument(merged);
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
@@ -2495,6 +2535,8 @@ function CanvasEditorInner({
           }
         }
       }
+      // 「创建并连接」顺带建的线亮一下（updater 可能延后到渲染时才跑，所以在这里点名）。
+      flashCanvasEdges(connections.slice(current.connections.length).map(connection => connection.id));
       const next = { ...current, nodes, connections, content_versions: contentVersions };
       return menu?.sourceId
         ? syncCanvasPromptReferences(next, new Set([
@@ -2515,6 +2557,7 @@ function CanvasEditorInner({
     } else {
       commit(apply, true);
     }
+    markCanvasNodesEntering([node.id]);
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set());
     setAddOpen(false);
@@ -3423,6 +3466,26 @@ function CanvasEditorInner({
     }
   }, [commit, fitBounds, runViewportCommand]);
 
+  /** 撤销 / 重做之后点出变化在哪（Q7）：视口里的受影响节点闪一圈描边；一处都看不到时边缘给胶囊。 */
+  const announceHistoryChange = useCallback((action: '撤销' | '重做', before: CanvasDocument, after: CanvasDocument) => {
+    const bounds = editorRegionRef.current?.getBoundingClientRect();
+    if (!bounds?.width || !bounds.height) return;
+    const { x, y, zoom } = getViewport();
+    const visible = { x: -x / zoom, y: -y / zoom, width: bounds.width / zoom, height: bounds.height / zoom };
+    const affected = canvasHistoryAffectedNodes(before, after);
+    flashCanvasNodes(affected.presentIds.filter(id => canvasRectsIntersect(affected.presentRects.get(id)!, visible)));
+    if (historyHintTimer.current !== null) window.clearTimeout(historyHintTimer.current);
+    const hint = canvasHistoryHint(action, affected.rects, visible);
+    setHistoryHint(hint ? { ...hint, key: Date.now() } : null);
+    historyHintTimer.current = hint ? window.setTimeout(() => {
+      historyHintTimer.current = null;
+      setHistoryHint(null);
+    }, CANVAS_HISTORY_HINT_MS) : null;
+  }, [getViewport]);
+  useEffect(() => () => {
+    if (historyHintTimer.current !== null) window.clearTimeout(historyHintTimer.current);
+  }, []);
+
   const undo = useCallback(() => {
     const previous = history.current.past.pop();
     if (!previous || !document) return;
@@ -3446,7 +3509,8 @@ function CanvasEditorInner({
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document, jobsByRunId]);
+    announceHistoryChange('撤销', document, restored);
+  }, [announceHistoryChange, document, jobsByRunId]);
 
   const redo = useCallback(() => {
     const next = history.current.future.pop();
@@ -3465,7 +3529,8 @@ function CanvasEditorInner({
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document, jobsByRunId]);
+    announceHistoryChange('重做', document, restored);
+  }, [announceHistoryChange, document, jobsByRunId]);
 
   const groupSelectionRef = useRef(groupSelection);
   groupSelectionRef.current = groupSelection;
@@ -3477,6 +3542,8 @@ function CanvasEditorInner({
       // 不管选了几个都拦掉浏览器的「查找下一个」，画布里 ⌘G 只有打组一个含义。
       event.preventDefault();
       if (latestSelectedNodeIds.current.size < 2) return;
+      // 快捷键没有点击来源：对应的「分组」按钮按一下给个回执（Q15），也确认没被输入法吞掉。
+      flashShortcutButton(editorRegionRef.current?.querySelector('[data-canvas-shortcut="group"]'));
       groupSelectionRef.current();
     }
     window.addEventListener('keydown', handleGroupShortcut);
@@ -4354,6 +4421,7 @@ function CanvasEditorInner({
     mediaOperationInFlight.current = true;
     setMediaOperationBusy(true);
     setMediaOperationError(null);
+    let placeholderHandedOver = false;
     try {
       if (!await persistNow()) {
         reportError('自动保存失败，图片处理尚未开始。请检查服务后重试。');
@@ -4425,6 +4493,16 @@ function CanvasEditorInner({
       latestDocument.current = synced;
       if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = synced;
       flowNodeCache.current.clear();
+      // 结果节点接替占位卡：结果淡入、占位卡留在原位淡出，两层交叉，不露画布。
+      markCanvasNodesEntering(createdNodes.map(node => node.id), placeholder ? 1 : undefined);
+      if (placeholder && motionAvailable()) {
+        const leaving = { ...(mediaPlaceholderRef.current ?? placeholder), leaving: true };
+        placeholderHandedOver = true;
+        updateMediaPlaceholder(leaving);
+        window.setTimeout(() => {
+          if (mediaPlaceholderRef.current?.id === leaving.id) updateMediaPlaceholder(null);
+        }, MOTION_DURATION.base * 1000);
+      }
       setDocument(synced);
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
@@ -4440,7 +4518,7 @@ function CanvasEditorInner({
     } finally {
       documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
-      updateMediaPlaceholder(null);
+      if (!placeholderHandedOver) updateMediaPlaceholder(null);
       setMediaOperationBusy(false);
       if (saveQueued.current) void flushSave().catch(() => {
         setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
@@ -4481,7 +4559,7 @@ function CanvasEditorInner({
         setMattingPrompt({ ...target, title: node.title, bytes: status.bytes });
         return;
       }
-      announceToolNotice(`正在为 ${node.title} 抠图…`);
+      announceToolNotice(`${node.title} 抠图中…`);
       await executeMediaOperation(target, { kind: 'remove_background' });
     })();
   }, [announceToolNotice, executeMediaOperation]);
@@ -4492,7 +4570,7 @@ function CanvasEditorInner({
     try {
       await downloadCanvasMattingModel();
       setMattingPrompt(null);
-      announceToolNotice(`模型已就绪，正在为 ${mattingPrompt.title} 抠图…`);
+      announceToolNotice(`模型已就绪，${mattingPrompt.title} 抠图中…`);
       await executeMediaOperation(
         { nodeId: mattingPrompt.nodeId, versionId: mattingPrompt.versionId },
         { kind: 'remove_background' },
@@ -4838,6 +4916,7 @@ function CanvasEditorInner({
   // 取代 09-14 的「放大到占视口大部分」）。一批新节点只算一次、只动一次视口。
   focusNewNodesHandler.current = (nodes: readonly CanvasNode[]) => {
     if (!nodes.length) return;
+    markCanvasNodesEntering(nodes.map(node => node.id));
     const versions = latestDocument.current?.content_versions ?? {};
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
     for (const node of nodes) {
@@ -5126,7 +5205,29 @@ function CanvasEditorInner({
     return () => { root.style.overscrollBehaviorX = previous; };
   }, []);
 
-  if (loading) return <EditorMessage icon={<LoadingIcon size="lg" className="animate-spin" />} text="正在展开画布…" />;
+  // 生成中的节点：拖动时 document.nodes 每帧都换，但决定「是否在生成」的只有节点 id / 类型 / active_run_id
+  // 与任务表。按这几样做 key，拖动期间不再每帧对所有节点跑一遍 canvasNodeRunState（含历史任务排序）。
+  const runNodesRef = useRef<readonly CanvasNode[]>([]);
+  runNodesRef.current = document?.nodes ?? [];
+  const runKey = (document?.nodes ?? []).map(node => (
+    `${node.id}:${node.type}:${'active_run_id' in node.data ? node.data.active_run_id ?? '' : ''}`
+  )).join('|');
+  const runningNodeIds = useMemo(() => (runKey ? runNodesRef.current : [])
+    .filter(node => canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).status === 'loading')
+    .map(node => node.id), [jobsByResultNodeId, jobsByRunId, runKey]);
+
+  // 进入画布：读得快就不闪转圈（超过 300ms 才出），读完画布整体 200ms 淡入。
+  const wasLoading = useRef(loading);
+  useLayoutEffect(() => {
+    if (loading) { wasLoading.current = true; return; }
+    if (!wasLoading.current) return;
+    wasLoading.current = false;
+    const region = editorRegionRef.current;
+    if (!region || !motionAvailable()) return;
+    clearOnFinish(animate(region, { opacity: [0, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), region, ['opacity']);
+  }, [loading]);
+
+  if (loading) return <DelayedCanvasLoading />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
   const background = backgroundVariant(document.settings.background);
@@ -5186,9 +5287,6 @@ function CanvasEditorInner({
   const fitAllNodes = () => {
     void runViewportCommand(() => fitView({ duration: viewportMotionMs(MOTION_DURATION.fast), padding: 0.12 }));
   };
-  const runningNodeIds = document.nodes
-    .filter(node => canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).status === 'loading')
-    .map(node => node.id);
 
   const canvasFeedbackVisible = !preview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
     && !shortcutsOpen && !generationPreferencesOpen;
@@ -5305,9 +5403,11 @@ function CanvasEditorInner({
           onlyRenderVisibleElements
           className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting', createMenu?.sourceId && 'canvas-flow-pending-connection')}
         >
-          <CanvasZoomCssVars target={editorRegionRef} />
+          <CanvasZoomCssVars />
           {background && <Background variant={background} gap={22} size={1} />}
+          <AnimatePresence initial={false}>
           {document.settings.show_minimap && !materialPick && (
+            <CanvasChromeFade key="minimap">
             <MiniMap
               position="bottom-left"
               className="canvas-minimap hidden sm:block"
@@ -5321,7 +5421,9 @@ function CanvasEditorInner({
                 void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: viewportMotionMs(MOTION_DURATION.fast) }));
               }}
             />
+            </CanvasChromeFade>
           )}
+          </AnimatePresence>
           {createMenu?.sourceId && (
             <CanvasPendingConnection
               sourceIds={createMenu.sourceIds ?? [createMenu.sourceId]}
@@ -5356,17 +5458,19 @@ function CanvasEditorInner({
           </div>
         )}
 
+        <AnimatePresence>
         {selectedNodeIds.size > 1 && (
+          <CanvasChromeFade key="multi-select" offset={-4} className="pointer-events-auto absolute left-1/2 top-20 z-30 -translate-x-1/2">
           <div
             role="toolbar"
             aria-label={`已选择 ${selectedNodeIds.size} 个节点`}
-            className="pointer-events-auto absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow"
+            className="flex items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow"
           >
-            <span className="px-2 text-xs font-medium text-foreground">
+            <span className="px-2 text-xs font-medium tabular-nums text-foreground">
               已选 {selectedNodeIds.size} 个节点
             </span>
             <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
-            <Button type="button" variant="ghost" size="sm" onClick={groupSelection}>
+            <Button type="button" variant="ghost" size="sm" data-canvas-shortcut="group" onClick={groupSelection}>
               <LayersIcon aria-hidden="true" />分组
             </Button>
             {hideableSelection.length > 0 && (
@@ -5401,7 +5505,9 @@ function CanvasEditorInner({
               <CloseIcon aria-hidden="true" />
             </Button>
           </div>
+          </CanvasChromeFade>
         )}
+        </AnimatePresence>
 
         {!materialPick && (
           <CanvasZoomDock
@@ -5582,8 +5688,9 @@ function CanvasEditorInner({
               </Button></Hint>
             </div>
           )}
+          <AnimatePresence initial={false}>
           {runningNodeIds.length > 0 && (
-            <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+            <CanvasChromeFade key="running" className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
               <Hint label="定位到生成中的节点"><Button
                 variant="ghost"
                 className="h-9 gap-2 px-3 font-normal"
@@ -5600,8 +5707,9 @@ function CanvasEditorInner({
                 生成中
                 <span className="text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
               </Button></Hint>
-            </div>
+            </CanvasChromeFade>
           )}
+          </AnimatePresence>
           <div className={cn('pointer-events-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow', runningNodeIds.length === 0 && 'ml-auto')}>
             <Button
               variant="ghost"
@@ -5618,7 +5726,7 @@ function CanvasEditorInner({
           <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex max-h-[calc(100dvh-8rem)] -translate-y-1/2 flex-col items-center gap-1 overflow-y-auto rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents md:max-h-none md:overflow-visible">
           <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:max-h-[calc(100dvh-17rem)] md:flex-col md:items-center md:gap-0 md:overflow-y-auto md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <span className="xl:hidden">
-              <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <CloseIcon /> : <AddIcon />}</ToolButton>
+              <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}><SwapIcon swapKey={addOpen}>{addOpen ? <CloseIcon /> : <AddIcon />}</SwapIcon></ToolButton>
             </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><SelectIcon /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
@@ -5641,14 +5749,22 @@ function CanvasEditorInner({
               <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={toggleAssetLibrary}><LibraryIcon /></ToolButton>
             </div>
           )}
+          <AnimatePresence>
           {addOpen && (
-            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
+            <motion.div
+              key="add-menu"
+              ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation}
+              // 进场沿用 popover-in；退场 150ms 淡出（.canvas-add-menu 在宽屏自带 translateY 定位，只动透明度）。
+              exit={motionAvailable() ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
+              className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow"
+            >
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
               <PluginCreateMenuItems onAdd={addPluginNode} />
               <PluginCanvasActionItems hostPlugins={hostPlugins} onRun={runPluginCanvasAction} />
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
           </div>
         )}
 
@@ -5674,12 +5790,23 @@ function CanvasEditorInner({
           }}
         />
 
+        {/* 「创建并连接」：在松手处 150ms 淡入放大，关掉 150ms 淡出。left / top 管位置（平移时直接改写），动画只动透明度与缩放。 */}
+        <AnimatePresence>
         {createMenu && (
-          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
+          <motion.div
+            key="create-menu"
+            ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation}
+            initial={motionAvailable() ? { opacity: 0, scale: prefersReducedMotion() ? 1 : 0.96 } : false}
+            animate={{ opacity: 1, scale: 1, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.out } }}
+            exit={motionAvailable() ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
+            className={cn('fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow', createMenu.sourceHandle === 'target' ? 'origin-right' : 'origin-left')}
+            style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}
+          >
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><CloseIcon /></Button></div>
             <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu, 'speech')} onAddMusic={() => addGenerationNode('audio', createMenu, 'music')} onUpload={() => uploadRef.current?.click()} />
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* 资产库与 Agent 面板共用右侧一个位置：从右侧滑入淡入，收起淡出，互切时交叉淡化。 */}
         <AnimatePresence initial={false}>
@@ -5797,24 +5924,49 @@ function CanvasEditorInner({
           />
         )}
 
-        {canvasFeedbackVisible && error && (
-          <CanvasActionFeedback
-            error={error}
-            notice={null}
-            action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
-            className="absolute left-1/2 top-20 z-30 w-full max-w-lg -translate-x-1/2 items-center px-3"
-          />
-        )}
-
-        {canvasFeedbackVisible && toolNotice && (
-          <CanvasActionFeedback
-            error={null}
-            notice={toolNotice}
-            noticeAction={toolNoticeAction}
-            action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
-            className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"
-          />
-        )}
+        {/* 报错条与操作提示：出现 150ms 淡入下移 4px，消失 150ms 淡出（退场期间保留最后一份内容）。 */}
+        <AnimatePresence>
+          {canvasFeedbackVisible && error && (
+            <CanvasChromeFade key="error" offset={-4} className="absolute left-1/2 top-20 z-30 w-full max-w-lg -translate-x-1/2 px-3">
+              <CanvasActionFeedback
+                error={error}
+                notice={null}
+                action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
+                className="items-center"
+              />
+            </CanvasChromeFade>
+          )}
+          {canvasFeedbackVisible && toolNotice && (
+            <CanvasChromeFade key="notice" offset={-4} className="absolute right-3 top-20 z-30 max-w-sm md:right-4">
+              <CanvasActionFeedback
+                error={null}
+                notice={toolNotice}
+                noticeAction={toolNoticeAction}
+                action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
+                className="items-end"
+              />
+            </CanvasChromeFade>
+          )}
+          {canvasFeedbackVisible && historyHint && (
+            <CanvasChromeFade key={`history:${historyHint.key}`} className={cn('pointer-events-none absolute z-30', CANVAS_HISTORY_HINT_POSITION[historyHint.direction])}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="pointer-events-auto rounded-full font-normal tabular-nums"
+                onClick={() => {
+                  const { bounds } = historyHint;
+                  setHistoryHint(null);
+                  void runViewportCommand(() => setCenter(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, {
+                    zoom: getZoom(),
+                    duration: viewportMotionMs(MOTION_DURATION.slow),
+                    ease: CANVAS_VIEWPORT_EASE_IN_OUT,
+                  }));
+                }}
+              >{historyHint.label}</Button>
+            </CanvasChromeFade>
+          )}
+        </AnimatePresence>
 
         {maskEdit && (
           <MaskEditor
@@ -6573,22 +6725,36 @@ function parseCanvasClipboardPayload(serialized: string): CanvasClipboardPayload
 
 const canvasFlowZoom = (state: ReactFlowState) => state.transform[2];
 
-/** 连接把手随缩放反比放大，靠 CSS 变量。变量写在编辑器外壳上由 .canvas-flow 继承——
- *  原来是把 zoom 存成 CanvasEditor 的 state、每帧平移 / 缩放都让 5000 行的主树整棵重渲染，
- *  几十个节点就卡。这里只订阅 store 里的 zoom，主树不再知道每一帧。 */
-function CanvasZoomCssVars({ target }: { target: RefObject<HTMLElement> }) {
-  const zoom = useStore(canvasFlowZoom);
-  useEffect(() => {
-    const element = target.current;
-    if (!element) return;
-    element.style.setProperty('--canvas-handle-size', `${48 / zoom}px`);
-    element.style.setProperty('--canvas-handle-dot-size', `${12 / zoom}px`);
-    element.style.setProperty('--canvas-handle-border-size', `${2 / zoom}px`);
-  }, [target, zoom]);
+/** 连接把手随缩放反比放大，靠 CSS 变量。原来是把 zoom 存成 CanvasEditor 的 state、每帧平移 / 缩放都让
+ *  5000 行的主树整棵重渲染；后来改成订阅 zoom 的空组件，但仍要每帧走一次 React 渲染 + 绘制之后的 useEffect，
+ *  变量也写在整个编辑器外壳上（顶栏、面板、浮条都跟着重算样式）。
+ *  现在直接订阅 store：只在 zoom 变了（平移不算）时同步写，写在只含节点的 .react-flow__nodes 上，
+ *  不经过 React，也赶在这一帧绘制之前。 */
+function CanvasZoomCssVars() {
+  const store = useStoreApi<FlowNode>();
+  useLayoutEffect(() => {
+    let lastZoom = Number.NaN;
+    let target: HTMLElement | null = null;
+    const write = (state: { transform?: [number, number, number]; domNode?: HTMLDivElement | null }) => {
+      const zoom = state.transform?.[2];
+      if (zoom === undefined) return;
+      if (!target?.isConnected) {
+        target = state.domNode?.querySelector<HTMLElement>('.react-flow__nodes') ?? null;
+        lastZoom = Number.NaN;
+      }
+      if (!target || zoom === lastZoom) return;
+      lastZoom = zoom;
+      target.style.setProperty('--canvas-handle-size', `${48 / zoom}px`);
+      target.style.setProperty('--canvas-handle-dot-size', `${12 / zoom}px`);
+      target.style.setProperty('--canvas-handle-border-size', `${2 / zoom}px`);
+    };
+    write(store.getState());
+    return store.subscribe(write);
+  }, [store]);
   return null;
 }
 
-const zoomDockButtonClass = 'grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+const zoomDockButtonClass = 'grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
 
 function CanvasZoomDock({
   assetControl,
@@ -6672,6 +6838,52 @@ function CanvasSidePanelMotion({ children }: { children: ReactNode }) {
       {children}
     </motion.div>
   );
+}
+
+/** 画布上的浮条（报错条、提示、多选工具条、生成中胶囊、小地图）：150ms 淡入（offset 给出 4px 的来向），退场 150ms 淡出。
+ *  只动透明度与 y：定位用的 -translate-x-1/2 是 translate 属性，不与这里的 transform 打架。减弱动态效果只淡变。 */
+function CanvasChromeFade({ children, className, offset = 0 }: { children: ReactNode; className?: string; offset?: number }) {
+  const animated = motionAvailable();
+  const y = prefersReducedMotion() ? 0 : offset;
+  return (
+    <motion.div
+      className={className}
+      initial={animated ? { opacity: 0, y } : false}
+      animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+      exit={animated ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+const CANVAS_HISTORY_HINT_POSITION: Record<CanvasHistoryHint['direction'], string> = {
+  left: 'left-20 top-1/2 -translate-y-1/2',
+  right: 'right-4 top-1/2 -translate-y-1/2',
+  up: 'left-1/2 top-20 -translate-x-1/2',
+  down: 'bottom-20 left-1/2 -translate-x-1/2',
+};
+
+/** 读画布超过 300ms 才显示转圈，之前留空；转圈出现时 150ms 淡入。jsdom 里直接显示，测试照旧能找到文案。 */
+function DelayedCanvasLoading() {
+  const [visible, setVisible] = useState(() => !motionAvailable());
+  useEffect(() => {
+    if (visible) return;
+    const timer = window.setTimeout(() => setVisible(true), CANVAS_LOADING_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [visible]);
+  if (!visible) return <div className="h-full" aria-busy="true" />;
+  return (
+    <motion.div className="h-full" initial={motionAvailable() ? { opacity: 0 } : false} animate={{ opacity: 1, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}>
+      <EditorMessage icon={<LoadingIcon size="lg" className="animate-spin" />} text="展开画布中…" />
+    </motion.div>
+  );
+}
+
+/** 快捷键触发时，对应按钮做一次 150ms 的按下回弹；减弱动态效果时不缩放，交给操作结果本身。 */
+function flashShortcutButton(button: Element | null | undefined) {
+  if (!button || !motionAvailable() || prefersReducedMotion()) return;
+  clearOnFinish(animate(button, { scale: [1, 0.94, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), button, ['transform']);
 }
 
 /** 视口平移 / 缩放的时长（xyflow 收毫秒）。减弱动态效果时直接跳到位。 */

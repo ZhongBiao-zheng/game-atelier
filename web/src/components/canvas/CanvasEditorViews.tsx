@@ -1,4 +1,6 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
+import { CanvasNodeFlash, playCanvasNodeEntrance } from './canvasNodeAttention';
+import { fadePresenceClass, useFadePresence } from './useFadePresence';
 import { useAnnotationToolbarSwap } from './annotation/useAnnotationToolbarSwap';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
@@ -35,7 +37,8 @@ import {
   type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, prefersReducedMotion, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
+import { Collapse } from '@/components/ui/collapse';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, prefersReducedMotion, shakeOnError, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
@@ -169,7 +172,7 @@ import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
-export type CanvasPlaceholderFlowNode = Node<{ label: string }, 'canvasPlaceholder'>;
+export type CanvasPlaceholderFlowNode = Node<{ label: string; leaving?: boolean }, 'canvasPlaceholder'>;
 export type FlowNode = CanvasFlowNode | CanvasPlaceholderFlowNode;
 
 export interface CanvasGenerationPanelContextValue {
@@ -310,6 +313,8 @@ export interface CanvasNodeContextValue {
 
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
+/** 连接点圆点：拖线吸附到有效接口（xyflow 给接口加 connectingto + valid）时放大到 125%，150ms。 */
+const CANVAS_HANDLE_DOT_CLASS = 'canvas-node-handle-dot transition-[border-color,scale] duration-150 motion-safe:in-[.connectingto.valid]:scale-125';
 const EMPTY_PLUGIN_INPUTS: readonly PluginNodeInput[] = [];
 const EMPTY_HOST_PLUGINS: ReadonlyMap<string, HostPluginModule> = new Map();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
@@ -318,8 +323,12 @@ const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
 export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowNode>) {
   // 长得和生成中的图片节点一样：上方标题栏（图标 + 「图片」+ 运行态标签）、卡片里转圈。
+  // 结果节点落地时占位卡留在原位 200ms 淡出，结果节点同时淡入，中间不露出画布。
   return (
-    <div className="relative h-full" data-canvas-placeholder="true">
+    <div
+      className={cn('relative h-full transition-opacity duration-200', data.leaving && 'pointer-events-none opacity-0')}
+      data-canvas-placeholder="true"
+    >
       <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <ImageFileIcon size="sm" className="shrink-0" />
@@ -334,7 +343,7 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
         role="status"
         aria-busy="true"
         aria-label={`图片，${data.label}`}
-        className="relative flex h-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-border bg-card/95 px-5 text-center text-xs text-[color:var(--status-running)] shell-glow"
+        className="relative flex h-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-border bg-card/95 px-5 text-center text-xs text-[color:var(--status-running)]"
       >
         <span data-canvas-generation-indicator="true" className="canvas-generation-indicator size-12" aria-hidden="true">
           <LoadingIcon size="lg" />
@@ -342,7 +351,7 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
         <span>{data.label}</span>
       </article>
       <Handle type="target" position={Position.Left} className="canvas-node-handle" isConnectable={false} aria-label="处理中的节点">
-        <span className="canvas-node-handle-dot" aria-hidden="true" />
+        <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
       </Handle>
     </div>
   );
@@ -487,6 +496,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     if (!entrance || !shellElement) return;
     playStackMemberEntrance(shellElement, [entrance]);
   }, [consumeResultStackEntrance, node.id, shellElement]);
+  // 新建节点（添加、上传、Agent 新放上来的、媒体处理结果）：外壳从略小处淡入，只挂载那一次。
+  useLayoutEffect(() => {
+    if (shellElement) playCanvasNodeEntrance(node.id, shellElement);
+  }, [node.id, shellElement]);
 
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
     setMaterialPickPointer({
@@ -496,6 +509,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   }
   const annotating = context?.annotationController?.nodeId === node.id;
   const annotationToolbar = useAnnotationToolbarSwap(annotating);
+  // 选中节点的工具条进出场各 150ms 淡变；xyflow 的 NodeToolbar 自己决定挂不挂，这里延迟卸载让淡出播完。
+  const toolbarPresence = useFadePresence(Boolean(context)
+    && !context?.multiSelectionActive && !(annotating && context?.annotationController?.fullscreen)
+    && Boolean(selected || toolbarOverlayOpen));
   const annotation = node.type === 'image' && node.data.annotation?.version_id === node.data.current_version_id ? node.data.annotation : null;
   const annotationEditor = useAnnotationEditor({
     enabled: annotating, elements: annotation?.elements ?? [],
@@ -640,6 +657,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       onPointerMove={showHandleOnHoveredSide}
       onPointerLeave={hideHoverHandles}
     >
+      <CanvasNodeFlash nodeId={node.id} />
       <NodeResizer
         isVisible={selected && !stackCoverId && !annotating && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
@@ -696,14 +714,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
-        isVisible={
-          !context.multiSelectionActive && !(annotating && context.annotationController?.fullscreen)
-          && (selected || toolbarOverlayOpen)
-        }
+        isVisible={toolbarPresence.mounted}
         position={annotationToolbar.annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
         align="center"
         offset={annotationToolbar.annotating ? 12 : 32}
-        className={cn('nodrag', annotationToolbar.className)}
+        className={cn('nodrag', toolbarPresence.phase === 'shown' ? annotationToolbar.className : fadePresenceClass(toolbarPresence.phase))}
       >
         {annotationToolbar.annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
@@ -729,8 +744,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {nodeRunState.status === 'loading' && nodeJob?.canvas_run && (
             <MediaToolButton
               label={nodeRunState.reversePrompt
-                ? nodeJob.cancel_requested_at ? '正在停止反推提示词' : '停止反推提示词'
-                : nodeJob.cancel_requested_at ? `正在停止 ${node.title}` : `停止 ${node.title} 的生成`}
+                ? nodeJob.cancel_requested_at ? '反推提示词停止中…' : '停止反推提示词'
+                : nodeJob.cancel_requested_at ? `${node.title} 停止中…` : `停止 ${node.title} 的生成`}
               text="停止"
               disabled={Boolean(nodeJob.cancel_requested_at)}
               onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
@@ -840,9 +855,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
-          'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
+          'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors',
           node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
-          selected ? 'border-primary' : 'border-border',
+          // 16px 模糊投影只给选中的节点：几十个节点各带一层大半径阴影，平移缩放时每帧都要重绘。
+          selected ? 'border-primary shell-glow' : 'border-border',
           annotating && 'annotation-active',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
@@ -906,7 +922,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         )}
         <div
           data-canvas-node-hidden={node.hidden ? 'true' : undefined}
-          className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
+          // 打码与取消打码 200ms 过渡（模糊与外扩）；减弱动态效果时全局只留透明度与颜色过渡，这里直接切。
+          className={cn('h-full transition-[filter,transform] duration-200', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
             : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && (node.type === 'text' || hostNodeType(context.hostPlugins ?? EMPTY_HOST_PLUGINS, node)?.textContent) && 'canvas-node-hidden-text')}
         >
           {node.type === 'text' && (
@@ -1048,12 +1065,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
         <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
           style={{ top: slot === 'before' ? '35%' : '65%' }} aria-label={`连接到 ${slot === 'before' ? 'Before' : 'After'}`}>
-          <span className="canvas-node-handle-dot" aria-hidden="true" />
+          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
         </Handle>
       ))}
       {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
         <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
-          <span className="canvas-node-handle-dot" aria-hidden="true" />
+          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
         </Handle>
       )}
       {(canvasNodeProvidesOutput(node) || node.type === 'image_edit' || (node.type === 'layer_stack'
@@ -1065,7 +1082,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           className="canvas-node-handle"
           aria-label="从此节点连接"
         >
-          <span className="canvas-node-handle-dot" aria-hidden="true" />
+          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
         </Handle>
       )}
       {generationPanelVisible && draft && (
@@ -2390,6 +2407,10 @@ export function CanvasGenerationComposer({
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
   const textMode = draft.mode === 'text';
+  const generationButtonState = running
+    ? activeJob?.cancel_requested_at ? 'stopping' : 'running'
+    : submitting ? 'submitting' : 'idle';
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const panelLabel = `${modeLabel}设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id)
@@ -2517,15 +2538,21 @@ export function CanvasGenerationComposer({
 
   function submitGeneration() {
     const sizeError = draft.mode === 'image' ? imageSizeError(draft.params, draft.model) : null;
+    // 提交不成（参数不合法、被挡、服务端拒绝）时按钮原位微抖（Q14），报错条照旧说原因。
     if (sizeError) {
       context.reportError?.(sizeError);
+      shakeOnError(submitButtonRef.current);
       return;
     }
     if (blockedReason) {
       context.reportError?.(blockedReason);
+      shakeOnError(submitButtonRef.current);
       return;
     }
-    void context.submitRun(node.id);
+    void context.submitRun(node.id).then(outcome => {
+      const status = (outcome as { status?: string } | undefined)?.status;
+      if (status && status !== 'submitted') shakeOnError(submitButtonRef.current);
+    });
   }
 
   return (
@@ -2618,7 +2645,8 @@ export function CanvasGenerationComposer({
             : undefined}
         />
       )}
-      {promptCollapsed ? (
+      {/* 摘要态 ↔ 编辑态：一块收起、一块展开，高度在 300ms 里从三行过渡到编辑框，不瞬跳。 */}
+      <Collapse open={promptCollapsed}>
         <Button variant="bare"
           type="button"
           aria-label="展开提示词"
@@ -2631,7 +2659,8 @@ export function CanvasGenerationComposer({
           </p>
           <span className="block text-right text-xs text-muted-foreground">展开</span>
         </Button>
-      ) : (
+      </Collapse>
+      <Collapse open={!promptCollapsed}>
       <CanvasPromptInput
         disabled={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt')}
         value={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt') ? '' : draft.prompt}
@@ -2666,7 +2695,7 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      )}
+      </Collapse>
       {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
@@ -2869,29 +2898,26 @@ export function CanvasGenerationComposer({
           />
         )}
         </div>
-        {running && activeJob && (
+        {/* 开始 ↔ 停止同一个按钮壳：底色随状态过渡，图标原位换态，不整块换一个按钮。 */}
+        {running && !activeJob ? null : (
           <Button
+            ref={submitButtonRef}
             type="button"
             size="sm"
-            variant="outline"
-            className="shrink-0"
-            disabled={Boolean(activeJob.cancel_requested_at)}
-            onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
+            variant={running ? 'outline' : 'default'}
+            className="shrink-0 transition-colors"
+            disabled={running ? Boolean(activeJob?.cancel_requested_at) : submitting || Boolean(workflowReferenceProblem)}
+            onClick={running ? () => void context.cancelRun(activeJob!.canvas_run!.run_id) : submitGeneration}
           >
-            <SwapIcon swapKey={Boolean(activeJob.cancel_requested_at)}>{activeJob.cancel_requested_at ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <StopIcon aria-hidden="true" />}</SwapIcon>
-            {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
-          </Button>
-        )}
-        {!running && (
-          <Button
-            type="button"
-            size="sm"
-            className="shrink-0"
-            disabled={submitting || Boolean(workflowReferenceProblem)}
-            onClick={submitGeneration}
-          >
-            <SwapIcon swapKey={Boolean(submitting)}>{submitting ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AiIcon aria-hidden="true" />}</SwapIcon>
-            {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
+            <SwapIcon swapKey={generationButtonState}>
+              {generationButtonState === 'stopping' || generationButtonState === 'submitting'
+                ? <LoadingIcon className="animate-spin" aria-hidden="true" />
+                : generationButtonState === 'running' ? <StopIcon aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
+            </SwapIcon>
+            {generationButtonState === 'stopping' ? '停止中…'
+              : generationButtonState === 'running' ? '停止'
+                : generationButtonState === 'submitting' ? '提交中…'
+                  : textMode ? '生成' : '开始生成'}
           </Button>
         )}
       </div>
@@ -3041,6 +3067,8 @@ function CanvasVideoFrameSlot({
 }
 
 const INSTANT_LAYOUT = { layout: { duration: 0 } } as const;
+/** 拖动排序时其余缩略图让位：无回弹的 snappy 弹簧，中途换方向带着速度接上。 */
+const REORDER_LAYOUT = { layout: MOTION_SPRING.snappy } as const;
 
 const ANNOTATION_DELIVERY_LABELS: Record<CanvasAnnotationDelivery, string> = {
   composite: '合成图',
@@ -3194,7 +3222,7 @@ function CanvasMaterialConnections({
               as="span"
               value={reference.nodeId}
               drag={onReorder && connected.length > 1 ? 'x' : false}
-              transition={dragging ? undefined : INSTANT_LAYOUT}
+              transition={dragging ? REORDER_LAYOUT : INSTANT_LAYOUT}
               whileDrag={{ zIndex: 20 }}
               onDragStart={() => {
                 draggedRef.current = true;
@@ -3551,11 +3579,11 @@ function PluginCanvasActionGroup({ plugin, module, onRun, layout }: {
     {(plugin.contributes.canvas_actions ?? []).map(action => {
       const Icon = pluginIcon(action.icon);
       if (layout === 'toolbar') {
-        return <ToolButton key={`${plugin.id}:${action.id}`} label={busy ? `${action.label}（正在处理上一个请求）` : action.label}
+        return <ToolButton key={`${plugin.id}:${action.id}`} label={busy ? `${action.label}（上一个请求处理中…）` : action.label}
           popup={false} disabled={busy} onClick={() => onRun(plugin, action)}><Icon /></ToolButton>;
       }
       return <AddMenuButton key={`${plugin.id}:${action.id}`} icon={<Icon />} title={action.label}
-        description={plugin.description} disabledReason={busy ? '正在处理上一个请求' : undefined}
+        description={plugin.description} disabledReason={busy ? '上一个请求处理中…' : undefined}
         onClick={() => onRun(plugin, action)} />;
     })}
   </>;
@@ -4041,6 +4069,13 @@ function MediaPreview({
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoMuted, setVideoMuted] = useState(false);
   const [videoVolume, setVideoVolume] = useState(1);
+  // 视频首帧解出来之前保持透明，避免先闪一块黑底；首帧到了 150ms 淡入（Q15）。
+  // Safari 在 preload=metadata 下可能不派发 loadeddata：拿到元数据 300ms 后仍没首帧也显示出来。
+  const [videoFrameSrc, setVideoFrameSrc] = useState<string | null>(null);
+  const videoFrameTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (videoFrameTimer.current !== null) window.clearTimeout(videoFrameTimer.current);
+  }, []);
   const stopCanvasInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
   const videoRef = useCallback((element: HTMLVideoElement | null) => {
     videoElement.current = element;
@@ -4110,16 +4145,22 @@ function MediaPreview({
           preload={resolvedSrc ? 'metadata' : 'none'}
           data-canvas-media-controls="video"
           className={cn(
-            'size-full',
+            'size-full transition-opacity duration-150',
             freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
             compact && 'max-h-48 rounded-md',
+            motionAvailable() && videoFrameSrc !== resolvedSrc && 'opacity-0',
           )}
+          onLoadedData={() => setVideoFrameSrc(resolvedSrc)}
+          onError={() => setVideoFrameSrc(resolvedSrc)}
           onClick={event => event.preventDefault()}
           onDoubleClick={stopCanvasInteraction}
           onPlay={() => setVideoPlaying(true)}
           onPause={() => setVideoPlaying(false)}
           onEnded={() => setVideoPlaying(false)}
           onLoadedMetadata={event => {
+            const loadedSrc = resolvedSrc;
+            if (videoFrameTimer.current !== null) window.clearTimeout(videoFrameTimer.current);
+            videoFrameTimer.current = window.setTimeout(() => setVideoFrameSrc(loadedSrc), 300);
             setVideoDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
             setVideoCurrentTime(event.currentTarget.currentTime);
             setVideoMuted(event.currentTarget.muted);

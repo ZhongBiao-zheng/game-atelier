@@ -532,6 +532,8 @@ export interface CanvasMediaOperationPlaceholder {
   position: { x: number; y: number };
   size: CanvasSize;
   label: string;
+  /** 结果节点已经落在同一位置：占位卡淡出（200ms）让位，与结果节点的淡入交叉。 */
+  leaving?: boolean;
 }
 
 const MEDIA_OPERATION_PLACEHOLDER_LABEL: Record<CanvasMediaOperation['kind'], string> = {

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { LoadingIcon } from '@/components/ui/icons';
-import { MOTION_DURATION, MOTION_EASE, motionAvailable } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, useAnimateOnChange } from '@/lib/motion';
 
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
@@ -61,7 +61,7 @@ export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
   if (job.status === 'pending' || job.status === 'pending_confirm') {
     return {
       status: 'loading',
-      label: job.cancel_requested_at ? '正在停止…' : reversePrompt ? '正在分析提示词' : job.progress_phase === 'waiting_gateway' ? '等待网关' : job.progress_phase?.startsWith('queued:') ? `排队第 ${job.progress_phase.slice(7)} 位` : '正在生成',
+      label: job.cancel_requested_at ? '停止中…' : reversePrompt ? '分析提示词中…' : job.progress_phase === 'waiting_gateway' ? '等待网关中…' : job.progress_phase?.startsWith('queued:') ? `排队第 ${job.progress_phase.slice(7)} 位` : '生成中…',
       detail: job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : null,
       job,
       reversePrompt,
@@ -107,12 +107,20 @@ export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
 }
 
 export function CanvasNodeRunBadge({ state }: { state: CanvasNodeRunState }) {
+  const labelRef = useRef<HTMLSpanElement>(null);
+  // 状态换了（生成中 → 生成完成 / 失败）时新文案 150ms 淡入，颜色随 transition-colors 过渡。
+  useAnimateOnChange(state.job ? state.label : null, label => {
+    const element = labelRef.current;
+    if (!label || !element) return;
+    clearOnFinish(animate(element, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), element, ['opacity']);
+  }, { keepWhenReduced: true });
   if (!state.job) return null;
   return (
     <span
+      ref={labelRef}
       data-canvas-node-status-label={state.status}
       className={cn(
-        'ml-2 flex shrink-0 items-center gap-1 text-xs font-medium',
+        'ml-2 flex shrink-0 items-center gap-1 text-xs font-medium transition-colors',
         state.status === 'loading' && 'text-[color:var(--status-running)]',
         state.status === 'success' && 'text-[color:var(--status-done)]',
         state.status === 'error' && 'text-[color:var(--status-failed)]',
@@ -154,6 +162,9 @@ export function CanvasNodeRunOverlay({
 }) {
   const active = state.status === 'loading' || state.status === 'error';
   const lastLoading = useRef<OverlayFrame | null>(null);
+  // 挂载那一刻已经在生成（打开画布、平移回视口）就直接显示；之后才开始的（点了生成）150ms 淡入。
+  const entered = useRef(false);
+  useEffect(() => { entered.current = true; }, []);
   const current: OverlayFrame = { state, compact: hasContent };
   const shown = active ? current : holdUntilReady ? lastLoading.current : null;
   useEffect(() => {
@@ -165,7 +176,8 @@ export function CanvasNodeRunOverlay({
       {shown && (
         <motion.div
           key="run-overlay"
-          initial={false}
+          initial={entered.current && motionAvailable() ? { opacity: 0 } : false}
+          animate={{ opacity: 1, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
           exit={motionAvailable() ? {
             opacity: 0,
             transition: {

@@ -305,7 +305,7 @@ it('announces terminal status transitions without remounting the live region', (
     </CanvasNodeContext.Provider>,
   );
   const liveStatus = screen.getByRole('status');
-  expect(liveStatus).toHaveTextContent('正在生成');
+  expect(liveStatus).toHaveTextContent('生成中…');
 
   rerender(
     <CanvasNodeContext.Provider value={nodeContext(canvasJob('done'))}>
@@ -334,7 +334,7 @@ it('keeps cancellation and reverse-prompt labels honest', () => {
   const cancelRequested = canvasJob('pending', { cancel_requested_at: '2026-08-25T00:01:00Z' });
   expect(canvasNodeRunState(imageNode, new Map([['run-1', cancelRequested]]))).toMatchObject({
     status: 'loading',
-    label: '正在停止…',
+    label: '停止中…',
     detail: '已请求停止，上游可能仍在执行',
   });
   const canceledView = render(
@@ -342,7 +342,7 @@ it('keeps cancellation and reverse-prompt labels honest', () => {
       <NodeCard data={{ domain: imageNode }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.getByRole('button', { name: '正在停止 生成图片' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '生成图片 停止中…' })).toBeDisabled();
   canceledView.unmount();
 
   const reversePending = canvasJob('pending');
@@ -425,7 +425,7 @@ it('keeps existing content visible while a new run is loading and exposes stop i
   expect(article).toHaveAttribute('data-canvas-node-status', 'loading');
   expect(article).toHaveAttribute('aria-busy', 'true');
   expect(container.querySelector('img')).toHaveAttribute('src', expect.stringContaining('version-existing'));
-  expect(screen.getByRole('status')).toHaveTextContent('正在生成');
+  expect(screen.getByRole('status')).toHaveTextContent('生成中…');
   fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: '停止 生成图片 的生成' }));
   expect(context.cancelRun).toHaveBeenCalledWith('run-1');
 });
