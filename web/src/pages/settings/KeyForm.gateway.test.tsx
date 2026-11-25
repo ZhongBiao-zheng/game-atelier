@@ -24,7 +24,7 @@ describe('团队网关供应商', () => {
 
     await chooseOption(screen.getByLabelText('供应商选择'), /^团队网关/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '美术组网关' } });
-    fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
+    fireEvent.change(screen.getByLabelText('团队网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
     fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
 
@@ -45,7 +45,7 @@ describe('团队网关供应商', () => {
     render(<KeyForm onCreated={vi.fn()} onCancel={vi.fn()} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^团队网关/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '美术组网关' } });
-    fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
+    fireEvent.change(screen.getByLabelText('团队网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
     fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });
     // 原因写在禁用的保存按钮旁，一行短文案。
     const reason = await screen.findByText('这把密钥当前没有可用模型');

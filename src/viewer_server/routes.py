@@ -961,14 +961,17 @@ def onboarding_metrics_summary() -> dict:
 class _KeyProbePayload(BaseModel):
     preset: str = Field(max_length=40)
     access_key: str = Field(max_length=4096)
+    # 表单当前的请求地址：与该预置的默认地址不一致时不发探针（密钥属于那个自定义地址）。
+    base_url: str = Field(max_length=2048)
 
 
 @router.post("/onboarding/key-probe")
 def onboarding_key_probe(payload: _KeyProbePayload) -> dict:
-    """引导里粘贴密钥后的有效性提示；结果不拦保存。密钥只用于这一次请求，不落盘、不进日志。"""
+    """粘贴密钥后的有效性提示；结果不拦保存。密钥只用于这一次请求，不落盘、不进日志。"""
     from character_workflow.lib import onboarding_metrics
 
-    return {"result": onboarding_metrics.probe_key(payload.preset, payload.access_key)}
+    return {"result": onboarding_metrics.probe_key(payload.preset, payload.access_key,
+                                                   payload.base_url)}
 
 
 class _KeyCreatePayload(BaseModel):

@@ -55,7 +55,7 @@ it('pastes a key, detects models and preselects only known image and video model
   })));
   expect(await screen.findByRole('radio', { name: '已选 3' })).toBeInTheDocument();
   expect(await screen.findByRole('status')).toHaveTextContent('密钥有效');
-  expect(probeKey).toHaveBeenCalledWith('tuzi', 'sk-onboarding-test');
+  expect(probeKey).toHaveBeenCalledWith('tuzi', 'sk-onboarding-test', 'https://api.tu-zi.com');
   // 控制台里的自动校验不记首启漏斗事件；只有首启引导（guided）才记。
   expect(recordOnboardingEvent).not.toHaveBeenCalled();
 

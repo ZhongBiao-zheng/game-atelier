@@ -13,6 +13,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -147,8 +148,8 @@ def metrics() -> dict:
     }
 
 
-# Key 探针：只打这几家「需要鉴权、不计费」的账户接口。URL 写死在服务端，调用方只给厂商 id 与密钥，
-# 决定不了密钥发往哪里。各家接口见 .scratch/key-onboarding/PLAN.md §5.4。
+# Key 探针：只打这几家「需要鉴权、不计费」的账户接口。URL 写死在服务端，调用方给的请求地址只用来
+# 核对，决定不了密钥发往哪里。各家接口见 .scratch/key-onboarding/PLAN.md §5.4。
 KEY_PROBES: dict[str, str] = {
     "tokendance": "https://tokendance.space/portal/api/v1/user/balance",
     "tuzi": "https://api.tu-zi.com/v1/dashboard/billing/subscription",
@@ -156,14 +157,38 @@ KEY_PROBES: dict[str, str] = {
     "openrouter": "https://openrouter.ai/api/v1/key",
     "seedream": "https://ark.cn-beijing.volces.com/api/v3/models",
 }
+# 各预置的默认请求地址（与 web 的 providerPresets 一致）。表单里的请求地址与它一字不差（忽略末尾
+# 斜杠）才发探针：自定义地址的密钥属于那个站点，不能送到预置的固定地址。
+PROBE_BASE_URLS: dict[str, str] = {
+    "tokendance": "https://tokendance.space/gateway/v1",
+    "tuzi": "https://api.tu-zi.com",
+    "openai-hk": "https://api.openai-hk.com",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "seedream": "https://ark.cn-beijing.volces.com/api/v3",
+}
 
 
-def probe_key(preset: str, access_key: str) -> ProbeResult:
+def _exact_url(value: str) -> str | None:
+    """请求地址的精确写法：scheme 与主机不分大小写，忽略路径末尾斜杠；不是 http(s) 地址时为 None。"""
+    try:
+        parts = urlsplit(value.strip())
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        return None
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"),
+                       parts.query, parts.fragment))
+
+
+def probe_key(preset: str, access_key: str, base_url: str) -> ProbeResult:
     """结果只用来提示，不拦保存：网络不通、上游改接口都算 unknown。"""
     import requests
 
     url = KEY_PROBES.get(preset)
-    if not url or not access_key.strip():
+    default = PROBE_BASE_URLS.get(preset)
+    if not url or not default or not access_key.strip():
+        return "unknown"
+    if _exact_url(base_url) != _exact_url(default):
         return "unknown"
     try:
         # 带密钥的请求不跟随重定向：3xx 归为 unknown，密钥不会被带去别的地址。

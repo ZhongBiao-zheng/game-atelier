@@ -72,11 +72,12 @@ export function recordOnboardingEvent(event: OnboardingEvent): Promise<void> {
 
 export type KeyProbeResult = 'ok' | 'invalid' | 'unknown';
 
-/** 引导里粘贴密钥后的有效性提示；失败一律当 unknown，不拦保存。 */
-export function probeKey(preset: string, accessKey: string): Promise<KeyProbeResult> {
+/** 粘贴密钥后的有效性提示；失败一律当 unknown，不拦保存。
+ *  baseUrl 是表单当前的请求地址：与该预置的默认地址不一致时服务端不发探针。 */
+export function probeKey(preset: string, accessKey: string, baseUrl: string): Promise<KeyProbeResult> {
   return requestJson<{ result: KeyProbeResult }>('/api/onboarding/key-probe', '检测密钥', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ preset, access_key: accessKey }),
+    body: JSON.stringify({ preset, access_key: accessKey, base_url: baseUrl }),
   }).then(body => body.result, () => 'unknown' as const);
 }

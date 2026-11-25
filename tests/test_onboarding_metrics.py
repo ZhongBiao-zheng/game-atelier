@@ -121,7 +121,8 @@ def test_key_probe_classifies_responses(client, monkeypatch, preset, status, bod
         return _Resp(status, body)
 
     monkeypatch.setattr("requests.get", fake_get)
-    resp = client.post("/api/onboarding/key-probe", json={"preset": preset, "access_key": "sk-test"})
+    resp = client.post("/api/onboarding/key-probe", json={"preset": preset, "access_key": "sk-test",
+                                                         "base_url": onboarding_metrics.PROBE_BASE_URLS[preset]})
     assert resp.json() == {"result": expected}
     assert calls == [onboarding_metrics.KEY_PROBES[preset]]
 
@@ -145,12 +146,14 @@ def test_key_probe_does_not_follow_redirects(client, monkeypatch):
         return resp
 
     monkeypatch.setattr(HTTPAdapter, "send", fake_adapter_send)
-    resp = client.post("/api/onboarding/key-probe", json={"preset": "tuzi", "access_key": "sk-test"})
+    resp = client.post("/api/onboarding/key-probe", json={"preset": "tuzi", "access_key": "sk-test",
+                                                         "base_url": "https://api.tu-zi.com"})
     assert resp.json() == {"result": "unknown"}
     assert sent == [onboarding_metrics.KEY_PROBES["tuzi"]]
 
 
 def test_key_probe_skips_vendors_without_probe(client, monkeypatch):
     monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("no request expected"))
-    resp = client.post("/api/onboarding/key-probe", json={"preset": "evolink", "access_key": "sk-test"})
+    resp = client.post("/api/onboarding/key-probe", json={"preset": "evolink", "access_key": "sk-test",
+                                                         "base_url": "https://api.evolink.ai/v1"})
     assert resp.json() == {"result": "unknown"}

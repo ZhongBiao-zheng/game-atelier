@@ -55,6 +55,18 @@ const isHttpUrl = (value: string) => {
   try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; }
 };
 
+/** 站点 = 请求地址的 origin。密钥只属于填它时的供应商与站点；地址还不完整时按原文比较。 */
+const siteOf = (value: string) => {
+  try { return new URL(value.trim()).origin; } catch { return value.trim(); }
+};
+/** 请求地址的精确写法（忽略末尾斜杠）；不是合法地址时为 null。 */
+const exactUrl = (value: string) => {
+  try {
+    const url = new URL(value.trim());
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}${url.search}${url.hash}`;
+  } catch { return null; }
+};
+
 const capLabelClass = 'block text-xs text-muted-foreground mb-2';
 // 次要文本操作（全选 / 清空 / 显示全部）：不占黄铜，也不做成方块按钮抢主操作的戏。
 
@@ -87,10 +99,10 @@ const withRowIds = (rows: EditableModel[]) => rows.some(row => row._rowId == nul
   ? rows.map(row => (row._rowId == null ? { ...row, _rowId: ++nextRowId } : row))
   : rows;
 
-const PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；留空为未计价';
+const PRICE_HELP = '没有同步价时按此价估算，并计入团队网关额度；留空为未计价';
 // 输入中的文本优先（允许「0.」这类中间态），否则回显已存的单价。
 const priceText = (model: EditableModel) => model._price ?? (model.per_call_cny != null ? String(model.per_call_cny) : '');
-const TEXT_PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；输入、输出都填才生效，留空为未计价';
+const TEXT_PRICE_HELP = '没有同步价时按此价估算，并计入团队网关额度；输入、输出都填才生效，留空为未计价';
 const priceInText = (model: EditableModel) => model._priceIn ?? (model.input_cny_per_m != null ? String(model.input_cny_per_m) : '');
 const priceOutText = (model: EditableModel) => model._priceOut ?? (model.output_cny_per_m != null ? String(model.output_cny_per_m) : '');
 function parsePrice(text: string): number | null | undefined {
@@ -208,6 +220,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   const [revealing, setRevealing] = useState(false);
   // 编辑态打开时密钥框是掩码（前端只有掩码）；create 态字段值即用户实输的真值。
   const [keyRevealed, setKeyRevealed] = useState(mode !== 'edit');
+  // 「显示密钥」取回的存储原值：把掩码换成它不算编辑。
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const editing = mode === 'edit';
   // 自定义接口（ADR-0036）：只有自定义供应商的图片 / 视频模型可以绑定。
   const [interfaces, setInterfaces] = useState<HttpProtocolRow[]>([]);
@@ -225,6 +239,23 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   const preset = providerByValue(activePresetId);
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
   const fetchModelsBaseUrl = baseUrl.trim() || preset.defaultBaseUrl || '';
+  // 这次填的密钥：新建时是框里的值；编辑时不含掩码回显与「显示密钥」取回的原值。
+  const keyEdited = Boolean(accessKey.trim())
+    && (!editing || (accessKey !== initial?.access_key && accessKey !== revealedKey));
+  // 编辑态没重填密钥时，存储的密钥只能用在它原来的站点；换了站点要重填。
+  const storedKeyUsable = editing
+    && siteOf(fetchModelsBaseUrl) === siteOf(initial?.base_url || initialPreset.defaultBaseUrl || '');
+  const keyMissing = !accessKey.trim() && !storedKeyUsable;
+  /** 换了站点：之前的密钥不属于新站点，清空要求重填，自动校验也不会把它发过去。 */
+  const changeBaseUrl = (next: string) => {
+    const effective = (value: string) => value.trim() || preset.defaultBaseUrl || '';
+    if (accessKey && siteOf(effective(next)) !== siteOf(effective(baseUrl))) {
+      setAccessKey('');
+      setKeyRevealed(true);
+      setShowKey(false);
+    }
+    setBaseUrl(next);
+  };
   const isGateway = provider === GATEWAY_PROVIDER;
   const isComfy = provider === 'comfyui';
   const isSubscription = provider === 'chatgpt';
@@ -259,10 +290,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setConnecting(true);
     setGatewayError(null);
     try {
-      const keyChanged = key.trim() && key !== initial?.access_key;
       const result = await checkGateway({
         base_url: url.trim(),
-        ...(keyChanged ? { access_key: key.trim() } : {}),
+        ...(keyEdited ? { access_key: key.trim() } : {}),
         ...(editing && initial?.alias ? { alias: initial.alias } : {}),
       });
       if (run !== gatewayRun.current) return;
@@ -282,7 +312,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     const url = baseUrl.trim();
     const key = accessKey.trim();
     if (!url || (!editing && !key) || gatewayAttempted.current === `${url}\n${key}`) return;
-    if (editing && key === initial?.access_key && url === (initial?.base_url ?? '')) return;
+    // 编辑态没重填密钥：只在同站点改了地址时用存储的密钥重连，换站点要先重填。
+    if (editing && !keyEdited && (!storedKeyUsable || url === (initial?.base_url ?? ''))) return;
     const timer = window.setTimeout(() => { void connectGateway(); }, AUTO_DETECT_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [isGateway, baseUrl, accessKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -315,11 +346,21 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     const key = accessKey.trim();
     setProbe(null);
     setProbing(false);
-    // 编辑态只在换了密钥后校验；密钥框里还是掩码回显时什么都不做。
-    if (key.length < MIN_KEY_LENGTH || (editing && accessKey === initial?.access_key)) return;
+    // 只校验这次填的密钥：编辑态的掩码回显、「显示密钥」取回的原值都不算编辑。
+    if (key.length < MIN_KEY_LENGTH || !keyEdited) return;
+    // 固定探针只收发往该预置默认地址的密钥；自定义地址只走它自己的 GET /models。
+    const defaultUrl = exactUrl(preset.defaultBaseUrl ?? '');
+    const probeApplies = defaultUrl !== null && exactUrl(fetchModelsBaseUrl) === defaultUrl;
     const run = listRun.current;
     let active = true;
     const timer = setTimeout(() => {
+      if (editing && !probeApplies && fetchModelsBaseUrl) {
+        // 编辑态：用这个地址自己的模型列表核对新密钥，只看 401 / 403，不动已选模型。
+        setProbing(true);
+        previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl, access_key: key, include_all: false, text_protocol: textProtocol })
+          .then(() => undefined, e => { if (active && toIssue(e).code === 'invalid_key') setProbe('invalid'); })
+          .finally(() => { if (active) setProbing(false); });
+      }
       // 新建时顺手拉模型并预选；地址还没填（自定义供应商）就先只校验密钥。
       if (!editing && fetchModelsBaseUrl && run === listRun.current) {
         const defaultIds = new Set(preset.defaultModels.map(model => model.id));
@@ -346,8 +387,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
           })
           .finally(() => { if (run === listRun.current) setPendingRequest(null); });
       }
+      if (!probeApplies) return;
       setProbing(true);
-      void probeKey(activePresetId, key).then(result => {
+      void probeKey(activePresetId, key, fetchModelsBaseUrl).then(result => {
         if (!active) return;
         setProbing(false);
         setProbe(current => (result === 'unknown' ? current : result));
@@ -381,6 +423,11 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setAliasInput(nextPreset.kind === 'custom' || nextPreset.kind === 'team' ? '' : nextPreset.label);
     setAliasEdited(false);
     setBaseUrl(nextPreset.defaultBaseUrl ?? '');
+    // 密钥属于上一家：换供应商就清空，要求重填。
+    setAccessKey('');
+    setShowKey(false);
+    setProbe(null);
+    setProbing(false);
     setBillingGroup('');
     setHomepage(nextPreset.homepageUrl ?? '');
     setTextProtocol(nextPreset.textProtocol ?? null);
@@ -422,13 +469,12 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     if (connectionRun === undefined) setPendingRequest('list');
     setFetchError(null);
     try {
-      // 编辑态密钥框是掩码回显，未改动就不当真实密钥发，改由服务端按 alias 取存储密钥。
-      const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
+      // 编辑态没重填密钥（掩码或「显示密钥」取回的原值）就不当真实密钥发，改由服务端按 alias 取存储密钥。
       const remote = await previewModels({
         alias: editing ? initial?.alias ?? null : null,
         provider: provider || null,
         base_url: fetchModelsBaseUrl || null,
-        access_key: !editing || keyChanged ? accessKey.trim() || null : null,
+        access_key: keyEdited ? accessKey.trim() : null,
         include_all: includeAll,
         protocol_id: catalogProtocolId,
         text_protocol: textProtocol,
@@ -505,6 +551,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
       try {
         const { access_key } = await revealKey(initial.alias);
         setAccessKey(access_key);
+        setRevealedKey(access_key);
         setKeyRevealed(true);
         setShowKey(true);
       } catch (e) {
@@ -592,7 +639,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
         };
         if (textProtocol !== (initial.text_protocol ?? null)) patch.text_protocol = textProtocol;
         if (icon !== (initial.icon ?? null)) patch.icon = icon;
-        if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
+        if (!keyEdited) delete patch.access_key;
         if (isComfy) delete patch.models;
         await patchKey(initial.alias, patch);
         onCreated(initial.alias);
@@ -624,9 +671,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     if (saving) return null;
     if (isComfy) return baseUrl.trim() ? null : '填写 ComfyUI 地址';
     if (isSubscription) return editing || subscription?.available ? null : subscription ? '先在 Codex 里用 ChatGPT 登录' : null;
-    if ((provider === 'custom' || isGateway) && !baseUrl.trim()) return isGateway ? '填写网关地址' : '填写请求地址';
+    if ((provider === 'custom' || isGateway) && !baseUrl.trim()) return isGateway ? '填写团队网关地址' : '填写请求地址';
     if (baseUrlInvalid) return '请求地址要以 http:// 或 https:// 开头';
-    if (!editing && !accessKey.trim()) return isGateway ? '填写网关密钥' : '填写密钥';
+    if (keyMissing) return isGateway ? '填写网关密钥' : '填写密钥';
     if (!editing && !displayAlias.trim()) return '填写名称';
     if (!editing && aliasTaken(submitAlias, takenAliases, reserved)) return `名称「${displayAlias.trim()}」已被使用`;
     if (isGateway) {
@@ -674,9 +721,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
         setConnectionTest({ ok: true, message: result.devices.map(device => `${device.name} · ${(device.vram_total / 1024 ** 3).toFixed(1)} GB`).join('、') || '已连接' });
         return;
       }
-      const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
       const remote = await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
-        base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
+        base_url: fetchModelsBaseUrl, access_key: keyEdited ? accessKey.trim() : null,
         include_all: false, text_protocol: textProtocol });
       if (run !== listRun.current) return;
       setDetected(remote.detected ?? null);
@@ -748,14 +794,14 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                 onChange={e => { setAliasInput(e.target.value); setAliasEdited(true); }} />
             </>}
             {isGateway && <>
-              <Label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</Label>
-              <Input id="key-gateway-url" value={baseUrl} onPaste={pasteInvite} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className="font-mono" placeholder="http://192.168.1.20:5180" />
+              <Label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">团队网关地址</Label>
+              <Input id="key-gateway-url" value={baseUrl} onPaste={pasteInvite} onChange={e => { changeBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className="font-mono" placeholder="http://192.168.1.20:5180" />
             </>}
             {userBaseUrl && <>
               <Label htmlFor="key-base-url" className="pt-2 text-xs text-muted-foreground">请求地址</Label>
               <div className="space-y-1">
                 <Input id="key-base-url" value={baseUrl} aria-invalid={baseUrlInvalid || undefined} placeholder="https://api.example.com/v1"
-                  onChange={e => { setBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
+                  onChange={e => { changeBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
                 {baseUrlInvalid && <p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p>}
               </div>
             </>}
@@ -811,7 +857,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                 {(gatewayInfo || gatewayError) && <Button variant="ghost" size="sm" type="button" onClick={() => void connectGateway()} disabled={!baseUrl.trim() || connecting}><SwapLabel active={connecting} on="连接中…" off={gatewayModels.length ? '重新同步' : '重新连接'} /></Button>}
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
                 <IssueText issue={gatewayError} />
-                <ul aria-label="网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
+                <ul aria-label="团队网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
               </> : <>
                 <div className="flex flex-wrap items-center gap-2">
                   <ToggleGroup type="single" size="sm" variant="outline" sliding aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
@@ -1053,7 +1099,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || baseUrlInvalid || (!editing && !accessKey.trim())}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
+                  <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || baseUrlInvalid || keyMissing}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
                   {connectionTest?.ok && <span key={connectionTest.message} role="status" className="content-swap-in text-xs text-[color:var(--status-done)]">{connectionTest.message}</span>}
                 </div>
                 {connectionTest && !connectionTest.ok && <IssueText key={connectionTest.message} className="content-swap-in text-xs" issue={{ message: connectionTest.message, raw: connectionTest.raw ?? null, code: null }} />}
@@ -1063,7 +1109,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                   {!userBaseUrl && <>
                     <Label htmlFor="key-base-url" className="text-xs text-muted-foreground">请求地址</Label>
                     <div className="space-y-1">
-                      <Input id="key-base-url" value={baseUrl} aria-invalid={baseUrlInvalid || undefined} onChange={e => { setBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
+                      <Input id="key-base-url" value={baseUrl} aria-invalid={baseUrlInvalid || undefined} onChange={e => { changeBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
                       {baseUrlInvalid && <p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p>}
                     </div>
                   </>}
