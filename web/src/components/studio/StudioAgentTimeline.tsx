@@ -90,8 +90,8 @@ function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: bo
   const isSkill = first.tool === 'load_skill';
   const problem = steps.find(s => s.status === 'failed' || s.status === 'interrupted' || s.status === 'rejected');
   const label = isSkill ? `已加载技能：${first.summary}`
-    : steps.length === 1 ? TOOL_LABELS[first.tool] ?? first.tool : `已执行 ${steps.length} 条命令`;
-  const suffix = awaiting && first.status === 'running' ? ' · 待确认' : problem?.status === 'failed' ? ' · 出错了' : problem?.status === 'interrupted' ? ' · 已停止' : problem ? ' · 已拒绝' : '';
+    : steps.length === 1 ? TOOL_LABELS[first.tool] ?? first.tool : `已执行 ${steps.length} 步`;
+  const suffix = awaiting && first.status === 'running' ? ' · 待确认' : problem?.status === 'failed' ? ' · 出错了' : problem?.status === 'interrupted' ? ' · 已停止' : problem ? ' · 已取消' : '';
   if (isSkill && !problem && !awaiting) {
     return (
       <div className="flex items-center gap-2 py-0.5 text-xs text-muted-foreground">

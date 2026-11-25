@@ -141,6 +141,21 @@ describe('设计漂移守卫（DESIGN.md 硬约束）', () => {
     );
   });
 
+  it('动效只用 motion：不引其他动画库（DESIGN.md § Motion）', () => {
+    assertClean(/from ['"](?:gsap|@gsap\/|framer-motion|react-spring|@react-spring\/)/, 'DESIGN.md § Motion（JS 动画只走 lib/motion 与 motion/react）');
+  });
+
+  it('禁 transition-all 与内联 CSS transition —— 只过渡要动的属性（DESIGN.md § Motion）', () => {
+    assertClean(/\btransition-all\b|transition:\s*['"`]/, 'DESIGN.md § Motion（写具体属性，时长曲线走 token）');
+  });
+
+  it('过渡时长只走三档，曲线只走 token（DESIGN.md § Motion）', () => {
+    assertClean(
+      /\bduration-(?!150\b|200\b|300\b|0\b)|\bease-\[|\bease-in(?!-out)\b/,
+      'DESIGN.md § Motion（duration-150/200/300；ease-out / ease-in-out / 默认 subtle，不用 ease-in）',
+    );
+  });
+
   it('图标只从 components/ui/icons 导入（DESIGN.md § 图标）', () => {
     assertClean(/from ['"](?:lucide-react|@hugeicons\/)/, 'DESIGN.md § 图标（语义注册表是唯一入口）');
   });

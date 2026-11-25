@@ -86,7 +86,7 @@ it('运行时默认收起工具步骤，待确认强制展开，停止后能展�
   fireEvent.click(screen.getByRole('button', { name: '处理中…' }));
   expect(screen.getByRole('group', { name: '待确认的操作' })).toBeVisible();
   expect(screen.getByRole('button', { name: '生成 · 待确认' })).toBeVisible();
-  expect(screen.queryByText('已执行 2 条命令')).toBeNull();
+  expect(screen.queryByText('已执行 2 步')).toBeNull();
   tree.rerender(view('interrupted'));
   fireEvent.click(screen.getByRole('button', { name: '已停止' }));
   fireEvent.click(screen.getByRole('button', { name: '查看可用模型' }));
