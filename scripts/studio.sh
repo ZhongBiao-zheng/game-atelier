@@ -33,7 +33,7 @@ sync_local_skills() {
   fi
 }
 
-echo "Game Atelier"
+echo "Atelier"
 echo
 SECONDS=0
 
@@ -80,15 +80,19 @@ sync_local_skills
 echo "[3/6] 同步 Skill … ${SECONDS}.0s"
 
 if [ ! -f "web/dist/index.html" ]; then
-  err "前端文件 web/dist 缺失，请双击「Mac一键修复.command」"
-  pause_exit 1
+  # 前端文件缺失：直接从当前版本还原（只动 web/dist），不再让用户另去双击修复脚本。
+  warn "前端文件缺失，正在自动修复…"
+  if ! bash "$SCRIPT_DIR/repair-update.sh" --repair-only || [ ! -f "web/dist/index.html" ]; then
+    err "自动修复失败，请重新下载 Atelier"
+    pause_exit 1
+  fi
 fi
 
 if ! "$UV" run --no-project python scripts/bootstrap.py --launch; then
   echo
-  err "启动失败。原因见上方或数据目录 .runtime/server.log"
+  err "启动失败，原因见上方"
   pause_exit 1
 fi
 echo
-echo "工坊已启动，本窗口可关闭。"
+echo "Atelier 已启动，本窗口可关闭。"
 sleep 2

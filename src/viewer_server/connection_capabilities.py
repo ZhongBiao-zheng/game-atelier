@@ -28,6 +28,8 @@ GET /api/onboarding/status
 POST /api/folder-picker
 GET /api/data-root
 POST /api/data-root
+GET /api/ui-prefs
+PUT /api/ui-prefs/{key}
 POST /api/onboarding/events
 GET /api/onboarding/metrics
 POST /api/onboarding/key-probe

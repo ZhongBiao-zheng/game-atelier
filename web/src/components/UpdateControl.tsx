@@ -6,7 +6,6 @@ import { applyUpdate, cancelUpdate, checkUpdate, fetchUpdateResult, fetchUpdateS
 import { ApiError } from '@/api/http';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { OPEN_CHANGELOG_EVENT } from '@/components/ChangelogButton';
 import { Hint } from '@/components/ui/tooltip';
 import { useRetained } from '@/components/ui/retained';
 import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
@@ -50,7 +49,7 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
       const operation = pendingRef.current;
       let reachable = false;
       if (operation && updateRecoveryExpired(operation)) {
-        finish('服务没有自动恢复，请双击启动器');
+        finish('Atelier 没有自动恢复，请重新打开 Atelier');
       } else {
         try {
           if (operation) {
@@ -132,14 +131,23 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
         <div className="flex justify-end gap-2"><Button variant="outline" disabled={submitting} onClick={() => setConfirm(false)}>取消</Button><Button disabled={submitting} onClick={() => void apply()}>更新</Button></div>
       </DialogContent>
     </Dialog>
-    <Dialog open={Boolean(pending)}>
+    {/* 只有真正重启的那几秒挡住界面；等任务完成期间是顶部胶囊，界面照常可看、可整理。 */}
+    <Dialog open={Boolean(pending) && restarting}>
       <DialogContent hideClose data-connection-controls onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
-        <DialogTitle>{restarting ? '重启中…' : `等待 ${state?.waiting ?? 0} 个任务完成`}</DialogTitle>
+        <DialogTitle>重启中…</DialogTitle>
         <DialogDescription>更新到 {shown?.to} 中…</DialogDescription>
-        {!restarting && Boolean(state?.waiting_counts?.approvals) && <p className="text-sm text-muted-foreground">{state?.waiting_counts?.approvals} 个 Agent 操作待确认</p>}
-        {!restarting && <div className="flex justify-end"><Button variant="outline" onClick={() => void cancel()}>取消更新</Button></div>}
       </DialogContent>
     </Dialog>
+    {/* 取消或进入重启时直接收起（没有退场动画）：重启弹窗紧接着出现，两者不同时在屏。 */}
+    {pending && !restarting && createPortal(<motion.div data-connection-controls role="status"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+        className="fixed inset-x-3 bottom-6 z-50 mx-auto flex min-h-9 w-fit max-w-full flex-wrap items-center gap-2.5 rounded-full border border-border bg-popover py-1 pl-3.5 pr-1 text-sm">
+        <span aria-hidden className="size-1.5 rounded-full bg-status-running" />
+        <span className="tabular-nums">更新到 {shown?.to} · 等待 {state?.waiting ?? 0} 个任务</span>
+        {Boolean(state?.waiting_counts?.approvals) && <span className="tabular-nums text-muted-foreground">{state?.waiting_counts?.approvals} 个 Agent 操作待确认</span>}
+        <Button variant="ghost" size="sm" type="button" data-connection-dismiss className="h-7 rounded-full" onClick={() => void cancel()}>取消更新</Button>
+      </motion.div>, document.body)}
     {/* 提示条要在连接闸门禁用业务界面时也能关，所以不走 Toaster（它在闸门的 fieldset 里），自己挂到 body 并补进出场。 */}
     {createPortal(<AnimatePresence>
       {message && <motion.div key="update-message" data-connection-controls role="alert"
@@ -161,8 +169,9 @@ export function UpdateButton({ mobile = false }: { mobile?: boolean }) {
     className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowUpIcon size="sm" aria-hidden />更新</Button></Hint> : null;
   if (!latest) return null;
   const wrapper = mobile ? 'flex justify-end px-3 pb-2 sm:hidden' : 'hidden sm:contents';
-  if (mode === 'source') return <span className={wrapper}><Hint label="重新运行一键启动器即可更新"><Button variant="bare" type="button" onClick={() => window.dispatchEvent(new Event(OPEN_CHANGELOG_EVENT))}
-    className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">新版本 {latest}</Button></Hint></span>;
+  // 源码版：链到新版本自己的发布说明（本地更新日志只到当前版本）；更新靠重新运行一键启动器。
+  if (mode === 'source') return <span className={wrapper}><Hint label="查看更新内容；重新运行一键启动器即可更新"><a href={releaseUrl(latest)} target="_blank" rel="noopener noreferrer"
+    className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">新版本 {latest}</a></Hint></span>;
   return <span className={wrapper}><a href={releaseUrl(latest)} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">有新版本 {latest}</a></span>;
 }
 

@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 
 import type { KeyModel, KeyView, RemoteModel } from '@/api/keys';
 import { requestJson } from '@/api/http';
+import { loadUiPrefs, saveUiPref, UI_PREF_KEYS } from '@/lib/uiPrefs';
 
 export interface AnnouncedModel {
   name: string;
@@ -53,31 +54,25 @@ export function useAnnouncements(): Announcement[] {
 export const OPEN_ANNOUNCEMENT_EVENT = 'atelier:open-announcement';
 export const KEYS_CHANGED_EVENT = 'atelier:keys-changed';
 
-const SEEN_KEY = 'atelier:announcements-seen';
-
-export function loadSeenAnnouncements(): string[] {
-  try {
-    const value = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '[]');
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
+/** 已读公告 id；读不到（请求失败）返回 null，记录不存在（第一次运行）返回 undefined。 */
+export async function loadSeenAnnouncements(): Promise<string[] | null | undefined> {
+  const prefs = await loadUiPrefs();
+  if (!prefs) return null;
+  const value = prefs[UI_PREF_KEYS.announcementsSeen];
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-/** 弹过一次就把当前所有公告记为已读：积了多条未读时只弹最新一条，旧的不再补弹。 */
-export function markAnnouncementsSeen(announcements: readonly Announcement[]): void {
-  try {
-    const seen = new Set(loadSeenAnnouncements());
-    for (const item of announcements) seen.add(item.id);
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
-  } catch {
-    // 存储不可用时最多下次再弹一次，不影响使用
-  }
+/** 把当前所有公告记为已读：积了多条未读时只弹最新一条，旧的不再补弹。返回写后的已读列表。 */
+export function markAnnouncementsSeen(announcements: readonly Announcement[], seen: readonly string[]): string[] {
+  const next = [...new Set([...seen, ...announcements.map(item => item.id)])];
+  void saveUiPref(UI_PREF_KEYS.announcementsSeen, next);
+  return next;
 }
 
 export function latestUnseenAnnouncement(
   announcements: readonly Announcement[],
-  seen: readonly string[] = loadSeenAnnouncements(),
+  seen: readonly string[],
 ): Announcement | null {
   const latest = announcements[0];
   return latest && !seen.includes(latest.id) ? latest : null;

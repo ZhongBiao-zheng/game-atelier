@@ -2560,24 +2560,6 @@ export function groupChanges(changes: ChangelogChange[]): [ChangeKind, Changelog
   ).filter(([, list]) => list.length > 0);
 }
 
-const SEEN_KEY = 'atelier:changelog-seen';
-
-export function loadSeenVersion(): string | null {
-  try {
-    return window.localStorage.getItem(SEEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function saveSeenVersion(version: string): void {
-  try {
-    window.localStorage.setItem(SEEN_KEY, version);
-  } catch {
-    // 隐私模式 / 存储写满：读不到就是每次都当已读，不该因此让顶栏崩掉
-  }
-}
-
 /** 是否有没读过的更新。
  *
  * 首次使用（没有任何记录）**不算未读** —— 新用户不该一进来就被历史更新日志拦住，

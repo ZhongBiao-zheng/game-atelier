@@ -9,16 +9,14 @@ import {
   PROJECT_GITHUB_URL,
   groupChanges,
   hasUnreadChangelog,
-  loadSeenVersion,
-  saveSeenVersion,
   type ChangelogEntry,
 } from '@/lib/changelog';
 import { OPEN_ANNOUNCEMENT_EVENT, useAnnouncements, type Announcement } from '@/lib/announcements';
+import { loadUiPrefs, saveUiPref, UI_PREF_KEYS } from '@/lib/uiPrefs';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { useScrollFade } from '@/components/ui/scroll-fade';
 
-export const OPEN_CHANGELOG_EVENT = 'atelier:open-changelog';
 
 function VersionBlock({
   entry,
@@ -144,7 +142,12 @@ function buildFeed(announcements: readonly Announcement[]): FeedItem[] {
   return feed;
 }
 
-/** 顶栏版本号与仓库入口，更新日志只在主动点击时展开。
+/** 已读版本存在数据目录（lib/uiPrefs），端口顺延换了 origin 也不丢。 */
+function saveSeenVersion(version: string) {
+  void saveUiPref(UI_PREF_KEYS.changelogSeen, version);
+}
+
+/** 顶栏版本号，更新日志只在主动点击时展开；仓库入口在面板标题栏。
  *
  * 未读判定见 lib/changelog：首次使用静默标已读（新用户不该被历史更新拦住），
  * 只有「读过旧版本后升级」才亮圆点。打开即标已读。
@@ -158,15 +161,15 @@ export function ChangelogButton() {
   const announcements = useAnnouncements();
 
   useEffect(() => {
-    const seen = loadSeenVersion();
-    setUnread(hasUnreadChangelog(seen));
-    if (seen === null) saveSeenVersion(CURRENT_VERSION);
-  }, []);
-
-  useEffect(() => {
-    const show = () => { saveSeenVersion(CURRENT_VERSION); setOpen(true); };
-    window.addEventListener(OPEN_CHANGELOG_EVENT, show);
-    return () => window.removeEventListener(OPEN_CHANGELOG_EVENT, show);
+    let active = true;
+    void loadUiPrefs().then(prefs => {
+      if (!active || !prefs) return;
+      const stored = prefs[UI_PREF_KEYS.changelogSeen];
+      const seen = typeof stored === 'string' ? stored : null;
+      setUnread(hasUnreadChangelog(seen));
+      if (seen === null) saveSeenVersion(CURRENT_VERSION);
+    });
+    return () => { active = false; };
   }, []);
 
   const close = useCallback((returnFocus = false) => {
@@ -221,16 +224,6 @@ export function ChangelogButton() {
         )}
       </Button></Hint>
 
-      <Hint label="GitHub 项目仓库"><a
-        href={PROJECT_GITHUB_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="GitHub 项目仓库（新标签页打开）"
-        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      >
-        <GitHubIcon />
-      </a></Hint>
-
       <ToolbarPopover
         open={open}
         onClose={close}
@@ -246,7 +239,19 @@ export function ChangelogButton() {
         {/* 标题栏不跟着滚：滚到第三个版本时仍要知道自己在读什么、当前是哪一版 */}
         <div className="flex shrink-0 items-baseline justify-between gap-3 border-b border-border px-5 pb-4 pt-5">
           <h2 className="text-base font-medium text-foreground">更新日志</h2>
-          <span className="tabular-nums text-xs text-muted-foreground">当前 v{CURRENT_VERSION}</span>
+          <span className="flex items-center gap-1">
+            <span className="tabular-nums text-xs text-muted-foreground">当前 v{CURRENT_VERSION}</span>
+            {/* 仓库入口画师用不上，从顶栏收进面板标题栏。 */}
+            <Hint label="GitHub 项目仓库"><a
+              href={PROJECT_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub 项目仓库（新标签页打开）"
+              className="inline-flex size-7 shrink-0 items-center justify-center self-center rounded-full text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <GitHubIcon />
+            </a></Hint>
+          </span>
         </div>
         <div
           ref={fadeRef}

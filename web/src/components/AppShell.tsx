@@ -22,6 +22,7 @@ import { AnnouncementHost } from '@/components/AnnouncementDialog';
 import { OnboardingHost } from '@/components/OnboardingHost';
 import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
 import { Button } from '@/components/ui/button';
+import { Hint } from '@/components/ui/tooltip';
 import { DESKTOP_NAVIGATE_EVENT, desktopNavigatePath } from '@/lib/desktopShell';
 
 // 组件样例页只在 dev 存在，生产构建整段摇掉
@@ -31,15 +32,16 @@ const Kit = import.meta.env.DEV ? lazy(() => import('@/pages/Kit').then(m => ({ 
 function ThemeToggle() {
   const theme = useTheme();
   const next: Theme = theme === 'dark' ? 'light' : 'dark';
+  const label = next === 'light' ? '切换到浅色主题' : '切换到深色主题';
   return (
-    <Button variant="bare"
+    <Hint label={label}><Button variant="bare"
       type="button"
-      aria-label={next === 'light' ? '切换到浅色主题' : '切换到深色主题'}
+      aria-label={label}
       onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <SwapIcon swapKey={theme}>{theme === 'dark' ? <LightModeIcon size="lg" aria-hidden /> : <DarkModeIcon size="lg" aria-hidden />}</SwapIcon>
-    </Button>
+    </Button></Hint>
   );
 }
 
@@ -158,7 +160,7 @@ function AppShellContent() {
             <UpdateButton />
             <ChangelogButton />
             <ThemeToggle />
-            <Link
+            <Hint label="设置"><Link
               href="/settings/providers"
               aria-label="设置"
               className={[
@@ -167,7 +169,7 @@ function AppShellContent() {
               ].join(' ')}
             >
               <SettingsIcon size="lg" aria-hidden />
-            </Link>
+            </Link></Hint>
           </div>
         </div>
         <UpdateButton mobile />

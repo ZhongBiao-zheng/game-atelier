@@ -14,6 +14,8 @@ import {
   announcementsInSameRelease,
   findCandidates,
   latestUnseenAnnouncement,
+  loadAnnouncements,
+  loadSeenAnnouncements,
   markAnnouncementsSeen,
   useAnnouncements,
   withAddedModels,
@@ -40,13 +42,30 @@ const selectionKey = (alias: string, modelId: string) => `${alias}\u0000${modelI
 /** 没开通的供应商不列出；拉取失败的保留，否则分不清「没开通」和「查不了」。 */
 const visibleScans = (scans: KeyScan[]) => scans.filter(item => item.status === 'error' || item.candidates.length > 0);
 
-/** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志里的公告卡片按 id 通过事件再次打开。 */
+/** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志里的公告卡片按 id 通过事件再次打开。
+ *  第一次运行（没有已读记录）把现有公告全部静默记为已读；一个供应商都没有时也不弹：
+ *  新用户刚进来，公告只会挡住输入框。 */
 export function AnnouncementHost() {
   const announcements = useAnnouncements();
   // undefined = 还没人操作，按「最新一条未读」自动弹；null = 已关闭；字符串 = 当前显示的公告 id。
   const [openedId, setOpenedId] = useState<string | null | undefined>(undefined);
+  // null = 还没读到（或读失败）已读记录与供应商列表：这时不自动弹。
+  const [seen, setSeen] = useState<string[] | null>(null);
+  const [hasKeys, setHasKeys] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      loadSeenAnnouncements(), listKeys().then(body => Array.isArray(body?.keys) && body.keys.length > 0).catch(() => false), loadAnnouncements(),
+    ]).then(([stored, keys, items]) => {
+      if (!active || stored === null) return;
+      setHasKeys(keys);
+      // 第一次运行：现有公告（可能为空）全部记为已读，之后发的新公告才会弹。
+      setSeen(stored === undefined ? markAnnouncementsSeen(items, []) : stored);
+    });
+    return () => { active = false; };
+  }, []);
   const announcement = openedId === undefined
-    ? latestUnseenAnnouncement(announcements)
+    ? (seen && hasKeys ? latestUnseenAnnouncement(announcements, seen) : null)
     : announcements.find(item => item.id === openedId) ?? null;
 
   useEffect(() => {
@@ -73,7 +92,7 @@ export function AnnouncementHost() {
       announcement={shown}
       pager={siblings.length > 1 ? { index, total: siblings.length, onPrevious: step(-1), onNext: step(1) } : undefined}
       onClose={() => {
-        markAnnouncementsSeen(announcements);
+        if (seen) setSeen(markAnnouncementsSeen(announcements, seen));
         setOpenedId(null);
       }}
     />

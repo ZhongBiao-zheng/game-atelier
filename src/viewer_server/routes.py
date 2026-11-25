@@ -904,6 +904,28 @@ def change_data_root(payload: _DataRootPayload) -> dict:
     return {"data_root": str(data_root.resolve_data_root()), "move": move}
 
 
+class _UiPrefPayload(BaseModel):
+    value: Any = None
+
+
+@router.get("/ui-prefs")
+def get_ui_prefs() -> dict:
+    """界面偏好与已读记录（公告、更新日志）；存在数据目录里，不随端口变化丢失。"""
+    from character_workflow.lib import ui_prefs
+
+    return {"prefs": ui_prefs.read_prefs()}
+
+
+@router.put("/ui-prefs/{key}")
+def put_ui_pref(key: str, payload: _UiPrefPayload) -> dict:
+    from character_workflow.lib import ui_prefs
+
+    try:
+        return {"prefs": ui_prefs.set_pref(key, payload.value)}
+    except ui_prefs.UiPrefsError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
 @router.post("/onboarding/events", status_code=204)
 def onboarding_event(payload: dict = Body(...)) -> Response:
     """引导的本机度量：只收枚举事件（见 onboarding_metrics），不上报。"""

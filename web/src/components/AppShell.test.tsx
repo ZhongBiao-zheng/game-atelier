@@ -246,15 +246,11 @@ describe('in-app update controls', () => {
     await renderUpdater('bundle', '5.130.0');
     expect(screen.getByRole('link', { name: '有新版本 5.130.0' })).toHaveAttribute('href', 'https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v5.130.0');
   });
-  it('source mode opens changelog without starting an update', async () => {
+  it('source mode links to the new release notes without starting an update', async () => {
     const network = updateServer({ state: { ...readyUpdate, runtime_mode: 'source' } });
-    const show = vi.fn();
-    window.addEventListener('atelier:open-changelog', show);
     await renderUpdater('source', '5.130.0');
-    fireEvent.click(screen.getByRole('button', { name: '新版本 5.130.0' }));
-    expect(show).toHaveBeenCalledOnce();
+    expect(screen.getByRole('link', { name: '新版本 5.130.0' })).toHaveAttribute('href', 'https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v5.130.0');
     expect(network.mock.calls.some(([path]) => path === '/api/update/apply')).toBe(false);
-    window.removeEventListener('atelier:open-changelog', show);
   });
   it('shows a 409 reason without entering recovery', async () => {
     updateServer({ applyStatus: 409 });
@@ -268,14 +264,17 @@ describe('in-app update controls', () => {
     updateServer({ state: { ...readyUpdate, waiting: 2, waiting_counts: { jobs: 1, approvals: 1 } } });
     await renderUpdater();
     await startUpdate();
-    expect(screen.getByRole('dialog')).toHaveTextContent('等待 2 个任务完成');
-    expect(screen.getByRole('dialog')).toHaveTextContent('1 个 Agent 操作待确认');
+    // 等任务期间不挡界面：底部状态胶囊，没有模态。
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText(/等待 2 个任务/)).toBeInTheDocument();
+    expect(screen.getByText('1 个 Agent 操作待确认')).toBeInTheDocument();
     expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).restartAt).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60_000); });
-    expect(screen.getByRole('dialog')).toHaveTextContent('等待 2 个任务完成');
+    expect(screen.getByText(/等待 2 个任务/)).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '取消更新' })); });
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.queryByText(/等待 2 个任务/)).not.toBeInTheDocument();
   });
   it('restores cancellation when a transient probe failure resolves to the same waiting transaction', async () => {
     const network = updateServer({ state: { ...readyUpdate, update_id: 'update-one', phase: 'waiting',
@@ -295,7 +294,7 @@ describe('in-app update controls', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     expect(screen.queryByRole('button', { name: '取消更新' })).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    expect(screen.getByRole('dialog')).toHaveTextContent('1 个 Agent 操作待确认');
+    expect(screen.getByText('1 个 Agent 操作待确认')).toBeInTheDocument();
     expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).restartAt).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60_000); });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -344,7 +343,7 @@ describe('in-app update controls', () => {
     await renderUpdater();
     expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     await act(async () => { await vi.advanceTimersByTimeAsync(62_000); });
-    expect(screen.getByRole('alert')).toHaveTextContent('服务没有自动恢复，请双击启动器');
+    expect(screen.getByRole('alert')).toHaveTextContent('Atelier 没有自动恢复，请重新打开 Atelier');
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
   });
   it('clears successful results silently after page reload', async () => {

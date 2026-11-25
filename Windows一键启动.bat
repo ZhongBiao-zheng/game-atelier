@@ -10,9 +10,9 @@ set "UV_PROJECT_ENVIRONMENT="
 rem uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
 if not defined UV_PYTHON_INSTALL_MIRROR set "UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone"
 cd /d "%~dp0"
-title Game Atelier
+title Atelier
 
-echo Game Atelier
+echo Atelier
 echo.
 call :timer_start
 
@@ -74,7 +74,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo 工坊已启动，本窗口可关闭。
+echo Atelier 已启动，本窗口可关闭。
 timeout /t 2 >nul
 exit /b 0
 
