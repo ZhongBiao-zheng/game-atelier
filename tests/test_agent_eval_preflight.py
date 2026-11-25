@@ -81,7 +81,7 @@ def test_preflight_without_sync_uses_only_selected_local_prices(tmp_path, monkey
         assert cli.main(["preflight", *args]) == 0
         text = capsys.readouterr().out
         assert "已登记，同步或内置价格" in text and "eval/gpt-image-1  ¥0.31" in text
-        assert "eval/kling-v2  ¥1.2" in text and "¥4.5，预算 ¥5" in text
+        assert "eval/kling-v2  ¥1.2" in text and "¥8.5，预算 ¥5" in text
         assert not (tmp_path / "results").exists()
         assert upstream_calls == []
 

@@ -71,8 +71,8 @@ def test_matrix_stops_at_exact_threshold_and_on_unobservable_spend(tmp_path, mon
 
 def test_sample_cases_have_valid_attachments_and_distinct_ids():
     cases = cli.load_cases(cli.HERE / "examples.yaml", None, cli.HERE / "fixtures")
-    assert len(cases) == len({c["id"] for c in cases}) == 3
-    assert [c["id"][:2] for c in cases] == ["01", "04", "11"]
+    assert len(cases) == len({c["id"] for c in cases}) == 5
+    assert [c["id"][:2] for c in cases] == ["01", "04", "11", "15", "16"]
     assert Path(cli.HERE / "fixtures" / "hero-a.png").is_file()
 
 
