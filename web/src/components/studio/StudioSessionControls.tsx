@@ -1,12 +1,11 @@
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChatIcon, ChevronDownIcon, DeleteIcon, NewChatIcon } from '@/components/ui/icons';
+import { ChevronDownIcon, DeleteIcon, NewChatIcon } from '@/components/ui/icons';
 import { Hint } from '@/components/ui/tooltip';
 import { DEFAULT_STUDIO_SESSION_ID } from '@/pages/studioDraft';
 import type { StudioComposerState } from './StudioComposer';
 import { ToolbarPopover } from './ToolbarPopover';
 
-const capsule = 'h-9 shrink-0 rounded-full border border-input bg-glass backdrop-blur-glass';
 export function StudioSessionControls({ agent, clearDraft, disabled = false }: {
   agent: StudioComposerState['agent']; clearDraft: () => void; disabled?: boolean;
 }) {
@@ -20,13 +19,14 @@ export function StudioSessionControls({ agent, clearDraft, disabled = false }: {
   }
   const title = agent.session?.title ?? agent.sessions.find(s => s.session_id === agent.selectedSessionId)?.title
     ?? (agent.selectedSessionId === DEFAULT_STUDIO_SESSION_ID ? '默认会话' : '新建对话');
-  return <div className="pointer-events-auto flex min-w-0 items-center gap-1.5">
-    <Button ref={anchor} variant="ghost" size="sm" aria-label="切换对话" aria-expanded={open}
-      className={capsule + ' min-w-0 shrink gap-1 px-2 sm:px-3'} onClick={() => setOpen(!open)}>
-      <ChatIcon size="sm" /><span className="max-w-40 truncate">{title}</span><ChevronDownIcon size="sm" />
+  return <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+    <Hint label="新建对话"><Button variant="ghost" aria-label="新建对话" disabled={busy} onClick={newChat}
+      className="h-9 shrink-0 gap-1.5 rounded-full border border-primary/45 bg-primary/14 px-2.5 text-sm font-medium text-foreground hover:bg-primary/22 sm:pl-3 sm:pr-3.5">
+      <NewChatIcon /><span className="max-sm:hidden">新建对话</span></Button></Hint>
+    <Button ref={anchor} variant="ghost" aria-label="切换对话" aria-expanded={open}
+      className="h-9 min-w-0 shrink gap-1 rounded-full px-2 text-base font-semibold" onClick={() => setOpen(!open)}>
+      <span className="max-w-60 truncate">{title}</span><ChevronDownIcon size="sm" className="text-muted-foreground" />
     </Button>
-    <Hint label="新建对话"><Button variant="ghost" size="icon" aria-label="新建对话"
-      className={capsule + ' w-9'} disabled={busy} onClick={newChat}><NewChatIcon /></Button></Hint>
     <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchor} direction="down" autoFocus
       aria-label="对话列表" className="w-60 rounded-xl border border-border bg-card p-2" maxHeight={360}>
       <Button variant="ghost" size="sm" className="h-10 w-full justify-start" disabled={busy} onClick={newChat}>

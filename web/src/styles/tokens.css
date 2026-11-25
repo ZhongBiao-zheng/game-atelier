@@ -307,6 +307,13 @@
     mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
   }
 
+  /* 创作台历史区顶部渐隐：顶部的对话入口与筛选没有底，内容滚上去会和标题叠字。
+     前 52px（顶部控件所在高度）完全透明，再用 28px 过渡到不透明。 */
+  .scroll-fade-t {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 52px, #000 80px);
+    mask-image: linear-gradient(to bottom, transparent 52px, #000 80px);
+  }
+
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */

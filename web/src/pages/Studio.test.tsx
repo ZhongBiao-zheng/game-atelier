@@ -3172,14 +3172,14 @@ it('团队使用连续追加并按来源复用 File，满额不覆盖，也不�
 
 it('三种生成模式共享顶部会话与筛选，切换后保留查询条件', async () => {
   renderStudio();
-  fireEvent.click(await screen.findByRole('button', { name: '生成模式筛选' }));
+  fireEvent.click(await screen.findByRole('button', { name: '筛选' }));
   fireEvent.click(screen.getByRole('option', { name: '视频' }));
-  fireEvent.click(screen.getByRole('button', { name: '生成模式筛选：视频' }));
+  fireEvent.click(screen.getByRole('button', { name: '筛选：视频' }));
   for (const mode of ['Agent', '视频', '图片']) {
     fireEvent.click(screen.getByLabelText('选择生成模式'));
     fireEvent.click(screen.getByRole('option', { name: mode }));
     expect(screen.getByLabelText('切换对话')).toBeVisible();
     expect(screen.getByLabelText('新建对话')).toBeVisible();
-    expect(screen.getByLabelText('生成模式筛选：视频')).toBeVisible();
+    expect(screen.getByLabelText('筛选：视频')).toBeVisible();
   }
 });

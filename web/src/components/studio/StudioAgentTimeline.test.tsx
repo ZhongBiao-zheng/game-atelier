@@ -117,11 +117,13 @@ it('多方案的每条提示词只在对应的作品卡片里出现一次', () =
   });
 });
 
-it('两枚会话按钮与筛选条共用同色玻璃边框', () => {
+it('新建对话用主色浅底并排在对话标题前，标题不再套胶囊', () => {
   render(<StudioSessionControls agent={makeAgent('idle')} clearDraft={() => {}} />);
-  for (const name of ['切换对话', '新建对话']) {
-    const capsule = screen.getByRole('button', { name });
-    expect(capsule).toHaveClass('h-9', 'rounded-full', 'border', 'border-input', 'bg-glass', 'backdrop-blur-glass');
-    expect(capsule).not.toHaveClass('glass-specular');
-  }
+  const create = screen.getByRole('button', { name: '新建对话' });
+  const title = screen.getByRole('button', { name: '切换对话' });
+  expect(create).toHaveClass('bg-primary/14', 'border-primary/45');
+  expect(create).toHaveTextContent('新建对话');
+  expect(create.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(title).toHaveClass('text-base', 'font-semibold');
+  expect(title).not.toHaveClass('border', 'bg-glass');
 });

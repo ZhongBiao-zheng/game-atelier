@@ -5,11 +5,15 @@ import { DEFAULT_HISTORY_FILTERS } from '@/lib/historyFilters';
 import { StudioQueryBar } from './StudioQueryBar';
 
 describe('StudioQueryBar', () => {
-  it('三个筛选 chip 渲染可见标签（防 FilterChip 吞 children 回归）', () => {
+  it('三组筛选收在一个「筛选」入口里，面板内分组展示', () => {
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
-    expect(screen.getByLabelText('时间筛选')).toHaveTextContent('时间');
-    expect(screen.getByLabelText('生成模式筛选')).toHaveTextContent('生成模式');
-    expect(screen.getByLabelText('操作类型筛选')).toHaveTextContent('操作类型');
+    const chip = screen.getByRole('button', { name: '筛选' });
+    expect(chip).toHaveTextContent('筛选');
+    expect(chip).not.toHaveClass('text-primary');
+    fireEvent.click(chip);
+    for (const name of ['时间筛选列表', '生成模式列表', '操作类型列表']) {
+      expect(screen.getByRole('listbox', { name })).toBeInTheDocument();
+    }
   });
 
   it('点搜索展开输入框并回传 search', () => {
@@ -20,41 +24,22 @@ describe('StudioQueryBar', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ search: 'dragon' }));
   });
 
-  it('筛选关闭后仍显示当前值与主题色，恢复默认后还原标题', () => {
-    const { rerender } = render(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '1w', modes: ['image'], op: 'favorite' }} onChange={vi.fn()} />);
-    for (const [name, value] of [['时间', '最近一周'], ['生成模式', '图片'], ['操作类型', '喜欢']]) {
-      const chip = screen.getByRole('button', { name: `${name}筛选：${value}` });
-      expect(chip).toHaveTextContent(value);
-      expect(chip).toHaveClass('text-primary');
-      expect(chip.querySelector('svg')).toHaveClass('text-primary');
-      expect(chip).not.toHaveClass('bg-secondary');
-    }
-    fireEvent.click(screen.getByRole('button', { name: '时间筛选：最近一周' }));
-    expect(screen.getByRole('button', { name: '时间筛选：最近一周' })).toHaveClass('bg-secondary', 'text-primary');
-    fireEvent.click(screen.getByRole('button', { name: '时间筛选：最近一周' }));
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '时间筛选：最近一周' })).toHaveClass('text-primary');
-    rerender(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
-    for (const name of ['时间', '生成模式', '操作类型']) {
-      const chip = screen.getByRole('button', { name: `${name}筛选` });
-      expect(chip).toHaveTextContent(name);
-      expect(chip).not.toHaveClass('text-primary');
-    }
-  });
-
-  it('多选模式以顿号连接，时间与操作类型各自保留当前值', () => {
-    const { rerender } = render(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '1m', modes: ['video', 'image'], op: 'hidden' }} onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '生成模式筛选：图片、视频' })).toHaveTextContent('图片、视频');
-    expect(screen.getByRole('button', { name: '时间筛选：最近一个月' })).toHaveTextContent('最近一个月');
-    expect(screen.getByRole('button', { name: '操作类型筛选：隐藏' })).toHaveTextContent('隐藏');
+  it('有筛选时入口显示条数与主题色，名称带出当前值，恢复默认后还原', () => {
+    const { rerender } = render(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '1w', modes: ['video', 'image'], op: 'favorite' }} onChange={vi.fn()} />);
+    const chip = screen.getByRole('button', { name: '筛选：最近一周，图片、视频，喜欢' });
+    expect(chip).toHaveTextContent('筛选3');
+    expect(chip).toHaveClass('text-primary');
+    expect(chip.querySelector('svg')).toHaveClass('text-primary');
     rerender(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '3m' }} onChange={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '时间筛选：最近三个月' })).toHaveTextContent('最近三个月');
+    expect(screen.getByRole('button', { name: '筛选：最近三个月' })).toHaveTextContent('筛选1');
+    rerender(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '筛选' })).not.toHaveClass('text-primary');
   });
 
   it('生成模式可以独立加选、取消，且不影响其他已选项', () => {
     const onChange = vi.fn();
     const { rerender } = render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText('生成模式筛选'));
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }));
     const listbox = screen.getByRole('listbox', { name: '生成模式列表' });
     expect(listbox).toHaveAttribute('aria-multiselectable', 'true');
 
@@ -79,7 +64,7 @@ describe('StudioQueryBar', () => {
 
   it('点选选项后面板保持展开', () => {
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText('时间筛选'));
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }));
     fireEvent.click(screen.getByRole('option', { name: '最近一周' }));
     expect(screen.getByRole('listbox', { name: '时间筛选列表' })).toBeInTheDocument();
   });
@@ -87,7 +72,7 @@ describe('StudioQueryBar', () => {
   it('操作类型选喜欢回传 op=favorite', () => {
     const onChange = vi.fn();
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText('操作类型筛选'));
+    fireEvent.click(screen.getByRole('button', { name: '筛选' }));
     fireEvent.click(screen.getByRole('option', { name: /喜欢/ }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ op: 'favorite' }));
   });

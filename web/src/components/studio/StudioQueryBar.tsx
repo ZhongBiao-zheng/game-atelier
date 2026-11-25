@@ -53,24 +53,22 @@ export function StudioQueryBar({
   filters: HistoryFilters;
   onChange: (next: HistoryFilters) => void;
 }) {
-  const [openPanel, setOpenPanel] = useState<'time' | 'mode' | 'op' | null>(null);
+  const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const timeRef = useRef<HTMLDivElement>(null);
-  const modeRef = useRef<HTMLDivElement>(null);
-  const opRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
 
-  const toggle = (panel: 'time' | 'mode' | 'op') => setOpenPanel((p) => (p === panel ? null : panel));
-  const panelCls = 'w-60 rounded-xl border border-border bg-card p-2';
   const optionCls =
-    'flex h-10 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60';
+    'flex h-8 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60';
   const timeLabel = filters.time === 'all' ? '' : TIME_OPTS.find(option => option.key === filters.time)?.label;
   const modeLabel = MODE_OPTS.filter(option => filters.modes.includes(option.key)).map(option => option.label).join('、');
   const opLabel = OP_OPTS.find(option => option.key === filters.op)?.label;
+  const summary = [timeLabel, modeLabel, opLabel].filter(Boolean);
+  const sectionCls = 'px-3 pb-1 pt-2 text-xs text-muted-foreground';
 
   return (
     <div
@@ -117,63 +115,55 @@ export function StudioQueryBar({
       </div>
 
       <Divider />
-      <div ref={timeRef} className="relative">
-        <FilterChip active={openPanel === 'time'} filtered={Boolean(timeLabel)} aria-label={`时间筛选${timeLabel ? `：${timeLabel}` : ''}`} onClick={() => toggle('time')}>
-          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{timeLabel || '时间'}</span> <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
+      <div ref={anchorRef} className="relative">
+        <FilterChip active={open} filtered={summary.length > 0} aria-expanded={open}
+          aria-label={`筛选${summary.length ? `：${summary.join('，')}` : ''}`} onClick={() => setOpen(!open)}>
+          筛选{summary.length > 0 && <span className="tabular-nums">{summary.length}</span>}
+          <ChevronDownIcon size="sm" aria-hidden className={summary.length ? 'text-primary' : 'text-muted-foreground'} />
         </FilterChip>
-        <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
-          {TIME_OPTS.map((o) => (
-            <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
-              onClick={() => onChange({ ...filters, time: o.key })}>
-              <span>{o.label}</span>
-              {filters.time === o.key && <CheckIcon aria-hidden className="text-primary" />}
-            </Button>
-          ))}
-        </ToolbarPopover>
-      </div>
-
-      <Divider />
-      <div ref={modeRef} className="relative">
-        <FilterChip active={openPanel === 'mode'} filtered={Boolean(modeLabel)} aria-label={`生成模式筛选${modeLabel ? `：${modeLabel}` : ''}`} onClick={() => toggle('mode')}>
-          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{modeLabel || <><span className={searchOpen ? 'max-sm:hidden' : ''}>生成</span>模式</>}</span> <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
-        </FilterChip>
-        <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
-          <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
-          {MODE_OPTS.map((o) => {
-            const active = filters.modes.includes(o.key);
-            return (
-              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                onClick={() => onChange({
-                  ...filters,
-                  modes: active
-                    ? filters.modes.filter((mode) => mode !== o.key)
-                    : [...filters.modes, o.key],
-                })}>
-                <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                {active && <CheckIcon aria-hidden className="text-primary" />}
+        <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} direction="down" align="end" aria-label="筛选面板"
+          className="w-60 rounded-xl border border-border bg-card p-2" maxHeight={480}>
+          <div className={sectionCls}>时间</div>
+          <div role="listbox" aria-label="时间筛选列表">
+            {TIME_OPTS.map((o) => (
+              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
+                onClick={() => onChange({ ...filters, time: o.key })}>
+                <span>{o.label}</span>
+                {filters.time === o.key && <CheckIcon aria-hidden className="text-primary" />}
               </Button>
-            );
-          })}
-        </ToolbarPopover>
-      </div>
-
-      <Divider />
-      <div ref={opRef} className="relative">
-        <FilterChip active={openPanel === 'op'} filtered={Boolean(opLabel)} aria-label={`操作类型筛选${opLabel ? `：${opLabel}` : ''}`} onClick={() => toggle('op')}>
-          <span className={`truncate sm:max-w-32 ${searchOpen ? 'max-w-8' : 'max-w-14'}`}>{opLabel || <>操作<span className={searchOpen ? 'max-sm:hidden' : ''}>类型</span></>}</span> <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'hidden sm:block text-primary': 'hidden sm:block text-muted-foreground'} />
-        </FilterChip>
-        <ToolbarPopover open={openPanel === 'op'} onClose={() => setOpenPanel(null)} anchorRef={opRef} direction="down" role="listbox" aria-label="操作类型列表" className={panelCls}>
-          <div className="px-3 py-2 text-sm text-muted-foreground">操作</div>
-          {OP_OPTS.map((o) => {
-            const active = filters.op === o.key;
-            return (
-              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
-                <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                {active && <CheckIcon aria-hidden className="text-primary" />}
-              </Button>
-            );
-          })}
+            ))}
+          </div>
+          <div className={sectionCls}>生成模式</div>
+          <div role="listbox" aria-label="生成模式列表" aria-multiselectable="true">
+            {MODE_OPTS.map((o) => {
+              const active = filters.modes.includes(o.key);
+              return (
+                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+                  onClick={() => onChange({
+                    ...filters,
+                    modes: active
+                      ? filters.modes.filter((mode) => mode !== o.key)
+                      : [...filters.modes, o.key],
+                  })}>
+                  <span className="flex items-center gap-3">{o.icon}{o.label}</span>
+                  {active && <CheckIcon aria-hidden className="text-primary" />}
+                </Button>
+              );
+            })}
+          </div>
+          <div className={sectionCls}>操作类型</div>
+          <div role="listbox" aria-label="操作类型列表">
+            {OP_OPTS.map((o) => {
+              const active = filters.op === o.key;
+              return (
+                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+                  onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
+                  <span className="flex items-center gap-3">{o.icon}{o.label}</span>
+                  {active && <CheckIcon aria-hidden className="text-primary" />}
+                </Button>
+              );
+            })}
+          </div>
         </ToolbarPopover>
       </div>
     </div>

@@ -1014,7 +1014,7 @@ function StudioFull() {
         onScroll={handleHistoryScroll}
         data-studio-history-scroll
         data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-64"
+        className="scroll-fade-t flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-64"
       >
         {usage && visibleRounds.length > 0 && <div className="mx-auto w-full max-w-[1024px] pt-4">
           <Hint label={usage.detail}><span className="text-xs text-muted-foreground">{usage.text}</span></Hint>
