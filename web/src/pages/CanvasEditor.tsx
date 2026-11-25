@@ -141,6 +141,7 @@ import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
+import { CREATION_ASSET_DRAG_TYPE, readCreationAssetDrag } from '@/schema/creationAssets';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import { Button } from '@/components/ui/button';
@@ -2891,6 +2892,18 @@ function CanvasEditorInner({
       })();
       return;
     }
+    // 个人资产与参考库卡片拖入：落点与「使用」一致，在指针处插入这项资产。
+    const creationAsset = Array.from(event.dataTransfer.types ?? []).includes(CREATION_ASSET_DRAG_TYPE)
+      ? readCreationAssetDrag(event.dataTransfer)
+      : null;
+    if (creationAsset) {
+      event.preventDefault();
+      const flow = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      void insertCreationAsset(creationAsset.asset_id, {}, undefined, flow).catch(insertError => {
+        setError(errorText(insertError));
+      });
+      return;
+    }
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) {
       // 不 preventDefault 的话浏览器按默认行为打开这个文件，整个应用被顶掉，
@@ -5239,6 +5252,17 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+  // 首页「打开所在位置」带 `?node=`：文档载入后定位一次，再把参数从地址栏去掉。
+  useEffect(() => {
+    if (!documentLoaded) return;
+    const params = new URLSearchParams(window.location.search);
+    const nodeId = params.get('node');
+    if (!nodeId) return;
+    params.delete('node');
+    const query = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    requestAnimationFrame(() => locateNode(nodeId));
+  }, [documentLoaded, locateNode]);
   const [projectAssets, setProjectAssets] = useState<CreationAsset[]>([]);
   const [assetsRevision, setAssetsRevision] = useState(0);
   const refreshProjectAssets = useCallback(async () => {
@@ -5875,7 +5899,7 @@ function CanvasEditorInner({
             const types = event.dataTransfer.types;
             // 'Files' 也要接：dragover 不 preventDefault 时 drop 事件根本不会派发，
             // 浏览器直接导航到被拖进来的文件。
-            if (!types.includes('Files') && !types.includes(TEAM_ASSET_DRAG_TYPE)) return;
+            if (!types.includes('Files') && !types.includes(TEAM_ASSET_DRAG_TYPE) && !types.includes(CREATION_ASSET_DRAG_TYPE)) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
           }}
@@ -6461,6 +6485,7 @@ function CanvasEditorInner({
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
             onOpenKeySettings={() => leaveCanvas(() => setLocation('/settings/providers'))}
+            onLocateNode={locateNode}
           />
           </CanvasSidePanelMotion>
         )}
