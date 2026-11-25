@@ -203,6 +203,30 @@ it('旧会话的慢响应不能替换已切换到的会话任务', async () => {
   expect(screen.getByText('第一幅草图')).toBeVisible();
 });
 
+it('切换会话读取失败时整体退回原会话，记录与提交仍归原会话', async () => {
+  const { requests, finish } = server();
+  const respond = requests.getMockImplementation()!;
+  requests.mockImplementation((url, init) => url === base + '/' + ordinary
+    ? Promise.resolve(Response.json({ detail: '会话不存在' }, { status: 404 }))
+    : respond(url, init));
+  updateStudioView({ activeSessionId: DEFAULT_STUDIO_SESSION_ID });
+  mount();
+  await screen.findByText('无归属字段的旧图');
+  fireEvent.click(screen.getByLabelText('切换对话'));
+  fireEvent.click(await screen.findByRole('button', { name: '山色' }));
+  await waitFor(() => expect(requests.mock.calls.some(([url]) => url === base + '/' + ordinary)).toBe(true));
+  await act(async () => {});
+  expect(readStudioView().activeSessionId).toBe(DEFAULT_STUDIO_SESSION_ID);
+  expect(screen.getByText('无归属字段的旧图')).toBeVisible();
+  expect(screen.queryByText('第一幅草图')).toBeNull();
+  enter('失败后提交');
+  await waitFor(() => expect(screen.getByLabelText('提交生成')).toBeEnabled());
+  fireEvent.click(screen.getByLabelText('提交生成'));
+  await act(async () => finish());
+  const call = requests.mock.calls.find(([url]) => url === '/api/studio/jobs');
+  expect(JSON.parse(String(call?.[1]?.body)).studio_agent_session_id).toBe(DEFAULT_STUDIO_SESSION_ID);
+});
+
 it('滚动时保留实际输入焦点，已卸载的弹窗焦点不会持续撑开输入壳', async () => {
   server();
   mount();

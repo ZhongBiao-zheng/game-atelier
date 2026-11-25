@@ -893,6 +893,43 @@ it('loads node-card images at the tier above the card width, not the original', 
   );
 });
 
+it('reports the restored version at once when undo brings an already decoded layer back on top', async () => {
+  // 宽图 A 换竖图 B，B 就绪后立刻撤销回 A：A 那层一直挂着、早已解完，不会再有一次 load。
+  const version = (id: string, width: number, height: number): CanvasContentVersion => ({
+    version_id: id, kind: 'image', created_at: '2026-08-25T00:00:00Z', sha256: 'c'.repeat(64),
+    origin: { kind: 'upload', upload_id: 'upload-' + id }, path: `uploads/${id}.png`, mime_type: 'image/png',
+    bytes: 1000, width, height, duration_ms: null,
+  });
+  const reportMediaRevealed = vi.fn();
+  const context = nodeContext({
+    resolveVersion: versionResolver({ wide: version('wide', 1600, 900), tall: version('tall', 900, 1600) }),
+    reportMediaRevealed,
+  });
+  const card = (versionId: string) => (
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: { ...nodes[1], data: { ...nodes[1].data, current_version_id: versionId } } as CanvasNode }} selected={false} />
+    </CanvasNodeContext.Provider>
+  );
+  const load = async (versionId: string) => {
+    const image = [...document.querySelectorAll('img')].find(item => item.getAttribute('src')?.includes(`/versions/${versionId}/`));
+    await act(async () => { fireEvent.load(image!); });
+  };
+  const { rerender } = render(card('wide'));
+  await load('wide');
+  expect(reportMediaRevealed).toHaveBeenLastCalledWith('image', 'wide');
+  rerender(card('tall'));
+  await load('tall');
+  expect(reportMediaRevealed).toHaveBeenLastCalledWith('image', 'tall');
+  rerender(card('wide'));
+  await act(async () => {});
+  expect(reportMediaRevealed).toHaveBeenLastCalledWith('image', 'wide');
+  // 淘汰按新的顶层重新安排：B 层退场后卸掉，只剩 A。
+  await act(() => new Promise(resolve => window.setTimeout(resolve, 300)));
+  expect([...document.querySelectorAll('img')].map(item => item.getAttribute('src'))).toEqual([
+    expect.stringContaining('/versions/wide/'),
+  ]);
+});
+
 it('hide toggles the node hidden flag and flips the button label', () => {
   const written = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'written' } } as CanvasNode;
   const context = nodeContext({

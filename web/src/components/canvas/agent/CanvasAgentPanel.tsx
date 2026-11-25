@@ -260,7 +260,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 }) {
   const labels = useAgentToolLabels();
   const agent = useCanvasAgent(projectId, true);
-  const { session, streaming, tool, pending, loading, outgoing } = agent;
+  const { session, streaming, tool, pending, loading, outgoing, waitingForSession } = agent;
   const [text, setText] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [skill, setSkill] = useState<string | null>(null);
@@ -387,7 +387,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 
   // 列表读到之后，只有列表里的模型能发（Key 里停用的文本模型不再可用）。
   const modelReady = !agent.models || Boolean(selectedModel);
-  const canSend = text.trim().length > 0 && !running && !awaiting && !pending && modelReady;
+  const canSend = text.trim().length > 0 && !running && !awaiting && !pending && !waitingForSession && modelReady;
 
   /** 发出去立刻清空输入、回到底部，消息先以「发送中」出现；失败时把文字、技能、带入的节点填回去
    *  （期间又打了字就不覆盖）。 */
@@ -534,7 +534,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               key={approvalCard.key}
               approvals={approvalCard.approvals}
               labels={labels}
-              disabled={pending || !awaiting}
+              disabled={pending || waitingForSession || !awaiting}
               onDecide={decide}
               loadBatchItems={callId => getCanvasAgentBatchItems(projectId, approvalCard.sessionId, callId)}
             />

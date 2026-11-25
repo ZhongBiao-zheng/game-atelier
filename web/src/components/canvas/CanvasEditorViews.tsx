@@ -4006,17 +4006,28 @@ function CanvasCrossfadeImage({ src, alt, fitClassName, className, onReady }: {
   onReady?: () => void;
 }) {
   const [layers, setLayers] = useState<readonly string[]>([src]);
-  const [readySrc, setReadySrc] = useState<string | null>(null);
+  // 每层各记解码状态：撤销回一张还挂着、早已解完的旧图时，它重新到顶不会再触发一次解码回调。
+  const [readyLayers, setReadyLayers] = useState<ReadonlySet<string>>(() => new Set());
   if (layers[layers.length - 1] !== src) setLayers([...layers.filter(layer => layer !== src), src]);
-  const settled = readySrc === src && layers.length > 1;
+  const topReady = readyLayers.has(src);
+  const latestOnReady = useRef(onReady);
+  latestOnReady.current = onReady;
+  // 顶层换了身份（含换回已就绪的旧层）就按当前版本上报，节点尺寸跟着屏上的图走。
+  useEffect(() => {
+    if (topReady) latestOnReady.current?.();
+  }, [topReady, src]);
+  const settled = topReady && layers.length > 1;
   useEffect(() => {
     if (!settled) return;
-    const timer = window.setTimeout(
-      () => setLayers(current => current[current.length - 1] === src ? [src] : current),
-      MOTION_DURATION.base * 1000,
-    );
+    const timer = window.setTimeout(() => {
+      setLayers(current => current[current.length - 1] === src ? [src] : current);
+      setReadyLayers(current => current.has(src) && current.size > 1 ? new Set([src]) : current);
+    }, MOTION_DURATION.base * 1000);
     return () => window.clearTimeout(timer);
   }, [settled, src]);
+  const markReady = useCallback((layer: string) => {
+    setReadyLayers(current => current.has(layer) ? current : new Set([...current, layer]));
+  }, []);
   return (
     <div data-canvas-media className={cn('relative size-full', className)}>
       {layers.map(layer => {
@@ -4036,7 +4047,7 @@ function CanvasCrossfadeImage({ src, alt, fitClassName, className, onReady }: {
               top ? cn('relative', fitClassName) : 'absolute inset-0 object-cover',
               className,
             )}
-            onReady={top ? () => { setReadySrc(layer); onReady?.(); } : undefined}
+            onReady={() => markReady(layer)}
           />
         );
       })}

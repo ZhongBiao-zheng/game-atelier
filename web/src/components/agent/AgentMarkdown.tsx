@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { usePlugins } from '@/plugin-host/registry';
 import type { PluginEntry } from '@/schema/plugins';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -77,21 +77,70 @@ const MARKDOWN_COMPONENTS: Components = {
 /** 流式输出的末尾光标：静态，不闪不动，只标出「还在写」。 */
 const STREAM_CURSOR = '▍';
 
-/** 切出已经写完的段落：最后一个空行之前、且代码围栏已经闭合的部分不会再变。 */
-export function splitStreamingMarkdown(text: string): [stable: string, tail: string] {
-  let index = text.lastIndexOf('\n\n');
-  while (index > 0) {
-    const stable = text.slice(0, index);
-    if ((stable.match(/```/g)?.length ?? 0) % 2 === 0) return [stable, text.slice(index + 2)];
-    index = text.lastIndexOf('\n\n', index - 1);
+/** 流式分段的扫描进度：只向前推进，每次只看新到的完整行。 */
+export interface StreamingMarkdownScan {
+  text: string;
+  /** 已扫描到的位置，总在行首。 */
+  offset: number;
+  /** 未闭合的代码围栏：``` 或 ~~~ 及其长度，闭合围栏要同字符且不短于它。 */
+  fence: { char: string; length: number } | null;
+  /** 围栏外空行之后的位置：下一行确认是顶格的新块才成为切分点。 */
+  pendingBoundary: number | null;
+  /** 已确认的切分点：之前的部分不会再变。 */
+  boundary: number;
+}
+
+const FENCE_PATTERN = /^\s*(`{3,}|~{3,})(.*)$/;
+
+function emptyScan(text: string): StreamingMarkdownScan {
+  return { text, offset: 0, fence: null, pendingBoundary: null, boundary: 0 };
+}
+
+/** 从上次的进度接着扫：文本只在末尾追加时不回头；不是追加（换了回复）就从头扫。
+ *  切分点只落在围栏外的空行之后、且下一行顶格开始新块时；缩进续行（列表续段、缩进代码）不切。 */
+export function scanStreamingMarkdown(text: string, previous?: StreamingMarkdownScan): StreamingMarkdownScan {
+  const scan = previous && text.startsWith(previous.text) ? { ...previous, text } : emptyScan(text);
+  let lineStart = scan.offset;
+  for (let lineEnd = text.indexOf('\n', lineStart); lineEnd !== -1; lineEnd = text.indexOf('\n', lineStart)) {
+    const line = text.slice(lineStart, lineEnd);
+    const fence = FENCE_PATTERN.exec(line);
+    if (scan.fence) {
+      if (fence && fence[1][0] === scan.fence.char && fence[1].length >= scan.fence.length && !fence[2].trim()) {
+        scan.fence = null;
+      }
+    } else if (!line.trim()) {
+      scan.pendingBoundary = lineEnd + 1;
+    } else {
+      if (scan.pendingBoundary !== null && !/^\s/.test(line)) scan.boundary = scan.pendingBoundary;
+      scan.pendingBoundary = null;
+      // 反引号围栏的信息串里不能再有反引号，否则是行内代码。
+      if (fence && !(fence[1][0] === '`' && fence[2].includes('`'))) {
+        scan.fence = { char: fence[1][0], length: fence[1].length };
+      }
+    }
+    lineStart = lineEnd + 1;
   }
-  return ['', text];
+  scan.offset = lineStart;
+  // 正在写的行：首字一到就知道是不是顶格的新块，不必等整行写完。
+  if (!scan.fence && scan.pendingBoundary !== null && lineStart < text.length && !/\s/.test(text[lineStart])) {
+    scan.boundary = scan.pendingBoundary;
+    scan.pendingBoundary = null;
+  }
+  return scan;
+}
+
+/** 切出已经写完的块：确认的切分点之前不会再变；未闭合的围栏整体留在尾段。 */
+export function splitStreamingMarkdown(text: string, scan = scanStreamingMarkdown(text)): [stable: string, tail: string] {
+  return [text.slice(0, scan.boundary).trimEnd(), text.slice(scan.boundary)];
 }
 
 /** 流式回复：写完的段落与正在写的尾段分开渲染。服务端按块推送，每次只有尾段重新解析；
  *  不做逐字入场动画（会让末行高频闪烁），末尾一个静态光标。 */
 export function AgentStreamingMarkdown({ text }: { text: string }) {
-  const [stable, tail] = splitStreamingMarkdown(text);
+  const scanRef = useRef<StreamingMarkdownScan | undefined>(undefined);
+  const scan = scanStreamingMarkdown(text, scanRef.current);
+  scanRef.current = scan;
+  const [stable, tail] = splitStreamingMarkdown(text, scan);
   return (
     <div className="space-y-2">
       {stable && <AgentMarkdown text={stable} />}

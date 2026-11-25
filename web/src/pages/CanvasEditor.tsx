@@ -3649,6 +3649,8 @@ function CanvasEditorInner({
   // 重新挂载取不到，不播）。收起：先在成员内层外壳上播 150ms 收回，播完再把成员设成 hidden。
   const resultStackEntrances = useRef(new Map<string, CanvasStackMemberMotion>());
   const resultStackCollapses = useRef(new Map<string, { controls: AnimationPlaybackControls[]; shells: Element[] }>());
+  /** 刚点了展开、等提交后登记入场的封面。 */
+  const resultStackEntranceQueue = useRef(new Set<string>());
   const resultStackEntriesRef = useRef(resultStackEntries);
   resultStackEntriesRef.current = resultStackEntries;
   const consumeResultStackEntrance = useCallback((memberId: string) => {
@@ -3692,9 +3694,8 @@ function CanvasEditorInner({
     if (opening) {
       const pending = pendingResultStack(cover, jobsByResultNodeIdRef.current.get(coverId));
       if (pending) commit(current => settleResultStack(current, coverId, pending, () => makeId('image')), true);
-      for (const { memberId, motion } of resultStackMemberMotions(coverId)) resultStackEntrances.current.set(memberId, motion);
-      // 没挂载上的成员（在视口外）不留着入场参数，免得之后平移过去才补播。
-      window.setTimeout(() => resultStackEntrances.current.clear(), MOTION_DURATION.slow * 1000);
+      // 现场拆出的成员要等新文档提交后才存在：入场起点在提交后的 layout effect 里按同一份文档算。
+      resultStackEntranceQueue.current.add(coverId);
       setExpandedResultStackIds(current => new Set(current).add(coverId));
       return;
     }
@@ -3717,6 +3718,18 @@ function CanvasEditorInner({
       window.requestAnimationFrame(() => clearStackMemberMotion(shells));
     });
   }, [commit, resultStackMemberMotions]);
+
+  // 展开后的这次提交里登记成员入场：成员节点挂载（xyflow 在之后的 effect 里同步节点）时各取一次。
+  useLayoutEffect(() => {
+    const queue = resultStackEntranceQueue.current;
+    if (!queue.size) return;
+    for (const coverId of queue) {
+      for (const { memberId, motion } of resultStackMemberMotions(coverId)) resultStackEntrances.current.set(memberId, motion);
+    }
+    queue.clear();
+    // 没挂载上的成员（在视口外）不留着入场参数，免得之后平移过去才补播。
+    window.setTimeout(() => resultStackEntrances.current.clear(), MOTION_DURATION.slow * 1000);
+  }, [document, expandedResultStackIds, resultStackMemberMotions]);
 
   const setResultStackCover = useCallback((coverId: string, memberId: string) => {
     commit(current => swapResultStackCover(current, coverId, memberId), true);

@@ -156,6 +156,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   // 否则读取途中任何一次重渲染都会把它冲回 null，读到的会话被当成过期结果丢掉。
   const explicitDraft = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
+  // 实际显示的会话：切会话失败时退回到它，目标与它不一致期间不发送、不审批。
+  const shownSessionIdRef = useRef<string | null>(null);
+  useEffect(() => { shownSessionIdRef.current = session?.session_id ?? null; }, [session]);
 
   const acceptSession = useCallback((updated: CanvasAgentSession | StudioAgentSession) => {
     if (sessionIdRef.current !== updated.session_id) return;
@@ -190,21 +193,31 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   }, [acceptSession, loadPlan, projectId]);
 
   // 切会话不先清空：旧会话留在原处（面板降透明度），新会话读到后整体替换。
+  // 读到之后才记住选中的会话；读不到就整体退回仍在显示的那个，消息不会发进旧对话。
   const selectSession = useCallback(async (sessionId: string) => {
     setError(null);
     setStreaming('');
     setTool(null);
     sessionIdRef.current = sessionId;
     setSelecting(true);
-    if (projectId === null) updateStudioView({ activeSessionId: sessionId });
-    else writeStorage(sessionStorageKey(projectId), sessionId);
     try {
       await loadSession(sessionId);
     } catch (loadError) {
-      if (sessionIdRef.current === sessionId) setError(messageOf(loadError));
-    } finally {
-      if (sessionIdRef.current === sessionId) { setSelecting(false); setRestoring(false); }
+      if (sessionIdRef.current !== sessionId) return;  // 期间又切到了别的会话，由那次收尾
+      setError(messageOf(loadError));
+      const shown = shownSessionIdRef.current;
+      sessionIdRef.current = shown;
+      setSelecting(false);
+      setRestoring(false);
+      // 选择期间旧会话的推送被挡掉了，退回后补读一次。
+      if (shown) void loadSession(shown).catch(() => undefined);
+      return;
     }
+    if (sessionIdRef.current !== sessionId) return;
+    if (projectId === null) updateStudioView({ activeSessionId: sessionId });
+    else writeStorage(sessionStorageKey(projectId), sessionId);
+    setSelecting(false);
+    setRestoring(false);
   }, [loadSession, projectId]);
 
   // 打开面板：读会话列表，回到上次停留的会话。
@@ -374,6 +387,11 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     });
   }, [acceptSession, projectId, run, session]);
 
+  // 切会话期间显示的还是旧会话：这时发出去会发进旧会话，等新会话读到再发。
+  // 目标会话与显示的会话不一致（读取中或读取失败尚未退回）时同样拦住发送与审批。
+  const waitingForSession = restoring || selecting || sessionIdRef.current !== (session?.session_id ?? null);
+  const rejectWaiting = useCallback(() => run(() => Promise.reject(new Error('请先载入对话或选择新对话'))), [run]);
+
   /** 发送时先把消息显示成「发送中」，服务端确认后换成正式的那条；失败撤掉，由调用方把文字填回输入框。 */
   const sendOptimistic = useCallback(<T,>(
     text: string,
@@ -394,7 +412,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     });
   }, [run, session]);
 
-  const send = useCallback((text: string, nodeIds: string[], skill: string | null) => sendOptimistic(text, skill, null, async claim => {
+  const send = useCallback((text: string, nodeIds: string[], skill: string | null) => waitingForSession
+    ? rejectWaiting()
+    : sendOptimistic(text, skill, null, async claim => {
     const target = session ?? await createSession();
     claim(target);
     setStreaming('');
@@ -405,12 +425,10 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     acceptSession(updated);
     void refreshList().catch(() => undefined);
     return updated;
-  }), [acceptSession, createSession, projectId, refreshList, sendOptimistic, session]);
+  }), [acceptSession, createSession, projectId, refreshList, rejectWaiting, sendOptimistic, session, waitingForSession]);
 
-  // 切会话期间显示的还是旧会话：这时发出去会发进旧会话，等新会话读到再发。
-  const waitingForSession = restoring || selecting || (projectId === null && sessionIdRef.current !== null && !session);
   const sendStudio = (text: string, files: File[], assets: string[], skill: string | null, clientId: string) => waitingForSession
-    ? run(() => Promise.reject(new Error('请先载入对话或选择新对话')))
+    ? rejectWaiting()
     : sendOptimistic(text, skill, clientId, async claim => {
     const target = session ?? await createSession();
     claim(target);
@@ -445,7 +463,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const decide = useCallback((
     approved: ReadonlySet<string>,
     items: ReadonlyMap<string, readonly number[]> = new Map(),
-  ) => run(async () => {
+  ) => waitingForSession ? rejectWaiting() : run(async () => {
     if (!session) return undefined;
     setStreaming('');
     const decisions = session.pending_approvals.map(item => {
@@ -455,7 +473,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     const updated = await decideCanvasAgentApprovals(projectId, session.session_id, decisions);
     acceptSession(updated);
     return updated;
-  }), [acceptSession, projectId, run, session]);
+  }), [acceptSession, projectId, rejectWaiting, run, session, waitingForSession]);
 
   const stop = useCallback(() => run(async () => {
     if (!session) return undefined;
