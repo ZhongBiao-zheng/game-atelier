@@ -1253,7 +1253,10 @@ def _run_config(workspace):
         return vision.with_attached_images(folded, workspace.media, attachment_source=items)
 
     async def attach(data) -> ModelInputData:
-        items = await asyncio.to_thread(prepare, list(data.model_data.input))
+        items = list(data.model_data.input)
+        if attach_results := getattr(workspace, "attach_generation_results", None):
+            items = await attach_results(items)
+        items = await asyncio.to_thread(prepare, items)
         return ModelInputData(input=items, instructions=data.model_data.instructions)
 
     return RunConfig(call_model_input_filter=attach)

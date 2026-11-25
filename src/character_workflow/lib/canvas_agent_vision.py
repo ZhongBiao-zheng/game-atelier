@@ -67,7 +67,7 @@ async def wait_for_run(get_run: Callable[[], dict], image_versions: Callable[[li
     return {**view, ATTACH_KEY: images} if images else view
 
 
-async def wait_for_runs(get_runs: dict[str, Callable[[], dict]]) -> dict[str, dict]:
+async def wait_for_runs(get_runs: dict[str, Callable[[], dict]], *, wake_on=()) -> dict[str, dict]:
     """一起等多个 run 到终态，最长 WAIT_SECONDS；查询出错的 run（带 lookup_error）不再查。"""
     deadline = time.monotonic() + WAIT_SECONDS
 
@@ -75,8 +75,12 @@ async def wait_for_runs(get_runs: dict[str, Callable[[], dict]]) -> dict[str, di
         return "lookup_error" in view or view.get("status") in TERMINAL_STATUSES
 
     views = {run_id: await asyncio.to_thread(get) for run_id, get in get_runs.items()}
+    runners = set(wake_on)
     while not all(done(view) for view in views.values()) and time.monotonic() < deadline:
-        await asyncio.sleep(POLL_SECONDS)
+        if runners:
+            _, runners = await asyncio.wait(runners, timeout=POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+        else:
+            await asyncio.sleep(POLL_SECONDS)
         for run_id, get in get_runs.items():
             if not done(views[run_id]):
                 views[run_id] = await asyncio.to_thread(get)

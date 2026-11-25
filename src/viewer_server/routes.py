@@ -3826,7 +3826,7 @@ async def _run_studio_job_safely(
         await asyncio.sleep(_STUDIO_RECOVERY_DELAY_SECONDS)
 
 
-async def _start_studio_job_task(job_id: str) -> None:
+async def _start_studio_job_task(job_id: str) -> asyncio.Task | None:
     """Detach a Studio runner from the response lifecycle and track it for shutdown."""
     from viewer_server import routes as _self
 
@@ -3836,6 +3836,7 @@ async def _start_studio_job_task(job_id: str) -> None:
     task = asyncio.create_task(result)
     _STUDIO_BACKGROUND_TASKS.add(task)
     task.add_done_callback(_STUDIO_BACKGROUND_TASKS.discard)
+    return task
 
 
 @router.post("/studio/jobs", status_code=201)

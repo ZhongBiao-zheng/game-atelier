@@ -41,7 +41,7 @@ INSTRUCTIONS = runtime.CORE + """
 
 ## 创作台
 参考素材使用用户附件、资产或本会话结果的 media_ref。
-用 run_generation 或 run_generations 提交，多方案时每条 count 为 1，再按 job_id 等待结果。
+用 run_generation 或 run_generations 提交，设 wait=true 一起等待并看图；超时后按 job_id 继续等待。
 不调用 update_plan。"""
 
 
@@ -106,8 +106,13 @@ class Generation(BaseModel):
         return params
 
 
+class Submission(Generation):
+    wait: bool = False
+
+
 class Batch(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    wait: bool = False
     items: list[Generation] = Field(min_length=1, max_length=MAX_BATCH_GENERATIONS)
 
 
@@ -115,7 +120,7 @@ def items_for(tool, args):
     return (
         Batch.model_validate(args).items
         if tool == "run_generations"
-        else [Generation.model_validate(args)]
+        else [Submission.model_validate(args)]
     )
 
 
@@ -313,7 +318,9 @@ def submit(workspace, item, params, call_id, index):
             studio_agent_session_id=workspace.session_id,
             studio_agent_turn_id=workspace.active_turn,
         )
-        workspace.schedule(job.job_id)
+        runner = workspace.schedule(job.job_id)
+        if runner is not None:
+            workspace.runners[job.job_id] = runner
     return jid
 
 
@@ -330,7 +337,7 @@ def generation_signature(name, arguments):
     try:
         items = items_for(name, json.loads(arguments))
         normalized = [
-            item.model_dump()
+            item.model_dump(exclude={"wait"})
             | {"params": JobParams.model_validate(item.params).model_dump(exclude_defaults=True)}
             for item in items
         ]
@@ -346,6 +353,7 @@ class StudioWorkspace:
     def __init__(self, sid, schedule, notify=None):
         self.session_id = sid
         self.schedule = schedule
+        self.runners = {}
         self.notify = notify
         self.active_turn = None
         self.response_times: dict[str, deque[str]] = defaultdict(deque)
@@ -719,7 +727,8 @@ class StudioWorkspace:
             except (OSError, ValueError) as error:
                 return {"lookup_error": runtime.redact(str(error))}
 
-        views = await vision.wait_for_runs({jid: lambda jid=jid: lookup(jid) for jid in ids})
+        views = await vision.wait_for_runs({jid: lambda jid=jid: lookup(jid) for jid in ids},
+                                          wake_on=[self.runners[jid] for jid in ids if jid in self.runners])
         images = {}
         for jid, view in views.items():
             if view.get("outputs"):
@@ -732,6 +741,44 @@ class StudioWorkspace:
                 ]
         attached, omitted = vision.pick_attachments(images)
         return {"runs": views, "attach_images": attached, "omitted": omitted}
+
+    async def attach_generation_results(self, items):
+        # Only enrich this tool block. The stored submission receipt remains available
+        # for approval replay and accounting even if the wait is interrupted.
+        outputs = []
+        for item in reversed(items):
+            if not isinstance(item, dict) or item.get("type") != "function_call_output":
+                break
+            outputs.append(item)
+        if not outputs:
+            return items
+        pending = {item["call_id"] for item in outputs}
+        waiting = set()
+        for call in reversed(items[:-len(outputs)]):
+            if not isinstance(call, dict):
+                continue
+            if call.get("role") == "user" or not pending:
+                break
+            if call.get("type") == "function_call" and call.get("call_id") in pending:
+                pending.remove(call["call_id"])
+                if (call.get("name") in cost.GENERATION_TOOLS
+                        and runtime._arguments(call.get("arguments")).get("wait") is True):
+                    waiting.add(call["call_id"])
+        enriched = list(items)
+        for index, item in enumerate(outputs, 1):
+            if item["call_id"] not in waiting or runtime.is_tool_error(item["output"]):
+                continue
+            try:
+                receipt = json.loads(item["output"])
+            except (TypeError, ValueError):
+                continue  # A rejected approval has a plain-text output.
+            if not isinstance(receipt, dict):
+                continue
+            ids = [row["job_id"] for row in receipt.get("items", [receipt]) if row.get("job_id")]
+            if ids:
+                result = await self.wait(ids)
+                enriched[-index] = {**item, "output": json.dumps({**receipt, **result}, ensure_ascii=False)}
+        return enriched
 
     def tools(self):
         from agents import FunctionTool
@@ -758,10 +805,10 @@ class StudioWorkspace:
             description, schema = runtime.TOOL_SPECS[name]
             if name in {"run_generation", "run_generations"}:
                 schema = runtime._inline_refs(
-                    (Generation if name == "run_generation" else Batch).model_json_schema()
+                    (Submission if name == "run_generation" else Batch).model_json_schema()
                 )
                 description = (
-                    "按创作参数提交付费 Studio 生成，返回 job_id；部分成功保留，禁止自动重试。"
+                    "按创作参数提交付费 Studio 生成，返回 job_id，wait=true 时同时返回结果和预览；部分成功保留，禁止自动重试。"
                 )
             else:
                 schema = json.loads(

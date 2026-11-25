@@ -295,3 +295,21 @@ def test_batched_skill_observations_use_per_name_result_before_truncating():
         [{"tool": "load_skill", "status": "completed", "result": "first、last"}]
     ) == ["first", "last"]
     assert skills_from([{"tool": "load_skill", "status": "failed", "result": "missing"}]) == []
+
+
+@pytest.mark.parametrize(("case_id", "images"), [("15-cat-composition", 1), ("16-cat-composition", 3)])
+def test_composition_turn_submits_and_views_in_two_calls(tmp_path, case_id, images):
+    from scripts.agent_eval.cases_io import load_cases
+
+    root = Path(__file__).resolve().parents[1]
+    folder = root / "scripts/agent_eval"
+    case, = load_cases(folder / "examples.yaml", case_id, folder / "fixtures")
+    with FakeProvider(["eval/chat"]) as vendor:
+        with serve(root, keys_from=None, providers=[], fake_keys=vendor.keys) as api:
+            row = run_case(api, case, "eval/chat", folder / "fixtures", tmp_path, None)
+    second = row["turn_outcomes"][1]
+    assert second["session_status"] == "idle"
+    assert second["chat_requests"] == 2 and second["call_input_tokens"] == [120, 120]
+    assert 0 <= second["first_text_seconds"] <= second["elapsed_seconds"]
+    assert second["final_reply"].startswith("→ ")
+    assert len([g for g in row["generations"] if g["turn_index"] == 2]) == images

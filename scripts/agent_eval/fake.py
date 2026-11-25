@@ -34,7 +34,8 @@ def illustration(w, h, red=False):
 
 
 def reply(messages, tools):
-    last_user = max(i for i, msg in enumerate(messages) if msg["role"] == "user")
+    last_user = max(i for i, msg in enumerate(messages) if msg["role"] == "user"
+                    and "上面工具结果里的图片：" not in str(msg["content"]))
     content = messages[last_user]["content"]
     text = (
         content
@@ -87,7 +88,8 @@ def reply(messages, tools):
     refs = re.findall(r"upload:[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9]+)?", text)
     if refs:
         args["references"] = [{"media_ref": ref} for ref in refs]
-    if "披风" in text:
+    composition = "这版构图" in prompt or "三版不同构图" in prompt
+    if "披风" in text or composition:
         for m in reversed(messages[:last_user]):
             match = re.search(r"studio-[a-f0-9]{32}", str(m.get("content")))
             if m["role"] == "tool" and match:
@@ -136,7 +138,21 @@ def reply(messages, tools):
         return "apply_changes", arguments
     if "run_generations" not in used:
         item = {"surface_node_id": "eval-art", "count": 1} if canvas else args
+        if composition and not canvas:
+            directions = ["放大橘猫，靠近镜头", "窗台左侧留白", "从窗外看向猫的背影"]
+            items = [dict(item, prompt=direction) for direction in
+                     (directions if "三版" in prompt else directions[:1])]
+            schema = next(t["function"]["parameters"] for t in tools if t["function"]["name"] == "run_generations")
+            options = {"wait": True} if "wait" in schema["properties"] else {}
+            return "run_generations", {"items": items, **options}
         return "run_generations", {"items": [item]}
+    if composition:
+        if not any("上面工具结果里的图片：" in str(m.get("content")) for m in messages[last_user + 1:]):
+            ids = [jid for m in messages[last_user + 1:] if m["role"] == "tool"
+                   for jid in re.findall(r'"job_id":\s*"(studio-[a-f0-9]{32})"', str(m["content"]))]
+            if ids and "wait_for_runs" not in used:
+                return "wait_for_runs", {"job_ids": ids}
+        return None, "→ 按②再出一版" if "三版" not in prompt else "→ 调整窗外光线"
     return None, "已完成本轮创作。"
 
 
@@ -207,6 +223,9 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 ]
             }
+            if tool == "run_generations" and "放大橘猫" in str(value):
+                delta["content"] = ("① 放大橘猫，靠近镜头（本张）\n② 窗台左侧留白" if len(value["items"]) == 1
+                                    else "三版分别采用近景、留白和背影构图。")
         else:
             delta = {"content": value}
         frame = {

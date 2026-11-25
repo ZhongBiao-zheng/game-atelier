@@ -71,7 +71,7 @@ def workspace(sid):
     loop = asyncio.get_running_loop()
 
     def schedule(job_id):
-        asyncio.run_coroutine_threadsafe(_start_studio_job_task(job_id), loop).result()
+        return asyncio.run_coroutine_threadsafe(_start_studio_job_task(job_id), loop).result()
 
     return StudioWorkspace(sid, schedule, hub.broadcast)
 

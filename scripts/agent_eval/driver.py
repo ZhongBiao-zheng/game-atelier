@@ -539,11 +539,13 @@ def run_case(
         usage = response.json() if response.ok else {}
         for turn_index, turn in enumerate(case["turns"], 1):
             payload = prepare_turn(api, url, project, turn, fixtures, row)
-            if time.monotonic() - start >= limits["max_seconds"]:
+            turn_started = time.monotonic()
+            if turn_started - start >= limits["max_seconds"]:
                 row.update(status="stopped", reason="max_seconds")
                 break
             model_may_be_running = True
             waiting_for_submission_reply = True
+            turn_start_requests = usage.get("requests", 0)
             segment_start_requests = usage.get("requests")
             session = body(api.post(url + "/messages", json=payload), "发送对话")
             waiting_for_submission_reply = False
@@ -568,6 +570,7 @@ def run_case(
                 cards = session.get("pending_approvals", [])
                 count = occupied_results(jobs)
                 step_count = max(len(steps), usage.get("requests", 0))
+                observed_at = time.monotonic()
                 reason = None
                 if spent["total_cost_cny"] > max_money + 1e-9:
                     reason = (
@@ -605,7 +608,7 @@ def run_case(
                     step_count == limits["max_steps"] and status in ("awaiting_approval", "running")
                 ):
                     reason = "max_steps"
-                elif time.monotonic() - start >= limits["max_seconds"]:
+                elif observed_at - start >= limits["max_seconds"]:
                     reason = "max_seconds"
                 if reason:
                     row.update(status="stopped", reason=reason)
@@ -665,12 +668,18 @@ def run_case(
             row["turn_outcomes"].append(
                 {
                     "turn_index": turn_index,
+                    "chat_requests": usage.get("requests", 0) - turn_start_requests,
+                    "elapsed_seconds": round(observed_at - turn_started, 3),
                     "status": row["status"],
                     "session_status": session.get("status"),
                     "reason": row["reason"],
                     "error": session.get("error"),
                 }
             )
+            if session.get("session_id") and not project and session.get("turns"):
+                row["turn_outcomes"][-1].update(api.turn_metrics(
+                    session["session_id"], session["turns"][-1]["turn_id"], turn_started, turn_start_requests,
+                ))
             if row["status"] != "completed":
                 break
     except KeyboardInterrupt:

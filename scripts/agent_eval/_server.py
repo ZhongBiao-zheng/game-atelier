@@ -8,6 +8,7 @@ import shutil
 import socket
 import sys
 import threading
+import time
 
 
 def _loopback(host):
@@ -90,6 +91,24 @@ def stop_if_parent_exits(port_file):
         os._exit(1)
 
 
+def record_first_text(path):
+    from viewer_server.sse import hub
+
+    seen = set()
+    broadcast = hub.broadcast
+
+    def observe(event, data):
+        if event == "studio-agent" and data.get("kind") == "delta" and data.get("text"):
+            identity = (data.get("session_id"), data.get("turn_id"))
+            if identity not in seen:
+                seen.add(identity)
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps([*identity, time.monotonic()]) + "\n")
+        broadcast(event, data)
+
+    hub.broadcast = observe
+
+
 if __name__ == "__main__":
     port_file = Path(sys.argv[1])
     threading.Thread(target=stop_if_parent_exits, args=(port_file,), daemon=True).start()
@@ -99,6 +118,8 @@ if __name__ == "__main__":
     )
 
     import uvicorn
+
+    record_first_text(port_file.with_name("first-text.jsonl"))
 
     # A fresh data root needs no recovery. Skip the host's announcement, update and price
     # synchronizers; all measured agent behavior is driven through the public HTTP routes.

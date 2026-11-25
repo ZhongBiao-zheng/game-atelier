@@ -113,6 +113,23 @@ class LocalAPI(requests.Session):
         self._lease = None
         self._secrets = set(credential_values(keys))
 
+    def turn_metrics(self, session_id, turn_id, started, previous_requests):
+        first = self.data_root.parent / "first-text.jsonl"
+        latency = None
+        if first.exists():
+            for line in first.read_text(encoding="utf-8").splitlines():
+                sid, tid, observed = json.loads(line)
+                if (sid, tid) == (session_id, turn_id):
+                    latency = round(observed - started, 3)
+                    break
+        tokens = []
+        for path in sorted((self.data_root / ".runtime" / "agent-usage").glob("????-??.jsonl")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                row = json.loads(line)
+                if row.get("session_id") == session_id and row.get("kind") != "host_settlement":
+                    tokens.append(row.get("input_tokens"))
+        return {"first_text_seconds": latency, "call_input_tokens": tokens[previous_requests:]}
+
     def finish_preflight(self):
         (self.data_root.parent / "preflight").unlink()
 

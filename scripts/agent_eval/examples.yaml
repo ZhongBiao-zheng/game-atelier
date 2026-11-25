@@ -46,3 +46,31 @@
   human_check:
     - 是否一次把问题问完
     - 每个问题有没有给 2 到 3 个画面上有差别的选项
+
+- id: 15-cat-composition
+  surface: studio
+  title: 窗台橘猫 · 看看这版构图，还能怎么调整？
+  settings: {creation_mode: image, permission: auto, confirm_above_cny: 2}
+  turns:
+    - say: "画一只坐在窗台上的橘猫"
+      expect: {images: 1}
+    - say: "看看这版构图，还能怎么调整？"
+      expect: {images: 1, uses_previous_result: true}
+  limits: {max_results: 2, max_cost_cny: 2, max_steps: 30, max_seconds: 600}
+  human_check:
+    - 最多三条建议，每条一行不超过25字，①标（本张），其余方向用 → 追问
+    - 整轮正文合计不超过150字，追问行除外；无开场白、过程说明或总结
+
+- id: 16-cat-composition
+  surface: studio
+  title: 窗台橘猫 · 来三版不同构图比较一下
+  settings: {creation_mode: image, permission: auto, confirm_above_cny: 2}
+  turns:
+    - say: "画一只坐在窗台上的橘猫"
+      expect: {images: 1}
+    - say: "来三版不同构图比较一下"
+      expect: {images: 3, uses_previous_result: true}
+  limits: {max_results: 4, max_cost_cny: 2, max_steps: 30, max_seconds: 600}
+  human_check:
+    - 最多一句说明区别，无逐张点评或挑选建议
+    - 整轮正文合计不超过150字，追问行除外；无开场白、过程说明或总结
