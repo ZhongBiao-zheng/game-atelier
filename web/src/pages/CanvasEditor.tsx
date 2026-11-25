@@ -91,7 +91,7 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { AnimatePresence, motion } from 'motion/react';
-import { MOTION_DURATION, MOTION_EASE, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
@@ -6660,8 +6660,7 @@ function CanvasZoomDock({
  *  面板本身是 fixed 定位，外层铺满视口：带 transform 的祖先会成为 fixed 的定位参照，铺满才不改面板位置。
  *  外层不接事件，只有面板本身接。减弱动态效果时只淡变。 */
 function CanvasSidePanelMotion({ children }: { children: ReactNode }) {
-  // 没有 matchMedia 的环境（jsdom）不播，与 lib/motion 的约定一致。
-  const animated = typeof window.matchMedia === 'function';
+  const animated = motionAvailable();
   const reduced = prefersReducedMotion();
   return (
     <motion.div

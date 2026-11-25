@@ -34,7 +34,7 @@ import {
   type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, prefersReducedMotion, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, prefersReducedMotion, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
@@ -1416,14 +1416,10 @@ export function canvasStackMemberMotion(cover: CanvasPoint, member: CanvasPoint,
   return { x: -dx * ratio, y: -dy * ratio, delay: Math.min(index * STACK_MEMBER_STAGGER, STACK_MEMBER_STAGGER_CAP) };
 }
 
-/** jsdom 没有 matchMedia：vanilla animate() 一律不播，测试里元素不停在动画起点。 */
-function stackMotionAvailable() {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
-}
 
 /** 抽出：从封面方向 + 96% 缩放 + 透明进到原位。减弱动态效果时只淡入。 */
 export function playStackMemberEntrance(elements: Element | Element[], motions: CanvasStackMemberMotion[]) {
-  if (!stackMotionAvailable()) return;
+  if (!motionAvailable()) return;
   const list = Array.isArray(elements) ? elements : [elements];
   const reduced = prefersReducedMotion();
   list.forEach((element, index) => {
@@ -1439,7 +1435,7 @@ export function playStackMemberEntrance(elements: Element | Element[], motions: 
 
 /** 收回：150ms 同步退回封面方向并淡出，不错开。返回 null 表示不播（直接收起）。 */
 export function playStackMemberExit(elements: Element[], motions: CanvasStackMemberMotion[]): AnimationPlaybackControls[] | null {
-  if (!stackMotionAvailable() || elements.length === 0) return null;
+  if (!motionAvailable() || elements.length === 0) return null;
   const reduced = prefersReducedMotion();
   const timing = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
   return elements.map((element, index) => {

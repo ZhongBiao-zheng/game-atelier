@@ -1,16 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import type { Job } from '@/schema/jobs';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 /** 生成中的转圈：占位卡与完成交接层共用，交接时位置、样子都不变。 */
 export const ROUND_SPINNER_CLASS = 'size-6 animate-spin rounded-full border-2 border-primary border-t-transparent';
 
-/** 没有 matchMedia 的环境（jsdom）不播 vanilla 动画，元素直接停在终态。 */
-function canAnimate(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
-}
 
 // ---- 渐近进度 ----
 // 上游任务查询不回真实进度（Ark / 可灵 / HappyHorse 只有状态枚举，2026-06-12 查证），只能按预期耗时近似：
@@ -64,7 +60,7 @@ export function ProgressLine({ startedAt, expectedMs, phase, held = false, compl
     const elapsed = Date.now() - startedAt;
     const estimate = held ? 0 : estimatedProgress(elapsed, expectedMs);
     const target = complete ? 1 : phase === 'downloading' ? PROGRESS_DOWNLOADING : estimate;
-    if (!canAnimate()) {
+    if (!motionAvailable()) {
       setScale(target);
       return;
     }
@@ -192,7 +188,7 @@ export function RoundEnter({ enter, leaving, children }: { enter: boolean; leavi
   const enterOnMount = useRef(enter);
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!enterOnMount.current || !element || !canAnimate()) return;
+    if (!enterOnMount.current || !element || !motionAvailable()) return;
     const controls = prefersReducedMotion()
       ? animate(element, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle })
       : animate(element, { opacity: [0, 1], y: [8, 0] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out });
@@ -211,7 +207,7 @@ export function useLeavingRounds() {
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(() => new Set());
   const removeAfterFade = async (key: string, remove: () => void | Promise<void>) => {
     setLeaving(current => new Set(current).add(key));
-    if (canAnimate()) await new Promise(resolve => setTimeout(resolve, MOTION_DURATION.fast * 1000));
+    if (motionAvailable()) await new Promise(resolve => setTimeout(resolve, MOTION_DURATION.fast * 1000));
     try {
       await remove();
     } finally {

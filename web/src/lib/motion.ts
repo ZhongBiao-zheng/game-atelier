@@ -22,6 +22,11 @@ export const MOTION_SPRING = {
 /** 错峰出场的间隔（秒）。 */
 export const MOTION_STAGGER = 0.05;
 
+/** 当前环境能不能播 vanilla animate()。jsdom 没有 matchMedia：一律不播，测试里元素直接停在终态、不卡在动画起点。 */
+export function motionAvailable(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+}
+
 /** 动效只是空间提示，不携带信息：系统要求减弱动效时一律不播。
  *  没有 matchMedia 的环境（jsdom）按不播处理，测试里元素不会停在动画起点的透明态。 */
 export function prefersReducedMotion(): boolean {
@@ -43,8 +48,7 @@ export function useAnimateOnChange<T>(
     const last = previous.current;
     if (Object.is(last, value)) return;
     previous.current = value;
-    // 没有 matchMedia 的环境（jsdom）一律不播，测试里元素不会停在透明的起点。
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (!motionAvailable()) return;
     const reduced = prefersReducedMotion();
     if (reduced && !keepWhenReduced) return;
     latestRun.current(value, last, reduced);
@@ -65,6 +69,13 @@ export function clearOnFinish(
     }
   });
   return controls;
+}
+
+/** 失败反馈：触发失败的那个局部元素（按钮、输入框、状态徽标）水平微抖 250ms，与成功的放大弹入在运动方向上区分开。
+ *  只抖局部，不抖整张卡或整个弹窗；减弱动态效果时不抖，只靠错误色与图标。 */
+export function shakeOnError(element: Element | null) {
+  if (!element || !motionAvailable() || prefersReducedMotion()) return;
+  clearOnFinish(animate(element, { x: [0, -4, 4, -2, 0] }, { duration: 0.25, ease: MOTION_EASE.subtle }), element, ['transform']);
 }
 
 export { animate, stagger };

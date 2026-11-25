@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { LoadingIcon } from '@/components/ui/icons';
-import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable } from '@/lib/motion';
 
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
@@ -166,8 +166,7 @@ export function CanvasNodeRunOverlay({
         <motion.div
           key="run-overlay"
           initial={false}
-          // 没有 matchMedia 的环境（jsdom）不播退场，与 lib/motion 的约定一致。
-          exit={typeof window.matchMedia === 'function' ? {
+          exit={motionAvailable() ? {
             opacity: 0,
             transition: {
               duration: MOTION_DURATION.fast,

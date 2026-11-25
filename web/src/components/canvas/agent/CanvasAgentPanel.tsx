@@ -31,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 import {
   animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, useAnimateOnChange,
+  motionAvailable,
 } from '@/lib/motion';
 
 export interface CanvasAgentNodeRef {
@@ -62,10 +63,6 @@ const THUMB_DISPLAY_WIDTH = 160;
 /** 列表距底不到这么多时算「在底部」：流式输出与新消息只在这时自动贴底，往上翻过就不再拽回来。 */
 const STICK_TO_BOTTOM_PX = 24;
 
-/** 没有 matchMedia 的环境（jsdom）不播 vanilla animate，与 lib/motion 的约定一致。 */
-function motionAvailable() {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
-}
 
 /** 新到达的一项（不是打开面板、切会话时已有的历史）挂载时轻轻淡入并上移 4px；减弱动态效果时只淡入。 */
 function useArrival<T extends HTMLElement>(arriving: boolean) {
@@ -105,12 +102,10 @@ const ProcessGroup = memo(function ProcessGroup({ projectId, messages, steps, ar
   arriving: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [entered, setEntered] = useState(!arriving);
-  useEffect(() => { setEntered(true); }, []);
   const images = messages.flatMap(message => message.role === 'tool'
     ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
   return (
-    <Collapse open={entered}>
+    <Collapse open appear={arriving}>
       <div className="flex flex-col gap-2">
         <AgentProcessToggle label={`处理过程 · ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
         <Collapse open={open}>

@@ -2,11 +2,17 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { animate, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 
-/** 高度 0 ↔ auto 的展开区。收起时等动画播完再卸载子树；首次挂载不播。
+/** 高度 0 ↔ auto 的展开区。收起时等动画播完再卸载子树；首次挂载默认不播，appear 时挂载即从 0 展开
+ *  （新到达、需要交代「从这里长出来」的内容，比如刚出现的报错条、确认卡明细）。
  *  收起途中再展开（或反过来）从当前高度接着走，不归零重来。 */
-export function Collapse({ open, className, children }: { open: boolean; className?: string; children: ReactNode }) {
+export function Collapse({ open, appear = false, className, children }: {
+  open: boolean;
+  appear?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  const previous = useRef(open);
+  const previous = useRef(appear ? false : open);
   const lastElement = useRef<HTMLDivElement | null>(null);
   const running = useRef<AnimationPlaybackControls | null>(null);
   const [mounted, setMounted] = useState(open);

@@ -340,6 +340,9 @@
       --dialog-scale-in: 1;
       --dialog-scale-out: 1;
     }
+    .scrim-fade {
+      animation-duration: var(--motion-fast);
+    }
   }
 
   /* 可滚动区底部渐隐：明示「下面还有内容」。硬切边缘在暗底上尤其像内容被截断。

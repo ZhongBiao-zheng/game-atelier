@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, DownloadIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { RevealImage } from '@/components/ui/reveal-image';
-import { animate, MOTION_DURATION, MOTION_EASE, prefersReducedMotion } from '@/lib/motion';
+import { animate, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 
 // 遮罩已是不透明度足够的纯色 bg-scrim，按钮不再叠毛玻璃：全屏 backdrop-filter 每帧重算模糊，开合与翻页都卡。
 const CONTROL_CLASS = 'absolute size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 border-0 disabled:pointer-events-none disabled:opacity-30';
@@ -13,10 +13,6 @@ const IMAGE_SCALE_FROM = 0.96;
 
 type Layer = { src: string; phase: 'incoming' | 'shown' | 'leaving' };
 
-/** 没有 matchMedia 的环境（jsdom）不播开合动画，关闭立即生效。 */
-function canAnimate() {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
-}
 
 /** 全屏大图层：点遮罩 / 右上角 / Esc 关闭。
  *
@@ -63,7 +59,7 @@ export function Lightbox({
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
-    if (!canAnimate()) {
+    if (!motionAvailable()) {
       onCloseRef.current();
       return;
     }
@@ -123,7 +119,7 @@ export function Lightbox({
     const stage = stageRef.current;
     if (opened.current || !stage) return;
     opened.current = true;
-    if (canAnimate() && !prefersReducedMotion() && !closingRef.current) {
+    if (motionAvailable() && !prefersReducedMotion() && !closingRef.current) {
       animate(stage, { scale: [IMAGE_SCALE_FROM, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out });
     }
   }, []);
