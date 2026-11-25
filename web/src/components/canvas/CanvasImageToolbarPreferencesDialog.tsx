@@ -32,20 +32,30 @@ export function CanvasImageToolbarPreferencesDialog({
   error,
   onOpenChange,
   onSave,
+  excludedToolIds,
 }: {
   open: boolean;
   value: CanvasImageToolbarPreferences;
+  /** 本机用不了的工具（如不支持本机抠图）：不在候选里出现，已存的配置原样保留。 */
+  excludedToolIds?: ReadonlySet<CanvasImageQuickToolId>;
   saving: boolean;
   error: string | null;
   onOpenChange: (open: boolean) => void;
   onSave: (value: CanvasImageToolbarPreferences) => void;
 }) {
   const [draft, setDraft] = useState(value);
-  const visibleTools = useMemo(() => orderedCanvasImageTools(draft.tool_ids), [draft.tool_ids]);
+  const availableTools = useMemo(
+    () => CANVAS_IMAGE_TOOLS.filter(tool => !excludedToolIds?.has(tool.id)),
+    [excludedToolIds],
+  );
+  const visibleTools = useMemo(
+    () => orderedCanvasImageTools(draft.tool_ids).filter(tool => !excludedToolIds?.has(tool.id)),
+    [draft.tool_ids, excludedToolIds],
+  );
   const hiddenTools = useMemo(() => {
     const selected = new Set(draft.tool_ids);
-    return CANVAS_IMAGE_TOOLS.filter(tool => !selected.has(tool.id));
-  }, [draft.tool_ids]);
+    return availableTools.filter(tool => !selected.has(tool.id));
+  }, [availableTools, draft.tool_ids]);
 
   useEffect(() => {
     if (open) setDraft({ ...value, tool_ids: orderedCanvasImageTools(value.tool_ids).map(tool => tool.id) });
@@ -107,7 +117,7 @@ export function CanvasImageToolbarPreferencesDialog({
         <section aria-label="快捷工具顺序" className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">快捷工具</p>
-            <p className="text-xs tabular-nums text-muted-foreground">已显示 {draft.tool_ids.length}/{CANVAS_IMAGE_TOOLS.length}</p>
+            <p className="text-xs tabular-nums text-muted-foreground">已显示 {visibleTools.length}/{availableTools.length}</p>
           </div>
           <Reorder.Group
             as="div"

@@ -2002,6 +2002,7 @@ function updateToolbarTabStops(controls: HTMLElement[], active: HTMLElement | nu
   });
 }
 
+const MATTING_UNAVAILABLE_TOOL_IDS: ReadonlySet<CanvasImageQuickToolId> = new Set(['removeBackground']);
 const DELETE_KEY_HINT = /Mac/i.test(navigator.userAgent) ? '⌫' : 'Delete';
 
 /** AI高清某一档会用哪个模型：指定了就用指定的，否则按服务端同一规则自动选 Nano Banana。 */
@@ -2365,6 +2366,7 @@ function ImageNodeToolbar({
       <CanvasImageToolbarPreferencesDialog
         open={settingsOpen}
         value={context.canvasUiPreferences.image_toolbar}
+        excludedToolIds={context.mattingAvailable === false ? MATTING_UNAVAILABLE_TOOL_IDS : undefined}
         saving={settingsSaving}
         error={settingsError}
         onOpenChange={updateSettingsOpen}
