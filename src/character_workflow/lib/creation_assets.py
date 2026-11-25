@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from contextlib import contextmanager
 import mimetypes
 import re
@@ -62,6 +63,9 @@ _BLOB_DIR = Path("creation-assets") / "blobs"
 _SHA256_RE = re.compile(r"[a-f0-9]{64}")
 
 
+logger = logging.getLogger(__name__)
+
+
 class CreationAssetStateError(ValueError):
     """The global creation asset catalog is invalid on disk."""
 
@@ -84,6 +88,29 @@ def _catalog_path() -> Path:
 
 def _catalog_lock_path() -> Path:
     return data_root.runtime_dir() / "locks" / "creation-assets.lock"
+
+
+def _archived_path() -> Path:
+    """归档清单（D13）：{asset_id: 归档时间}。单独一份 sidecar 而不是资产上的字段——资产库的
+    schema 是 extra=forbid，加字段会让降级后的旧版整库读不出；旧版读不到这份清单，只是把归档的也列出来。"""
+    return data_root.creation_assets_dir() / "archived.json"
+
+
+def _read_archived_unlocked() -> dict[str, str]:
+    try:
+        raw = json.loads(_archived_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        logger.warning("creation asset archive list unreadable; treating as empty", exc_info=True)
+        return {}
+    rows = raw.get("assets") if isinstance(raw, dict) else None
+    return {key: value for key, value in rows.items()
+            if isinstance(key, str) and isinstance(value, str)} if isinstance(rows, dict) else {}
+
+
+def _write_archived_unlocked(archived: dict[str, str]) -> None:
+    atomic_write_json(_archived_path(), {"assets": archived})
 
 
 def _empty_catalog() -> CreationAssetCatalog:
@@ -692,6 +719,8 @@ def create_media_asset_from_bytes(
         current = _read_catalog_unlocked()
         duplicate = _media_duplicate(current, content.sha256)
         if duplicate:
+            # 再存一次已归档的同一个文件：把它还原回来，不然「已在资产库中」指向一个看不见的资产。
+            _set_archived_unlocked([duplicate.asset_id], False)
             if not allow_existing:
                 raise CreationAssetDuplicateError(duplicate.asset_id)
             project_ids = _normalize_project_ids([
@@ -780,18 +809,22 @@ def list_creation_assets(
     scope: Literal["all", "project"] = "all",
     project_id: str | None = None,
     has_category: bool | None = None,
+    archived: bool | None = False,
 ) -> CreationAssetList:
+    """archived：False 只列在用的（默认），True 只列已归档的，None 两者都列。"""
     migrate_legacy_canvas_libraries()
     if scope == "project" and not project_id:
         raise ValueError("按项目查看资产时必须提供 project_id")
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
+        hidden = _read_archived_unlocked()
         rows = [
             asset
             for asset in current.assets
             if (kind is None or asset.kind == kind)
             and (project_id is None or project_id in asset.project_ids)
             and (has_category is None or bool(asset.category) == has_category)
+            and (archived is None or (asset.asset_id in hidden) == archived)
         ]
         rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
         return CreationAssetList(revision=current.revision, assets=rows)
@@ -814,7 +847,9 @@ def list_prompt_asset_index(
     wanted = {tag.strip().casefold() for tag in (tags or []) if tag.strip()}
     needle = (query or "").strip().casefold()
     with file_lock(_catalog_lock_path()):
-        prompts = [asset for asset in _read_catalog_unlocked().assets if asset.kind == "prompt"]
+        hidden = _read_archived_unlocked()
+        prompts = [asset for asset in _read_catalog_unlocked().assets
+                   if asset.kind == "prompt" and asset.asset_id not in hidden]
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     for asset in prompts:
@@ -974,8 +1009,32 @@ def update_media_asset_from_bytes(
     return updated
 
 
+def _set_archived_unlocked(asset_ids: list[str], archived: bool) -> None:
+    current = _read_archived_unlocked()
+    if archived:
+        timestamp = _now()
+        updated = {**current, **{asset_id: current.get(asset_id, timestamp) for asset_id in asset_ids}}
+    else:
+        updated = {key: value for key, value in current.items() if key not in set(asset_ids)}
+    if updated != current:
+        _write_archived_unlocked(updated)
+
+
+def set_creation_assets_archived(asset_ids: list[str], archived: bool) -> list[str]:
+    """归档 / 还原一批资产（D13：个人资产不物理删除）。返回实际存在的 id；全都不存在时 KeyError。
+    归档只是从列表里收起：文件、项目引用、参考库关系都不动，还原后原样回来。"""
+    with file_lock(_catalog_lock_path()):
+        known = {asset.asset_id for asset in _read_catalog_unlocked().assets}
+        found = list(dict.fromkeys(asset_id for asset_id in asset_ids if asset_id in known))
+        if not found:
+            raise KeyError(asset_ids[0] if asset_ids else "")
+        _set_archived_unlocked(found, archived)
+    return found
+
+
 def delete_creation_asset(asset_id: str) -> None:
-    """Physically remove one asset and delete its blobs when no other asset uses them."""
+    """Physically remove one asset and delete its blobs when no other asset uses them.
+    界面不再提供（D13 改为归档）；只给测试与将来「彻底删除」用。"""
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         asset = next((row for row in current.assets if row.asset_id == asset_id), None)
@@ -984,6 +1043,7 @@ def delete_creation_asset(asset_id: str) -> None:
         remaining = [row for row in current.assets if row.asset_id != asset_id]
         orphan_paths = _orphan_blob_paths(_asset_blob_paths(asset), remaining)
         _write_catalog_unlocked(current, remaining)
+        _set_archived_unlocked([asset_id], False)
         if asset.kind == "prompt":
             preview_dir = _preview_dir(asset.asset_id)
             if preview_dir.exists():

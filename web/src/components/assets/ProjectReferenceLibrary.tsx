@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AiIcon, UploadIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, MoreIcon, UploadIcon } from '@/components/ui/icons';
 import { classifyCreationAssets, listCreationAssets, updateCreationAssetCategory, uploadMediaCreationAsset } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { MediaPreview } from './CreationAssetCards';
 import { rememberedModel } from '@/components/agent/useWorkspaceAgent';
 import { Button } from '@/components/ui/button';
-import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
+import { assetMediaContent, CREATION_ASSET_DRAG_TYPE, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { errorText } from '@/lib/errorText';
+import { notify } from '@/lib/notify';
 import { FileInput } from '@/components/ui/file-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Hint } from '@/components/ui/tooltip';
@@ -42,11 +45,15 @@ function writePending(projectId: string, queue: PendingQueue) {
   } catch { /* 存不了就只在本次面板里保留 */ }
 }
 
-export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse, onAssetsChanged }: {
+export function ProjectReferenceLibrary({ projectId, refreshKey, visible, busy: parentBusy = false, onUse, onOpen, onAssetsChanged }: {
   projectId: string;
   visible: boolean;
   refreshKey?: number;
+  /** 面板正在「使用」：卡片上的使用键跟着禁用。 */
+  busy?: boolean;
   onUse: (asset: CreationAsset) => void;
+  /** 点卡片进资产详情（与个人资产同一套：悬停「使用」，点卡片看详情）。 */
+  onOpen: (asset: CreationAsset) => void;
   onAssetsChanged?: () => Promise<void>;
 }) {
   const [assets, setAssets] = useState<CreationAsset[]>([]);
@@ -88,6 +95,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     writePending(projectId, { ids: pendingIds, suggestions: Object.fromEntries(Object.entries(suggestions).filter(([id]) => kept.has(id))) });
   }, [projectId, pendingIds, suggestions]);
   const pending = assets.filter(asset => pendingIds.includes(asset.asset_id) && !asset.category);
+  const classifyModel = rememberedModel();
   const groups = [...new Set([...categories, ...assets.flatMap(asset => asset.category ? [asset.category] : [])])];
 
   async function changed() {
@@ -118,7 +126,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     setBusy(true);
     setError(null);
     try {
-      const selection = rememberedModel();
+      const selection = classifyModel;
       for (let offset = 0; offset < pending.length; offset += 48) {
         const rows = await classifyCreationAssets(projectId, pending.slice(offset, offset + 48).map(asset => asset.asset_id), selection);
         setSuggestions(current => ({ ...current, ...Object.fromEntries(rows.map(row => [row.asset_id, row])) }));
@@ -130,9 +138,22 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
   async function categorize(asset: CreationAsset, category: string | null) {
     setBusy(true);
     setError(null);
-    try { await updateCreationAssetCategory(asset.asset_id, category); await changed(); setLanded(asset.asset_id); }
+    try { await updateCreationAssetCategory(asset.asset_id, category); await changed(); if (category) setLanded(asset.asset_id); }
     catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
+  }
+
+  /** 取消定稿会让卡片当场离开参考库：不放在类别下拉里防误选，执行后给撤销。 */
+  async function unfinalize(asset: CreationAsset) {
+    const previous = asset.category;
+    await categorize(asset, null);
+    if (!previous) return;
+    notify.undo('已取消定稿', () => {
+      updateCreationAssetCategory(asset.asset_id, previous)
+        .then(() => changed())
+        .then(() => setLanded(asset.asset_id))
+        .catch(caught => notify.error(errorText(caught, '恢复定稿失败')));
+    });
   }
 
   async function confirm() {
@@ -158,9 +179,21 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     const suggestion = suggestions[asset.asset_id];
     const value = waiting ? suggestion?.category ?? '' : asset.category ?? '';
     const isLanded = !waiting && landed === asset.asset_id;
+    // 已定稿的卡片与个人资产同一套：悬停「使用」、能拖进画布（落点与「使用」一致）、点图进详情。
     return <article key={asset.asset_id} ref={isLanded ? revealLanded : undefined}
-      className={`mb-3 break-inside-avoid overflow-hidden rounded-lg border bg-card p-3 transition-[border-color,box-shadow] duration-300 ${isLanded ? 'content-swap-in border-primary ring-1 ring-primary/60' : 'border-border'}`}>
-      <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-2 max-h-64 w-full rounded-md object-contain" />
+      draggable={!waiting}
+      onDragStart={waiting ? undefined : event => {
+        event.dataTransfer.setData(CREATION_ASSET_DRAG_TYPE, JSON.stringify({ asset_id: asset.asset_id }));
+        event.dataTransfer.effectAllowed = 'copy';
+      }}
+      className={`group relative mb-3 break-inside-avoid overflow-hidden rounded-lg border bg-card p-3 transition-[border-color,box-shadow] duration-300 ${isLanded ? 'content-swap-in border-primary ring-1 ring-primary/60' : 'border-border'}`}>
+      <Button variant="ghost" aria-label={asset.title} className="mb-2 block h-auto w-full p-0" onClick={() => onOpen(asset)}>
+        <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="max-h-64 w-full rounded-md object-contain" />
+      </Button>
+      {!waiting && <div className="pointer-events-none absolute right-4 top-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <Button variant="solid" size="sm" className="pointer-events-auto h-7 rounded-full px-2 text-xs" disabled={busy || parentBusy}
+          onClick={() => onUse(asset)}><AddIcon />使用</Button>
+      </div>}
       <Hint label={asset.title}><p className="truncate text-sm">{asset.title}</p></Hint>
       <div className="mt-2 flex items-center gap-2">
         <Select value={value || NO_CATEGORY} disabled={busy}
@@ -171,13 +204,17 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
           }}>
           <SelectTrigger size="sm" aria-label={`${asset.title} 的类别`} className="flex-1"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value={NO_CATEGORY}>{waiting ? '待分类' : '取消定稿'}</SelectItem>
+            {waiting && <SelectItem value={NO_CATEGORY}>待分类</SelectItem>}
             {[...new Set([...categories, ...(value ? [value] : [])])].map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
           </SelectContent>
         </Select>
         {waiting && suggestion && <Hint label="分类置信度"><span className="text-xs tabular-nums text-muted-foreground">{Math.round(suggestion.confidence * 100)}%</span></Hint>}
+        {!waiting && <DropdownMenu><DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`${asset.title} 的更多操作`} disabled={busy}><MoreIcon /></Button>
+        </DropdownMenuTrigger><DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => void unfinalize(asset)}>取消定稿</DropdownMenuItem>
+        </DropdownMenuContent></DropdownMenu>}
       </div>
-      {!waiting && <Button variant="ghost" size="sm" className="mt-2 w-full" disabled={busy} onClick={() => onUse(asset)}>放到画布</Button>}
     </article>;
   }
 
@@ -203,7 +240,10 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       {pending.length > 0 && <section aria-label="待分类" className="mb-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm">待分类 · {pending.length}</h3>
-          <Hint label="使用 Agent 中选择的对话模型，此操作会产生模型费用"><Button variant="ghost" size="sm" disabled={busy} onClick={() => void classify()}><AiIcon />自动分类</Button></Hint>
+          {/* 借用 Agent 面板上次选的对话模型：写出是哪个模型；没选过就不让点，说清去哪选。 */}
+          <Hint label={classifyModel ? `用 ${classifyModel.model} 分类，会产生模型费用` : '先在 Agent 面板选择对话模型'}>
+            <span><Button variant="ghost" size="sm" disabled={busy || !classifyModel} onClick={() => void classify()}><AiIcon />自动分类</Button></span>
+          </Hint>
         </div>
         <div className="columns-[14rem] gap-3">{pending.map(asset => card(asset, true))}</div>
         <Button size="sm" disabled={busy || !pending.some(asset => suggestions[asset.asset_id]?.category)} onClick={() => void confirm()}>全部确认</Button>

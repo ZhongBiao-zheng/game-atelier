@@ -9,6 +9,7 @@ import {
   teamAssetActionSearch,
 } from '@/lib/teamAssetActions';
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
+import { publishTeamLibraryChange } from './teamLibraryEvents';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { toast as showToast } from '@/components/ui/sonner';
@@ -141,6 +142,8 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
   }, [commit, scheduleDismiss]);
 
   const notify = useCallback(async (event: TeamLibraryChangeEvent) => {
+    // 先转给开着的团队库面板（它据此重拉列表），提醒本身的去重与过滤不影响面板。
+    publishTeamLibraryChange(event);
     const author = reminderAuthor(event);
     const reminded = sessionRemindedRef.current;
     if (!author || author === displayNameRef.current || isReminded(reminded, event.asset_id)) return;

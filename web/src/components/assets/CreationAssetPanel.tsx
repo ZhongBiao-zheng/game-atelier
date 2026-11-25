@@ -5,13 +5,16 @@ import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studi
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ProjectReferenceLibrary } from './ProjectReferenceLibrary';
 import { promptFromAsset } from '@/lib/promptVariables';
-import { AddIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, DeleteIcon, EditIcon, MoreIcon, SearchIcon, ShareIcon, UploadIcon } from '@/components/ui/icons';
+import { AddIcon, ArchiveIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, EditIcon, MoreIcon, SearchIcon, ShareIcon, UploadIcon } from '@/components/ui/icons';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
-import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
-import { AssetCard, AssetDetail } from '@/components/assets/CreationAssetCards';
+import { archiveCreationAsset, listCreationAssets, markCreationAssetUsed, restoreCreationAsset } from '@/api/creationAssets';
+import { AssetCard, AssetDetail, assetMediaSrc, type AssetCardAction } from '@/components/assets/CreationAssetCards';
 import { MediaEditor, PromptEditor } from '@/components/assets/CreationAssetEditors';
-import { CanvasPicker, DeleteAssetDialog, DiscardChangesDialog } from '@/components/assets/CreationAssetPanelBits';
+import { CanvasPicker, DiscardChangesDialog } from '@/components/assets/CreationAssetPanelBits';
+import { Lightbox } from '@/components/Lightbox';
+import { errorText } from '@/lib/errorText';
+import { notify } from '@/lib/notify';
 import { errorMessage, type CreationAssetPanelMode, type CreationAssetSaveRequest } from '@/components/assets/creationAssetPanelModel';
 import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { useAdoptionStaleness } from '@/components/assets/useAdoptionStaleness';
@@ -103,7 +106,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [linkedCanvas, setLinkedCanvas] = useState<{ projectId: string; name: string } | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<CreationAsset | null>(null);
+  // 「已归档」筛选（D13）：列表换成已归档的资产，卡片与详情的主动作换成「还原」。
+  const [archivedView, setArchivedView] = useState(false);
+  const [zoomed, setZoomed] = useState<CreationAsset | null>(null);
   const leaveActionRef = useRef<(() => void) | null>(null);
   const adoption = useAdoptionStaleness({
     onReadopted: updated => setAssets(current => current.map(asset => asset.asset_id === updated.asset_id ? updated : asset)),
@@ -139,6 +144,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         kind: kind === 'prompt' ? 'prompt' : undefined,
         scope: projectId ? scope : 'all',
         projectId: scope === 'project' ? projectId : undefined,
+        ...(archivedView && kind !== 'reference' ? { archived: true } : {}),
       });
       const rows = kind === 'prompt'
         ? response.assets
@@ -157,7 +163,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   useEffect(() => {
     void refresh();
-  }, [kind, projectId, scope, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, projectId, scope, refreshKey, archivedView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setKind(initialKind), [initialKind]);
 
@@ -219,6 +225,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     requestTransition: requestLeave,
   }));
 
+  // 用完面板不关（规格 2.5）：连续用几张不必反复打开。
   async function applyAsset(asset: CreationAsset) {
     setBusy(true);
     setError(null);
@@ -231,7 +238,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       } else if (media) {
         onUseMedia(updated, media);
       }
-      onClose();
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -277,14 +283,32 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     }
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
+  /** D13：归档不确认，给撤销 toast；归档的在「已归档」里还能还原。 */
+  async function archiveAsset(asset: CreationAsset) {
     setBusy(true);
     setError(null);
     try {
-      await deleteCreationAsset(deleteTarget.asset_id);
-      setDeleteTarget(null);
+      await archiveCreationAsset(asset.asset_id);
       clearEditor();
+      setSelectedId(null);
+      await refresh();
+      notify.undo('已归档资产', () => {
+        restoreCreationAsset(asset.asset_id)
+          .then(() => refresh())
+          .catch(caught => notify.error(errorText(caught, '还原资产失败')));
+      });
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreAsset(asset: CreationAsset) {
+    setBusy(true);
+    setError(null);
+    try {
+      await restoreCreationAsset(asset.asset_id);
       setSelectedId(null);
       await refresh();
     } catch (caught) {
@@ -293,6 +317,11 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       setBusy(false);
     }
   }
+
+  const cardAction: AssetCardAction = archivedView
+    ? { label: '还原', onRun: asset => void restoreAsset(asset), disabled: busy }
+    : { label: '使用', onRun: asset => void applyAsset(asset), disabled: busy };
+  const zoomedMedia = zoomed ? assetMediaContent(zoomed) : null;
 
   async function connectToCanvas(target: { projectId: string; name: string }) {
     if (!canvasPickerAsset) return;
@@ -329,7 +358,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     const list = listRef.current;
     if (list) clearOnFinish(animate(list, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), list, ['opacity']);
   }, { keepWhenReduced: true });
-  const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? mediaEditor?.assetId));
 
   return (
     <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', className)}>
@@ -337,16 +365,21 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <div className="flex min-w-0 items-center gap-2">
           {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeftIcon /></Button>}
           <div className="min-w-0">
-            <HeaderTitle className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</HeaderTitle>
+            <HeaderTitle className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存到资产' : selected?.title ?? '创作资产'}</HeaderTitle>
           </div>
         </div>
-        {selected?.kind === 'prompt' ? <DropdownMenu><DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="更多提示词操作"><MoreIcon /></Button>
-        </DropdownMenuTrigger><DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => beginPromptEdit(selected)}><EditIcon />编辑</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><ShareIcon />分享到团队库</DropdownMenuItem>
-          <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteTarget(selected)}><DeleteIcon />删除</DropdownMenuItem>
-        </DropdownMenuContent></DropdownMenu> : <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>}
+        {/* 三类资产同一套：头部固定「关闭」，详情里的编辑 / 分享 / 归档收在「更多」。 */}
+        <div className="flex shrink-0 items-center gap-1">
+          {selected && !archivedView && <DropdownMenu><DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="更多资产操作"><MoreIcon /></Button>
+          </DropdownMenuTrigger><DropdownMenuContent align="end">
+            {/* 生成资产是冻结快照，本机不改。 */}
+            {selected.kind !== 'generation' && <DropdownMenuItem onSelect={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)}><EditIcon />编辑</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><ShareIcon />分享到团队库</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void archiveAsset(selected)}><ArchiveIcon />归档</DropdownMenuItem>
+          </DropdownMenuContent></DropdownMenu>}
+          <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>
+        </div>
       </header>
 
       <Collapse open={Boolean(error)}><p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{shownError}</p></Collapse>
@@ -354,7 +387,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col">
       {!selected && !isEditing && (
         <>
-          <Tabs className="px-3" value={kind} onValueChange={value => { setKind(value as typeof kind); setScope('all'); setCategory(null); setMediaType('all'); }}>
+          <Tabs className="px-3" value={kind} onValueChange={value => { setKind(value as typeof kind); setScope('all'); setCategory(null); setMediaType('all'); setArchivedView(false); }}>
             <TabsList variant="line" aria-label="资产类型">
               <TabsTrigger variant="line" value="prompt">提示词</TabsTrigger>
               <TabsTrigger variant="line" value="media">媒体</TabsTrigger>
@@ -398,16 +431,18 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               if (file) loadSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file, projectId });
             }} />}</div>
             {kind === 'prompt' ? <div role="group" aria-label="资产范围" className="flex flex-wrap gap-2">
-              <AssetFilterPill selected={scope === 'all' && category === null} onClick={() => { setScope('all'); setCategory(null); }}>全部</AssetFilterPill>
-              {projectId && <AssetFilterPill selected={scope === 'project'} onClick={() => { setScope('project'); setCategory(null); }}>本项目</AssetFilterPill>}
+              <AssetFilterPill selected={!archivedView && scope === 'all' && category === null} onClick={() => { setArchivedView(false); setScope('all'); setCategory(null); }}>全部</AssetFilterPill>
+              {projectId && <AssetFilterPill selected={!archivedView && scope === 'project'} onClick={() => { setArchivedView(false); setScope('project'); setCategory(null); }}>本项目</AssetFilterPill>}
               <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
                 <PopoverTrigger asChild><Button variant="ghost" size="sm" className={cn('h-7 rounded-full border-border px-3 text-xs font-normal', category !== null ? 'bg-secondary' : 'text-muted-foreground')}>按分类<ChevronDownIcon /></Button></PopoverTrigger>
                 <PopoverContent className="w-44 p-1" align="start">
-                  {[...categories, ''].map(value => <Button key={value} variant="ghost" className="w-full justify-start" onClick={() => { setCategory(value); setScope('all'); setCategoryOpen(false); }}>{value || '未分类'}</Button>)}
+                  {[...categories, ''].map(value => <Button key={value} variant="ghost" className="w-full justify-start" onClick={() => { setArchivedView(false); setCategory(value); setScope('all'); setCategoryOpen(false); }}>{value || '未分类'}</Button>)}
                 </PopoverContent>
               </Popover>
-            </div> : <div role="group" aria-label="媒体类型" className="flex gap-2">
-              {[['all', '全部'], ['image', '图片'], ['video', '视频'], ['audio', '音频']].map(([value, label]) => <AssetFilterPill key={value} selected={mediaType === value} onClick={() => setMediaType(value)}>{label}</AssetFilterPill>)}
+              <AssetFilterPill selected={archivedView} onClick={() => { setArchivedView(true); setScope('all'); setCategory(null); }}>已归档</AssetFilterPill>
+            </div> : <div role="group" aria-label="媒体类型" className="flex flex-wrap gap-2">
+              {[['all', '全部'], ['image', '图片'], ['video', '视频'], ['audio', '音频']].map(([value, label]) => <AssetFilterPill key={value} selected={!archivedView && mediaType === value} onClick={() => { setArchivedView(false); setMediaType(value); }}>{label}</AssetFilterPill>)}
+              <AssetFilterPill selected={archivedView} onClick={() => { setArchivedView(true); setMediaType('all'); }}>已归档</AssetFilterPill>
             </div>}
           </div>
           )}
@@ -415,9 +450,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {adoption.stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
             {visibleAssets.length ? kind === 'media'
-              ? <MediaAssetGroups projects={canvasTargets} currentProjectId={projectId} assets={visibleAssets} staleness={adoption.staleness} onOpen={openAsset} />
-              : <div className="space-y-1">{visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} />)}</div> : (
-              <p className="py-8 text-center text-sm text-muted-foreground">{normalizedQuery || category !== null || mediaType !== 'all' ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</p>
+              ? <MediaAssetGroups projects={canvasTargets} currentProjectId={projectId} assets={visibleAssets} staleness={adoption.staleness} onOpen={openAsset} action={cardAction} />
+              : <div className="space-y-1">{visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} staleness={adoption.staleness[asset.asset_id]} action={cardAction} onOpen={() => openAsset(asset)} />)}</div> : (
+              <p className="py-8 text-center text-sm text-muted-foreground">{archivedView ? '没有已归档的资产' : normalizedQuery || category !== null || mediaType !== 'all' ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</p>
             )}
           </div>
           )}
@@ -425,7 +460,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       )}
 
       {projectId && <div className={kind === 'reference' && !selected && !isEditing ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-        <ProjectReferenceLibrary key={projectId} projectId={projectId} visible={kind === 'reference' && !selected && !isEditing} refreshKey={refreshKey} onAssetsChanged={onAssetsChanged} onUse={asset => void applyAsset(asset)} />
+        <ProjectReferenceLibrary key={projectId} projectId={projectId} visible={kind === 'reference' && !selected && !isEditing} refreshKey={refreshKey} onAssetsChanged={onAssetsChanged} busy={busy} onUse={asset => void applyAsset(asset)} onOpen={openAsset} />
       </div>}
 
       {promptEditor && (
@@ -446,7 +481,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           onSaveAndAddCanvas={() => void editor.savePrompt(true)}
           onConfirmDuplicate={() => void editor.savePrompt(editor.addToCanvasAfterSave, true)}
           onCancelDuplicate={editor.cancelDuplicatePrompt}
-          onDelete={editingAsset ? () => setDeleteTarget(editingAsset) : undefined}
         />
       )}
 
@@ -461,7 +495,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           onSaveAndAddCanvas={() => void editor.saveMedia(true)}
           onConfirmDuplicate={() => void editor.saveMedia(editor.addToCanvasAfterSave, true)}
           onCancelDuplicate={editor.cancelDuplicateMedia}
-          onDelete={editingAsset ? () => setDeleteTarget(editingAsset) : undefined}
         />
       )}
 
@@ -476,8 +509,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       )}
 
       {selected?.content.kind === 'prompt' && <PromptAssetDetail key={selected.asset_id} asset={selected} busy={busy}
-        staleness={adoption.staleness[selected.asset_id]} onUse={() => void applyAsset(selected)}
-        onEdit={() => beginPromptEdit(selected)} onReadopt={() => adoption.requestReadopt(selected)}
+        staleness={adoption.staleness[selected.asset_id]} useLabel={cardAction.label} onUse={() => cardAction.onRun(selected)}
+        onReadopt={() => adoption.requestReadopt(selected)}
         onUpdated={updated => setAssets(current => current.map(asset => asset.asset_id === updated.asset_id ? updated : asset))} />}
       <TeamShareDialog request={shareRequest} projectId={projectId} onClose={() => setShareRequest(null)} onShared={() => setShareRequest(null)} />
       {selected && selected.kind !== 'prompt' && (
@@ -486,11 +519,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           busy={busy}
           staleness={adoption.staleness[selected.asset_id]}
           onReadopt={() => adoption.requestReadopt(selected)}
-          onUse={() => void applyAsset(selected)}
-          onReproduce={onReproduce && selected.kind === 'generation' ? () => void reproduceAsset(selected) : undefined}
-          // 生成资产是冻结快照，本机不改；只能删。
-          onEdit={selected.kind === 'generation' ? undefined : () => beginMediaEdit(selected)}
-          onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
+          useLabel={cardAction.label}
+          onUse={() => cardAction.onRun(selected)}
+          onReproduce={onReproduce && selected.kind === 'generation' && !archivedView ? () => void reproduceAsset(selected) : undefined}
+          onZoom={() => setZoomed(selected)}
         />
       )}
       </div>
@@ -511,12 +543,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         onDiscard={() => { setDiscardOpen(false); const action = leaveActionRef.current; leaveActionRef.current = null; action?.(); }}
       />
 
-      <DeleteAssetDialog
-        target={deleteTarget}
-        busy={busy}
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={() => void confirmDelete()}
-      />
+      {/* 资产预览统一走 Lightbox（自带下载）；详情页只留元数据与操作。 */}
+      {zoomed && zoomedMedia && <Lightbox src={assetMediaSrc(zoomed.asset_id, zoomedMedia)} downloadName={zoomedMedia.filename}
+        onClose={() => setZoomed(null)} />}
     </aside>
   );
 });

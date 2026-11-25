@@ -14,7 +14,7 @@ const previews = Array.from({ length: 8 }, (_, i) => ({ file: `${String(i).padSt
 const full: CreationAsset = { ...asset, content: { ...asset.content as Extract<CreationAsset['content'], { kind: 'prompt' }>, preview_images: previews } };
 function Detail({ initial = asset }: { initial?: CreationAsset }) {
   const [current, setCurrent] = useState(initial);
-  return <PromptAssetDetail asset={current} busy={false} onUpdated={setCurrent} onUse={vi.fn()} onEdit={vi.fn()} />;
+  return <PromptAssetDetail asset={current} busy={false} onUpdated={setCurrent} onUse={vi.fn()} />;
 }
 beforeEach(() => vi.resetAllMocks());
 describe('prompt previews', () => {

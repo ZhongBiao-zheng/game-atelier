@@ -4,7 +4,10 @@ import type { GatewayLibrarySelection } from '@/api/gatewayLibraries';
 import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { RevealImage } from '@/components/ui/reveal-image';
-import { AddIcon, ChevronDownIcon, CopyIcon, EditIcon, FolderIcon, LoadingIcon, RetryIcon, SearchIcon, UndoIcon } from '@/components/ui/icons';
+import { AddIcon, ChevronDownIcon, CopyIcon, EditIcon, FolderIcon, LoadingIcon, RetryIcon, SearchIcon, WithdrawIcon } from '@/components/ui/icons';
+import { Lightbox } from '@/components/Lightbox';
+import { errorText } from '@/lib/errorText';
+import { subscribeTeamLibraryChange } from '@/components/team/teamLibraryEvents';
 import {
   useCallback,
   useEffect,
@@ -96,8 +99,11 @@ function firstPageFilters(typeFilter: TypeFilter, search: string) {
   };
 }
 
+/** 团队库变更事件常一批到达（watcher 按条广播）：攒一下再重拉第一页。 */
+const CHANGE_RELOAD_DELAY_MS = 400;
+
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  return errorText(error, fallback);
 }
 
 export function TeamLibraryPanel({
@@ -227,13 +233,34 @@ export function TeamLibraryPanel({
         setEntries(page.entries);
         setCursor(page.next_cursor);
       })
-      .catch(() => {
+      .catch(caught => {
         if (!alive || token !== requestId.current) return;
         setEntries([]);
         setCursor(null);
-        setError('读取失败');
+        setError(errorMessage(caught, '读取失败'));
       });
     return () => { alive = false; };
+  }, [libraryId, search, typeFilter]);
+
+  // 别人新分享 / 撤回：命中当前库就重拉第一页（全壳那条 SSE 经分享提醒转发过来，不另开连接）。
+  useEffect(() => {
+    if (!libraryId) return;
+    let timer: number | undefined;
+    const unsubscribe = subscribeTeamLibraryChange(event => {
+      if (event.library_id !== libraryId) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const token = ++requestId.current;
+        void listTeamAssets(libraryId, firstPageFilters(typeFilter, search))
+          .then(page => {
+            if (token !== requestId.current) return;
+            setEntries(page.entries);
+            setCursor(page.next_cursor);
+          })
+          .catch(() => undefined);  // 只是自动刷新：失败留着现有列表，手动「刷新」照样能重扫
+      }, CHANGE_RELOAD_DELAY_MS);
+    });
+    return () => { window.clearTimeout(timer); unsubscribe(); };
   }, [libraryId, search, typeFilter]);
 
   const loadMore = useCallback(() => {
@@ -246,7 +273,7 @@ export function TeamLibraryPanel({
         setEntries(current => [...current, ...page.entries]);
         setCursor(page.next_cursor);
       })
-      .catch(() => { if (token === requestId.current) setError('读取失败'); })
+      .catch(caught => { if (token === requestId.current) setError(errorMessage(caught, '读取失败')); })
       .finally(() => setBusy(false));
   }, [cursor, libraryId, search, typeFilter]);
 
@@ -266,7 +293,7 @@ export function TeamLibraryPanel({
           setCursor(page.next_cursor);
         });
       })
-      .catch(() => setError('扫描失败'))
+      .catch(caught => setError(errorMessage(caught, '扫描失败')))
       .finally(() => setBusy(false));
   }, [libraryId, search, typeFilter]);
 
@@ -278,7 +305,7 @@ export function TeamLibraryPanel({
     try {
       const file = await readTeamMedia(teamAssetContentUrl(libraryId, entry.id), entry);
       await onUseMedia?.(file, entry, `${libraryId}:${entry.id}`);
-    } catch { setError('读取失败'); }
+    } catch (caught) { setError(errorMessage(caught, '读取失败')); }
     finally { setUsingId(null); }
   }, [libraryId, usingId, onUseMedia, onUsePrompt]);
 
@@ -390,8 +417,8 @@ export function TeamLibraryPanel({
             aria-pressed={libraryId === item.library_id} onClick={() => { setRemoteLibrary(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
             <FolderIcon />{item.name}
           </Button>)}
-          <div role="group" aria-label="同事共享" className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1">
-            <div className="flex items-center gap-1 px-2 text-xs text-muted-foreground">同事共享<GatewayLibraryHelp /></div>
+          <div role="group" aria-label="网关共享库" className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1">
+            <div className="flex items-center gap-1 px-2 text-xs text-muted-foreground">网关共享库<GatewayLibraryHelp /></div>
             {remote.sources.map(source => source.unreachable
               ? <p key={source.gateway_alias} className="px-2 py-1 text-xs text-muted-foreground">{source.gateway_alias} · 无法连接</p>
               : source.libraries.map(item => <Button key={`${source.gateway_alias}:${item.id}`} variant="ghost" className="w-full justify-start"
@@ -434,15 +461,27 @@ export function TeamLibraryPanel({
         </div>
       )}
       </>}
-      {shownViewing && libraryId && <Dialog open={Boolean(!remoteLibrary && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
+      {/* 图片走全站 Lightbox（自带下载）；提示词、视频、音频仍用详情弹窗。 */}
+      {viewing && libraryId && !remoteLibrary && viewing.kind !== 'prompt' && viewing.mime_type?.startsWith('image/') && (
+        <Lightbox src={teamAssetContentUrl(libraryId, viewing.id)} downloadName={viewing.title}
+          onClose={() => setViewing(null)}
+          details={<div className="flex flex-wrap items-center gap-3 text-xs text-white/80">
+            <span className="font-medium text-white">{viewing.title}</span>
+            {viewing.author && <span>{viewing.author}</span>}
+            {viewing.model && <span>{viewing.model}</span>}
+            {viewing.cost_cny != null && <span className="tabular-nums">{formatGenerationCost(viewing.cost_cny)}</span>}
+            <Button size="sm" disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(viewing)}>
+              {usingId === viewing.id ? <LoadingIcon className="animate-spin" /> : <AddIcon />}使用</Button>
+          </div>} />
+      )}
+      {shownViewing && libraryId && !(shownViewing.kind !== 'prompt' && shownViewing.mime_type?.startsWith('image/')) && <Dialog open={Boolean(!remoteLibrary && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
         <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>{shownViewing.title}</DialogTitle></DialogHeader>
           {shownViewing.kind === 'prompt' ? <div className="min-h-0 space-y-3 overflow-y-auto">
             <TeamPromptPreviewGallery key={shownViewing.id} libraryId={libraryId} entry={shownViewing} />
             <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{shownViewing.prompt_text}</p>
           </div>
-            : shownViewing.mime_type?.startsWith('image/') ? <img src={teamAssetContentUrl(libraryId, shownViewing.id)} alt={shownViewing.title} className="max-h-120 w-full rounded-lg object-contain" />
-              : shownViewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, shownViewing.id)} controls className="max-h-120 w-full rounded-lg" />
+            : shownViewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, shownViewing.id)} controls className="max-h-120 w-full rounded-lg" />
                 : <audio src={teamAssetContentUrl(libraryId, shownViewing.id)} controls className="w-full" />}
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {shownViewing.author && <><dt>作者</dt><dd>{shownViewing.author}</dd></>}
@@ -570,7 +609,7 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onUse, 
           {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><CopyIcon /></CardIconButton>}
           {owned && <>
             <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}><EditIcon /></CardIconButton>
-            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><UndoIcon /></CardIconButton>
+            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><WithdrawIcon /></CardIconButton>
           </>}
           {!incomplete && <Button variant="solid" size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy || usingId !== null} onClick={() => onUse(entry)}>{usingId === entry.id ? <LoadingIcon className="animate-spin" /> : <AddIcon />}使用</Button>}
         </div>

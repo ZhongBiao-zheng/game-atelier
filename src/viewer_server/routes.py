@@ -1899,7 +1899,8 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                 })
     from character_workflow.lib.canvas_projects import list_canvas_gallery_images
     show_canvas = bool(_read_config().get("show_canvas_on_home", True))
-    for canvas_project_id, canvas_job_id, f in list_canvas_gallery_images() if show_canvas else []:
+    for canvas_project_id, canvas_job_id, canvas_node_id, f in (
+            list_canvas_gallery_images() if show_canvas else []):
         try:
             if f.suffix.lower() not in _GALLERY_EXTS:
                 continue
@@ -1915,6 +1916,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
             "asset_slot": None,
             "source": "canvas",
             "canvas_project_id": canvas_project_id,
+            "canvas_node_id": canvas_node_id,
             "filename": f.name,
             "path": rel,
             "job_id": canvas_job_id,
@@ -2583,25 +2585,23 @@ def get_canvas_agent_session(
         _raise_canvas_agent_session_error(error)
 
 
-@router.delete(
-    "/canvas/projects/{project_id}/agent/sessions/{session_id}",
-    status_code=204,
-)
+@router.delete("/canvas/projects/{project_id}/agent/sessions/{session_id}")
 def delete_canvas_agent_session_route(
     project_id: str,
     session_id: str,
     if_match: str | None = Header(default=None, alias="If-Match"),
-) -> Response:
+) -> dict:
+    """会话进回收站，返回 trash_id：面板的撤销 toast 用它还原。"""
     from character_workflow.lib.canvas_agent_sessions import delete_canvas_agent_session
     from viewer_server.canvas_chat_routes import cancel
     cancel(project_id, session_id)
     try:
-        delete_canvas_agent_session(
+        trash_id = delete_canvas_agent_session(
             project_id,
             session_id,
             _canvas_if_match(if_match, "Agent 会话"),
         )
-        return Response(status_code=204)
+        return {"trash_id": trash_id}
     except (KeyError, RuntimeError, ValueError) as error:
         _raise_canvas_agent_session_error(error)
 
@@ -2731,6 +2731,7 @@ def get_creation_assets(
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
     has_category: bool | None = Query(default=None),
+    archived: bool = Query(default=False),
 ):
     from character_workflow.lib.creation_assets import list_creation_assets
     try:
@@ -2739,6 +2740,7 @@ def get_creation_assets(
             scope=scope,
             project_id=project_id,
             has_category=has_category,
+            archived=archived,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
@@ -3001,11 +3003,22 @@ def post_creation_asset_use(asset_id: str, payload: CreationAssetUseRequest):
         _raise_creation_asset_error(error)
 
 
-@router.delete("/creation-assets/{asset_id}", status_code=204)
-def delete_creation_asset_route(asset_id: str) -> Response:
-    from character_workflow.lib.creation_assets import delete_creation_asset
+@router.post("/creation-assets/{asset_id}/archive", status_code=204)
+def archive_creation_asset_route(asset_id: str) -> Response:
+    """D13：个人资产「删除」改为归档，可在「已归档」里还原。"""
+    from character_workflow.lib.creation_assets import set_creation_assets_archived
     try:
-        delete_creation_asset(asset_id)
+        set_creation_assets_archived([asset_id], True)
+        return Response(status_code=204)
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.post("/creation-assets/{asset_id}/restore", status_code=204)
+def restore_creation_asset_route(asset_id: str) -> Response:
+    from character_workflow.lib.creation_assets import set_creation_assets_archived
+    try:
+        set_creation_assets_archived([asset_id], False)
         return Response(status_code=204)
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)

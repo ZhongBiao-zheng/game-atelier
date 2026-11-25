@@ -891,8 +891,9 @@ def _cover_for_project(
     return None
 
 
-def list_canvas_gallery_images() -> list[tuple[str, str, Path]]:
-    """首页作品展示用：每张画布上「正在显示的生成图」，返回 (project_id, job_id, 文件)。
+def list_canvas_gallery_images() -> list[tuple[str, str, str, Path]]:
+    """首页作品展示用：每张画布上「正在显示的生成图」，返回 (project_id, job_id, node_id, 文件)。
+    node_id 给首页「打开所在位置」定位到节点。
 
     只取节点当前版本、来源是生成任务的图片：上传的参考图是素材不是作品，被换掉的候选和
     已删除的节点也不算。打码的节点不取，判据与项目封面一致。坏项目跳过，不拖垮首页。
@@ -900,7 +901,7 @@ def list_canvas_gallery_images() -> list[tuple[str, str, Path]]:
     root = canvas_projects_root()
     if not root.exists():
         return []
-    images: list[tuple[str, str, Path]] = []
+    images: list[tuple[str, str, str, Path]] = []
     for path in root.glob("*/project.json"):
         project_id = path.parent.name
         try:
@@ -923,7 +924,7 @@ def list_canvas_gallery_images() -> list[tuple[str, str, Path]]:
                 continue
             if target.is_file():
                 seen.add(version_id)
-                images.append((project_id, version.origin.job_id, target))
+                images.append((project_id, version.origin.job_id, node.id, target))
     return images
 
 

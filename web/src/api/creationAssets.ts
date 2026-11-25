@@ -41,12 +41,15 @@ export function listCreationAssets(options: {
   scope?: 'all' | 'project';
   hasCategory?: boolean;
   projectId?: string;
+  /** 只列已归档的（「已归档」筛选）。 */
+  archived?: boolean;
 } = {}): Promise<CreationAssetList> {
   const params = new URLSearchParams();
   if (options.kind) params.set('kind', options.kind);
   if (options.scope) params.set('scope', options.scope);
   if (options.projectId) params.set('project_id', options.projectId);
   if (options.hasCategory !== undefined) params.set('has_category', String(options.hasCategory));
+  if (options.archived) params.set('archived', 'true');
   const query = params.size ? `?${params.toString()}` : '';
   return requestJson<CreationAssetList>(`/api/creation-assets${query}`, '读取创作资产');
 }
@@ -181,11 +184,19 @@ export async function updateMediaCreationAsset(
   return response.json() as Promise<CreationAsset>;
 }
 
-export async function deleteCreationAsset(assetId: string): Promise<void> {
-  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}`, {
-    method: 'DELETE',
+/** D13：个人资产不物理删除，归档后在「已归档」里可还原。 */
+export async function archiveCreationAsset(assetId: string): Promise<void> {
+  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/archive`, {
+    method: 'POST',
   });
-  if (!response.ok) throw await apiError(response, '删除创作资产');
+  if (!response.ok) throw await apiError(response, '归档资产');
+}
+
+export async function restoreCreationAsset(assetId: string): Promise<void> {
+  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/restore`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw await apiError(response, '还原资产');
 }
 
 export function markCreationAssetUsed(

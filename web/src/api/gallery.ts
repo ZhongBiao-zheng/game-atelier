@@ -6,8 +6,9 @@ export interface GalleryItem {
   project_id?: string | null;
   asset_slot: 'portrait' | 'promo' | 'turnaround' | null;
   source?: 'character' | 'studio' | 'canvas';
-  /** canvas 来源：图所在的画布项目。 */
+  /** canvas 来源：图所在的画布项目与节点（首页「打开所在位置」定位用）。 */
   canvas_project_id?: string;
+  canvas_node_id?: string;
   filename: string;
   path: string;
   job_id: string | null;

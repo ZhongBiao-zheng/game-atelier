@@ -20,7 +20,7 @@ export function canvasAgentSetupNotice({ chatModels, generationModels, mode, aut
   preferred: CanvasAgentModelRef[];
 }): CanvasAgentSetupNotice | null {
   if (chatModels && chatModels.length === 0) {
-    return { text: '还没有可用的对话模型，需要在 Key 里启用文本模型', action: 'settings' };
+    return { text: '还没有可用的对话模型，需要在供应商里启用文本模型', action: 'settings' };
   }
   if (!generationModels) return null;
   const kinds = mode === 'all' ? (['image', 'video'] as const) : [mode];

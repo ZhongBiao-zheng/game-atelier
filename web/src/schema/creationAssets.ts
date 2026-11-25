@@ -117,6 +117,19 @@ export interface CreationAssetList {
   assets: CreationAsset[];
 }
 
+/** 个人资产与参考库卡片拖进画布的 dataTransfer 类型；载荷是 `{asset_id}` 的 JSON。
+ *  落点与「使用」一致：画布在落点插入这项资产（画布侧由 CanvasEditor 的 drop 处理接）。 */
+export const CREATION_ASSET_DRAG_TYPE = 'application/x-game-atelier-creation-asset';
+
+export function readCreationAssetDrag(transfer: DataTransfer): { asset_id: string } | null {
+  const raw = transfer.getData(CREATION_ASSET_DRAG_TYPE);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { asset_id?: unknown };
+    return typeof parsed.asset_id === 'string' && parsed.asset_id ? { asset_id: parsed.asset_id } : null;
+  } catch { return null; }
+}
+
 /** 资产的媒体本体：媒体资产是它自己，生成资产是成片，提示词没有。 */
 export function assetMediaContent(asset: CreationAsset): CreationMediaAssetContent | null {
   if (asset.content.kind === 'media') return asset.content;

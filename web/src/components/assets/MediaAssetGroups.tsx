@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronRightIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
-import { MediaAssetGrid } from './CreationAssetCards';
+import { MediaAssetGrid, type AssetCardAction } from './CreationAssetCards';
 import type { CreationAsset } from '@/schema/creationAssets';
 
 type Project = { projectId: string; name: string };
@@ -25,9 +25,10 @@ export function groupMediaAssets(assets: CreationAsset[], projects: Project[], c
   });
 }
 
-function MediaGroup({ group, staleness, onOpen }: {
+function MediaGroup({ group, staleness, onOpen, action }: {
   group: ReturnType<typeof groupMediaAssets>[number];
   staleness: React.ComponentProps<typeof MediaAssetGrid>['staleness']; onOpen: (asset: CreationAsset) => void;
+  action?: AssetCardAction;
 }) {
   const key = `atelier:media-group:${group.id}:collapsed`;
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(key) === 'true'; } catch { return false; } });
@@ -38,16 +39,17 @@ function MediaGroup({ group, staleness, onOpen }: {
       {/* 同一个箭头转 90°，不换图标；分组内容高度展开收起。 */}
       <ChevronRightIcon className={`transition-transform duration-150 ${collapsed ? '' : 'rotate-90'}`} /><span className="truncate">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{group.assets.length}</span>
     </Button>
-    <Collapse open={!collapsed}><MediaAssetGrid assets={group.assets} staleness={staleness} onOpen={onOpen} /></Collapse>
+    <Collapse open={!collapsed}><MediaAssetGrid assets={group.assets} staleness={staleness} onOpen={onOpen} action={action} /></Collapse>
   </section>;
 }
 
-export function MediaAssetGroups({ assets, projects, currentProjectId, staleness, onOpen }: {
+export function MediaAssetGroups({ assets, projects, currentProjectId, staleness, onOpen, action }: {
   assets: CreationAsset[]; projects: Project[]; currentProjectId?: string;
   staleness: React.ComponentProps<typeof MediaAssetGrid>['staleness']; onOpen: (asset: CreationAsset) => void;
+  action?: AssetCardAction;
 }) {
   const groups = groupMediaAssets(assets, projects, currentProjectId);
-  if (groups.length === 1) return <MediaAssetGrid assets={groups[0].assets} staleness={staleness} onOpen={onOpen} />;
+  if (groups.length === 1) return <MediaAssetGrid assets={groups[0].assets} staleness={staleness} onOpen={onOpen} action={action} />;
   return <div className="space-y-3">{groups.map(group =>
-    <MediaGroup key={group.id} group={group} staleness={staleness} onOpen={onOpen} />)}</div>;
+    <MediaGroup key={group.id} group={group} staleness={staleness} onOpen={onOpen} action={action} />)}</div>;
 }

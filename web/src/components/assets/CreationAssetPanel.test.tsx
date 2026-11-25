@@ -72,7 +72,7 @@ const mocks = vi.hoisted(() => ({
   markUsed: vi.fn(),
   createPrompt: vi.fn(),
   updatePrompt: vi.fn(),
-  deleteAsset: vi.fn(),
+  archiveAsset: vi.fn(),
   staleness: vi.fn(),
   readopt: vi.fn(),
   fromJob: vi.fn(),
@@ -89,7 +89,7 @@ vi.mock('@/api/creationAssets', async importOriginal => {
     markCreationAssetUsed: mocks.markUsed,
     createPromptCreationAsset: mocks.createPrompt,
     updatePromptCreationAsset: mocks.updatePrompt,
-    deleteCreationAsset: mocks.deleteAsset,
+    archiveCreationAsset: mocks.archiveAsset,
     fetchCreationAssetStalenessBatch: mocks.staleness,
     readoptCreationAsset: mocks.readopt,
     saveGenerationFromJob: mocks.fromJob,
@@ -112,12 +112,18 @@ vi.mock('./TeamLibraryPanel', () => ({
   ),
 }));
 
+/** 编辑 / 分享 / 归档收在详情头部的「更多」里。 */
+function chooseMoreAction(name: string) {
+  fireEvent.keyDown(screen.getByRole('button', { name: '更多资产操作' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
 describe('CreationAssetPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  it('inserts an unfilled inline template in one step and closes', async () => {
+  it('inserts an unfilled inline template in one step and keeps the panel open', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     mocks.markUsed.mockResolvedValue(promptAsset);
     const onUsePrompt = vi.fn();
@@ -132,7 +138,8 @@ describe('CreationAssetPanel', () => {
       promptAsset,
       promptFromAsset(promptAsset.content.kind === 'prompt' ? promptAsset.content.segments : []),
     ));
-    expect(onClose).toHaveBeenCalledOnce();
+    // 用完面板不关（规格 2.5）。
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('leaves repeated variables to be filled inside the prompt, not a separate form', async () => {
@@ -204,7 +211,7 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    chooseMoreAction('编辑');
     fireEvent.change(screen.getByDisplayValue('火山口三头犬'), { target: { value: '新标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
 
@@ -221,7 +228,7 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    chooseMoreAction('编辑');
     expect(screen.queryByText('推荐配置')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('推荐模型')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
@@ -235,7 +242,7 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    chooseMoreAction('编辑');
     fireEvent.change(screen.getByDisplayValue('火山口三头犬'), { target: { value: '改了一半' } });
     fireEvent.click(screen.getByRole('button', { name: '返回资产列表' }));
 
@@ -251,7 +258,7 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel ref={panelRef} onClose={onClose} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    chooseMoreAction('编辑');
     fireEvent.change(screen.getByDisplayValue('火山口三头犬'), { target: { value: '外部关闭前未保存' } });
     act(() => panelRef.current?.requestClose());
 
@@ -261,20 +268,18 @@ describe('CreationAssetPanel', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('physically deletes only after the irreversible confirmation', async () => {
+  it('archives without a confirmation dialog (D13)', async () => {
     mocks.list
       .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
       .mockResolvedValue({ revision: 2, assets: [] });
-    mocks.deleteAsset.mockResolvedValue(undefined);
+    mocks.archiveAsset.mockResolvedValue(undefined);
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-    fireEvent.click(screen.getByRole('button', { name: '删除资产' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('删除后不可恢复');
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    chooseMoreAction('归档');
+    expect(screen.queryByRole('dialog')).toBeNull();
 
-    await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-prompt'));
+    await waitFor(() => expect(mocks.archiveAsset).toHaveBeenCalledWith('asset-prompt'));
     expect(await screen.findByText('还没有提示词资产')).toBeInTheDocument();
   });
 
@@ -402,7 +407,7 @@ describe('CreationAssetPanel', () => {
       generationAsset,
       generationAsset.content.kind === 'generation' ? generationAsset.content.media : null,
     ));
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('finds generation assets by their media filename', async () => {
@@ -414,19 +419,19 @@ describe('CreationAssetPanel', () => {
     expect(screen.getByRole('button', { name: /雪山白犬/ })).toBeInTheDocument();
   });
 
-  it('deletes a generation asset from its detail', async () => {
+  it('archives a generation asset from its detail', async () => {
     mocks.list
       .mockResolvedValueOnce({ revision: 1, assets: [generationAsset] })
       .mockResolvedValue({ revision: 2, assets: [] });
-    mocks.deleteAsset.mockResolvedValue(undefined);
+    mocks.archiveAsset.mockResolvedValue(undefined);
     render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /雪山白犬/ }));
-    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '删除资产' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: '更多资产操作' }), { key: 'Enter' });
+    expect(screen.queryByRole('menuitem', { name: '编辑' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }));
 
-    await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-generation'));
+    await waitFor(() => expect(mocks.archiveAsset).toHaveBeenCalledWith('asset-generation'));
   });
 
   it('passes onReproduce through to the team panel only when given', async () => {

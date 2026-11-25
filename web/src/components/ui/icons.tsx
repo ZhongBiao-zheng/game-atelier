@@ -56,6 +56,7 @@ export const AgentIcon = defineIcon(Huge.BotIcon, 'agent');
 export const AiIcon = defineIcon(Huge.SparklesIcon, 'ai');
 export const AngleIcon = defineIcon(Huge.ThreeDRotateIcon, 'angle');
 export const ArchiveFileIcon = defineIcon(Huge.FileZipIcon, 'archive-file');
+export const ArchiveIcon = defineIcon(Huge.Archive02Icon, 'archive');
 export const ArrowDownIcon = defineIcon(Huge.ArrowDown02Icon, 'arrow-down');
 export const ArrowToolIcon = defineIcon(Huge.ArrowUpRight01Icon, 'arrow-tool');
 export const ArrowUpIcon = defineIcon(Huge.ArrowUp02Icon, 'arrow-up');
@@ -164,6 +165,7 @@ export const VideoFileIcon = defineIcon(Huge.FileVideoIcon, 'video-file');
 export const VideoIcon = defineIcon(Huge.Video01Icon, 'video');
 export const VolumeIcon = defineIcon(Huge.VolumeHighIcon, 'volume');
 export const WarningIcon = defineIcon(Huge.Alert02Icon, 'warning');
+export const WithdrawIcon = defineIcon(Huge.PackageRemoveIcon, 'withdraw');
 export const WorkflowIcon = defineIcon(Huge.WorkflowSquare03Icon, 'workflow');
 
 /** 产品内插件（设置页「插件」、缺失占位）的通用图标。 */

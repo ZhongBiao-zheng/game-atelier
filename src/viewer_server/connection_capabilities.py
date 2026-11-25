@@ -170,7 +170,8 @@ POST /api/creation-assets/media/upload
 PUT /api/creation-assets/{asset_id}/prompt
 PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
-DELETE /api/creation-assets/{asset_id}
+POST /api/creation-assets/{asset_id}/archive
+POST /api/creation-assets/{asset_id}/restore
 POST /api/creation-assets/{asset_id}/previews
 POST /api/creation-assets/{asset_id}/previews/from-job
 PUT /api/creation-assets/{asset_id}/previews/order

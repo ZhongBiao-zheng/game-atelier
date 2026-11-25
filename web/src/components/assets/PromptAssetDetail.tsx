@@ -10,13 +10,14 @@ import { PromptPreview, StalenessBadge, TagList } from './CreationAssetCards';
 
 const ACCEPT = 'image/png,image/jpeg,image/webp,image/gif';
 
-export function PromptAssetDetail({ asset, busy, staleness, onUpdated, onUse, onEdit, onReadopt }: {
+export function PromptAssetDetail({ asset, busy, staleness, useLabel = '使用', onUpdated, onUse, onReadopt }: {
   asset: CreationAsset;
   busy: boolean;
   staleness?: CreationAssetStaleness;
   onUpdated: (asset: CreationAsset) => void;
+  /** 归档视图里是「还原」。 */
+  useLabel?: string;
   onUse: () => void;
-  onEdit: () => void;
   onReadopt?: () => void;
 }) {
   const addInput = useRef<HTMLInputElement>(null);
@@ -99,8 +100,7 @@ export function PromptAssetDetail({ asset, busy, staleness, onUpdated, onUse, on
       <StalenessBadge staleness={staleness} />
     </div>
     <div className="flex shrink-0 flex-wrap gap-2 border-t border-border p-3">
-      <Button className="flex-1" disabled={disabled} onClick={onUse}>使用</Button>
-      <Button variant="outline" disabled={disabled} onClick={onEdit}>编辑</Button>
+      <Button className="flex-1" disabled={disabled} onClick={onUse}>{useLabel}</Button>
       {staleness === 'stale' && onReadopt && <Button variant="outline" disabled={disabled} onClick={onReadopt}><RetryIcon />重新采用</Button>}
     </div>
   </>;

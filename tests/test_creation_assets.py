@@ -283,11 +283,16 @@ def test_creation_asset_http_api_exposes_single_content_edit_and_delete(client: 
     assert content.status_code == 200
     assert content.content == _PNG
 
-    obsolete = client.post(f"/api/creation-assets/{prompt['asset_id']}/archive")
-    assert obsolete.status_code == 403
-    assert obsolete.json()["error"]["code"] == "CAPABILITY_DENIED"
-    deleted = client.delete(f"/api/creation-assets/{prompt['asset_id']}")
-    assert deleted.status_code == 204
+    # D13：删除改为归档，「已归档」里可还原；不再提供物理删除。
+    archived = client.post(f"/api/creation-assets/{prompt['asset_id']}/archive")
+    assert archived.status_code == 204
+    listed = client.get("/api/creation-assets").json()["assets"]
+    assert prompt["asset_id"] not in [asset["asset_id"] for asset in listed]
+    shelf = client.get("/api/creation-assets", params={"archived": "true"}).json()["assets"]
+    assert [asset["asset_id"] for asset in shelf] == [prompt["asset_id"]]
+    assert client.post(f"/api/creation-assets/{prompt['asset_id']}/restore").status_code == 204
+    assert prompt["asset_id"] in [asset["asset_id"] for asset in client.get("/api/creation-assets").json()["assets"]]
+    assert client.delete(f"/api/creation-assets/{prompt['asset_id']}").status_code in {403, 405}
 
 
 def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestClient):

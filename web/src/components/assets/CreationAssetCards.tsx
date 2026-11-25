@@ -1,5 +1,5 @@
-import { AudioFileIcon, CopyIcon, DeleteIcon, ImageIcon, RetryIcon, VideoFileIcon } from '@/components/ui/icons';
-import { useEffect, useState } from 'react';
+import { AddIcon, AudioFileIcon, CopyIcon, ImageIcon, RetryIcon, VideoFileIcon } from '@/components/ui/icons';
+import { useEffect, useState, type DragEvent } from 'react';
 
 import { promptPreviewUrl } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
@@ -9,21 +9,51 @@ import { AssetMasonry, mediaRatio, useMediaSizes, type MediaSize } from './Asset
 import { AssetMediaTile } from './AssetMediaTile';
 import {
   assetMediaContent,
+  CREATION_ASSET_DRAG_TYPE,
   type CreationAsset,
   type CreationAssetStaleness,
   type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
 
-export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
+/** 卡片悬停的主动作：「使用」（归档视图里是「还原」）。用完面板不关（规格 2.5）。 */
+export interface AssetCardAction {
+  label: string;
+  onRun: (asset: CreationAsset) => void;
+  disabled?: boolean;
+}
+
+/** 悬停浮出的主动作按钮：卡片本身点开详情，这个按钮直接用。 */
+function CardAction({ asset, action, className }: { asset: CreationAsset; action?: AssetCardAction; className?: string }) {
+  if (!action) return null;
+  return <div className={cn('pointer-events-none absolute opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100', className)}>
+    <Button variant="solid" size="sm" className="pointer-events-auto h-7 rounded-full px-2 text-xs" disabled={action.disabled}
+      onClick={() => action.onRun(asset)}>{action.label === '使用' && <AddIcon />}{action.label}</Button>
+  </div>;
+}
+
+/** 能「使用」的卡片都能拖进画布，落点与「使用」一致（归档的不能拖）。 */
+function dragProps(asset: CreationAsset, action?: AssetCardAction) {
+  if (action?.label !== '使用') return { draggable: false };
+  return {
+    draggable: true,
+    onDragStart: (event: DragEvent<HTMLDivElement>) => {
+      event.dataTransfer.setData(CREATION_ASSET_DRAG_TYPE, JSON.stringify({ asset_id: asset.asset_id }));
+      event.dataTransfer.effectAllowed = 'copy';
+    },
+  };
+}
+
+export function AssetCard({ asset, staleness, onOpen, action, size, onMeasure }: {
   asset: CreationAsset;
   staleness?: CreationAssetStaleness;
   onOpen: () => void;
+  action?: AssetCardAction;
   size?: MediaSize;
   onMeasure?: (size: MediaSize) => void;
 }) {
   const media = assetMediaContent(asset);
-  if (asset.content.kind === 'prompt') return (
+  if (asset.content.kind === 'prompt') return <div className="group relative min-w-0" {...dragProps(asset, action)}>
     <Button variant="ghost" type="button" onClick={onOpen}
       className="h-auto w-full items-start justify-start gap-3 rounded-lg p-2 text-left font-normal whitespace-normal hover:bg-card">
       {asset.content.preview_images?.[0] ? <img src={promptPreviewUrl(asset.asset_id, asset.content.preview_images[0].file, 128)}
@@ -40,10 +70,11 @@ export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
         <StalenessBadge staleness={staleness} className="mt-1" />
       </span>
     </Button>
-  );
+    <CardAction asset={asset} action={action} className="right-2 top-2" />
+  </div>;
   if (!media) return null;
   const dimensions = media.width && media.height ? media : size;
-  return <Button variant="ghost" type="button" aria-label={asset.title}
+  return <div className="group relative min-w-0" {...dragProps(asset, action)}><Button variant="ghost" type="button" aria-label={asset.title}
     className="block h-auto w-full min-w-0 rounded-md border-0 p-0 text-left font-normal hover:bg-card" onClick={onOpen}>
     <AssetMediaTile src={assetMediaSrc(asset.asset_id, media)} mimeType={media.mime_type}
       alt={asset.title} size={dimensions} onMeasure={onMeasure} />
@@ -53,20 +84,23 @@ export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
         ? <span className="shrink-0 tabular-nums">{dimensions.width}×{dimensions.height}</span> : null}
     </span>
     <StalenessBadge staleness={staleness} className="mt-1" />
-  </Button>;
+  </Button>
+  <CardAction asset={asset} action={action} className="right-1 top-1" />
+  </div>;
 }
 
-export function MediaAssetGrid({ assets, staleness, onOpen }: {
+export function MediaAssetGrid({ assets, staleness, onOpen, action }: {
   assets: CreationAsset[];
   staleness: Record<string, CreationAssetStaleness>;
   onOpen: (asset: CreationAsset) => void;
+  action?: AssetCardAction;
 }) {
   const { sizes, measure } = useMediaSizes();
   const key = (asset: CreationAsset) => `${asset.asset_id}:${assetMediaContent(asset)?.sha256}`;
   return <AssetMasonry items={assets} itemKey={key} ratio={asset => {
     const media = assetMediaContent(asset);
     return mediaRatio(media?.width && media.height ? media : sizes[key(asset)]);
-  }}>{asset => <AssetCard asset={asset} staleness={staleness[asset.asset_id]}
+  }}>{asset => <AssetCard asset={asset} staleness={staleness[asset.asset_id]} action={action}
     onOpen={() => onOpen(asset)} size={sizes[key(asset)]} onMeasure={size => measure(key(asset), size)} />}</AssetMasonry>;
 }
 
@@ -75,14 +109,17 @@ export function assetMediaSrc(assetId: string, content: CreationMediaAssetConten
   return `/api/creation-assets/${encodeURIComponent(assetId)}/content?v=${content.sha256.slice(0, 12)}`;
 }
 
-/** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */
-export function MediaPreview({ assetId, content, alt, className }: {
+/** 已入库的媒体：图片直接显示（给了 onZoom 时点图进大图），视频/音频给原生播放器。 */
+export function MediaPreview({ assetId, content, alt, className, onZoom }: {
   assetId: string;
   content: CreationMediaAssetContent;
   alt: string;
   className: string;
+  onZoom?: () => void;
 }) {
   const src = assetMediaSrc(assetId, content);
+  if (content.mime_type.startsWith('image/') && onZoom) return <Button variant="ghost" aria-label={`查看大图 ${alt}`}
+    className="block h-auto w-full cursor-zoom-in p-0" onClick={onZoom}><RevealImage src={src} alt={alt} loading="lazy" className={className} /></Button>;
   if (content.mime_type.startsWith('image/')) return <RevealImage src={src} alt={alt} loading="lazy" className={className} />;
   if (content.mime_type.startsWith('video/')) return <video src={src} muted playsInline preload="metadata" className={className} />;
   if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
@@ -93,36 +130,31 @@ export function PromptPreview({ segments, clamp = true }: { segments: CreationPr
   return <p className={cn("mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground", clamp && "line-clamp-2")}>{segments.map((segment, index) => segment.kind === 'text' ? segment.text : <span key={`${segment.name}-${index}`} className="mx-0.5 rounded border border-border bg-secondary px-1"><span className="text-muted-foreground">{segment.name}：</span><span className="text-foreground/80">{segment.default_value}</span></span>)}</p>;
 }
 
-export function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
-  return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><DeleteIcon />删除资产</Button></div>;
-}
-
-export function AssetDetail({ asset, busy, staleness, onUse, onReproduce, onReadopt, onEdit, onDelete }: {
+/** 详情只放主动作（使用 / 复刻 / 重新采用）；编辑、分享、归档在面板头部的「更多」里。 */
+export function AssetDetail({ asset, busy, staleness, useLabel = '使用', onUse, onReproduce, onReadopt, onZoom }: {
   asset: CreationAsset;
   busy: boolean;
   staleness?: CreationAssetStaleness;
+  useLabel?: string;
   onUse: () => void;
   onReproduce?: () => void;
   onReadopt?: () => void;
-  onEdit?: () => void;
-  onDelete?: () => void;
+  onZoom?: () => void;
 }) {
   const media = assetMediaContent(asset);
   const readopt = staleness === 'stale' ? onReadopt : undefined;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="max-h-120 w-full rounded-lg border border-border object-contain" />}
+      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} onZoom={onZoom} className="max-h-120 w-full rounded-lg border border-border object-contain" />}
       <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
       <StalenessBadge staleness={staleness} className="mt-2" />
       <div className="mt-4 flex gap-2">
-        <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
+        <Button className="flex-1" disabled={busy} onClick={onUse}>{useLabel}</Button>
         {readopt && <Button variant="outline" disabled={busy} onClick={readopt}><RetryIcon />重新采用</Button>}
         {onReproduce && <Button variant="outline" disabled={busy} onClick={onReproduce}><CopyIcon />复刻</Button>}
-        {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
       </div>
-      {onDelete && <div className="mt-4"><DeleteAssetButton disabled={busy} onClick={onDelete} /></div>}
     </div>
   );
 }

@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { CreationAsset } from '@/schema/creationAssets';
-import { SwapLabel } from '@/components/ui/swap-label';
 import { Label } from '@/components/ui/label';
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -44,22 +43,6 @@ export function DiscardChangesDialog({ open, onOpenChange, onKeepEditing, onDisc
       <DialogContent hideClose>
         <DialogHeader><DialogTitle>放弃未保存的修改？</DialogTitle><DialogDescription>当前编辑内容还没有保存。</DialogDescription></DialogHeader>
         <DialogFooter><Button variant="outline" onClick={onKeepEditing}>继续编辑</Button><Button onClick={onDiscard}>放弃修改</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function DeleteAssetDialog({ target, busy, onCancel, onConfirm }: {
-  target: CreationAsset | null;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={Boolean(target)} onOpenChange={open => { if (!open) onCancel(); }}>
-      <DialogContent hideClose>
-        <DialogHeader><DialogTitle>删除“{target?.title}”？</DialogTitle><DialogDescription>删除后不可恢复。已经使用过的提示词、媒体和来源名称快照不会受影响。</DialogDescription></DialogHeader>
-        <DialogFooter><Button variant="outline" disabled={busy} onClick={onCancel}>取消</Button><Button variant="destructive" disabled={busy} onClick={onConfirm}><SwapLabel active={Boolean(busy)} on="删除中…" off="确认删除" /></Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

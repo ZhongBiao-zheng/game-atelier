@@ -153,13 +153,11 @@ describe('Home', () => {
     await waitFor(() => {
       expect(container.querySelector('img')).toBeInTheDocument();
     });
-    const hrefs = [...container.querySelectorAll('a')].map(link => link.getAttribute('href'));
-    expect(hrefs).toContain(
-      '/studio?job=job-promo-1',
-    );
-    expect(hrefs).toContain(
-      '/studio?job=job-portrait-2',
-    );
+    // 点作品先开大图，「打开所在位置」才跳转。
+    fireEvent.click(screen.getByRole('button', { name: '查看大图 kv.png' }));
+    expect((await screen.findByRole('link', { name: '打开所在位置' })).getAttribute('href')).toBe('/studio?job=job-promo-1');
+    fireEvent.click(screen.getByRole('button', { name: '下一张' }));
+    await waitFor(() => expect(screen.getByRole('link', { name: '打开所在位置' }).getAttribute('href')).toBe('/studio?job=job-portrait-2'));
   });
 
   it('links studio-sourced gallery items to the studio page', async () => {
@@ -191,7 +189,8 @@ describe('Home', () => {
     await waitFor(() => {
       expect(container.querySelector('img')).toBeInTheDocument();
     });
-    const link = screen.getByRole('link', { name: '查看出图页' });
+    fireEvent.click(screen.getByRole('button', { name: '查看大图 v1.png' }));
+    const link = await screen.findByRole('link', { name: '打开所在位置' });
     expect(link.getAttribute('href')).toBe('/studio?job=job-x');
   });
 
@@ -224,7 +223,8 @@ describe('Home', () => {
     }) as any;
     renderHome();
     await waitFor(() => {
-      expect(screen.getByText(/暂时拿不到图片/)).toBeInTheDocument();
+      expect(screen.getByText('暂时拿不到作品')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     });
   });
 

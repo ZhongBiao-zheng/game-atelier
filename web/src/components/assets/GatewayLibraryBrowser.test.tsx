@@ -42,7 +42,7 @@ it('无本地项目默认选中首个同事共享，展示缩略图和使用入�
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(container.querySelector('img')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '团队库' }));
-  expect(within(screen.getByRole('group', { name: '同事共享' })).queryByText(/画面参考/)).toBeNull();
+  expect(within(screen.getByRole('group', { name: '网关共享库' })).queryByText(/画面参考/)).toBeNull();
 });
 
 it('每 30 秒重查目录，断连后清空，不依赖 SSE', async () => {
@@ -54,11 +54,13 @@ it('每 30 秒重查目录，断连后清空，不依赖 SSE', async () => {
   expect(listGatewayLibraries).toHaveBeenCalledTimes(2);
 });
 
-it('缩略图失败立即通知上层撤掉共享库，旧列表请求不能覆盖切换', async () => {
+it('单张缩略图失败只换成占位，不判停止共享；停止只看列表，旧列表请求不能覆盖切换', async () => {
   const stopped = vi.fn();
   const { rerender } = render(<GatewayLibraryBrowser library={library} available revision={1} onRefresh={vi.fn()} onUnavailable={stopped} />);
   fireEvent.error(await screen.findByAltText('风景.png'));
-  expect(stopped).toHaveBeenCalledTimes(1);
+  expect(stopped).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByAltText('风景.png')).toBeNull());
+  expect(screen.getByRole('button', { name: '查看 风景.png' })).toBeInTheDocument();
   rerender(<GatewayLibraryBrowser library={library} available={false} revision={2} onRefresh={vi.fn()} onUnavailable={stopped} />);
   expect(screen.getByText('已停止共享')).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByAltText('风景.png')).toBeNull());

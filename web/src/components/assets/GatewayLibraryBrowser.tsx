@@ -13,11 +13,12 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { AssetFilterPill } from './AssetFilterPill';
 import { AssetMasonry, mediaRatio, useMediaSizes } from './AssetMasonry';
 import { mediaDuration } from './AssetMediaTile';
+import { Lightbox } from '@/components/Lightbox';
 import { readTeamMedia, type UseTeamMedia, type UseTeamPrompt } from './teamAssetUse';
 
 export function GatewayLibraryHelp() {
-  return <Hint label="将同事的网关添加为供应商后，可以查看他开启共享的团队库">
-    <Button size="icon" variant="ghost" className="size-7" aria-label="同事共享说明"><HelpIcon /></Button>
+  return <Hint label="添加团队网关供应商后，能看到主机上开启共享的团队库">
+    <Button size="icon" variant="ghost" className="size-7" aria-label="网关共享库说明"><HelpIcon /></Button>
   </Hint>;
 }
 
@@ -77,6 +78,9 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
   const [query, setQuery] = useState('');
   const [type, setType] = useState('all');
   const [loading, setLoading] = useState(true);
+  // 单张缩略图读不出（刚删掉、格式特殊）只把这一张换成占位；「已停止共享」只按列表接口失败判。
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const markBroken = (entryId: string) => setBroken(current => current.has(entryId) ? current : new Set(current).add(entryId));
   // 复制提示词：勾 1.5 秒后退回复制图标；浏览器拒绝剪贴板时提示失败。
   const [copyState, copyPrompt] = useCopyFeedback();
   const unavailable = useRef(onUnavailable);
@@ -95,9 +99,10 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [library, available, revision]);
-  const thumb = (entry: GatewayLibraryEntry, n = 0) => entry.kind === 'prompt'
+  const thumb = (entry: GatewayLibraryEntry, n = 0) => broken.has(entry.entry_id) ? null : entry.kind === 'prompt'
     ? (entry.preview_count > 0 ? gatewayThumbUrl(library, entry, Math.min(n, entry.preview_count - 1)) : null)
     : (entry.mime_type?.startsWith('image/') ? gatewayThumbUrl(library, entry) : null);
+  const isImage = (entry: GatewayLibraryEntry) => entry.kind !== 'prompt' && Boolean(entry.mime_type?.startsWith('image/'));
   const placeholder = (entry: GatewayLibraryEntry) => <span className="grid aspect-square w-full place-content-center gap-2 rounded-md border border-border bg-card text-muted-foreground">
     {entry.mime_type?.startsWith('audio/') ? <AudioIcon size="xl" className="mx-auto" /> : <VideoIcon size="xl" className="mx-auto" />}
     <span className="text-center text-xs tabular-nums">{mediaDuration(entry.duration_s ?? undefined)}</span>
@@ -107,7 +112,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
   return <>
     <div className="flex items-center gap-2">
       <InputGroup className="min-w-0 flex-1"><InputGroupAddon><SearchIcon /></InputGroupAddon>
-        <InputGroupInput aria-label="搜索同事共享" placeholder="搜索" value={query} onChange={event => setQuery(event.target.value)} />
+        <InputGroupInput aria-label="搜索网关共享库" placeholder="搜索" value={query} onChange={event => setQuery(event.target.value)} />
       </InputGroup>
       <Button size="icon" variant="outline" aria-label="刷新" onClick={onRefresh}><RetryIcon /></Button>
     </div>
@@ -125,7 +130,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
             <div className="relative">
               <Button variant="ghost" aria-label={`查看 ${entry.title}`} className="block h-auto w-full p-0 text-left font-normal" onClick={() => { setViewing(entry); setPreview(0); }}>
                 {thumb(entry) ? <RevealImage src={thumb(entry)!} draggable={false} alt={entry.title} className="w-full rounded-md border border-border object-contain"
-                  onError={onUnavailable} onLoad={event => measure(entry.entry_id, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
+                  onError={() => markBroken(entry.entry_id)} onLoad={event => measure(entry.entry_id, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
                   : entry.kind !== 'prompt' ? placeholder(entry) : null}
                 {entry.kind === 'prompt' && <span className="block rounded-md border border-border bg-card p-3">
                   <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
@@ -142,15 +147,24 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
         </AssetMasonry>
       </div>
     </>}
-    {shownViewing && <Dialog open={Boolean(available && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
+    {/* 图片走全站 Lightbox：主机给了原文件就看原图、可下载，否则看缩略图；提示词与其他媒体仍用详情弹窗。 */}
+    {viewing && available && isImage(viewing) && thumb(viewing) && <Lightbox
+      src={viewing.has_content ? gatewayContentUrl(library, viewing) : thumb(viewing)!}
+      downloadName={viewing.has_content ? viewing.title : undefined} onClose={() => setViewing(null)}
+      details={<div className="flex flex-wrap items-center gap-3 text-xs text-white/80">
+        <span className="font-medium text-white">{viewing.title}</span>
+        {viewing.author && <span>{viewing.author}</span>}
+        {actionButton(viewing)}
+      </div>} />}
+    {shownViewing && !(isImage(shownViewing) && thumb(shownViewing)) && <Dialog open={Boolean(available && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
       <DialogContent aria-describedby={undefined}>
         <DialogHeader><DialogTitle>{shownViewing.title}</DialogTitle></DialogHeader>
         <div className="min-h-0 space-y-3 overflow-y-auto">
-          {thumb(shownViewing, preview) ? <img src={thumb(shownViewing, preview)!} alt={shownViewing.title} draggable={false} onError={onUnavailable}
+          {thumb(shownViewing, preview) ? <img src={thumb(shownViewing, preview)!} alt={shownViewing.title} draggable={false} onError={() => markBroken(shownViewing.entry_id)}
             className="max-h-120 w-full rounded-lg object-contain" /> : shownViewing.kind !== 'prompt' ? placeholder(shownViewing) : null}
           {shownViewing.kind === 'prompt' && shownViewing.preview_count > 1 && <div className="grid grid-cols-4 gap-2">
             {Array.from({ length: shownViewing.preview_count }, (_, n) => <Button key={n} variant="outline" className="h-auto p-1" aria-label={`效果图 ${n + 1}`} aria-pressed={n === preview} onClick={() => setPreview(n)}>
-              <img src={thumb(shownViewing, n)!} draggable={false} alt="" onError={onUnavailable} className="aspect-square w-full rounded-md object-cover" />
+              <img src={thumb(shownViewing, n) ?? ''} draggable={false} alt="" className="aspect-square w-full rounded-md object-cover" />
             </Button>)}
           </div>}
           {shownViewing.kind === 'prompt' && <>

@@ -1,7 +1,7 @@
 import { CloseIcon, ImageFileIcon } from '@/components/ui/icons';
 import type { ChangeEvent } from 'react';
 
-import { DeleteAssetButton, PathPreview, PendingFilePreview, isVideoSourcePath } from '@/components/assets/CreationAssetCards';
+import { PathPreview, PendingFilePreview, isVideoSourcePath } from '@/components/assets/CreationAssetCards';
 import { Field } from '@/components/assets/CreationAssetPanelBits';
 import { TagField } from '@/components/assets/TagField';
 import type { CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
@@ -37,7 +37,7 @@ export type MediaEditorState = {
 /** 服务端能存的媒体类型（与 schemas.MEDIA_SUFFIXES 一致）。 */
 const MEDIA_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/mp4';
 
-export function PromptEditor({ state, busy, textareaRef, variableName, selection, duplicateTitle, showSaveAndAddCanvas, onChange, onTextChange, onCaptureSelection, onVariableNameChange, onAddVariable, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
+export function PromptEditor({ state, busy, textareaRef, variableName, selection, duplicateTitle, showSaveAndAddCanvas, onChange, onTextChange, onCaptureSelection, onVariableNameChange, onAddVariable, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate }: {
   state: PromptEditorState;
   busy: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
@@ -54,7 +54,6 @@ export function PromptEditor({ state, busy, textareaRef, variableName, selection
   onSaveAndAddCanvas: () => void;
   onConfirmDuplicate: () => void;
   onCancelDuplicate: () => void;
-  onDelete?: () => void;
 }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -67,12 +66,11 @@ export function PromptEditor({ state, busy, textareaRef, variableName, selection
       </div>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>提示词正文与“{duplicateTitle}”相同，仍可按你的意图保存为另一条资产。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button><Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>仍然保存</Button></div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存提示词资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
-      {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
   );
 }
 
-export function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
+export function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate }: {
   state: MediaEditorState;
   busy: boolean;
   duplicateTitle?: string;
@@ -82,7 +80,6 @@ export function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas,
   onSaveAndAddCanvas: () => void;
   onConfirmDuplicate: () => void;
   onCancelDuplicate: () => void;
-  onDelete?: () => void;
 }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -91,7 +88,6 @@ export function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas,
       <Field label="标题"><Input value={state.title} onChange={event => onChange({ ...state, title: event.target.value })} /></Field>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这个文件已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : state.source ? '保存生成资产' : '保存媒体资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
-      {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
   );
 }
