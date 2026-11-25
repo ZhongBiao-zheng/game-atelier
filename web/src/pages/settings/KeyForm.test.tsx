@@ -21,7 +21,7 @@ describe('EvoLink key preset', () => {
     await chooseOption(screen.getByLabelText('供应商选择'), /^EvoLink ·/);
     expect(screen.getByLabelText('模型名称 1')).toHaveValue('Midjourney V8.2');
     expect(screen.getByLabelText('模型 ID 1')).toHaveValue('mj-v8.2');
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'test-key' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'test-key' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(createKey).toHaveBeenCalledOnce());
     expect(vi.mocked(createKey).mock.calls[0][0]).toMatchObject({
@@ -39,9 +39,9 @@ describe('供应商弹窗', () => {
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Tuzi');
     expect(screen.queryByLabelText('供应商选择')).not.toBeInTheDocument();
     expect(screen.getByLabelText('名称')).toHaveValue('Tuzi');
-    expect(screen.getByLabelText('API 请求地址')).toHaveValue('https://api.tu-zi.com');
+    expect(screen.getByLabelText('请求地址')).toHaveValue('https://api.tu-zi.com');
     expect(screen.getByRole('link', { name: '获取密钥 ↗' })).toHaveAttribute('href', 'https://api.tu-zi.com');
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'test-key' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'test-key' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({
       alias: 'Tuzi', provider: 'custom', enabled: true, base_url: 'https://api.tu-zi.com',
@@ -151,8 +151,8 @@ describe('ChatGPT subscription', () => {
     render(<KeyForm presetId="chatgpt" onCreated={vi.fn()} onCancel={vi.fn()} />);
     expect(await screen.findByText('artist@example.test')).toBeInTheDocument();
     expect(screen.getByText('plus')).toBeInTheDocument();
-    expect(screen.queryByLabelText('API 密钥')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('API 请求地址')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('请求地址')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '添加模型' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({
@@ -175,7 +175,7 @@ it('can disable an existing subscription even after Codex logout', async () => {
   vi.mocked(patchKey).mockResolvedValue(undefined);
   render(<KeyForm mode="edit" initial={{ alias: 'chatgpt', provider: 'chatgpt', auth_source: 'codex-cli', access_key: '', models: [{ id: 'gpt-image-2', name: 'GPT Image', modality: 'image' }] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
   expect(await screen.findByText('请先在 Codex 里用 ChatGPT 登录')).toBeInTheDocument();
-  expect(screen.queryByLabelText('API 密钥')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('密钥')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('switch'));
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(patchKey).toHaveBeenCalledWith('chatgpt', expect.objectContaining({ enabled: false })));

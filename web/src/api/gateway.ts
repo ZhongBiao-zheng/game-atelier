@@ -75,7 +75,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 function parseState(value: unknown): GatewayState {
   const state = value as Partial<GatewayState> | null;
   if (typeof state?.enabled !== 'boolean' || !Array.isArray(state.keys) || typeof state.status !== 'object') {
-    throw new Error('读取局域网共享失败：返回格式不对，重启本机服务后再试');
+    throw new Error('读取团队网关失败：返回格式不对，重启本机服务后再试');
   }
   return state as GatewayState;
 }
@@ -88,7 +88,7 @@ export async function fetchGateway(alias?: string): Promise<GatewayState> {
     const data = await requestJson<{ keys: GatewayKey[] }>(`${adminBase(alias)}/keys`, '读取中转成员');
     return { enabled: true, port: 0, name: alias, default_name: alias, keys: data.keys, status: { running: true, port: null, error: null, addresses: [] } };
   }
-  return parseState(await requestJson<unknown>('/api/gateway', '读取局域网共享'));
+  return parseState(await requestJson<unknown>('/api/gateway', '读取团队网关'));
 }
 
 export type GatewayService = { state: 'unsupported' | 'not_installed' | 'needs_credentials' | 'installed' | 'unknown'; install_command: string | null };
@@ -97,8 +97,13 @@ export async function fetchGatewayService(): Promise<GatewayService> {
   return requestJson<GatewayService>('/api/gateway/service', '读取常驻服务状态');
 }
 
+/** 拉起提权 PowerShell 安装常驻服务（Windows，会弹 UAC）。 */
+export async function installGatewayService(): Promise<void> {
+  await requestJson<{ started: boolean }>('/api/gateway/service/install', '安装常驻服务', { method: 'POST' });
+}
+
 export async function updateGateway(patch: { enabled?: boolean; port?: number; name?: string }) {
-  const state = parseState(await requestJson<unknown>('/api/gateway', '保存局域网共享', {
+  const state = parseState(await requestJson<unknown>('/api/gateway', '保存团队网关', {
     method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(patch),
   }));
   publishGatewayConnected();
@@ -139,7 +144,7 @@ export interface GatewayCheckResult {
 
 /** 接入端：测试连接并取回网关的模型（带 via）。编辑已存的网关供应商时不填密钥、传 alias。 */
 export async function checkGateway(payload: { base_url: string; access_key?: string; alias?: string }) {
-  return requestJson<GatewayCheckResult>('/api/gateway/check', '连接网关', {
+  return requestJson<GatewayCheckResult>('/api/gateway/check', '连接团队网关', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload),
   });
 }

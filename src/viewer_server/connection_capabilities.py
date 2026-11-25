@@ -89,6 +89,7 @@ PUT /api/gateway/providers/{alias}/admin/routes/order
 GET /api/gateway/providers/{alias}/admin/audit
 GET /api/gateway
 GET /api/gateway/service
+POST /api/gateway/service/install
 PUT /api/gateway
 POST /api/gateway/keys
 GET /api/gateway/keys/{key_id}/token
@@ -289,7 +290,7 @@ LOCAL_MANAGEMENT = frozenset({
     # 引导里的 Key 探针会把密钥发给固定的厂商地址，只给本机页面。
     "/api/onboarding/key-probe",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
-    "/api/gateway", "/api/gateway/service", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
+    "/api/gateway", "/api/gateway/service", "/api/gateway/service/install", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
     "/api/gateway/keys/{key_id}/token",
     "/api/gateway/keys/{key_id}/revoke", "/api/usage", "/api/usage/tasks", "/api/usage/key-last-used",
     "/api/gateway/check",

@@ -9,15 +9,16 @@ import { fetchGatewayMembers } from '@/api/gateway';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { openOnboarding } from '@/lib/onboardingGuide';
 import { KeyForm } from './KeyForm';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { errorText } from '@/lib/errorText';
 import { listKeys, deleteKey, patchKey } from '@/api/keys';
 import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { CustomInterfacesSection } from './CustomInterfacesSection';
 import { Button } from '@/components/ui/button';
-import { Collapse } from '@/components/ui/collapse';
 import { useRetained } from '@/components/ui/retained';
+import { Collapse } from '@/components/ui/collapse';
 
 interface Props {
   /** 首启向导复用同一个供应商表单。 */
@@ -34,24 +35,23 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [editingKey, setEditingKey] = useState<KeyRow | null>(null);
   // 每次打开表单换一个会话号作 key：关闭后表单留着播完退场，再打开时状态从头来。
   const [formSession, setFormSession] = useState(0);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // 刚保存的那一行原位打勾 2 秒（成功不发 toast，DESIGN.md「成功与失败」）。
+  const [savedAlias, setSavedAlias] = useState<string | null>(() => new URLSearchParams(window.location.search).get('saved'));
+  useEffect(() => {
+    if (!savedAlias) return;
+    const timer = window.setTimeout(() => setSavedAlias(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [savedAlias]);
   const [query, setQuery] = useState('');
   const [overdue, setOverdue] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
   // 按加载时的启用状态分组：页面内刚关掉的行留在原位，开关点完不会跳走。
   const [closedAliases, setClosedAliases] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
-  const [dialog, setDialog] = useState<{
-    open: boolean;
-    title: string;
-    message: string;
-    variant: 'default' | 'destructive';
-    onConfirm: () => void;
-  } | null>(null);
-
-  const shownDialog = useRetained(dialog);
+  // 删除确认：删供应商不可恢复，给更轻的「改为停用」（规格 2.1）。
+  const [deleting, setDeleting] = useState<{ row: KeyRow; fromForm: boolean } | null>(null);
+  const shownDeleting = useRetained(deleting);
   const formView = useRetained(showForm ? { session: formSession, editing: editingKey } : null);
-  const shownSuccess = useRetained(successMessage);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -71,7 +71,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
       setKeys(rows);
       setClosedAliases(new Set(rows.filter(row => !row.enabled).map(row => row.alias)));
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -81,21 +81,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     void refresh();
   }, [refresh]);
 
-  const onCreated = () => {
+  const onSaved = (alias: string) => {
     window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     setShowForm(false);
     setEditingKey(null);
-    setSuccessMessage('创建成功');
+    setSavedAlias(alias);
     void refresh();
-    if (mode === 'onboarding' && onComplete) onComplete();
-  };
-
-  const onUpdated = () => {
-    window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
-    setShowForm(false);
-    setEditingKey(null);
-    setSuccessMessage('已更新');
-    void refresh();
+    if (mode === 'onboarding' && onComplete && !formView?.editing) onComplete();
   };
 
   const openCreate = () => {
@@ -124,7 +116,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
       window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     } catch (e) {
       setKeys(current => current.map(row => row.alias === key.alias ? { ...row, enabled: key.enabled } : row));
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setPending(current => { const next = new Set(current); next.delete(key.alias); return next; });
     }
@@ -135,7 +127,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const activeKeys = filteredKeys.filter(key => !closedAliases.has(key.alias));
   const closedKeys = filteredKeys.filter(key => closedAliases.has(key.alias));
   const closedOpen = showClosed || query.trim() !== '';
-  const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key}
+  const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key} saved={savedAlias === key.alias}
     overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
     onToggle={enabled => { void toggleKey(key, enabled); }}
     onEdit={() => openEdit(key)} />;
@@ -144,27 +136,16 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     <KeyCard
       key={k.alias}
       row={k}
+      saved={savedAlias === k.alias}
       onEdit={() => openEdit(k)}
-      onDelete={() => {
-        setDialog({
-          open: true,
-          title: '确认删除？',
-          message: `"${k.alias}" 将被永久删除`,
-          variant: 'destructive',
-          onConfirm: async () => {
-            setDialog(null);
-            await deleteKey(k.alias);
-            void refresh();
-          },
-        });
-      }}
+      onDelete={() => setDeleting({ row: k, fromForm: false })}
     />
   ));
 
   const content = (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        {!embedded && <h1 className="font-display text-display text-foreground">API 密钥</h1>}
+        {!embedded && <h1 className="font-display text-display text-foreground">供应商</h1>}
         {embedded && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">供应商</h1>
         </div>}
@@ -186,13 +167,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </Button>}
         </div>
       </div>
-
-      <Collapse open={Boolean(successMessage)}>
-        <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-          {shownSuccess}
-        </div>
-      </Collapse>
 
       {loading && (
         <div className="space-y-2">
@@ -236,9 +210,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             </div></Collapse>
           </section>}
           {embedded && <CustomInterfacesSection />}
-          <div className="text-xs text-muted-foreground">
-            密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>
-          </div>
         </div>
       )}
 
@@ -248,59 +219,52 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           open={showForm}
           initial={formView.editing ? toKeyFormInitial(formView.editing) : undefined}
           mode={formView.editing ? 'edit' : 'create'}
-          onCreated={formView.editing ? onUpdated : onCreated}
+          autoDetect
+          existingAliases={keys.map(key => key.alias)}
+          onCreated={onSaved}
           onCancel={closeForm}
-          onDelete={formView.editing ? () => { const target = formView.editing!; setDialog({
-            open: true, title: '确认删除？', message: `"${target.alias}" 将被永久删除`, variant: 'destructive',
-            onConfirm: async () => {
-              setDialog(null);
-              try {
-                await deleteKey(target.alias);
-                closeForm();
-                window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
-                void refresh();
-              } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-            },
-          }); } : undefined}
+          onDelete={formView.editing ? () => setDeleting({ row: formView.editing!, fromForm: true }) : undefined}
           submitLabel={formView.editing ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
         />
       )}
     </>
   );
 
-  if (embedded) {
-    return (
-      <>
-        {content}
-        {shownDialog && (
-          <ConfirmDialog
-            open={Boolean(dialog?.open)}
-            title={shownDialog.title}
-            message={shownDialog.message}
-            variant={shownDialog.variant}
-            confirmText="删除"
-            onConfirm={shownDialog.onConfirm}
-            onCancel={() => setDialog(null)}
-          />
-        )}
-      </>
-    );
-  }
+  const removeKey = async (target: KeyRow, fromForm: boolean) => {
+    setDeleting(null);
+    try {
+      await deleteKey(target.alias);
+      if (fromForm) closeForm();
+      window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
+      void refresh();
+    } catch (e) { setError(errorText(e)); }
+  };
+  const disableKey = (target: KeyRow, fromForm: boolean) => {
+    setDeleting(null);
+    if (fromForm) closeForm();
+    void toggleKey(target, false);
+  };
+  const deleteDialog = shownDeleting && <AlertDialog open={Boolean(deleting)} onOpenChange={next => { if (!next) setDeleting(null); }}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>删除供应商「{shownDeleting.row.alias}」？</AlertDialogTitle>
+        <AlertDialogDescription>删除后不能恢复，它的模型会从智能路由里移除。只是暂时不用可以改为停用。</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>取消</AlertDialogCancel>
+        {shownDeleting.row.enabled !== false && <Button variant="outline" type="button"
+          onClick={() => disableKey(shownDeleting.row, shownDeleting.fromForm)}>改为停用</Button>}
+        <AlertDialogAction destructive onClick={event => { event.preventDefault(); void removeKey(shownDeleting.row, shownDeleting.fromForm); }}>删除</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
+
+  if (embedded) return <>{content}{deleteDialog}</>;
 
   return (
     <div className="px-6 py-8 max-w-3xl mx-auto">
       {content}
-      {shownDialog && (
-        <ConfirmDialog
-          open={Boolean(dialog?.open)}
-          title={shownDialog.title}
-          message={shownDialog.message}
-          variant={shownDialog.variant}
-          confirmText="删除"
-          onConfirm={shownDialog.onConfirm}
-          onCancel={() => setDialog(null)}
-        />
-      )}
+      {deleteDialog}
     </div>
   );
 }

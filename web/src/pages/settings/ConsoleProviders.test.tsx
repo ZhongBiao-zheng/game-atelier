@@ -46,7 +46,7 @@ it('添加页按供应商、中转、团队和自定义分组，支持查找与�
   expect(await screen.findByText('已添加')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '供应商' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '中转' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: '团队' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '团队网关' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '自定义' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
@@ -56,7 +56,7 @@ it('添加页按供应商、中转、团队和自定义分组，支持查找与�
   fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: /自定义供应商/ }));
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
-  expect(screen.getByLabelText('API 请求地址')).toBeInTheDocument();
+  expect(screen.getByLabelText('请求地址')).toBeInTheDocument();
 });
 it('custom 预设按域名识别已添加，不把所有中转都标为已添加', async () => {
   vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '我的兔子', provider: 'custom',

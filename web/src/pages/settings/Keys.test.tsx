@@ -119,10 +119,11 @@ describe('KeysPage', () => {
     await waitFor(() => expect(screen.getByText(/还没有配置供应商/)).toBeInTheDocument());
     fireEvent.click(screen.getAllByText('+ 新建供应商')[0]);
     await chooseOption(screen.getByLabelText('供应商选择'), /^Volcengine Ark ·/);
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'sk-created-secret' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'sk-created-secret' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
-    await waitFor(() => expect(screen.getByText('创建成功')).toBeInTheDocument());
+    // 成功不发文字提示，刚保存的那一行原位打勾。
+    expect(await screen.findByRole('img', { name: '已保存' })).toBeInTheDocument();
     expect(screen.queryByText('新 Key 已创建')).not.toBeInTheDocument();
     expect(screen.queryByText('sk-created-secret')).not.toBeInTheDocument();
   });
@@ -192,21 +193,23 @@ describe('KeysPage', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ alias: 'openai-hk' }) })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ keys: [], default_alias: null }),
+        json: async () => ({ keys: [{ ...mockKey, alias: 'openai-hk', provider: 'custom',
+          base_url: 'https://api.openai-hk.com/v1', access_key: 'sk-...old', homepage_url: null,
+          models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }] }], default_alias: null }),
       });
     globalThis.fetch = fetchMock as any;
 
     render(<KeysPage />);
 
     fireEvent.click(await screen.findByLabelText('编辑 openai-hk'));
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://api.openai-hk.com/v1' } });
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'https://api.openai-hk.com/v1' } });
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/keys/openai-hk', expect.objectContaining({ method: 'PATCH' })));
     const body = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(body.base_url).toBe('https://api.openai-hk.com/v1');
     expect(body.access_key).toBeUndefined();
-    expect(await screen.findByText('已更新')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '已保存' })).toBeInTheDocument();
   });
 });
 
@@ -215,7 +218,7 @@ describe('KeyForm', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
 
     expect(screen.getByLabelText('供应商选择')).toBeInTheDocument();
-    expect(screen.getByLabelText('API 密钥')).toBeInTheDocument();
+    expect(screen.getByLabelText('密钥')).toBeInTheDocument();
     expect(screen.getByLabelText('模型名称 1')).toBeInTheDocument();
     expect(screen.queryByLabelText('供应商名称')).not.toBeInTheDocument();
     expect(screen.getByText('高级：请求地址 · 计费分组').closest('button')).toHaveAttribute('aria-expanded', 'false');
@@ -233,7 +236,7 @@ describe('KeyForm', () => {
 
     render(<KeyForm onCreated={onCreated} onCancel={() => {}} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^Volcengine Ark ·/);
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'ark-test' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'ark-test' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -258,8 +261,8 @@ describe('KeyForm', () => {
     await chooseOption(screen.getByLabelText('供应商选择'), /^自定义 ·/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'custom-image' } });
     fireEvent.change(screen.getByLabelText('官网链接'), { target: { value: 'https://example.com' } });
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://ark.cn-beijing.volces.com/api/v3' } });
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'sk-custom' } });
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'https://ark.cn-beijing.volces.com/api/v3' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'sk-custom' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -282,7 +285,8 @@ describe('KeyForm', () => {
     expect(screen.getByLabelText('名称')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('例如：openrouter-image-main')).toBeInTheDocument();
     expect(screen.queryByLabelText('备注')).not.toBeInTheDocument();
-    expect(screen.getByText('自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。')).toBeInTheDocument();
+    // 常驻说明段已删（界面不写解释段）；同一供应商多把密钥靠名称自动编号区分。
+    expect(screen.queryByText('自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。')).not.toBeInTheDocument();
   });
 
   it('creates a Volcengine provider with image and conversation models', async () => {
@@ -294,7 +298,7 @@ describe('KeyForm', () => {
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^Volcengine Ark ·/);
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'ark-test' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'ark-test' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -325,7 +329,7 @@ describe('KeyForm', () => {
     globalThis.fetch = fetchMock as any;
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'sk-test' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'sk-test' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -379,8 +383,8 @@ describe('KeyForm', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^自定义 ·/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'zz-mixed' } });
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://api.example.com' } });
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'zz-secret' } });
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'https://api.example.com' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'zz-secret' } });
     fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: 'GPT Image 2' } });
     fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'gpt-image-2' } });
     fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
@@ -412,17 +416,18 @@ describe('KeyForm', () => {
     expect(screen.getAllByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toHaveLength(2);
   });
 
-  it('validates the custom API request URL from the test button', async () => {
+  it('validates the custom API request URL inline while typing', async () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
 
     await chooseOption(screen.getByLabelText('供应商选择'), /^自定义 ·/);
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'not-a-url' } });
-    fireEvent.click(screen.getByRole('button', { name: '测试' }));
-    expect(screen.getByText('请输入完整的 HTTP(S) API 请求地址')).toBeInTheDocument();
+    // 「测试」按钮（只查格式、和「测试连接」重名）已去掉，格式在输入时内联提示。
+    expect(screen.queryByRole('button', { name: '测试' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'not-a-url' } });
+    expect(screen.getByText('要以 http:// 或 https:// 开头')).toBeInTheDocument();
+    expect(screen.getByLabelText('请求地址')).toHaveAttribute('aria-invalid', 'true');
 
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://example.com/v1' } });
-    fireEvent.click(screen.getByRole('button', { name: '测试' }));
-    expect(screen.getByText('地址格式可用')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'https://example.com/v1' } });
+    expect(screen.queryByText('要以 http:// 或 https:// 开头')).not.toBeInTheDocument();
   });
 
   it('creates a key with custom model names and ids', async () => {
@@ -434,7 +439,7 @@ describe('KeyForm', () => {
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^Volcengine Ark ·/);
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'ark-test' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'ark-test' } });
     fireEvent.click(screen.getByRole('button', { name: '删除模型 2' }));
     fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: '图片 5.0 Lite' } });
     fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'doubao-seedream-5-0-260128' } });
@@ -557,7 +562,7 @@ describe('KeyForm', () => {
         onCancel={() => {}}
       />,
     );
-    const input = screen.getByLabelText('API 密钥') as HTMLInputElement;
+    const input = screen.getByLabelText('密钥') as HTMLInputElement;
     // 不能是密码框：Chrome 会把它当登录表单弹出保存密码；遮挡靠 text-security。
     expect(input.type).toBe('text');
     expect(input.className).toContain('[-webkit-text-security:disc]');
@@ -619,8 +624,8 @@ describe('KeyForm 模型选择器', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     await chooseOption(screen.getByLabelText('供应商选择'), /^自定义 ·/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'zz' } });
-    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://api.example.com/v1' } });
-    fireEvent.change(screen.getByLabelText('API 密钥'), { target: { value: 'sk-zz' } });
+    fireEvent.change(screen.getByLabelText('请求地址'), { target: { value: 'https://api.example.com/v1' } });
+    fireEvent.change(screen.getByLabelText('密钥'), { target: { value: 'sk-zz' } });
     fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
     await screen.findByText(/上游 \d+ 个模型/);
     return fetchMock;

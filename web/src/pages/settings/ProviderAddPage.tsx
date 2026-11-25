@@ -8,6 +8,7 @@ import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial, providerPresetId, type ProviderPreset } from './providerPresets';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Button } from '@/components/ui/button';
+import { errorText } from '@/lib/errorText';
 import { useRetained } from '@/components/ui/retained';
 
 const GROUPS = [
@@ -15,7 +16,7 @@ const GROUPS = [
   { kind: 'official', title: '供应商', description: '有自己的模型' },
   { kind: 'relay', title: '中转', description: '一个密钥，多家模型' },
   { kind: 'subscription', title: '订阅', description: '' },
-  { kind: 'team', title: '团队', description: '同事开启的局域网共享' },
+  { kind: 'team', title: '团队网关', description: '连接同事开启的团队网关' },
   { kind: 'custom', title: '自定义', description: '兼容 OpenAI 或任意第三方接口' },
 ] as const;
 const MODALITIES: Record<string, string> = { image: '图片', video: '视频', audio: '音频', llm: '文本' };
@@ -33,9 +34,9 @@ export function ProviderAddPage() {
   useEffect(() => {
     let active = true;
     void getChatGPTSubscription().then(data => { if (active) setSubscription(data); })
-      .catch(error => { if (active) setSubscriptionError(error instanceof Error ? error.message : String(error)); });
+      .catch(error => { if (active) setSubscriptionError(errorText(error)); });
     void listKeys().then(data => { if (active) setKeys(data.keys); })
-      .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+      .catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
   }, []);
   const open = (preset: ProviderPreset, baseUrl = preset.defaultBaseUrl) => {
@@ -73,7 +74,7 @@ export function ProviderAddPage() {
                 {isCustom ? <AddIcon size="sm" /> : <ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />}
               </span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{isCustom ? '自定义供应商' : preset.label}</span>
-                <span className="block text-xs text-muted-foreground">{isCustom ? '填写 API 地址与密钥' : preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '加载中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
+                <span className="block text-xs text-muted-foreground">{isCustom ? '填写请求地址与密钥' : preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '加载中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>
               {added && <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[color:var(--status-done)]" />已添加</span>}
             </Button>;
@@ -83,6 +84,7 @@ export function ProviderAddPage() {
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
     {shown && <KeyForm key={shown.session} open={Boolean(selected)} presetId={shown.preset.id} initial={shown.initial} onCancel={() => setSelected(null)}
-      onCreated={() => { window.dispatchEvent(new Event(KEYS_CHANGED_EVENT)); navigate('/settings/providers'); }} />}
+      autoDetect existingAliases={keys.map(key => key.alias)}
+      onCreated={alias => { window.dispatchEvent(new Event(KEYS_CHANGED_EVENT)); navigate(`/settings/providers?saved=${encodeURIComponent(alias)}`); }} />}
   </div>;
 }

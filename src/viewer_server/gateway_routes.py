@@ -112,9 +112,45 @@ def get_gateway_service() -> dict:
     return service_status()
 
 
+@gateway_router.post("/service/install")
+def install_gateway_service() -> dict:
+    """拉起提权 PowerShell 安装常驻服务（D16，会弹 UAC）；失败时页面保留「复制命令手动安装」。"""
+    from viewer_server.windows_service import ServiceInstallError, install_service
+    try:
+        install_service()
+    except ServiceInstallError as error:
+        raise HTTPException(409, {
+            "message": str(error), "code": "service_install_failed",
+            "recovery": "可以复制命令，在以管理员身份打开的 PowerShell 中手动安装", "raw": error.raw,
+        }) from None
+    return {"started": True}
+
+
+# 首次开启时端口被占，往后顺延找空闲端口（同 viewer-server 的 +1 规则）；最多试这么多个。
+_PORT_SEARCH_SPAN = 20
+
+
+def _first_free_port(start: int) -> int | None:
+    for port in range(start, min(start + _PORT_SEARCH_SPAN, 65536)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((gateway_server.host, port))
+        except OSError:
+            continue
+        return port
+    return None
+
+
 @gateway_router.put("")
 def update_gateway(body: GatewaySettingsPatch) -> dict:
-    config = gateway_keys.update_settings(enabled=body.enabled, port=body.port, name=body.name)
+    port = body.port
+    if body.enabled and port is None:
+        current = gateway_keys.read_config()
+        # 还没有成员时地址没交出去过，换端口无人受影响；有成员后端口固定，被占要用户自己改。
+        if not current.enabled and not any(not key.revoked_at for key in current.keys):
+            free = _first_free_port(current.port)
+            port = free if free not in (None, current.port) else None
+    config = gateway_keys.update_settings(enabled=body.enabled, port=port, name=body.name)
     gateway_server.apply(config)
     return _view()
 

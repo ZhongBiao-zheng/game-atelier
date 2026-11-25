@@ -1475,8 +1475,20 @@ def _protocol_is_openai_speech(protocol: str) -> bool:
     )
 
 
+def _model_list_error(code: str, raw: str) -> HTTPException:
+    """拉模型列表失败 → 一句能照着做的原因 + 修复建议；上游原文只进 raw（前端「查看技术详情」）。
+    code 沿用任务失败分类（invalid_key / bad_endpoint / network / unknown）。"""
+    message, recovery = {
+        "invalid_key": ("密钥无效或没有权限", "核对密钥是否复制完整、是否已在供应商后台停用"),
+        "bad_endpoint": ("请求地址不对，没找到模型列表接口", "检查地址是否少了 /v1；地址没错就手动添加模型"),
+        "network": ("连不上供应商，可能是本机代理或网络问题", "检查网络与代理设置后重试"),
+        "timeout": ("供应商响应超时", "稍后重试；一直超时就检查网络与代理设置"),
+    }.get(code, ("供应商返回了错误", "稍后重试；一直失败就展开技术详情查看原因"))
+    return HTTPException(502, {"message": message, "code": code, "recovery": recovery, "raw": raw[:500]})
+
+
 def _fetch_model_body(url: str, headers: dict, *, follow_redirects: bool = True) -> object:
-    """拉一次上游模型列表，返回解析后的 JSON；任何一步失败都抛 502 带上游原文。
+    """拉一次上游模型列表，返回解析后的 JSON；任何一步失败都抛 502：先分类成一句原因，上游原文放 raw。
     不跟随重定向时 3xx 也算失败（带着密钥的请求不去别的地址，3xx 的响应体不当列表用）。"""
     import requests
 
@@ -1484,20 +1496,29 @@ def _fetch_model_body(url: str, headers: dict, *, follow_redirects: bool = True)
         # 默认调用保持原样；不跟随重定向时才显式传参。
         extra = {} if follow_redirects else {"allow_redirects": False}
         resp = requests.get(url, headers=headers, timeout=20, **extra)
+    except requests.exceptions.SSLError as e:
+        raise _model_list_error("bad_endpoint", f"请求上游失败: {e}") from e
+    except requests.Timeout as e:
+        code = "network" if isinstance(e, requests.exceptions.ConnectTimeout) else "timeout"
+        raise _model_list_error(code, f"请求上游失败: {e}") from e
     except requests.RequestException as e:
-        raise HTTPException(502, f"请求上游失败: {e}") from e
+        raise _model_list_error("network", f"请求上游失败: {e}") from e
     if resp.status_code >= 400 or (not follow_redirects and resp.status_code >= 300):
-        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
+        status = resp.status_code
+        code = ("invalid_key" if status in (401, 403) else "bad_endpoint" if status in (404, 405)
+                else "unknown")
+        raise _model_list_error(code, f"上游 {status}: {resp.text[:200]}")
     try:
         return resp.json()
     except ValueError as e:
-        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
+        # 地址指到了网页（常见：少了 /v1，落到官网首页）。
+        raise _model_list_error("bad_endpoint", f"上游响应非 JSON: {resp.text[:200]}") from e
 
 
 def _model_rows(body: object, rows_key: str = "data") -> list:
     rows = body.get(rows_key) if isinstance(body, dict) else body
     if not isinstance(rows, list):
-        raise HTTPException(502, f"上游响应缺少模型列表（{rows_key}）")
+        raise _model_list_error("bad_endpoint", f"上游响应缺少模型列表（{rows_key}）")
     return rows
 
 

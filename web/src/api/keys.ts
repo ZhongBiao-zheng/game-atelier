@@ -111,11 +111,11 @@ export function modelModality(
 }
 
 export async function listKeys(): Promise<{ keys: KeyView[] }> {
-  return requestJson<{ keys: KeyView[] }>('/api/keys', '读取密钥列表');
+  return requestJson<{ keys: KeyView[] }>('/api/keys', '读取供应商列表');
 }
 
 export async function createKey(payload: KeyCreatePayload): Promise<{ alias: string }> {
-  return requestJson<{ alias: string }>('/api/keys', `新增密钥「${payload.alias}」`, {
+  return requestJson<{ alias: string }>('/api/keys', `添加供应商「${payload.alias}」`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -123,7 +123,7 @@ export async function createKey(payload: KeyCreatePayload): Promise<{ alias: str
 }
 
 export async function patchKey(alias: string, patch: Partial<KeyCreatePayload>): Promise<void> {
-  await request(`/api/keys/${encodeURIComponent(alias)}`, `修改密钥「${alias}」`, {
+  await request(`/api/keys/${encodeURIComponent(alias)}`, `修改供应商「${alias}」`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
@@ -131,7 +131,7 @@ export async function patchKey(alias: string, patch: Partial<KeyCreatePayload>):
 }
 
 export async function deleteKey(alias: string): Promise<void> {
-  await request(`/api/keys/${encodeURIComponent(alias)}`, `删除密钥「${alias}」`, { method: 'DELETE' });
+  await request(`/api/keys/${encodeURIComponent(alias)}`, `删除供应商「${alias}」`, { method: 'DELETE' });
 }
 
 /** 按需取某个已存密钥的明文（编辑表单查看用）；列表/创建接口仍只回掩码。 */

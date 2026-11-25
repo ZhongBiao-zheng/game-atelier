@@ -62,7 +62,8 @@ def test_bearer_refused_then_anthropic_headers_on_the_same_origin(client):
         relay.on("GET", "/v1/models", (401, {"error": {"message": "invalid bearer"}}))
         response = _preview(client, relay.url)
     # Bearer 401 → 换 x-api-key 再拉同一个 /v1/models，这次还是 401，接着试 Gemini 也失败 → 报第一次的错。
-    assert response.status_code == 502 and "401" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert response.status_code == 502 and detail["code"] == "invalid_key" and "401" in detail["raw"]
 
     with FakeVendor() as relay:
         relay.on("GET", "/v1/models", (401, {"error": {"message": "invalid bearer"}}),

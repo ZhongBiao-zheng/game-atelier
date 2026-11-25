@@ -587,7 +587,7 @@ def test_models_preview_reports_failed_complete_catalog(tmp_path, monkeypatch):
         })
 
     assert r.status_code == 502
-    assert "boom" in r.json()["detail"]
+    assert "boom" in r.json()["detail"]["raw"]
 
 
 @pytest.mark.parametrize("base,provider,expected", [

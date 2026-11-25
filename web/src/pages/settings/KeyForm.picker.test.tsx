@@ -123,7 +123,8 @@ it.each(['获取失败', '上游没有模型列表接口（HTTP 404）'])('opens
   vi.mocked(previewModels).mockRejectedValue(new Error(message));
   open();
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  // 界面只显示原因，不带「（HTTP 404）」状态码（规格 2.2）。
+  expect(await screen.findByRole('alert')).toHaveTextContent(message.replace(/（HTTP \d+）$/, ''));
   await waitFor(() => expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'true'));
   expect(screen.getByRole('button', { name: 'chat-demo' })).toBeInTheDocument();
 });

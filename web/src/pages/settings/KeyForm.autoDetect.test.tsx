@@ -26,7 +26,7 @@ const remote = (id: string, modality: RemoteModel['modality']): RemoteModel => (
 });
 
 const tuzi = PROVIDER_PRESETS.find(preset => preset.id === 'tuzi')!;
-const open = (autoDetect = true) => render(<KeyForm presetId="tuzi" initial={presetInitial(tuzi)} autoDetect={autoDetect}
+const open = (autoDetect = true, guided = false) => render(<KeyForm presetId="tuzi" initial={presetInitial(tuzi)} autoDetect={autoDetect} guided={guided}
   submitLabel="保存并开始" onCreated={vi.fn()} onCancel={vi.fn()} />);
 const paste = (value = 'sk-onboarding-test') =>
   fireEvent.change(screen.getByPlaceholderText('粘贴密钥'), { target: { value } });
@@ -54,9 +54,10 @@ it('pastes a key, detects models and preselects only known image and video model
     access_key: 'sk-onboarding-test', base_url: 'https://api.tu-zi.com', include_all: false,
   })));
   expect(await screen.findByRole('radio', { name: '已选 3' })).toBeInTheDocument();
-  expect(await screen.findByRole('status')).toHaveTextContent('Key 有效');
+  expect(await screen.findByRole('status')).toHaveTextContent('密钥有效');
   expect(probeKey).toHaveBeenCalledWith('tuzi', 'sk-onboarding-test');
-  expect(recordOnboardingEvent).toHaveBeenCalledWith({ event: 'models_detected', count: 3 });
+  // 控制台里的自动校验不记首启漏斗事件；只有首启引导（guided）才记。
+  expect(recordOnboardingEvent).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole('button', { name: '保存并开始' }));
   await waitFor(() => expect(createKey).toHaveBeenCalled());
@@ -100,10 +101,11 @@ it('keeps many preselected models valid for the selection view and the save payl
 it('shows an invalid key without blocking save', async () => {
   vi.mocked(previewModels).mockResolvedValue({ models: [remote('gpt-image-2', 'image')], total: 1, excluded: 0 });
   vi.mocked(probeKey).mockResolvedValue('invalid');
-  open();
+  open(true, true);
   paste();
-  expect(await screen.findByRole('alert')).toHaveTextContent('Key 无效');
+  expect(await screen.findByRole('alert')).toHaveTextContent('密钥无效');
   expect(screen.getByRole('button', { name: '保存并开始' })).toBeEnabled();
+  expect(recordOnboardingEvent).toHaveBeenCalledWith({ event: 'key_probed', result: 'invalid' });
 });
 
 it('keeps the preset models and shows the fetch error when detection fails', async () => {
@@ -113,7 +115,7 @@ it('keeps the preset models and shows the fetch error when detection fails', asy
   paste();
   expect(await screen.findByText('拉取模型列表失败：上游 401')).toBeInTheDocument();
   expect(screen.getByRole('radio', { name: '已选 1' })).toBeInTheDocument();
-  expect(screen.queryByText(/Key 有效|Key 无效/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/密钥有效|密钥无效/)).not.toBeInTheDocument();
 });
 
 it('does nothing automatically outside the guide', async () => {

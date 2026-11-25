@@ -1,4 +1,4 @@
-import { DeleteIcon, EditIcon } from '@/components/ui/icons';
+import { CheckIcon, DeleteIcon, EditIcon } from '@/components/ui/icons';
 import { modelModality } from '@/api/keys';
 import { providerLabel } from '@/lib/providerLabels';
 import { Button } from '@/components/ui/button';
@@ -35,10 +35,12 @@ interface Props {
   row: KeyRow;
   onEdit: () => void;
   onDelete: () => void;
+  /** 刚保存：名称旁原位打勾。 */
+  saved?: boolean;
 }
 
 /** 档案柜的一行：厂商名 + 掩码/链接第二行，右侧模型摘要 chip 与 ghost 操作。 */
-export function KeyCard({ row, onEdit, onDelete }: Props) {
+export function KeyCard({ row, onEdit, onDelete, saved = false }: Props) {
   const linkUrl = row.homepage_url || row.base_url;
   const vendorName = providerLabel(row.provider, row.alias);
   const models = row.models ?? [];
@@ -53,6 +55,7 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-foreground">{vendorName}</span>
+          {saved && <CheckIcon size="sm" role="img" aria-label="已保存" className="shrink-0 text-[color:var(--status-done)]" />}
           {vendorName !== row.alias && (
             <span className="shrink-0 truncate rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">
               {row.alias}

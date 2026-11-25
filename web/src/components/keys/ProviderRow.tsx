@@ -1,5 +1,5 @@
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
-import { ChevronRightIcon } from '@/components/ui/icons';
+import { CheckIcon, ChevronRightIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { providerLabel } from '@/lib/providerLabels';
 import type { KeyRow } from './KeyCard';
@@ -11,8 +11,8 @@ export function providerHost(row: KeyRow) {
   catch { return ''; }
 }
 
-export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
-  row: KeyRow; overdue: boolean; pending: boolean;
+export function ProviderRow({ row, overdue, pending, saved = false, onEdit, onToggle }: {
+  row: KeyRow; overdue: boolean; pending: boolean; saved?: boolean;
   onEdit: () => void; onToggle: (enabled: boolean) => void;
 }) {
   const enabled = row.enabled !== false;
@@ -35,7 +35,8 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
     <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
     <Button variant="bare" type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      <span className="block truncate text-sm font-medium">{title}</span>
+      <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium"><span className="truncate">{title}</span>
+        {saved && <CheckIcon size="sm" role="img" aria-label="已保存" className="pop-in shrink-0 text-[color:var(--status-done)]" />}</span>
       <Hint label={row.base_url ?? ''}><span className="mt-1 block truncate text-xs text-muted-foreground">
         {[showType ? rawType : '', host, `${row.models?.length ?? 0} 个${row.provider === 'comfyui' ? '工作流' : '模型'}`].filter(Boolean).join(' · ')}
       </span></Hint>
