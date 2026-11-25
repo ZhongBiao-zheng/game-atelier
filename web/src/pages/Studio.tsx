@@ -177,9 +177,12 @@ function StudioFull() {
 
   const session = composer.agent.session && 'turns' in composer.agent.session ? composer.agent.session : null;
   const scopedJobs = useMemo(() => persistedJobs.filter(job => jobSessionId(job) === scopedId), [persistedJobs, scopedId]);
+  // 本地占位轮交接给服务端任务时，任务沿用占位的客户端 id 与起点：整卡不重挂，转圈不重启，计时不跳。
+  const handoffs = useRef(new Map<string, RoundHandoff>());
   const rounds = useMemo(() => [
     ...localRounds.filter(round => round.sessionId === scopedId),
-    ...studioJobsToRounds(scopedJobs.filter(job => !job.studio_agent_turn_id), keys),
+    ...studioJobsToRounds(scopedJobs.filter(job => !job.studio_agent_turn_id), keys)
+      .map(round => withHandoff(round, handoffs.current)),
   ], [localRounds, scopedId, scopedJobs, keys]);
   const timeline = useMemo(() => mixedTimeline(rounds, session, scopedJobs), [rounds, session, scopedJobs]);
   const visibleRounds = useMemo(() => filterRounds(timeline, historyFilters, favorites, hiddenPaths),
@@ -738,7 +741,8 @@ function StudioFull() {
     if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
     const startedAt = Date.now();
-    const myRound = { kind: 'pending' as const, sessionId, startedAt, config };
+    const clientKey = `local-${crypto.randomUUID()}`;
+    const myRound = { kind: 'pending' as const, sessionId, startedAt, config, clientKey };
     setRounds((rs) => [myRound, ...rs]);
     // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
     scrollToBottom();
@@ -757,7 +761,7 @@ function StudioFull() {
     } catch (e: any) {
       setRounds((rs) =>
         rs.map((r) =>
-          r === myRound ? { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+          r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
       setPending(false);
@@ -767,6 +771,7 @@ function StudioFull() {
     // 提交真正发出去了，复刻时的提示才算用完。
     setRecipeNotice(null);
 
+    handoffs.current.set(job.job_id, { clientKey, startedAt });
     setPersistedJobs(items => items.some(item => item.job_id === job.job_id) ? items : [job, ...items]);
     setRounds(rs => rs.filter(r => r !== myRound));
   };
@@ -904,7 +909,8 @@ function StudioFull() {
     };
 
     const startedAt = Date.now();
-    const myRound = { kind: 'pending' as const, sessionId, startedAt, config };
+    const clientKey = `local-${crypto.randomUUID()}`;
+    const myRound = { kind: 'pending' as const, sessionId, startedAt, config, clientKey };
     setRounds((rs) => [myRound, ...rs]);
     // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
     scrollToBottom();
@@ -924,7 +930,7 @@ function StudioFull() {
     } catch (e: any) {
       setRounds((rs) =>
         rs.map((r) =>
-          r === myRound ? { kind: 'failed', sessionId, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+          r === myRound ? { kind: 'failed', sessionId, clientKey, submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
       setPending(false);
@@ -933,6 +939,7 @@ function StudioFull() {
     setPending(false);
     setRecipeNotice(null);
 
+    handoffs.current.set(job.job_id, { clientKey, startedAt });
     setPersistedJobs(items => items.some(item => item.job_id === job.job_id) ? items : [job, ...items]);
     setRounds(rs => rs.filter(r => r !== myRound));
   };
@@ -1033,7 +1040,7 @@ function StudioFull() {
             onClick={scrollToBottom}
             tabIndex={dockCollapsed ? 0 : -1}
             aria-hidden={!dockCollapsed}
-            className={`absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-all duration-300 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+            className={`absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-[opacity,translate,background-color] duration-300 ease-in-out hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
               dockCollapsed
                 ? 'pointer-events-auto opacity-100 translate-x-0 translate-y-0'
                 : 'pointer-events-none opacity-0 translate-x-3 -translate-y-2'
@@ -1557,6 +1564,16 @@ async function fetchRoundReferences(config: RoundConfig, jobId?: string): Promis
     fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
   ]);
   return { images, videos, audios, sref, cref, oref };
+}
+
+type RoundHandoff = { clientKey: string; startedAt: number };
+
+function withHandoff(round: RoundState, handoffs: ReadonlyMap<string, RoundHandoff>): RoundState {
+  const handoff = round.jobId ? handoffs.get(round.jobId) : undefined;
+  if (!handoff) return round;
+  return round.kind === 'pending'
+    ? { ...round, clientKey: handoff.clientKey, startedAt: handoff.startedAt }
+    : { ...round, clientKey: handoff.clientKey };
 }
 
 function jobSessionId(job: Job) {

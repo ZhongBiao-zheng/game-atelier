@@ -254,13 +254,9 @@ describe('Studio', () => {
   it('uses the responsive prompt shell on the studio page', () => {
     renderStudio();
 
-    expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
-      'min-h-[174px]',
-      'h-auto',
-      'pt-3.5',
-      'px-4',
-      'pb-4',
-    );
+    const shell = screen.getByTestId('studio-prompt-shell');
+    expect(shell).toHaveAttribute('data-state', 'expanded');
+    expect(shell).toHaveClass('h-auto', 'px-4', 'py-2');
   });
 
   it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
@@ -303,7 +299,7 @@ describe('Studio', () => {
     renderStudio();
 
     expect(screen.getByLabelText('打开创作资产')).toHaveClass('h-9', 'px-3');
-    expect(screen.getByLabelText('提交生成')).toHaveClass('w-10', 'h-10', 'bottom-4');
+    expect(screen.getByLabelText('提交生成')).toHaveClass('size-10');
   });
 
   it('shows no example prompt chips when no rounds', () => {

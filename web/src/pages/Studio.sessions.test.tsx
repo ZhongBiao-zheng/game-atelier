@@ -213,7 +213,7 @@ it('滚动时保留实际输入焦点，已卸载的弹窗焦点不会持续撑�
   scroll.scrollTop = -200;
   act(() => editor.focus());
   fireEvent.scroll(scroll);
-  expect(shell).toHaveClass('min-h-[174px]');
+  expect(shell).toHaveAttribute('data-state', 'expanded');
   act(() => editor.blur());
   // 临时按钮代表随弹窗卸载的焦点目标，移除 DOM 节点不会触发 React 的 blur。
   const temporaryButton = document.createElement('button');
@@ -222,7 +222,7 @@ it('滚动时保留实际输入焦点，已卸载的弹窗焦点不会持续撑�
   temporaryButton.remove();
   expect(document.activeElement).toBe(document.body);
   fireEvent.scroll(scroll);
-  expect(shell).toHaveClass('min-h-0');
+  expect(shell).toHaveAttribute('data-state', 'collapsed');
 });
 
 it('首屏与切换各拉一次任务，普通会话更新不拉；生成完成与 SSE 重连补查', async () => {

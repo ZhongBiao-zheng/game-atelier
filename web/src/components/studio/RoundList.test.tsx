@@ -486,9 +486,12 @@ describe('RoundList progress badge', () => {
     } as RoundState;
   }
 
-  it('shows 0% for a video round not yet sent upstream', () => {
+  const lineScale = () => screen.getByTestId('progress-line').style.transform;
+
+  it('视频还没提交上游：角标「准备中…」，细条停在起点', () => {
     render(<RoundList rounds={[pendingRound({ progressPhase: null })]} />);
-    expect(screen.getByTestId('progress-badge').textContent).toBe('0% 生成中');
+    expect(screen.getByTestId('progress-badge').textContent).toBe('准备中…');
+    expect(lineScale()).toBe('scaleX(0)');
   });
 
   it('排队位置只显示在图片角标，顶部不显示按耗时推测的文案', () => {
@@ -502,20 +505,25 @@ describe('RoundList progress badge', () => {
     expect(screen.queryByText('正在调度…')).not.toBeInTheDocument();
   });
 
-  it('shows 20% once the task is sent and 95% while downloading', () => {
+  it('提交上游后显示「生成中…」，下载产物时显示「下载中…」并推到 95%', () => {
     const { unmount } = render(<RoundList rounds={[pendingRound({ progressPhase: 'sent' })]} />);
-    expect(screen.getByTestId('progress-badge').textContent).toBe('20% 生成中');
+    expect(screen.getByTestId('progress-badge').textContent).toBe('生成中…');
     unmount();
     render(<RoundList rounds={[pendingRound({ progressPhase: 'downloading' })]} />);
-    expect(screen.getByTestId('progress-badge').textContent).toBe('95% 生成中');
+    expect(screen.getByTestId('progress-badge').textContent).toBe('下载中…');
+    expect(lineScale()).toBe('scaleX(0.95)');
   });
 
-  it('shows time-stepped percent for image rounds (20% when fresh)', () => {
-    const imageRound = pendingRound({
-      config: { prompt: 'p', model: 'm', kind: 'image', referenceImages: [] },
-    });
-    render(<RoundList rounds={[imageRound]} />);
-    expect(screen.getByTestId('progress-badge').textContent).toBe('20% 生成中');
+  it('图片按预期耗时渐近推进：前 60% 线性，之后逼近 90% 不越过', () => {
+    const image = { prompt: 'p', model: 'm', kind: 'image', referenceImages: [] };
+    const { unmount } = render(<RoundList rounds={[pendingRound({ startedAt: Date.now() - 30_000, config: image })]} />);
+    expect(screen.getByTestId('progress-badge').textContent).toBe('生成中…');
+    expect(parseFloat(lineScale().slice(7))).toBeCloseTo(0.5, 1);
+    unmount();
+    render(<RoundList rounds={[pendingRound({ startedAt: Date.now() - 600_000, config: image })]} />);
+    const late = parseFloat(lineScale().slice(7));
+    expect(late).toBeGreaterThan(0.85);
+    expect(late).toBeLessThan(0.9);
   });
 
   it('生成中显示模型、参数、提交时间，并且耗时每秒动态更新', () => {

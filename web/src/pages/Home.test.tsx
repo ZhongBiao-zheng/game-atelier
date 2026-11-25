@@ -56,13 +56,9 @@ describe('Home', () => {
   it('uses the responsive prompt shell on the home page', () => {
     renderHome();
 
-    expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
-      'min-h-[174px]',
-      'h-auto',
-      'pt-3.5',
-      'px-4',
-      'pb-4',
-    );
+    const shell = screen.getByTestId('studio-prompt-shell');
+    expect(shell).toHaveAttribute('data-state', 'expanded');
+    expect(shell).toHaveClass('h-auto', 'px-4', 'py-2');
   });
 
   it('shows skeleton during LOADING', () => {

@@ -28,8 +28,20 @@ import {
 } from '@/lib/mentionTokens';
 
 import { Lightbox } from '../Lightbox';
-import { WaitingCopy } from './WaitingCopy';
+import {
+  CompletionUnderlay,
+  expectedDurationMs,
+  ProgressLine,
+  ResultVideo,
+  ROUND_SPINNER_CLASS,
+  RoundEnter,
+  stageLabel,
+  useLeavingRounds,
+  useResultAspect,
+} from './RoundMotion';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -84,7 +96,7 @@ export interface RoundConfig {
   referenceAudios?: string[];
 }
 
-export type RoundState =
+export type RoundState = (
   | {
       kind: 'pending';
       mode?: GenMode;
@@ -109,7 +121,19 @@ export type RoundState =
       config: RoundConfig;
     }
   // canceled=画师主动停止（不是错误）：同一张卡，去掉警示色。
-  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig };
+  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig }
+) & {
+  /** 本地提交时生成的客户端 id：占位、服务端任务、完成始终用它作 key，整卡不重挂。 */
+  clientKey?: string;
+};
+
+/** 一轮记录的稳定 key：客户端 id 优先，其次 job_id。 */
+function roundKey(round: TimelineRound): string {
+  if (round.kind === 'agent') return round.turn.turn_id;
+  if (round.clientKey) return round.clientKey;
+  if (round.jobId) return round.jobId;
+  return round.kind === 'pending' ? `pending-${round.startedAt}` : `${round.kind}-${round.submittedAt}`;
+}
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
@@ -281,6 +305,27 @@ export function RoundList({
   const remainingCount = Math.max(0, rounds.length - mountedHistoryCount);
   const hasEarlierHistory = remainingCount > 0;
   useEffect(() => setHistoryAutoLoadArmed(!focusJobId), [focusJobId]);
+  // 入场只给新到达的那一轮：排在已挂载记录之后、之前没见过的 key。首屏、往上加载的历史、
+  // 深链置顶的记录都在已知记录之前或没有已知记录，不动。
+  const mountedKeys = mountedRounds.map(roundKey);
+  const knownKeys = useRef<Set<string> | null>(null);
+  const known = knownKeys.current;
+  let lastKnownIndex = -1;
+  if (known) mountedKeys.forEach((key, index) => { if (known.has(key)) lastKnownIndex = index; });
+  const enteringKeys = new Set(known && lastKnownIndex >= 0
+    ? mountedKeys.slice(lastKnownIndex + 1).filter(key => !known.has(key))
+    : []);
+  useEffect(() => {
+    const next = knownKeys.current ?? new Set<string>();
+    for (const key of mountedKeys) next.add(key);
+    knownKeys.current = next;
+  });
+  // 出现过「生成中」的轮次：完成时结果卡垫上占位交接层，结果在它上面淡入；历史记录直接显示。
+  const seenPendingKeys = useRef(new Set<string>());
+  useEffect(() => {
+    for (const round of rounds) if (round.kind === 'pending') seenPendingKeys.current.add(roundKey(round));
+  }, [rounds]);
+  const [leavingKeys, removeAfterFade] = useLeavingRounds();
   // 不循环：到头的一侧不给回调，大图层据此把那一侧箭头置灰。
   const lightboxStep = (offset: -1 | 1) => {
     const target = lightboxIndex < 0 ? undefined : lightboxItems[lightboxIndex + offset];
@@ -347,7 +392,13 @@ export function RoundList({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasEarlierHistory, historyAutoLoadArmed]);
-  const renderMedia = (r: RoundState, mediaActive: boolean) => (
+  const renderMedia = (r: RoundState, mediaActive: boolean) => {
+    const key = roundKey(r);
+    // 嵌在 Agent 回合里的结果没有单独的外层，删除不做整轮淡出。
+    const fadeThen = <A extends unknown[]>(remove?: (...args: A) => void | Promise<void>) => (
+      remove && !embedded ? (...args: A) => removeAfterFade(key, () => remove(...args)) : remove
+    );
+    return (
     <>
     {r.kind === 'pending' && (
       <PendingBatch
@@ -374,8 +425,9 @@ export function RoundList({
         onReEdit={onReEdit}
         reuseParameter={reuseParameter}
         onRegenerate={onRegenerate}
-        onDeleteBatch={onDeleteBatch}
+        onDeleteBatch={fadeThen(onDeleteBatch)}
         onLightbox={setLightboxSrc}
+        justCompleted={seenPendingKeys.current.has(key)}
         onReuseReferences={onReuseReferences}
         onEditAsReference={onEditAsReference}
         onSavePromptAsset={onSavePromptAsset}
@@ -390,7 +442,7 @@ export function RoundList({
         round={r}
         embedded={embedded}
         showActions={!embedded || rounds.length === 1}
-        onDeleteFailed={onDeleteFailed}
+        onDeleteFailed={fadeThen(onDeleteFailed)}
         onReEdit={onReEdit}
         reuseParameter={reuseParameter}
         onRegenerate={onRegenerate}
@@ -399,7 +451,8 @@ export function RoundList({
       />
     )}
     </>
-  );
+    );
+  };
   if (rounds.length === 0) return null;
   return (
     <>
@@ -417,25 +470,24 @@ export function RoundList({
         )}
         {embedded ? <MediaActivationBoundary>
           {active => <div className={ROUND_MEDIA_CLASS}>{rounds.map(r => r.kind !== 'agent' && (
-            <Fragment key={r.jobId}>{renderMedia(r, active)}</Fragment>
+            <Fragment key={roundKey(r)}>{renderMedia(r, active)}</Fragment>
           ))}</div>}
         </MediaActivationBoundary> : mountedRounds.map((r, index) => {
           const date = roundDate(r);
           const startsDate = index === 0 || roundDate(mountedRounds[index - 1]) !== date;
-          const stableKey =
-            r.kind === 'agent' ? r.turn.turn_id : r.jobId ? r.jobId :
-            r.kind === 'pending' ? `pending-${r.startedAt}` :
-            `${r.kind}-${r.submittedAt}`;
+          const stableKey = mountedKeys[index];
           return (
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
             <Fragment key={stableKey}>
             {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
             {!embedded && startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
-            {r.kind === 'agent' ? renderAgent?.(r) : <MediaActivationBoundary jobId={r.jobId}>
-              {(mediaActive) => (
-                renderMedia(r, mediaActive)
-              )}
-            </MediaActivationBoundary>}
+            <RoundEnter enter={enteringKeys.has(stableKey)} leaving={leavingKeys.has(stableKey)}>
+              {r.kind === 'agent' ? renderAgent?.(r) : <MediaActivationBoundary jobId={r.jobId}>
+                {(mediaActive) => (
+                  renderMedia(r, mediaActive)
+                )}
+              </MediaActivationBoundary>}
+            </RoundEnter>
             </Fragment>
           );
         })}
@@ -492,14 +544,13 @@ function PendingBatch({
       onClick={() => { void onCancel(round.jobId!); }}
     >
       <StopIcon size="sm" className="mr-1.5 fill-current" aria-hidden />
-      {round.cancelRequested ? '停止中' : '停止'}
+      <SwapLabel active={Boolean(round.cancelRequested)} on="停止中…" off="停止" />
     </ActionButton>
   );
+  const isVideo = round.config.kind === 'video';
+  const expectedMs = expectedDurationMs(round.config.kind, round.config.duration);
+  // 等待区只留一套信息：中央转圈 + 底部渐近细条 + 阶段角标；耗时只在操作行显示一处。
   return (
-    <>
-      {!embedded && <div className="mb-3">
-        <WaitingCopy startedAt={round.startedAt} now={now} phase={round.progressPhase} />
-      </div>}
       <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
         {!embedded && <div className={ROUND_HEADER_CLASS}>
           <div className={ROUND_PROMPT_ROW_CLASS}>
@@ -535,11 +586,22 @@ function PendingBatch({
               data-skeleton
               aria-busy="true"
               style={aspectStyle(round.config)}
-              className="relative flex w-[251.5px] items-center justify-center rounded-lg bg-card/40"
+              className="relative flex w-[251.5px] items-center justify-center overflow-hidden rounded-lg bg-card/40"
             >
               {i === 0 && !showActions && cancel && <div className="absolute bottom-2 right-2">{cancel}</div>}
-              <ProgressBadge round={round} now={now} />
-              <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span
+                data-testid="progress-badge"
+                className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white"
+              >
+                {stageLabel(round.progressPhase, isVideo)}
+              </span>
+              <div className={ROUND_SPINNER_CLASS} />
+              <ProgressLine
+                startedAt={round.startedAt}
+                expectedMs={expectedMs}
+                phase={round.progressPhase}
+                held={isVideo && !round.progressPhase}
+              />
             </div>
           ))}
         </div>
@@ -552,7 +614,6 @@ function PendingBatch({
           </p></Hint>
         </div>}
       </section>
-    </>
   );
 }
 
@@ -582,55 +643,6 @@ function MediaActivationBoundary({
     <div ref={ref} data-round-job={jobId ?? undefined}>
       {children(mediaActive)}
     </div>
-  );
-}
-
-/** 进度卡点 → 百分比。
- *
- * 真实信号：sent=20（任务已提交上游）、downloading=95（产物下载中）、终态时卡片整体切换。
- * 中段（50/75）按预期时长的时间卡点跳变 —— 上游任务查询不回真实进度（Ark/可灵/HappyHorse
- * 均只有状态枚举，2026-06-12 查证），只能用预期时间近似。
- * 图片任务无提交/下载拆分（同步单调用）：纯时间卡点 20→50→75，封顶 90 等 DONE。
- */
-function progressPercent(opts: {
-  isVideo: boolean;
-  phase: Job['progress_phase'] | undefined;
-  startedAt: number;
-  durationSec?: number;
-  now: number;
-}): number {
-  const { isVideo, phase, startedAt, durationSec, now } = opts;
-  if (phase === 'downloading') return 95;
-  if (isVideo && !phase) return 0; // 素材准备中（含本地参考视频 OSS 中转），还没提交上游
-  const expectedMs = isVideo ? (90 + (durationSec ?? 5) * 10) * 1000 : 60_000;
-  const elapsed = now - startedAt;
-  if (!isVideo && elapsed >= expectedMs) return 90;
-  if (elapsed >= expectedMs * 0.75) return 75;
-  if (elapsed >= expectedMs * 0.5) return 50;
-  return 20;
-}
-
-function ProgressBadge({
-  round,
-  now,
-}: {
-  round: Extract<RoundState, { kind: 'pending' }>;
-  now: number;
-}) {
-  const percent = progressPercent({
-    isVideo: round.config.kind === 'video',
-    phase: round.progressPhase,
-    startedAt: round.startedAt,
-    durationSec: round.config.duration,
-    now,
-  });
-  return (
-    <span
-      data-testid="progress-badge"
-      className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white backdrop-blur-glass"
-    >
-      {round.progressPhase === 'waiting_gateway' ? '等待网关' : round.progressPhase?.startsWith('queued:') ? `排队第 ${round.progressPhase.slice(7)} 位` : `${percent}% 生成中`}
-    </span>
   );
 }
 
@@ -774,9 +786,8 @@ function ReferenceStack({
                   zIndex: isActive ? 30 : i,
                   transform: `translateX(${i * (REF_CARD_W - (hover ? REF_OVERLAP_HOVER : REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
                   transformOrigin: 'center',
-                  transition: 'transform 250ms ease',
                 }}
-                className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
+                className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card transition-transform duration-200 ease-out"
               >
                 <RefThumb src={src} jobId={jobId} mediaActive={mediaActive} />
               </span>
@@ -985,7 +996,13 @@ function RefThumb({ src, jobId, mediaActive }: { src: string; jobId?: string; me
 
 type ShareResultHandler = (jobId: string, index: number, path: string, config: RoundConfig) => void;
 
-const RESULT_ACTION_CLASS = 'grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+// 结果图上的悬停按钮用不透明底，不叠毛玻璃：每张图好几颗 backdrop-blur 在长列表里很贵。
+const RESULT_BUTTON_BASE = 'grid size-8 place-items-center rounded-full border border-border bg-scrim transition-opacity duration-150 hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+const RESULT_ACTION_CLASS = `${RESULT_BUTTON_BASE} text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100`;
+/** 喜欢、隐藏这类开关：打开时常驻显示，关着时随悬停浮现。 */
+function resultToggleClass(on: boolean) {
+  return `${RESULT_BUTTON_BASE} ${on ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`;
+}
 
 /** 保存一张生成结果。index 是 imagePaths 下标（= Job.output_paths 下标）；
  *  generated = Studio 自家出图（job.namespace === 'studio'），只有它能存成带配方的生成资产。 */
@@ -1050,10 +1067,13 @@ function DoneBatch({
   onShareResult,
   onSetPromptPreview,
   mediaActive,
+  justCompleted,
 }: {
   embedded: boolean;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'done' }>;
+  /** 这一轮刚从「生成中」变成完成：结果在占位交接层上淡入。 */
+  justCompleted: boolean;
   favorites?: string[];
   onToggleFavorite?: (path: string) => void | Promise<void>;
   hiddenPaths?: string[];
@@ -1094,6 +1114,7 @@ function DoneBatch({
         config: round.config,
       })
     : undefined;
+  const startedAt = Date.parse(round.submittedAt);
 
   return (
     <section className={embedded ? "contents" : ROUND_SECTION_CLASS}>
@@ -1142,29 +1163,25 @@ function DoneBatch({
           ? round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
               return (
-                <figure
+                <ResultFrame
                   key={path}
-                  data-round-job={embedded && index === 0 ? round.jobId : undefined}
-                  data-testid={`studio-result-video-${index + 1}`}
+                  config={round.config}
+                  justCompleted={justCompleted}
+                  startedAt={startedAt}
+                  roundJob={embedded && index === 0 ? round.jobId : undefined}
+                  testId={`studio-result-video-${index + 1}`}
                   className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
-                >
-                  {mediaActive ? (
-                    <video
-                      src={videoSrc(path)}
-                      controls
-                      preload="metadata"
-                      playsInline
-                      className="h-full w-full"
-                    />
+                  media={({ onSize, onReady }) => mediaActive ? (
+                    <ResultVideo src={videoSrc(path)} onSize={onSize} onReady={onReady} />
                   ) : (
                     <div
                       data-testid="studio-video-placeholder"
-                      style={aspectStyle(round.config)}
                       className="flex h-full w-full items-center justify-center text-muted-foreground"
                     >
                       <VideoIcon size="xl" aria-hidden />
                     </div>
                   )}
+                >
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {share && (
                       <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
@@ -1180,45 +1197,52 @@ function DoneBatch({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
-                      className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                      className={resultToggleClass(favorited)}
                     >
-                      <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
+                      <SwapIcon swapKey={favorited} variant="pop"><FavoriteIcon className={favorited ? 'fill-current' : ''} aria-hidden /></SwapIcon>
                     </Button></Hint>
                     <Hint label="下载视频"><a
                       href={videoSrc(path)}
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
                       aria-label={`下载生成视频 ${index + 1}`}
-                      className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
+                      className={RESULT_ACTION_CLASS}
                     >
                       <DownloadIcon aria-hidden />
                     </a></Hint>
                   </div>
-                </figure>
+                </ResultFrame>
               );
             })
           : round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
               const hidden = !!hiddenPaths && isGalleryHidden(path, hiddenPaths);
               return (
-                <figure
+                <ResultFrame
                   key={path}
-                  data-round-job={embedded && index === 0 ? round.jobId : undefined}
-                  data-testid={`studio-result-thumb-${index + 1}`}
+                  config={round.config}
+                  justCompleted={justCompleted}
+                  startedAt={startedAt}
+                  roundJob={embedded && index === 0 ? round.jobId : undefined}
+                  testId={`studio-result-thumb-${index + 1}`}
                   className="media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
                   onClick={() => onLightbox?.(imageSrc(path))}
+                  media={({ onSize, onReady }) => (
+                    <RevealImage
+                      src={imageSrc(path)}
+                      alt={`生成结果 ${index + 1}`}
+                      loading="lazy"
+                      decoding="async"
+                      onLoad={event => onSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+                      onReady={onReady}
+                      className="media-checker relative h-full w-full object-contain"
+                    />
+                  )}
                 >
-                  <img
-                    src={imageSrc(path)}
-                    alt={`生成结果 ${index + 1}`}
-                    loading="lazy"
-                    decoding="async"
-                    className="media-checker h-full w-full object-contain"
-                  />
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {(share || saveResult || onSetPromptPreview) && <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
                         aria-label={`生成结果 ${index + 1} 的更多操作`}
-                        className="size-8 rounded-full bg-scrim text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        className="size-8 rounded-full bg-scrim text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
                         onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
                         {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><AddImageIcon />设为效果图</DropdownMenuItem>}
@@ -1231,16 +1255,16 @@ function DoneBatch({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
-                      className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                      className={resultToggleClass(favorited)}
                     >
-                      <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
+                      <SwapIcon swapKey={favorited} variant="pop"><FavoriteIcon className={favorited ? 'fill-current' : ''} aria-hidden /></SwapIcon>
                     </Button></Hint>
                     {onToggleHidden && (
                       <Hint label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}><Button variant="bare"
                         type="button"
                         onClick={(e) => { e.stopPropagation(); void onToggleHidden(path); }}
                         aria-label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
-                        className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hidden ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                        className={resultToggleClass(hidden)}
                       >
                         <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <HideIcon aria-hidden /> : <ShowIcon aria-hidden />}</SwapIcon>
                       </Button></Hint>
@@ -1250,7 +1274,7 @@ function DoneBatch({
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`下载生成结果 ${index + 1}`}
-                      className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      className={RESULT_ACTION_CLASS}
                     >
                       <DownloadIcon aria-hidden />
                     </a></Hint>
@@ -1261,12 +1285,12 @@ function DoneBatch({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onEditAsReference(path); }}
                       aria-label={`编辑生成结果 ${index + 1}（导入为参考图）`}
-                      className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      className={`absolute bottom-2 left-2 ${RESULT_ACTION_CLASS}`}
                     >
                       <EditIcon aria-hidden />
                     </Button></Hint>
                   )}
-                </figure>
+                </ResultFrame>
               );
             })}
       </div>
@@ -1310,6 +1334,36 @@ function DoneBatch({
         )}
       </div>}
     </section>
+  );
+}
+
+/** 结果卡：与占位卡同一个按目标比例的框（读到真实尺寸后改用真实比例）。
+ *  刚生成完的结果先垫着占位交接层，媒体解码后在它上面淡入；历史结果直接在卡片底色上淡入。 */
+function ResultFrame({ config, justCompleted, startedAt, roundJob, testId, className, onClick, media, children }: {
+  config: RoundConfig;
+  justCompleted: boolean;
+  startedAt: number;
+  roundJob?: string;
+  testId: string;
+  className: string;
+  onClick?: () => void;
+  media: (handlers: { onSize: (width: number, height: number) => void; onReady: () => void }) => ReactNode;
+  children: ReactNode;
+}) {
+  const [style, onSize] = useResultAspect(aspectStyle(config));
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <figure data-round-job={roundJob} data-testid={testId} style={style} className={className} onClick={onClick}>
+      {justCompleted && (
+        <CompletionUnderlay
+          revealed={revealed}
+          startedAt={startedAt}
+          expectedMs={expectedDurationMs(config.kind, config.duration)}
+        />
+      )}
+      {media({ onSize, onReady: () => setRevealed(true) })}
+      {children}
+    </figure>
   );
 }
 

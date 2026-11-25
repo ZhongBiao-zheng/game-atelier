@@ -52,6 +52,8 @@ import {
 } from '@/lib/mentionTokens';
 import { FileInput } from '@/components/ui/file-input';
 import { Hint } from '@/components/ui/tooltip';
+import { Collapse } from '@/components/ui/collapse';
+import { SwapIcon } from '@/components/ui/swap-icon';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
@@ -854,6 +856,7 @@ export function PromptInput({
     <div
       ref={shellRef}
       data-testid="studio-prompt-shell"
+      data-state={collapsed ? 'collapsed' : 'expanded'}
       onClick={collapsed ? () => onExpandRequest?.() : undefined}
       onFocus={() => onShellFocusChange?.(true)}
       onBlur={(e) => {
@@ -862,9 +865,9 @@ export function PromptInput({
       // backdrop-blur 已让外壳自成 stacking context，z-20 把它（含内部弹窗）整体抬到
       // 首页作品墙之上；全局梯度：内容卡片 auto < 外壳 20 < sticky 头 30 < lightbox/loading 50。
       // collapsed（Studio 滚动联动）收成单行条；圆角与展开态保持一致。
-      className={`bg-glass shell-glow rounded-xl border border-input px-4 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto transition-all duration-300 ${
-        collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-3.5 pb-4 gap-3 min-h-[174px]'
-      }`}
+      // 外壳本身不做过渡（毛玻璃补间很贵）：内边距恒定，展开多出来的间距都放在下面同步收放的行里，
+      // 高度走 grid-rows 0fr↔1fr，位置与大小只动 transform，统一 300ms in-out。
+      className="bg-glass shell-glow rounded-xl border border-input px-4 py-2 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto"
     >
       {showRefPanel && (
         <FileInput
@@ -896,7 +899,9 @@ export function PromptInput({
           )}
         </div>
       )}
-      {showRefPanel && refDrawerOpen && !collapsed && stackItems.length > 0 && (
+      <ShellCollapse open={!collapsed}><div className="h-1.5" /></ShellCollapse>
+      <Collapse open={Boolean(showRefPanel && refDrawerOpen && !collapsed && stackItems.length > 0)}>
+        <div className="pb-3">
         <div data-testid="reference-drawer" className="border-b border-border/70 pb-3">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1">
@@ -1007,19 +1012,22 @@ export function PromptInput({
             )}
           </div>
         </div>
-      )}
-      <div className={`flex min-h-0 gap-3.5 transition-[height] duration-300 ${collapsed ? 'h-[60px] items-center' : 'min-h-[92px] items-start'}`}>
+        </div>
+      </Collapse>
+      {/* 第一行：版面高度恒为 60px 起，展开时由编辑器撑到 92px 以上；参考区只用 transform 落位
+          （展开下移 16px 对齐 92px 行的中线，收起缩到 80%），不参与高度变化。 */}
+      <div className="flex min-h-[60px] items-start gap-3.5">
         {showRefPanel && !(refDrawerOpen && !collapsed && stackItems.length > 0) && (
           <div
             data-testid="reference-images-panel"
-            className={`shrink-0 relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'h-[60px] scale-80' : 'h-[92px]'}`}
+            className={`shrink-0 relative h-[60px] overflow-visible origin-left transition-transform duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'}`}
             style={{ width: REF_W + 14 }}
           >
             {stackItems.length === 0 ? (
               <Label
                 htmlFor={refInputId}
                 aria-label={isOmni ? '添加参考内容' : '添加参考图'}
-                className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-input"
+                className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-[translate,filter,border-color] duration-150 hover:-translate-y-1 hover:brightness-110 hover:border-input"
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <AddIcon size="lg" className="text-muted-foreground" />
@@ -1028,12 +1036,11 @@ export function PromptInput({
               <>
                 {/* 三阶交互第 1/2 阶：默认堆叠；悬停时右侧层级始终高于左侧、只压一个角，hover 微上抬微放大，+ 圆钮动态形变为右侧「+ 参考内容」卡片 */}
                 <div
-                  className="absolute inset-y-0 left-0 overflow-visible"
+                  className="absolute inset-y-0 left-0 overflow-visible transition-[width] duration-300 ease-in-out"
                   style={{
                     width: refExpanded
                       ? `${(stackItems.length > 1 ? 2 : 1) * REF_STEP + REF_W + 14}px`
                       : `${REF_W + 14}px`,
-                    transition: 'width 300ms ease',
                   }}
                   onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
                 >
@@ -1050,14 +1057,13 @@ export function PromptInput({
                       <div
                         key={i}
                         data-testid="reference-stack-item"
-                        className="absolute top-1/2 left-0"
+                        className="absolute top-1/2 left-0 transition-[left,transform] duration-300 ease-in-out"
                         style={{
                           width: REF_W,
                           height: REF_H,
                           zIndex,
                           left: refExpanded ? `${i * REF_STEP}px` : '0px',
                           transform: `translateY(calc(-50% + ${hovered ? REF_HOVER_LIFT : 0}px)) rotate(${angle}deg) scale(${hovered ? REF_HOVER_SCALE : 1})`,
-                          transition: 'left 300ms ease, transform 250ms ease',
                         }}
                         onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(i); } }}
                         onMouseLeave={() => setRefHovered(null)}
@@ -1098,7 +1104,7 @@ export function PromptInput({
                       aria-label={`移除参考素材 ${refHovered + 1}`}
                       onMouseEnter={() => { if (!collapsed) { setRefExpanded(true); setRefHovered(refHovered); } }}
                       onClick={(e) => { e.stopPropagation(); handleRefRemove(refHovered); }}
-                      className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 backdrop-blur-glass transition-all duration-200 hover:bg-destructive hover:text-foreground"
+                      className="absolute z-50 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 backdrop-blur-glass transition-[left,background-color,color,scale] duration-200 hover:bg-destructive hover:text-foreground"
                       style={{
                         left: `${(refExpanded ? refHovered * REF_STEP : 0) + REF_W - 11}px`,
                         top: `calc(50% - ${REF_H / 2 + 11}px)`,
@@ -1144,7 +1150,7 @@ export function PromptInput({
                       data-testid="reference-stack-add"
                       htmlFor={refInputId}
                       onMouseEnter={() => { if (!collapsed) setRefExpanded(true); }}
-                      className="absolute flex cursor-pointer flex-col items-center justify-center overflow-hidden border border-border bg-secondary text-muted-foreground hover:border-input hover:bg-card hover:text-foreground"
+                      className="absolute flex cursor-pointer flex-col items-center justify-center overflow-hidden border border-border bg-secondary text-muted-foreground transition-[left,top,width,height,border-radius,transform,background-color,color] duration-300 ease-in-out hover:border-input hover:bg-card hover:text-foreground"
                       style={{
                         width: refExpanded ? REF_W : 26,
                         height: refExpanded ? REF_H : 26,
@@ -1153,12 +1159,11 @@ export function PromptInput({
                         borderRadius: refExpanded ? '8px' : '9999px',
                         zIndex: 30,
                         transform: refExpanded ? 'translateY(-50%) rotate(-5deg)' : 'translateY(-50%) rotate(0deg)',
-                        transition: 'left 300ms ease, top 300ms ease, width 300ms ease, height 300ms ease, border-radius 300ms ease, transform 300ms ease, background-color 200ms ease, color 200ms ease',
                       }}
                     >
                       <AddIcon size={refExpanded ? 'md' : 'sm'} className="shrink-0" />
                       <span
-                        className={`overflow-hidden whitespace-nowrap text-xs transition-all duration-300 ${
+                        className={`overflow-hidden whitespace-nowrap text-xs transition-[max-height,margin,opacity] duration-300 ease-in-out ${
                           refExpanded ? 'mt-1 max-h-4 opacity-100' : 'mt-0 max-h-0 opacity-0'
                         }`}
                       >
@@ -1172,7 +1177,7 @@ export function PromptInput({
           </div>
         )}
         {isMj && onMjRefsChange && (
-          <div className={`self-center shrink-0 transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}>
+          <div className={slotRowClass(collapsed)}>
             <MjReferenceSlots
               refs={mjRefs}
               onChange={onMjRefsChange}
@@ -1183,7 +1188,7 @@ export function PromptInput({
           </div>
         )}
         {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (videoCaps?.maxFrames ?? 2) > 0 && (
-          <div className={`self-center shrink-0 transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}>
+          <div className={slotRowClass(collapsed)}>
             <FirstLastFrames
               frames={videoFrames}
               onChange={onVideoFramesChange}
@@ -1191,6 +1196,9 @@ export function PromptInput({
             />
           </div>
         )}
+        {/* 编辑器高度走 grid-rows：收起时只留首行（32px 窗口裁掉其余行），整块下移 14px 落到 60px 行的中线。 */}
+        <div className={`grid min-w-0 flex-1 transition-[grid-template-rows,translate] duration-300 ease-in-out ${collapsed ? 'grid-rows-[0fr] translate-y-3.5' : 'grid-rows-[1fr]'}`}>
+        <div className="min-h-8 overflow-hidden">
         <div
           ref={editorRef}
           contentEditable={!noWorkflowPrompt}
@@ -1213,10 +1221,12 @@ export function PromptInput({
           onCompositionEnd={(e) => { composing.current = false; onEditorInput(e); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
-          className={`${isLongPrompt && !collapsed ? 'thin-scrollbar' : 'no-scrollbar'} flex-1 min-h-0 w-full cursor-text whitespace-pre-wrap break-words bg-transparent text-sm leading-6 text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
-            collapsed ? 'h-6 self-center overflow-hidden pr-10' : `min-h-[92px] max-h-[220px] overflow-y-auto py-1 ${onSavePromptAsset ? 'pr-10' : 'pr-2'}`
+          className={`${isLongPrompt && !collapsed ? 'thin-scrollbar' : 'no-scrollbar'} w-full min-h-[92px] max-h-[220px] py-1 cursor-text whitespace-pre-wrap break-words bg-transparent text-sm leading-6 text-foreground focus:outline-none rounded-md pl-2 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
+            collapsed ? 'overflow-hidden pr-10' : `overflow-y-auto ${onSavePromptAsset ? 'pr-10' : 'pr-2'}`
           }`}
         />
+        </div>
+        </div>
         {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
         {onSavePromptAsset && !collapsed && text.trim() && (
           <Button variant="bare"
@@ -1288,17 +1298,18 @@ export function PromptInput({
           ))}
         </ToolbarPopover>
       </div>
-      {/* 控件行收放：grid-rows 0fr/1fr 让 auto 高度可动画；内容层 origin-bottom 向中下缩放 +
-          blur 渐隐，中层常驻 overflow-hidden 把整个过程关在壳内部（弹窗已全部 portal 出壳，不受裁剪）。 */}
+      {/* 控件行收放：grid-rows 0fr/1fr 让 auto 高度可动画；内容层 origin-bottom 向中下缩放并渐隐，
+          中层常驻 overflow-hidden 把整个过程关在壳内部（弹窗已全部 portal 出壳，不受裁剪）。
+          展开时与上一行的 12px 间距、底部多出的 8px 都在这一层里，跟着一起收。 */}
       <div
-        className={`grid transition-all duration-300 ${
+        className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
           collapsed ? 'grid-rows-[0fr] pointer-events-none' : 'grid-rows-[1fr]'
         }`}
       >
         <div className="min-h-0 min-w-0 overflow-hidden">
           <div
-            className={`origin-bottom transition-all duration-300 ${
-              collapsed ? 'scale-90 translate-y-2 opacity-0 blur-[6px]' : 'scale-100 translate-y-0 opacity-100 blur-none'
+            className={`origin-bottom pt-3 pb-3 transition-[opacity,scale,translate] duration-300 ease-in-out ${
+              collapsed ? 'scale-90 translate-y-2 opacity-0' : 'opacity-100'
             }`}
           >
       <div
@@ -1635,25 +1646,36 @@ export function PromptInput({
           </div>
         </div>
       </div>
-      {/* 提交按钮：唯一一颗，锚定壳右下角。收/放时壳底边在屏幕上不动，按钮只原位缩放
-          40↔32px，不随状态重新挂载——视觉连续性与参考堆叠 / 编辑器的缩放一致。 */}
+      {/* 提交按钮：唯一一颗，锚定壳右下角，固定 40px。收起只在外层做 transform（缩到 80%、上移 2px
+          落到单行条中线），不改尺寸与位置；缩放放在外层，按下反馈的 scale 不会和它打架。 */}
+      <div className={`absolute bottom-4 right-4 origin-center transition-transform duration-300 ease-in-out ${collapsed ? '-translate-y-0.5 scale-80' : ''}`}>
       <Hint label={isAgent ? (onStop ? '停止' : '发送') : workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
         type="button"
         onClick={(e) => { e.stopPropagation(); if (onStop) onStop(); else submit(); }}
         disabled={!onStop && !canSubmit}
         aria-label={isAgent ? (onStop ? "停止" : "发送") : "提交生成"}
-        className={`absolute right-4 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-all duration-300 ${
-          collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
-        }`}
+        className="inline-flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
       >
-        <ActionIcon size="lg"
-          aria-hidden
-          className={`transition-transform duration-300 ${collapsed ? 'scale-90': ''}`}
-        />
+        <SwapIcon swapKey={ActionIcon === StopIcon ? 'stop' : 'send'}><ActionIcon size="lg" aria-hidden /></SwapIcon>
       </Button></Hint>
+      </div>
       {slotLightbox && <Lightbox src={slotLightbox} onClose={() => setSlotLightbox(null)} />}
     </div>
   );
+}
+
+/** 输入壳里随收放出现/消失的一段：grid-rows 0fr↔1fr，与壳内其他收放同一时长与曲线。 */
+function ShellCollapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+/** MJ 参考槽、首尾帧：版面固定 60px 高，展开下移 16px 对齐 92px 行的中线，收起缩到 80%，只动 transform。 */
+function slotRowClass(collapsed: boolean) {
+  return `flex h-[60px] shrink-0 items-center origin-left transition-transform duration-300 ease-in-out ${collapsed ? 'scale-80' : 'translate-y-4'}`;
 }
 
 /** 数量弹窗的 1-4 选项（图片张数 / 视频条数共用同一配方）。 */

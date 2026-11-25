@@ -123,7 +123,7 @@ function MjReferenceGroup({
           htmlFor={disabled ? undefined : inputId}
           aria-label={label}
           aria-disabled={disabled || undefined}
-          className={`flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all ${
+          className={`flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-[translate,border-color] duration-150 ${
             disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
           }`}
         >
