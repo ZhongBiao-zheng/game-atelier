@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { FavoriteIcon } from '@/components/ui/icons';
+import { RevealImage } from '@/components/ui/reveal-image';
+import { SwapIcon } from '@/components/ui/swap-icon';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -29,39 +31,6 @@ export function Home() {
     };
   }, []);
 
-  const GalleryCard = useCallback(({ item }: { item: GalleryItem }) => {
-    const favorited = isFavorited(item.path);
-    return (
-      // 卡片容器本身非交互：导航链接与喜欢按钮作两个平级交互元素，
-      // 不再用 <a> 套 <button>（非法嵌套交互），喜欢点击也无需 stopPropagation 兜底。
-      <div className="media-edge group overflow-hidden rounded-xl">
-        {/* Pinterest 式瀑布流：图片直出、无放大，只留内侧发丝边，hover 淡入操作按钮 */}
-        <Link
-          href={galleryItemHref(item)}
-          aria-label={galleryItemAriaLabel(item)}
-          className="block"
-        >
-          <img
-            src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
-            alt=""
-            className="media-checker w-full block"
-            loading="lazy"
-          />
-        </Link>
-
-        {/* 喜欢按钮：与导航链接平级（不在 <a> 内），hover 淡入（已喜欢常显），玻璃药丸取代描边框 */}
-        <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
-          type="button"
-          onClick={() => void toggleFavorite(item.path)}
-          aria-label={favorited ? '取消喜欢' : '喜欢'}
-          className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
-        >
-          <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
-        </Button></Hint>
-      </div>
-    );
-  }, [isFavorited, toggleFavorite]);
-
   return (
     <div className="relative isolate px-8 pb-12" aria-label="作品集首页">
       {/* 波点铺满整页（含作品墙），垫在所有内容下面 */}
@@ -79,14 +48,13 @@ export function Home() {
 
       {/* Loading 状态 */}
       {state.kind === 'loading' && (
-        <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              data-skeleton
-              className="mb-6 break-inside-avoid bg-card/40 rounded-lg"
-              style={{ height: 200 + (i % 3) * 80 }}
-            />
+        <div className="flex items-start gap-6">
+          {distributeColumns(SKELETON_HEIGHTS, colCount).map((col, ci) => (
+            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-6">
+              {col.map((height, i) => (
+                <div key={i} data-skeleton className="rounded-xl bg-card/40" style={{ height }} />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -112,7 +80,12 @@ export function Home() {
           {distributeColumns(state.items, colCount).map((col, ci) => (
             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-6">
               {col.map((item) => (
-                <GalleryCard key={item.path} item={item} />
+                <GalleryCard
+                  key={item.path}
+                  item={item}
+                  favorited={isFavorited(item.path)}
+                  onToggleFavorite={toggleFavorite}
+                />
               ))}
             </div>
           ))}
@@ -122,9 +95,57 @@ export function Home() {
   );
 }
 
+/** 骨架高度：与作品墙同一套轮转分列、同圆角，载入后各列不换位。 */
+const SKELETON_HEIGHTS = Array.from({ length: 6 }, (_, i) => 200 + (i % 3) * 80);
+
+/** 作品卡。必须是模块顶层组件：在 Home 里用 useCallback 造组件，喜欢一变组件身份就变，整面墙卸载重挂。
+ *  接口还不给宽高：载入前先按方形占位，拿到原图尺寸后换成真实比例，图片解码完再淡入。 */
+const GalleryCard = memo(function GalleryCard({ item, favorited, onToggleFavorite }: {
+  item: GalleryItem;
+  favorited: boolean;
+  onToggleFavorite: (path: string) => void;
+}) {
+  const [measured, setMeasured] = useState(false);
+  return (
+    // 卡片容器本身非交互：导航链接与喜欢按钮作两个平级交互元素，
+    // 不再用 <a> 套 <button>（非法嵌套交互），喜欢点击也无需 stopPropagation 兜底。
+    <div
+      className={`media-edge group overflow-hidden rounded-xl ${measured ? '' : 'aspect-square bg-card/40'}`}
+    >
+      {/* Pinterest 式瀑布流：图片直出、无放大，只留内侧发丝边，hover 淡入操作按钮 */}
+      <Link
+        href={galleryItemHref(item)}
+        aria-label={galleryItemAriaLabel(item)}
+        className="block"
+      >
+        <RevealImage
+          src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+          alt=""
+          className="media-checker w-full block"
+          loading="lazy"
+          onLoad={() => setMeasured(true)}
+          onError={() => setMeasured(true)}
+        />
+      </Link>
+
+      {/* 喜欢按钮：与导航链接平级（不在 <a> 内），hover 淡入（已喜欢常显）；不透明底，不给每张卡叠毛玻璃 */}
+      <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
+        type="button"
+        onClick={() => onToggleFavorite(item.path)}
+        aria-label={favorited ? '取消喜欢' : '喜欢'}
+        className={`absolute left-3 top-3 z-10 grid size-9 place-items-center rounded-full bg-card transition-opacity duration-150 hover:bg-secondary ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}
+      >
+        <SwapIcon swapKey={favorited} variant="pop">
+          <FavoriteIcon className={favorited ? 'fill-current' : ''} aria-hidden />
+        </SwapIcon>
+      </Button></Hint>
+    </div>
+  );
+});
+
 /** 轮转分列：item i → 第 i%n 列。读首行即 items[0..n-1]（排名前列），列内再竖向堆叠保留瀑布流。 */
-function distributeColumns(items: GalleryItem[], n: number): GalleryItem[][] {
-  const cols: GalleryItem[][] = Array.from({ length: n }, () => []);
+function distributeColumns<T>(items: T[], n: number): T[][] {
+  const cols: T[][] = Array.from({ length: n }, () => []);
   items.forEach((item, i) => cols[i % n].push(item));
   return cols;
 }

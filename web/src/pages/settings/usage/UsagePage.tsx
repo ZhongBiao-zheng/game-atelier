@@ -11,6 +11,7 @@ import { TaskTable } from './TaskTable';
 import { useTaskFilters } from './useTaskFilters';
 import { QuotaCard } from './QuotaCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useDelayedFlag } from './useDelayedFlag';
 
 /** Select 不接受空字符串选项值，「全部成员」用这个占位。 */
 const ALL_MEMBERS = '__all__';
@@ -35,6 +36,7 @@ export function UsagePage() {
   const [data, setData] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const dimmed = useDelayedFlag(loading && data !== null);
   useEffect(() => {
     let active = true;
     fetchGateway()
@@ -132,24 +134,28 @@ export function UsagePage() {
       )}
       {!data && loading && !error && <p className="text-sm text-muted-foreground">读取中…</p>}
       {data && (
-        <div aria-busy={loading} className={`space-y-6 ${loading ? 'opacity-50' : ''}`}>
-          <KpiRow data={data}>
-            <QuotaCard />
-          </KpiRow>
-          {data.totals.count === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无用量记录</p>
-          ) : (
-            <>
-              <TrendChart data={data} />
-              <div className="grid gap-4 md:grid-cols-2">
-                {data.rankings.map((ranking) => (
-                  <RankingCard key={ranking.by} ranking={ranking} />
-                ))}
-              </div>
-              <TaskTable key={JSON.stringify([scope, range, source, member, taskFilters.fields])}
-                scope={scope} range={range} source={source} member={member} {...taskFilters.fields}
-                memberLabel={data.members.find(item => item.id === member)?.name} onFiltersChange={taskFilters.change} />
-            </>
+        <div className="space-y-6">
+          {/* 换范围时旧数据留在原地，请求慢于 150ms 才降透明度，新数据到达再淡回。任务表自管刷新，不在这一层叠暗。 */}
+          <div aria-busy={loading} className={`space-y-6 transition-opacity duration-200 ${dimmed ? 'opacity-50' : ''}`}>
+            <KpiRow data={data}>
+              <QuotaCard />
+            </KpiRow>
+            {data.totals.count === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无用量记录</p>
+            ) : (
+              <>
+                <TrendChart data={data} />
+                <div className="grid gap-4 md:grid-cols-2">
+                  {data.rankings.map((ranking) => (
+                    <RankingCard key={ranking.by} ranking={ranking} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {data.totals.count > 0 && (
+            <TaskTable scope={scope} range={range} source={source} member={member} {...taskFilters.fields}
+              memberLabel={data.members.find(item => item.id === member)?.name} onFiltersChange={taskFilters.change} />
           )}
         </div>
       )}

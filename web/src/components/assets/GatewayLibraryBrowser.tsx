@@ -5,6 +5,7 @@ import { gatewayContentUrl, gatewayThumbUrl, listGatewayAssets, listGatewayLibra
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { AssetFilterPill } from './AssetFilterPill';
 import { AssetMasonry, mediaRatio, useMediaSizes } from './AssetMasonry';
@@ -117,7 +118,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
           {entry => <div className="group min-w-0" draggable={false}>
             <div className="relative">
               <Button variant="ghost" aria-label={`查看 ${entry.title}`} className="block h-auto w-full p-0 text-left font-normal" onClick={() => { setViewing(entry); setPreview(0); setCopyError(false); }}>
-                {thumb(entry) ? <img src={thumb(entry)!} draggable={false} alt={entry.title} className="w-full rounded-md border border-border object-contain"
+                {thumb(entry) ? <RevealImage src={thumb(entry)!} draggable={false} alt={entry.title} className="w-full rounded-md border border-border object-contain"
                   onError={onUnavailable} onLoad={event => measure(entry.entry_id, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
                   : entry.kind !== 'prompt' ? placeholder(entry) : null}
                 {entry.kind === 'prompt' && <span className="block rounded-md border border-border bg-card p-3">
@@ -125,7 +126,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
                   <span className="line-clamp-2 whitespace-normal text-xs text-muted-foreground">{entry.prompt_text}</span>
                 </span>}
               </Button>
-              <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">{actionButton(entry)}</div>
+              <div className="absolute bottom-1 right-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">{actionButton(entry)}</div>
             </div>
             <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
               {entry.author && <span className="grid size-4 shrink-0 place-items-center rounded-full bg-secondary">{Array.from(entry.author)[0]}</span>}

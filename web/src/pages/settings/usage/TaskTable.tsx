@@ -8,6 +8,7 @@ import { KindBadge } from './KindBadge';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import type { TaskFilterChanges, TaskFilterName } from './useTaskFilters';
+import { useDelayedFlag } from './useDelayedFlag';
 
 type Filters = UsageTaskFields & {
   gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string;
@@ -38,6 +39,9 @@ export function TaskTable(filters: Filters) {
   const [status, setStatus] = useState<UsageTaskFilter>('all');
   const [data, setData] = useState<UsageTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // 换筛选时旧行留在原地，请求慢于 150ms 才降透明度，新数据到达再淡回；「加载更多」不算刷新。
+  const [refreshing, setRefreshing] = useState(false);
+  const dimmed = useDelayedFlag(refreshing && data !== null);
   const [error, setError] = useState('');
   const request = useRef(0);
   const [, navigate] = useLocation();
@@ -48,13 +52,13 @@ export function TaskTable(filters: Filters) {
   }), [project, model, alias, kind]);
   useEffect(() => {
     const current = ++request.current;
-    setData(null);
     setLoading(true);
+    setRefreshing(true);
     setError('');
     fetchUsageTasks({ scope, range, source, member, status, offset: 0, ...fields }, ...(gatewayAlias ? [gatewayAlias] as const : []))
       .then(next => { if (request.current === current) setData(next); })
       .catch(e => { if (request.current === current) setError(e instanceof Error ? e.message : String(e)); })
-      .finally(() => { if (request.current === current) setLoading(false); });
+      .finally(() => { if (request.current === current) { setLoading(false); setRefreshing(false); } });
     return () => { request.current = current + 1; };
   }, [scope, range, source, member, status, gatewayAlias, fields]);
 
@@ -117,7 +121,7 @@ export function TaskTable(filters: Filters) {
 
   return <section aria-label="任务" aria-busy={loading} className="min-w-0 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2.5">
-      <h2 className="text-sm font-semibold">任务 {data && <span className="font-normal text-muted-foreground">{data.total}</span>}</h2>
+      <h2 className="text-sm font-semibold">任务 {data && <span className="font-normal tabular-nums text-muted-foreground">{data.total}</span>}</h2>
       <ToggleGroup type="single" variant="outline" aria-label="状态筛选" value={status}
         onValueChange={value => { if (!value || value === status) return; request.current++; setStatus(value as typeof status); }}>
         {statuses.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
@@ -134,7 +138,7 @@ export function TaskTable(filters: Filters) {
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!data && loading && <p role="status" className="text-sm text-muted-foreground">读取任务中…</p>}
-    {data && <>
+    {data && <div className={`space-y-3 transition-opacity duration-200 ${dimmed ? 'opacity-50' : ''}`}>
       {data.rows.length > 0 ? <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead><tr className="text-left text-xs text-muted-foreground">
@@ -145,7 +149,7 @@ export function TaskTable(filters: Filters) {
         </table>
       </div> : <p className="text-sm text-muted-foreground">暂无匹配的任务</p>}
       {data.next_offset !== null && <div className="text-center"><Button variant="outline" size="sm" type="button" disabled={loading} onClick={() => void more()}
-       >{loading ? '加载中…' : '加载更多'}</Button></div>}
-    </>}
+       >{loading && !refreshing ? '加载中…' : '加载更多'}</Button></div>}
+    </div>}
   </section>;
 }

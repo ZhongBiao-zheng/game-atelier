@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { promptPreviewUrl } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { cn } from '@/lib/utils';
 import { AssetMasonry, mediaRatio, useMediaSizes, type MediaSize } from './AssetMasonry';
 import { AssetMediaTile } from './AssetMediaTile';
@@ -82,7 +83,7 @@ export function MediaPreview({ assetId, content, alt, className }: {
   className: string;
 }) {
   const src = assetMediaSrc(assetId, content);
-  if (content.mime_type.startsWith('image/')) return <img src={src} alt={alt} loading="lazy" className={className} />;
+  if (content.mime_type.startsWith('image/')) return <RevealImage src={src} alt={alt} loading="lazy" className={className} />;
   if (content.mime_type.startsWith('video/')) return <video src={src} muted playsInline preload="metadata" className={className} />;
   if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
   return null;

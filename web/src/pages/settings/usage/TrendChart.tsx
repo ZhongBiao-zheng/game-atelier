@@ -26,7 +26,7 @@ export function TrendChart({ data }: { data: UsageResponse }) {
         </div>
       </div>
       {data.trend.length > 0 && (
-        <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="flex justify-between text-xs tabular-nums text-muted-foreground">
           <span>{data.trend[0].start.slice(5)}</span>
           <span>{data.trend[data.trend.length - 1].start.slice(5)}</span>
         </div>

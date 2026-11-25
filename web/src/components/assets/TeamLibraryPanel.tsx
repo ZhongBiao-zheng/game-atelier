@@ -3,6 +3,7 @@ import { GatewayLibraryBrowser, GatewayLibraryHelp, useGatewayLibrarySources } f
 import type { GatewayLibrarySelection } from '@/api/gatewayLibraries';
 import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { AddIcon, ChevronDownIcon, CopyIcon, EditIcon, FolderIcon, LoadingIcon, RetryIcon, SearchIcon, UndoIcon } from '@/components/ui/icons';
 import {
   useCallback,
@@ -547,7 +548,7 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onUse, 
     <div className="relative">
       <Button variant="ghost" aria-label={`查看 ${entry.title}`} disabled={incomplete} onClick={() => onView(entry)} className="block h-auto w-full p-0 text-left font-normal">
         {entry.kind === 'prompt' ? <span className="block overflow-hidden rounded-md border border-border bg-card">
-          {entry.preview_images?.[0] && <img src={teamPromptPreviewUrl(libraryId, entry.id, entry.preview_images[0].file)}
+          {entry.preview_images?.[0] && <RevealImage src={teamPromptPreviewUrl(libraryId, entry.id, entry.preview_images[0].file)}
             alt={`${entry.title}效果图`} className="w-full object-contain" />}
           <span className="block p-3">
             <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
@@ -556,7 +557,7 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onUse, 
         </span> : <AssetMediaTile src={mime.startsWith('image/') ? teamAssetThumbUrl(libraryId, entry.id, 256) : teamAssetContentUrl(libraryId, entry.id)}
           mimeType={incomplete ? '' : mime} alt={entry.title} size={size} onMeasure={onMeasure} />}
       </Button>
-      <div className="pointer-events-none absolute inset-x-1 bottom-1 flex flex-wrap items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+      <div className="pointer-events-none absolute inset-x-1 bottom-1 flex flex-wrap items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
         <div className="pointer-events-auto flex items-center gap-1">
           {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><CopyIcon /></CardIconButton>}
           {owned && <>
