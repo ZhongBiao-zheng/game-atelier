@@ -58,7 +58,7 @@ export function AgentSection() {
     <section aria-label="Agent 状态" className="flex items-center gap-4 rounded-xl border border-border bg-card p-5">
       <div className="min-w-0 flex-1 space-y-1">
         <h2 className="text-sm font-semibold">允许本机 Agent 操作项目与画布</h2>
-        <p role="status" className="text-xs text-muted-foreground">{!status ? '读取中…' : status.enabled ? `${connected.length} 个已连接` : '关闭后本机 Agent 无法读写画布'}</p>
+        <p role="status" className="text-xs text-muted-foreground">{!status ? '加载中…' : status.enabled ? `${connected.length} 个已连接` : '关闭后本机 Agent 无法读写画布'}</p>
       </div>
       <Switch checked={Boolean(status?.enabled)} aria-label="允许 Agent 操作本机" disabled={!status || busy} onCheckedChange={next => void toggle(next)} />
     </section>

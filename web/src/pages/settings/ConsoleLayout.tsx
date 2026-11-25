@@ -18,6 +18,8 @@ import { PluginsPage } from './PluginsPage';
 import { PreferencesPage } from './PreferencesPage';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 export const CONSOLE_NAV: {
   group: string;
@@ -58,7 +60,7 @@ function LocalGatewayStatus() {
   }, []);
   if (!state?.enabled && !state?.config_error) return null;
   return <Hint label={state.config_error ?? state.status.error}><Link href="/settings/gateway"
-    className="mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+    className="content-swap-in mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${state.status.running
       ? 'bg-status-done' : state.status.error ? 'bg-destructive' : 'bg-status-pending'}`} />
     <span>局域网共享 · {state.config_error ? '配置损坏' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
@@ -103,7 +105,7 @@ function GatewayConnection() {
     return () => { active = false; unsubscribe(); };
   }, []);
   return <div className="hidden space-y-2 px-3 text-xs text-muted-foreground md:block">
-    {keys.map(key => <Hint key={key.alias} label={key.base_url ?? ''}><div className="flex min-w-0 items-center gap-2">
+    {keys.map(key => <Hint key={key.alias} label={key.base_url ?? ''}><div className="content-swap-in flex min-w-0 items-center gap-2">
       <span aria-label={connected.has(key.alias) ? '已连接' : '未连接'}
         className={`size-1.5 shrink-0 rounded-full ${connected.has(key.alias)
           ? 'bg-[color:var(--status-done)]' : 'bg-[color:var(--status-pending)]'}`} />
@@ -125,26 +127,36 @@ export function ConsoleLayout() {
       <Link href={lastCreativeLocation} className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
         <BackIcon aria-hidden />返回创作
       </Link>
-      <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-4.5">
+      {/* 选中底色是一个跟着当前项滑动的独立层（SelectionHighlight 认 aria-current="page"），各项只换文字与图标颜色。 */}
+      <nav aria-label="控制台" className="relative isolate flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-4.5">
+        <SelectionHighlight className="bg-popover ring-0" />
         {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'flex shrink-0 gap-1 md:mt-auto md:block'}>
           {!group.group && <><GatewayConnection /><LocalGatewayStatus /></>}
           {group.group && <p className="mb-2 hidden px-3 text-xs text-subtle-foreground md:block">{group.group}</p>}
           <div className="flex gap-1 md:flex-col">
-            {group.items.filter(item => item.path !== '/settings/relay-admin' || adminAliases.length > 0).map(item => <Link key={item.path} href={item.path}
-              aria-current={current.path === item.path ? 'page' : undefined}
-              className={`flex h-[34px] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 text-sm ${
-                current.path === item.path ? 'bg-popover font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'}`}>
-              <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm ${current.path === item.path ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
-                <item.icon size="sm" aria-hidden />
-              </span>{item.label}
-            </Link>)}
+            {group.items.map(item => {
+              const link = <Link key={item.path} href={item.path}
+                aria-current={current.path === item.path ? 'page' : undefined}
+                className={`flex h-[34px] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors ${
+                  current.path === item.path ? 'text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'}`}>
+                <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm transition-colors ${current.path === item.path ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
+                  <item.icon size="sm" aria-hidden />
+                </span>{item.label}
+              </Link>;
+              // 中转管理要等身份查回来才知道显不显示：展开着长出来，不把下面的项一下顶开。
+              return item.path === '/settings/relay-admin'
+                ? <Collapse key={item.path} open={adminAliases.length > 0} appear className="shrink-0">{link}</Collapse>
+                : link;
+            })}
             {!group.group && current.path === '/settings/preferences' && <PreferenceLinks />}
           </div>
         </div>)}
       </nav>
     </aside>
-    <main className="console-panel m-2 min-w-0 flex-1 space-y-6 rounded-2xl border border-border bg-panel p-4 md:p-6">
+    <main className="console-panel m-2 min-w-0 flex-1 rounded-2xl border border-border bg-panel p-4 md:p-6">
+      {/* 换页时正文 150ms 淡入；侧栏的选中滑块交代方向，正文不位移。 */}
+      <div key={addingProvider ? 'providers/new' : current.path} className="content-swap-in space-y-6">
       {!['/settings/providers', '/settings/routes'].includes(current.path) && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         {groupLabel && <span className="text-subtle-foreground">{groupLabel} /</span>}
         <h1 className="text-sm font-semibold">{current.label}</h1>
@@ -154,6 +166,7 @@ export function ConsoleLayout() {
         </Button></Hint>}
       </div>}
       <Page />
+      </div>
     </main>
   </div>;
 }

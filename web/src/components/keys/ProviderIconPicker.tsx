@@ -4,6 +4,7 @@ import { fetchProviderIcon, uploadProviderIcon } from '@/api/providerIcons';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { BrandGlyph, PROVIDER_BRANDS } from '@/components/providerBrands';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -93,7 +94,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
           </TabsContent>
           <TabsContent value="upload" className="space-y-2 py-1">
             <Button variant="outline" type="button" className="w-full" disabled={uploading} onClick={() => fileRef.current?.click()}>
-              {uploading ? '上传中…' : '选择图片'}
+              <SwapLabel active={uploading} on="上传中…" off="选择图片" />
             </Button>
             <FileInput ref={fileRef} aria-label="图标图片" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,.ico"
               onChange={event => void upload(event.target.files?.[0])} />
@@ -103,7 +104,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
             <Input aria-label="图标网址" placeholder="https://" maxLength={2048} value={url ?? defaultUrl} onChange={event => setUrl(event.target.value)}
               onKeyDown={event => { if (event.key === 'Enter' && address && !uploading) { event.preventDefault(); void run(() => fetchProviderIcon(address)); } }} />
             <Button variant="outline" type="button" className="w-full" disabled={uploading || !address} onClick={() => void run(() => fetchProviderIcon(address))}>
-              {uploading ? '获取中…' : '获取'}
+              <SwapLabel active={uploading} on="获取中…" off="获取" />
             </Button>
           </TabsContent>
         </Tabs>

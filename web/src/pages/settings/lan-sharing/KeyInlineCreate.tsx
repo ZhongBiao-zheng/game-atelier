@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createGatewayKey, type GatewayKey } from '@/api/gateway';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { errorMessage } from '@/components/assets/creationAssetPanelModel';
@@ -30,6 +31,6 @@ export function KeyInlineCreate({ gatewayAlias, onCancel, onCreated }: {
     </div>
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     <div className="flex justify-end gap-2"><Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>取消</Button>
-      <Button type="submit" disabled={busy || !name.trim()}>{busy ? '创建中…' : '创建'}</Button></div>
+      <Button type="submit" disabled={busy || !name.trim()}><SwapLabel active={busy} on="创建中…" off="创建" /></Button></div>
   </form>;
 }

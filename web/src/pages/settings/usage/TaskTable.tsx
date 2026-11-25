@@ -7,6 +7,7 @@ import { formatGenerationCost } from '@/lib/generationCost';
 import { KindBadge } from './KindBadge';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import type { TaskFilterChanges, TaskFilterName } from './useTaskFilters';
 import { useDelayedFlag } from './useDelayedFlag';
 
@@ -137,7 +138,7 @@ export function TaskTable(filters: Filters) {
         onClick={() => onFiltersChange?.(Object.fromEntries(Object.keys(active).map(name => [name, ''])))}>清除筛选</Button>}
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {!data && loading && <p role="status" className="text-sm text-muted-foreground">读取任务中…</p>}
+    {!data && loading && <p role="status" className="text-sm text-muted-foreground">加载中…</p>}
     {data && <div className={`space-y-3 transition-opacity duration-200 ${dimmed ? 'opacity-50' : ''}`}>
       {data.rows.length > 0 ? <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full min-w-[860px] border-collapse text-sm">
@@ -149,7 +150,7 @@ export function TaskTable(filters: Filters) {
         </table>
       </div> : <p className="text-sm text-muted-foreground">暂无匹配的任务</p>}
       {data.next_offset !== null && <div className="text-center"><Button variant="outline" size="sm" type="button" disabled={loading} onClick={() => void more()}
-       >{loading && !refreshing ? '加载中…' : '加载更多'}</Button></div>}
+       ><SwapLabel active={loading && !refreshing} on="加载中…" off="加载更多" /></Button></div>}
     </div>}
   </section>;
 }

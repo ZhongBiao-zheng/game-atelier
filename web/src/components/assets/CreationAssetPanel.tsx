@@ -22,6 +22,9 @@ import { FileInput } from '@/components/ui/file-input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AssetFilterPill } from './AssetFilterPill';
 import { cn } from '@/lib/utils';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
 import { assetMediaContent, renderCreationPrompt, type CreationAsset, type CreationMediaAssetContent } from '@/schema/creationAssets';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
@@ -59,6 +62,11 @@ export interface CreationAssetPanelProps {
 export interface CreationAssetPanelHandle {
   requestClose: () => void;
   requestTransition: (action: () => void) => void;
+}
+
+/** 面板视图的层级：列表 0、详情 1、编辑 / 加入画布 2；决定换视图时内容从哪一侧滑入。 */
+function viewDepth(view: string) {
+  return view === 'list' ? 0 : view.startsWith('detail:') ? 1 : 2;
 }
 
 export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps>(function CreationAssetPanel({
@@ -303,6 +311,24 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   const HeaderTitle = selected?.kind === 'prompt' ? 'h2' : 'p';
   const isEditing = Boolean(promptEditor || mediaEditor || canvasPickerAsset);
+  const shownError = useRetained(error);
+  // 列表 → 详情 → 编辑是一层层往里走：往里新内容从右侧 12px 滑入，返回从左侧滑入；只动内容区，不重挂列表。
+  const viewKey = canvasPickerAsset ? 'picker' : promptEditor ? 'prompt-edit' : mediaEditor ? 'media-edit'
+    : selected ? `detail:${selected.asset_id}` : 'list';
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(viewKey, (next, previous, reduced) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const direction = Math.sign(viewDepth(next) - viewDepth(previous)) || 1;
+    clearOnFinish(animate(body, reduced ? { opacity: [0, 1] } : { x: [direction * 12, 0], opacity: [0, 1] },
+      { duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out }), body);
+  }, { keepWhenReduced: true });
+  // 切类型 / 范围 / 分类时整面墙淡入新结果（不逐项飞位）；搜索逐字输入不播。
+  const listRef = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(`${kind}|${scope}|${category}|${mediaType}`, () => {
+    const list = listRef.current;
+    if (list) clearOnFinish(animate(list, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), list, ['opacity']);
+  }, { keepWhenReduced: true });
   const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? mediaEditor?.assetId));
 
   return (
@@ -323,8 +349,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         </DropdownMenuContent></DropdownMenu> : <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>}
       </header>
 
-      {error && <p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
+      <Collapse open={Boolean(error)}><p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{shownError}</p></Collapse>
 
+      <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col">
       {!selected && !isEditing && (
         <>
           <Tabs className="px-3" value={kind} onValueChange={value => { setKind(value as typeof kind); setScope('all'); setCategory(null); setMediaType('all'); }}>
@@ -385,7 +412,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           </div>
           )}
           {kind !== 'team' && kind !== 'reference' && (
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {adoption.stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
             {visibleAssets.length ? kind === 'media'
               ? <MediaAssetGroups projects={canvasTargets} currentProjectId={projectId} assets={visibleAssets} staleness={adoption.staleness} onOpen={openAsset} />
@@ -466,6 +493,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
         />
       )}
+      </div>
 
       <ConfirmDialog
         open={Boolean(adoption.readoptTarget)}

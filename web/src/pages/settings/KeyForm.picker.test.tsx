@@ -108,15 +108,15 @@ it('retains connection success and selections if a custom catalog cannot be load
 it.each(['create', 'edit'] as const)('collapses manual entry by default and does not persist it in %s', async mode => {
   const view = open(mode);
   const summary = screen.getByText('手动添加模型');
-  expect(summary.closest('details')).not.toHaveAttribute('open');
+  expect(summary.closest('button')).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(summary);
-  expect(summary.closest('details')).toHaveAttribute('open');
+  expect(summary.closest('button')).toHaveAttribute('aria-expanded', 'true');
   fireEvent.change(screen.getByLabelText('添加模型 ID'), { target: { value: 'manual-demo' } });
   fireEvent.click(screen.getByRole('button', { name: '添加', hidden: true }));
   expect(screen.getByRole('button', { name: 'manual-demo' })).toHaveAttribute('aria-pressed', 'true');
   view.unmount();
   open(mode);
-  expect(screen.getByText('手动添加模型').closest('details')).not.toHaveAttribute('open');
+  expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'false');
 });
 
 it.each(['获取失败', '上游没有模型列表接口（HTTP 404）'])('opens manual entry when the list is unavailable: %s', async message => {
@@ -124,7 +124,7 @@ it.each(['获取失败', '上游没有模型列表接口（HTTP 404）'])('opens
   open();
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(message);
-  await waitFor(() => expect(screen.getByText('手动添加模型').closest('details')).toHaveAttribute('open'));
+  await waitFor(() => expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'true'));
   expect(screen.getByRole('button', { name: 'chat-demo' })).toBeInTheDocument();
 });
 
@@ -134,7 +134,7 @@ it('opens manual entry after a failed connection without adding a second error',
   fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('列表接口不可用');
   expect(screen.getAllByRole('alert')).toHaveLength(1);
-  expect(screen.getByText('手动添加模型').closest('details')).toHaveAttribute('open');
+  expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'true');
 });
 
 it('does not save an unclassified selection as an image when a refresh hides it', async () => {

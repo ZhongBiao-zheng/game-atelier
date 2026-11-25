@@ -11,6 +11,7 @@ import examples from './customInterfaceExamples.json';
 import { CustomInterfaceAssist } from './CustomInterfaceAssist';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { FileInput } from '@/components/ui/file-input';
 import { AiIcon, CheckIcon, CopyIcon, HelpIcon } from '@/components/ui/icons';
@@ -65,6 +66,8 @@ function CallPreview({ label, call }: { label: string; call: HttpProtocolCallPre
 }
 
 interface Props {
+  /** 受控弹窗：调用方关闭时传 false，带着原内容播完退场；不传即打开。 */
+  open?: boolean;
   /** 编辑已有接口时的 id；新建时为 null。 */
   identifier: string | null;
   kind: HttpProtocolKind;
@@ -74,7 +77,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSaved, onClose }: Props) {
+export function CustomInterfaceDialog({ open = true, identifier, kind, baseUrl, model, onSaved, onClose }: Props) {
   const kindExamples = examplesFor(kind);
   const [exampleId, setExampleId] = useState(kindExamples[0]?.id ?? '');
   const [text, setText] = useState(() => identifier ? '' : pretty(kindExamples[0]?.document ?? {}));
@@ -161,7 +164,7 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
   };
 
   return (
-    <Dialog open onOpenChange={open => { if (!open && !saving) onClose(); }}>
+    <Dialog open={open} onOpenChange={next => { if (!next && !saving) onClose(); }}>
       <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] max-w-5xl flex-col gap-4"
         // 默认焦点会落到「?」上并弹出说明；打开即聚焦模板正文。
         onOpenAutoFocus={event => { event.preventDefault(); editor.current?.focus(); }}>
@@ -200,7 +203,7 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
                 <CallPreview label="提交" call={validation.preview.submit} />
                 {validation.preview.poll && <CallPreview label="轮询" call={validation.preview.poll} />}
               </>
-              : <p className="text-xs text-muted-foreground">{loading ? '读取中…' : '模板通过检查后显示请求预览'}</p>}
+              : <p className="text-xs text-muted-foreground">{loading ? '加载中…' : '模板通过检查后显示请求预览'}</p>}
           </div>
         </div>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -213,7 +216,7 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
           <Button variant="ghost" size="sm" type="button" disabled={loading || Boolean(parseIssue)} onClick={exportDocument}>导出</Button>
           <span className="flex-1" />
           <Button variant="ghost" size="sm" type="button" disabled={saving} onClick={onClose}>取消</Button>
-          <Button type="button" disabled={!canSave} onClick={() => void save()}>{saving ? '保存中…' : '保存'}</Button>
+          <Button type="button" disabled={!canSave} onClick={() => void save()}><SwapLabel active={saving} on="保存中…" off="保存" /></Button>
         </footer>
       </DialogContent>
     </Dialog>

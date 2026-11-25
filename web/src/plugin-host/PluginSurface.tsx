@@ -35,7 +35,9 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
   const [attempt, setAttempt] = useState(0);
   // 每个界面实例一个 nonce：写进宿主拼的页面前缀，插件要在 port 上把它报回来才开始服务。
   const nonce = useMemo(() => crypto.randomUUID(), [plugin, attempt]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const srcdoc = useMemo(() => (html === null ? null : buildSrcdoc(html, nonce)), [html, nonce]);
+  const srcdoc = useMemo(() => (html === null ? null : buildSrcdoc(html, nonce, readTheme().mode)), [html, nonce]);
+  // 握手通过前 iframe 保持透明，通过后 150ms 淡入：插件自己的首帧（空白、布局跳动）不露出来。
+  const [ready, setReady] = useState(false);
   const hostRef = useRef(host);
   hostRef.current = host;
   const portRef = useRef<MessagePort | null>(null);
@@ -45,6 +47,7 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
     let active = true;
     setHtml(null);
     setFailure(null);
+    setReady(false);
     loadPluginHtml(plugin).then(loaded => { if (active) setHtml(loaded); })
       .catch(error => { if (active) setFailure(error instanceof Error ? error.message : String(error)); });
     return () => { active = false; };
@@ -85,7 +88,7 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
     }, READY_TIMEOUT_MS);
     channel.port1.onmessage = event => {
       if (!proven) {
-        if (isReadyProof(event.data, nonce)) { proven = true; return; }
+        if (isReadyProof(event.data, nonce)) { proven = true; setReady(true); return; }
         cleanup();
         setHtml(null);
         setFailure('插件握手无效，已停止');
@@ -131,6 +134,6 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
     srcDoc={srcdoc}
     referrerPolicy="no-referrer"
     onLoad={event => connect(event.currentTarget)}
-    className={`block size-full border-0 bg-transparent ${interactive ? 'nodrag nopan nowheel' : 'pointer-events-none'}`}
+    className={`block size-full border-0 bg-transparent transition-opacity duration-150 ${ready ? 'opacity-100' : 'opacity-0'} ${interactive ? 'nodrag nopan nowheel' : 'pointer-events-none'}`}
   />;
 }

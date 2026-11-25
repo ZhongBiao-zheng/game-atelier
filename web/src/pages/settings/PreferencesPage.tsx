@@ -11,6 +11,8 @@ import { UpdateSettings } from '@/components/UpdateControl';
 
 import { AppearanceSection } from './appearance/AppearanceSection';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
@@ -23,6 +25,8 @@ export function PreferencesPage() {
   const [choosing, setChoosing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const shownMessage = useRetained(message);
+  const shownError = useRetained(error);
   // 首页展示画布出图开关（应用级设置，默认开）。乐观切换，失败回滚。
   const [showCanvasOnHome, setShowCanvasOnHome] = useState(true);
   const [togglingStudio, setTogglingStudio] = useState(false);
@@ -93,18 +97,18 @@ export function PreferencesPage() {
           <span className="text-sm">项目存放</span>
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
             <span aria-label="数据目录" className="min-w-0 break-all font-mono text-sm text-muted-foreground">
-              {loading ? '读取中…' : displayRoot || '尚未选择数据目录'}
+              {loading ? '加载中…' : displayRoot || '尚未选择数据目录'}
             </span>
             {changed && <span className="text-xs text-muted-foreground">未保存</span>}
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" size="sm" type="button" onClick={pickDataRoot} disabled={loading || saving || choosing}
                >
-                <FolderOpenIcon size="sm" aria-hidden />{choosing ? '选择中…' : '更换文件夹'}
+                <FolderOpenIcon size="sm" aria-hidden /><SwapLabel active={choosing} on="选择中…" off="更换文件夹" />
               </Button>
               {changed && <>
                 <Button variant="default" size="sm" type="button" onClick={saveDataRoot} disabled={saving}
                  >
-                  <SwapLabel active={saving} on="保存中..." off="保存" />
+                  <SwapLabel active={saving} on="保存中…" off="保存" />
                 </Button>
                 <Button variant="bare" type="button" onClick={() => setPendingRoot(null)} disabled={saving}
                   className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary/60 disabled:opacity-50">撤销</Button>
@@ -117,8 +121,9 @@ export function PreferencesPage() {
           <Switch checked={showCanvasOnHome} aria-label="首页展示画布出图" disabled={togglingStudio} onCheckedChange={() => void toggleShowStudioOnHome()} />
         </div>
       </div>
-      {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {/* 提示与报错展开出现，不把下面的分组一下顶开。 */}
+      <Collapse open={Boolean(message)}><p role="status" className="text-sm text-muted-foreground">{shownMessage}</p></Collapse>
+      <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
     </section>
     <ProfileSection />
     <UpdateSettings />

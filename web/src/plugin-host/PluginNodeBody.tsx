@@ -99,7 +99,7 @@ export function PluginNodeBody({ node, projectId, inputs, resolveVersion, update
   }
   if (!contribution || !contribution.surfaces.includes('node')) return <Placeholder reason="此版本的插件不支持这个节点" />;
   // 宿主插件（ADR-0039）由画布直接渲染；走到这里说明它的分块还在加载。
-  if (manifest.runtime === 'host') return <Placeholder icon={pluginIcon(manifest.icon)} reason="正在加载插件" />;
+  if (manifest.runtime === 'host') return <Placeholder icon={pluginIcon(manifest.icon)} reason="加载中…" />;
   if (grants === null) return <div role="status" aria-label="插件加载中" className="size-full min-h-44" />;
   if (!granted) {
     return <Placeholder icon={pluginIcon(manifest.icon)} reason="本项目尚未允许此插件">

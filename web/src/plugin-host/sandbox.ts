@@ -57,10 +57,12 @@ function prefixScript(nonce: string): string {
  * 标签、抢先的 <script> 都能让「找到的位置」落在策略生效之前或根本不生效的地方（B2 安全验收 S1）。
  * 先于一切标签的 <meta> 由解析器放进隐式的 <head>，对其后的全部内容生效；包自带的 meta 只能收紧。
  */
-export function buildSrcdoc(html: string, nonce: string): string {
+export function buildSrcdoc(html: string, nonce: string, colorScheme?: 'dark' | 'light'): string {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) throw new Error('无效的握手 nonce');
+  // color-scheme 与宿主一致：两边不一致时浏览器给 iframe 铺一层不透明的默认底色，暗色主题下会先闪一下白。
+  const scheme = colorScheme ? `<meta name="color-scheme" content="${colorScheme}">` : '';
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`
-    + `<script>${prefixScript(nonce)}</script>` + html;
+    + `<script>${prefixScript(nonce)}</script>` + scheme + html;
 }
 
 const htmlByDigest = new Map<string, Promise<string>>();

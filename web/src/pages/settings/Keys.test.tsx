@@ -218,7 +218,7 @@ describe('KeyForm', () => {
     expect(screen.getByLabelText('API 密钥')).toBeInTheDocument();
     expect(screen.getByLabelText('模型名称 1')).toBeInTheDocument();
     expect(screen.queryByLabelText('供应商名称')).not.toBeInTheDocument();
-    expect(screen.getByText('高级：请求地址 · 计费分组').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('高级：请求地址 · 计费分组').closest('button')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByLabelText(/Secret Key/)).not.toBeInTheDocument();
     expect(screen.queryByText('图种能力')).not.toBeInTheDocument();
   });

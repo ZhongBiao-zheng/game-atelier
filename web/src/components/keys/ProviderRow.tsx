@@ -30,7 +30,8 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
   const rawType = row.provider === 'custom' ? '自定义' : vendor;
   const showType = rawType.trim().toLowerCase() !== title.trim().toLowerCase();
   const host = providerHost(row);
-  return <li className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
+  // 启停是乐观的：整行立刻 200ms 淡到停用态，请求期间开关照常可点（aria-busy 标出保存中），失败由列表回滚。
+  return <li aria-busy={pending || undefined} className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 transition-[opacity,background-color] duration-200 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
     <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
     <Button variant="bare" type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -48,7 +49,7 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
           : used.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
       </span></Hint>
     </div>
-    <Switch size="sm" checked={enabled} disabled={pending} aria-label={`启用 ${row.alias}`} onCheckedChange={onToggle} />
+    <Switch size="sm" checked={enabled} aria-label={`启用 ${row.alias}`} onCheckedChange={onToggle} />
     <Button variant="bare" type="button" aria-label={`打开 ${row.alias}`} onClick={onEdit}
       className="rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <ChevronRightIcon aria-hidden />

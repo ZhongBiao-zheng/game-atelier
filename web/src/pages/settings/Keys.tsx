@@ -16,6 +16,8 @@ import type { KeyCreatePayload } from '@/api/keys';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { CustomInterfacesSection } from './CustomInterfacesSection';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
 
 interface Props {
   /** 首启向导复用同一个供应商表单。 */
@@ -30,6 +32,8 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(mode === 'onboarding');
   const [editingKey, setEditingKey] = useState<KeyRow | null>(null);
+  // 每次打开表单换一个会话号作 key：关闭后表单留着播完退场，再打开时状态从头来。
+  const [formSession, setFormSession] = useState(0);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [overdue, setOverdue] = useState<Set<string>>(new Set());
@@ -44,6 +48,10 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     variant: 'default' | 'destructive';
     onConfirm: () => void;
   } | null>(null);
+
+  const shownDialog = useRetained(dialog);
+  const formView = useRetained(showForm ? { session: formSession, editing: editingKey } : null);
+  const shownSuccess = useRetained(successMessage);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -92,6 +100,12 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
   const openCreate = () => {
     setEditingKey(null);
+    setFormSession(session => session + 1);
+    setShowForm(true);
+  };
+  const openEdit = (key: KeyRow) => {
+    setEditingKey(key);
+    setFormSession(session => session + 1);
     setShowForm(true);
   };
 
@@ -124,16 +138,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key}
     overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
     onToggle={enabled => { void toggleKey(key, enabled); }}
-    onEdit={() => { setEditingKey(key); setShowForm(true); }} />;
+    onEdit={() => openEdit(key)} />;
 
   const keyRows = keys.map((k) => (
     <KeyCard
       key={k.alias}
       row={k}
-      onEdit={() => {
-        setEditingKey(k);
-        setShowForm(true);
-      }}
+      onEdit={() => openEdit(k)}
       onDelete={() => {
         setDialog({
           open: true,
@@ -176,12 +187,12 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>
       </div>
 
-      {successMessage && (
+      <Collapse open={Boolean(successMessage)}>
         <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
           <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-          {successMessage}
+          {shownSuccess}
         </div>
-      )}
+      </Collapse>
 
       {loading && (
         <div className="space-y-2">
@@ -220,9 +231,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
               <ChevronRightIcon size="sm" className={`transition-transform duration-150 ${closedOpen ? 'rotate-90' : ''}`} aria-hidden />
               已关闭的供应商<span className="tabular-nums">{closedKeys.length}</span>
             </Button>
-            {closedOpen && <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
+            <Collapse open={closedOpen}><div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
               <ul aria-label="已关闭的供应商" className="divide-y divide-border">{closedKeys.map(providerRow)}</ul>
-            </div>}
+            </div></Collapse>
           </section>}
           {embedded && <CustomInterfacesSection />}
           <div className="text-xs text-muted-foreground">
@@ -231,25 +242,27 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>
       )}
 
-      {showForm && (
+      {formView && (
         <KeyForm
-          initial={editingKey ? toKeyFormInitial(editingKey) : undefined}
-          mode={editingKey ? 'edit' : 'create'}
-          onCreated={editingKey ? onUpdated : onCreated}
+          key={formView.session}
+          open={showForm}
+          initial={formView.editing ? toKeyFormInitial(formView.editing) : undefined}
+          mode={formView.editing ? 'edit' : 'create'}
+          onCreated={formView.editing ? onUpdated : onCreated}
           onCancel={closeForm}
-          onDelete={editingKey ? () => setDialog({
-            open: true, title: '确认删除？', message: `"${editingKey.alias}" 将被永久删除`, variant: 'destructive',
+          onDelete={formView.editing ? () => { const target = formView.editing!; setDialog({
+            open: true, title: '确认删除？', message: `"${target.alias}" 将被永久删除`, variant: 'destructive',
             onConfirm: async () => {
               setDialog(null);
               try {
-                await deleteKey(editingKey.alias);
+                await deleteKey(target.alias);
                 closeForm();
                 window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
                 void refresh();
               } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
             },
-          }) : undefined}
-          submitLabel={editingKey ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
+          }); } : undefined}
+          submitLabel={formView.editing ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
         />
       )}
     </>
@@ -259,13 +272,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     return (
       <>
         {content}
-        {dialog && (
+        {shownDialog && (
           <ConfirmDialog
-            open={dialog.open}
-            title={dialog.title}
-            message={dialog.message}
-            variant={dialog.variant}
-            onConfirm={dialog.onConfirm}
+            open={Boolean(dialog?.open)}
+            title={shownDialog.title}
+            message={shownDialog.message}
+            variant={shownDialog.variant}
+            onConfirm={shownDialog.onConfirm}
             onCancel={() => setDialog(null)}
           />
         )}
@@ -276,13 +289,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   return (
     <div className="px-6 py-8 max-w-3xl mx-auto">
       {content}
-      {dialog && (
+      {shownDialog && (
         <ConfirmDialog
-          open={dialog.open}
-          title={dialog.title}
-          message={dialog.message}
-          variant={dialog.variant}
-          onConfirm={dialog.onConfirm}
+          open={Boolean(dialog?.open)}
+          title={shownDialog.title}
+          message={shownDialog.message}
+          variant={shownDialog.variant}
+          onConfirm={shownDialog.onConfirm}
           onCancel={() => setDialog(null)}
         />
       )}

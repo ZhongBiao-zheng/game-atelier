@@ -8,6 +8,7 @@ import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial, providerPresetId, type ProviderPreset } from './providerPresets';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Button } from '@/components/ui/button';
+import { useRetained } from '@/components/ui/retained';
 
 const GROUPS = [
   { kind: 'local', title: '本机', description: '' },
@@ -26,7 +27,9 @@ export function ProviderAddPage() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<{ preset: ProviderPreset; initial: Partial<KeyCreatePayload> } | null>(null);
+  const [selected, setSelected] = useState<{ preset: ProviderPreset; initial: Partial<KeyCreatePayload>; session: number } | null>(null);
+  // 关闭后表单带着原内容播完退场；session 作 key，每次打开都是新表单。
+  const shown = useRetained(selected);
   useEffect(() => {
     let active = true;
     void getChatGPTSubscription().then(data => { if (active) setSubscription(data); })
@@ -36,7 +39,7 @@ export function ProviderAddPage() {
     return () => { active = false; };
   }, []);
   const open = (preset: ProviderPreset, baseUrl = preset.defaultBaseUrl) => {
-    setSelected({ preset, initial: presetInitial(preset, baseUrl) });
+    setSelected(current => ({ preset, initial: presetInitial(preset, baseUrl), session: (current?.session ?? shown?.session ?? 0) + 1 }));
   };
   const visible = PROVIDER_PRESETS.filter(preset =>
     [preset.label, preset.kind === 'custom' ? '自定义供应商' : ''].join(' ').toLowerCase().includes(query.trim().toLowerCase()),
@@ -70,7 +73,7 @@ export function ProviderAddPage() {
                 {isCustom ? <AddIcon size="sm" /> : <ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />}
               </span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{isCustom ? '自定义供应商' : preset.label}</span>
-                <span className="block text-xs text-muted-foreground">{isCustom ? '填写 API 地址与密钥' : preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '读取中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
+                <span className="block text-xs text-muted-foreground">{isCustom ? '填写 API 地址与密钥' : preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '加载中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>
               {added && <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[color:var(--status-done)]" />已添加</span>}
             </Button>;
@@ -79,7 +82,7 @@ export function ProviderAddPage() {
       </section>;
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
-    {selected && <KeyForm presetId={selected.preset.id} initial={selected.initial} onCancel={() => setSelected(null)}
+    {shown && <KeyForm key={shown.session} open={Boolean(selected)} presetId={shown.preset.id} initial={shown.initial} onCancel={() => setSelected(null)}
       onCreated={() => { window.dispatchEvent(new Event(KEYS_CHANGED_EVENT)); navigate('/settings/providers'); }} />}
   </div>;
 }

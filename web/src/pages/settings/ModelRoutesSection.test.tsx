@@ -35,7 +35,7 @@ describe('ModelRoutesSection', () => {
     expect(screen.getByRole('region', { name: '智能路由' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '智能路由' })).toBeInTheDocument();
     expect(screen.getByLabelText('面包屑')).toHaveTextContent('模型 /智能路由');
-    expect(screen.getByText('flux-3').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: /只有一家供应商的模型/ })).toHaveAttribute('aria-expanded', 'false');
     expect(within(order).getAllByRole('listitem')[0]).toHaveTextContent('1Tuzi');
     expect(screen.getByText('当前走 Tuzi')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('把 HK 提前'));

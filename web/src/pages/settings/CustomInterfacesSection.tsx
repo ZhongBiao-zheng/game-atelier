@@ -4,6 +4,7 @@ import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Hint } from '@/components/ui/tooltip';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
@@ -17,6 +18,10 @@ export function CustomInterfacesSection() {
   const [creating, setCreating] = useState<HttpProtocolKind | null>(null);
   const [deleting, setDeleting] = useState<HttpProtocolRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 弹窗关闭后沿用最后一份内容播完退场。
+  const shownEditing = useRetainedSession(editing);
+  const shownCreating = useRetainedSession(creating);
+  const shownDeleting = useRetained(deleting);
 
   useEffect(() => {
     let active = true;
@@ -70,12 +75,14 @@ export function CustomInterfacesSection() {
           </Hint>
         </li>)}
       </ul>}
-      {editing && <CustomInterfaceDialog identifier={editing.id} kind={editing.kind ?? 'image'}
+      {shownEditing && <CustomInterfaceDialog key={`edit-${shownEditing.session}`} open={Boolean(editing)}
+        identifier={shownEditing.value.id} kind={shownEditing.value.kind ?? 'image'}
         onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
-      {creating && <CustomInterfaceDialog identifier={null} kind={creating}
+      {shownCreating && <CustomInterfaceDialog key={`create-${shownCreating.session}`} open={Boolean(creating)}
+        identifier={null} kind={shownCreating.value}
         onClose={() => setCreating(null)} onSaved={() => setCreating(null)} />}
-      {deleting && <ConfirmDialog open title={`删除「${deleting.name}」？`} message="删除后不能恢复。"
-        variant="destructive" onConfirm={() => void remove(deleting)} onCancel={() => setDeleting(null)} />}
+      {shownDeleting && <ConfirmDialog open={Boolean(deleting)} title={`删除「${shownDeleting.name}」？`} message="删除后不能恢复。"
+        variant="destructive" onConfirm={() => void remove(shownDeleting)} onCancel={() => setDeleting(null)} />}
     </section>
   );
 }

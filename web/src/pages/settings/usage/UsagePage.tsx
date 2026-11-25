@@ -132,7 +132,7 @@ export function UsagePage() {
           {error}
         </p>
       )}
-      {!data && loading && !error && <p className="text-sm text-muted-foreground">读取中…</p>}
+      {!data && loading && !error && <p className="text-sm text-muted-foreground">加载中…</p>}
       {data && (
         <div className="space-y-6">
           {/* 换范围时旧数据留在原地，请求慢于 150ms 才降透明度，新数据到达再淡回。任务表自管刷新，不在这一层叠暗。 */}

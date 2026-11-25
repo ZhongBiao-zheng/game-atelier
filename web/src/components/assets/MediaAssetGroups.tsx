@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ChevronDownIcon, ChevronRightIcon } from '@/components/ui/icons';
+import { ChevronRightIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import { MediaAssetGrid } from './CreationAssetCards';
 import type { CreationAsset } from '@/schema/creationAssets';
 
@@ -34,9 +35,10 @@ function MediaGroup({ group, staleness, onOpen }: {
     <Button variant="ghost" className="w-full justify-start px-0" aria-expanded={!collapsed} onClick={() => {
       setCollapsed(!collapsed); try { localStorage.setItem(key, String(!collapsed)); } catch { /* 存储不可用时本次仍可折叠。 */ }
     }}>
-      {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}<span className="truncate">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{group.assets.length}</span>
+      {/* 同一个箭头转 90°，不换图标；分组内容高度展开收起。 */}
+      <ChevronRightIcon className={`transition-transform duration-150 ${collapsed ? '' : 'rotate-90'}`} /><span className="truncate">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{group.assets.length}</span>
     </Button>
-    {!collapsed && <MediaAssetGrid assets={group.assets} staleness={staleness} onOpen={onOpen} />}
+    <Collapse open={!collapsed}><MediaAssetGrid assets={group.assets} staleness={staleness} onOpen={onOpen} /></Collapse>
   </section>;
 }
 

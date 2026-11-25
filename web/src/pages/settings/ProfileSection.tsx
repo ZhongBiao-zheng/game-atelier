@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { fetchProfile, saveProfile } from '@/api/teamLibraries';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Label } from '@/components/ui/label';
 
 /** 显示名：分享到团队库的资产用它署名。 */
@@ -40,7 +41,7 @@ export function ProfileSection() {
         <div className="flex min-w-0 items-center gap-2">
           <Input id="profile-name" aria-label="显示名" value={name} maxLength={40} disabled={savedName === null || saving}
             onChange={event => setName(event.target.value)} className="w-50 min-w-0" />
-          {changed && <Button type="button" size="sm" className="shrink-0" onClick={() => void save()} disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</Button>}
+          {changed && <Button type="button" size="sm" className="shrink-0" onClick={() => void save()} disabled={saving || !name.trim()}><SwapLabel active={saving} on="保存中…" off="保存" /></Button>}
         </div>
       </div>
       {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}

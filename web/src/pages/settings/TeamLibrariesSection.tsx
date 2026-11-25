@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AddIcon, CloseIcon, CopyIcon, DeleteIcon, FolderIcon, FolderOffIcon, FolderOpenIcon, HelpIcon, MoreIcon, RetryIcon } from '@/components/ui/icons';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { useRetained } from '@/components/ui/retained';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MountTeamLibraryDialog, ProjectChecklist, type ProjectOption } from '@/components/team/MountTeamLibraryDialog';
@@ -110,6 +111,7 @@ export function TeamLibrariesSection() {
   const [mountOpen, setMountOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [pendingUnmount, setPendingUnmount] = useState<LibraryGroup | null>(null);
+  const shownUnmount = useRetained(pendingUnmount);
 
   const request = useRef(0);
   // 先发后到的旧响应不许覆盖新列表（初始加载慢、挂载后的刷新先回来）。
@@ -278,10 +280,10 @@ export function TeamLibrariesSection() {
         void reload().catch(cause => setError(message(cause)));
         void fetchProfile().then(profile => setDisplayName(profile.display_name)).catch(() => {});
       }} />
-    {pendingUnmount && <ConfirmDialog open variant="destructive" title="从全部项目卸载" message={pendingUnmount.library.name}
-      detail={pendingUnmount.library.mount_path} confirmText="卸载"
+    {shownUnmount && <ConfirmDialog open={Boolean(pendingUnmount)} variant="destructive" title="从全部项目卸载" message={shownUnmount.library.name}
+      detail={shownUnmount.library.mount_path} confirmText="卸载"
       onCancel={() => setPendingUnmount(null)} onConfirm={() => {
-        const target = pendingUnmount;
+        const target = shownUnmount;
         setPendingUnmount(null);
         void run(async () => {
           for (const projectId of target.projectIds) await unmountTeamLibrary(target.library.library_id, projectId);

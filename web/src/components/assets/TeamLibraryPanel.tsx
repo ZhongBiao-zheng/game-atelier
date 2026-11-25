@@ -32,6 +32,7 @@ import { CategoryField, TagField, parseTags } from '@/components/assets/TagField
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MountTeamLibraryDialog } from '@/components/team/MountTeamLibraryDialog';
 import { Button } from '@/components/ui/button';
+import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import {
   Dialog,
   DialogContent,
@@ -119,6 +120,8 @@ export function TeamLibraryPanel({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [viewing, setViewing] = useState<TeamLibraryIndexEntry | null>(null);
+  // 关闭后沿用最后一条内容，弹窗带着它播完退场。
+  const shownViewing = useRetained(viewing);
   const { sizes, measure } = useMediaSizes();
   const mediaKey = (entry: TeamLibraryIndexEntry) => `${libraryId}:${entry.id}:${entry.updated_at}`;
   const [entries, setEntries] = useState<TeamLibraryIndexEntry[]>([]);
@@ -132,6 +135,7 @@ export function TeamLibraryPanel({
   const [related, setRelated] = useState<TeamRelatedEntry[]>([]);
   const [relatedError, setRelatedError] = useState(false);
   const [editing, setEditing] = useState<TeamLibraryIndexEntry | null>(null);
+  const shownEditing = useRetainedSession(editing);
   const [withdrawing, setWithdrawing] = useState<TeamLibraryIndexEntry | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
   const [mountsVersion, setMountsVersion] = useState(0);
@@ -330,7 +334,7 @@ export function TeamLibraryPanel({
   if (libraries.length === 0 && !remote.sources.some(source => !source.unreachable && source.libraries.length) && !remoteLibrary) {
     return (
       <div className={cn('grid content-center place-items-center gap-3 p-8 text-center', className)}>
-        <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">{!librariesLoaded || remote.revision === 0 ? '读取中' : '还没有团队库'}</p><GatewayLibraryHelp /></div>
+        <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">{!librariesLoaded || remote.revision === 0 ? '加载中…' : '还没有团队库'}</p><GatewayLibraryHelp /></div>
         {projectId && <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>}
         <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
           onMounted={() => setMountsVersion(version => version + 1)} />
@@ -416,7 +420,7 @@ export function TeamLibraryPanel({
         <p className="py-8 text-center text-sm text-muted-foreground">目录不可达</p>
       ) : (
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          {typed.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{!librariesLoaded || !libraryId ? '读取中' : '库里还没有内容'}</p> : (
+          {typed.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{!librariesLoaded || !libraryId ? '加载中…' : '库里还没有内容'}</p> : (
             <AssetMasonry items={typed} itemKey={mediaKey} ratio={entry => mediaRatio(sizes[mediaKey(entry)])}>
               {entry => <TeamAssetCard entry={entry} libraryId={library?.library_id ?? ''} busy={busy}
                 size={sizes[mediaKey(entry)]} onMeasure={size => measure(mediaKey(entry), size)}
@@ -430,29 +434,30 @@ export function TeamLibraryPanel({
         </div>
       )}
       </>}
-      {!remoteLibrary && viewing && libraryId && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
+      {shownViewing && libraryId && <Dialog open={Boolean(!remoteLibrary && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
         <DialogContent aria-describedby={undefined}>
-          <DialogHeader><DialogTitle>{viewing.title}</DialogTitle></DialogHeader>
-          {viewing.kind === 'prompt' ? <div className="min-h-0 space-y-3 overflow-y-auto">
-            <TeamPromptPreviewGallery key={viewing.id} libraryId={libraryId} entry={viewing} />
-            <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
+          <DialogHeader><DialogTitle>{shownViewing.title}</DialogTitle></DialogHeader>
+          {shownViewing.kind === 'prompt' ? <div className="min-h-0 space-y-3 overflow-y-auto">
+            <TeamPromptPreviewGallery key={shownViewing.id} libraryId={libraryId} entry={shownViewing} />
+            <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{shownViewing.prompt_text}</p>
           </div>
-            : viewing.mime_type?.startsWith('image/') ? <img src={teamAssetContentUrl(libraryId, viewing.id)} alt={viewing.title} className="max-h-120 w-full rounded-lg object-contain" />
-              : viewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, viewing.id)} controls className="max-h-120 w-full rounded-lg" />
-                : <audio src={teamAssetContentUrl(libraryId, viewing.id)} controls className="w-full" />}
+            : shownViewing.mime_type?.startsWith('image/') ? <img src={teamAssetContentUrl(libraryId, shownViewing.id)} alt={shownViewing.title} className="max-h-120 w-full rounded-lg object-contain" />
+              : shownViewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, shownViewing.id)} controls className="max-h-120 w-full rounded-lg" />
+                : <audio src={teamAssetContentUrl(libraryId, shownViewing.id)} controls className="w-full" />}
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {viewing.author && <><dt>作者</dt><dd>{viewing.author}</dd></>}
-            {viewing.model && <><dt>模型</dt><dd>{viewing.model}</dd></>}
-            {viewing.cost_cny != null && <><dt>花费</dt><dd>{formatGenerationCost(viewing.cost_cny)}</dd></>}
+            {shownViewing.author && <><dt>作者</dt><dd>{shownViewing.author}</dd></>}
+            {shownViewing.model && <><dt>模型</dt><dd>{shownViewing.model}</dd></>}
+            {shownViewing.cost_cny != null && <><dt>花费</dt><dd>{formatGenerationCost(shownViewing.cost_cny)}</dd></>}
           </dl>
-          <DialogFooter><Button disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(viewing)}>{usingId === viewing.id && <LoadingIcon className="animate-spin" />}使用</Button></DialogFooter>
+          <DialogFooter><Button disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(shownViewing)}>{usingId === shownViewing.id && <LoadingIcon className="animate-spin" />}使用</Button></DialogFooter>
         </DialogContent>
       </Dialog>}
 
-      {editing && libraryId && (
+      {shownEditing && libraryId && (
         <TeamAssetEditDialog
-          key={editing.id}
-          entry={editing}
+          key={shownEditing.session}
+          open={Boolean(editing)}
+          entry={shownEditing.value}
           libraryId={libraryId}
           onClose={() => setEditing(null)}
           onSaved={updated => { replaceEntry(updated); setEditing(null); }}
@@ -473,11 +478,14 @@ export function TeamLibraryPanel({
 }
 
 function TeamAssetEditDialog({
+  open,
   entry,
   libraryId,
   onClose,
   onSaved,
 }: {
+  /** 受控弹窗：关闭时调用方传 false，带着原内容播完退场。 */
+  open: boolean;
   entry: TeamLibraryIndexEntry;
   libraryId: string;
   onClose: () => void;
@@ -503,7 +511,7 @@ function TeamAssetEditDialog({
   };
 
   return (
-    <Dialog open onOpenChange={next => { if (!next && !saving) onClose(); }}>
+    <Dialog open={open} onOpenChange={next => { if (!next && !saving) onClose(); }}>
       <DialogContent aria-describedby={undefined}>
         <DialogHeader><DialogTitle>编辑团队资产</DialogTitle></DialogHeader>
         <Label className="block space-y-1.5">

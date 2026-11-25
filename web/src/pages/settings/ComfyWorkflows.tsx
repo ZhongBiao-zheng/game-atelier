@@ -3,6 +3,7 @@ import { deleteWorkflow, inspectWorkflow, listWorkflows, saveWorkflow, type Comf
 import type { WorkflowInput } from '@/api/keys';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Input } from '@/components/ui/input';
 import { FileInput } from '@/components/ui/file-input';
 import { Label } from '@/components/ui/label';
@@ -119,7 +120,7 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
             <Button variant="ghost" disabled={busy} onClick={() => setDraft(null)}>取消</Button>
             <Button disabled={busy || !draft.name.trim() || Boolean(inspection?.unmapped.length && !accepted)} onClick={() => void act(async () => {
               await saveWorkflow(alias, draft); setDraft(null); await reload(); window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
-            })}>{busy ? '保存中…' : '保存工作流'}</Button>
+            })}><SwapLabel active={busy} on="保存中…" off="保存工作流" /></Button>
           </div>
         </>}
       </DialogContent>

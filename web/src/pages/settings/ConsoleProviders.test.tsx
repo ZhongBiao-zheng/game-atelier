@@ -98,14 +98,16 @@ it('按名称、类型和域名过滤供应商', async () => {
   fireEvent.change(search, { target: { value: 'missing' } });
   expect(screen.getByText('没有匹配的供应商')).toBeInTheDocument();
 });
-it('停用立即变淡并提交，失败回滚且列表仍可操作', async () => {
+it('停用立即变淡并提交，请求期间不禁用，失败回滚', async () => {
   let reject!: (error: Error) => void;
   vi.mocked(keys.patchKey).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
   render(<KeysPage embedded />);
   const toggle = await screen.findByRole('switch', { name: '启用 local' });
   fireEvent.click(toggle);
   expect(screen.getByText('已停用').closest('li')).toHaveClass('opacity-50');
-  expect(toggle).toBeDisabled();
+  // 乐观切换：请求期间开关不禁用，只标保存中。
+  expect(toggle).toBeEnabled();
+  expect(screen.getByText('已停用').closest('li')).toHaveAttribute('aria-busy', 'true');
   expect(keys.patchKey).toHaveBeenCalledWith('local', { enabled: false });
   reject(new Error('保存失败'));
   await screen.findByText('保存失败');
@@ -143,7 +145,7 @@ it('订阅卡片展示账号和套餐', async () => {
 it('订阅状态加载失败不冒充未登录', async () => {
   vi.mocked(keys.getChatGPTSubscription).mockRejectedValueOnce(new Error('读取登录状态失败'));
   render(<ProviderAddPage />);
-  expect(screen.getByRole('button', { name: /ChatGPT/ })).toHaveTextContent('读取中…');
+  expect(screen.getByRole('button', { name: /ChatGPT/ })).toHaveTextContent('加载中…');
   expect(await screen.findByText('读取登录状态失败')).toBeInTheDocument();
   expect(screen.queryByText('请先在 Codex 里用 ChatGPT 登录')).not.toBeInTheDocument();
 });

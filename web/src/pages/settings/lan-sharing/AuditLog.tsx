@@ -3,6 +3,7 @@ import { adminBase } from '@/api/gateway';
 import { requestJson } from '@/api/http';
 import { date } from './shared';
 import { Button } from '@/components/ui/button';
+import { Disclosure } from '@/components/ui/disclosure';
 interface Entry { time: string; actor_name: string; action: string; target_id: string; summary: Record<string, unknown> }
 const actions: Record<string, string> = { 'member.create': '新建成员', 'member.update': '修改成员', 'member.revoke': '撤销成员', 'member.reset': '重置密钥', 'upstream.restore': '恢复供应商', 'route.reorder': '调整路由' };
 export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
@@ -22,7 +23,7 @@ export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
     {!entries.length && !error && <p className="text-sm text-muted-foreground">暂无操作记录</p>}
     <ul className="divide-y divide-border">{entries.map((entry, index) => <li key={`${entry.time}:${index}`} className="space-y-2 py-3 text-xs">
       <div className="flex flex-wrap gap-3"><time className="text-muted-foreground">{date(entry.time)}</time><span>{entry.actor_name === 'local' ? '本机' : entry.actor_name}</span><span>{actions[entry.action] ?? entry.action}</span><span className="break-all text-muted-foreground">{entry.target_id}</span></div>
-      <details><summary className="cursor-pointer text-muted-foreground">变更详情</summary><pre className="overflow-x-auto whitespace-pre-wrap break-all py-2 text-xs">{JSON.stringify(entry.summary, null, 2)}</pre></details>
+      <Disclosure summary="变更详情"><pre className="overflow-x-auto whitespace-pre-wrap break-all py-2 text-xs">{JSON.stringify(entry.summary, null, 2)}</pre></Disclosure>
     </li>)}</ul>
   </section>;
 }

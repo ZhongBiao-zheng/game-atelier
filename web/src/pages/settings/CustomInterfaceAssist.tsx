@@ -3,6 +3,8 @@ import { draftHttpProtocol, listAssistModels, type AssistDraft, type AssistModel
 import { ApiError } from '@/api/http';
 import type { HttpProtocolKind } from '@/schema/httpProtocols';
 import { Button } from '@/components/ui/button';
+import { Disclosure } from '@/components/ui/disclosure';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { HelpIcon } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -107,14 +109,13 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
         <Hint label={HELP}><span tabIndex={0} aria-label="AI 帮我配置说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
         <span className="flex-1" />
         {onUndo && <Button variant="ghost" size="sm" type="button" disabled={running} onClick={onUndo}>撤销</Button>}
-        <Button size="sm" type="button" disabled={!canRun} onClick={() => void run()}>{running ? '生成中…' : '生成（消耗对话额度）'}</Button>
+        <Button size="sm" type="button" disabled={!canRun} onClick={() => void run()}><SwapLabel active={running} on="生成中…" off="生成（消耗对话额度）" /></Button>
       </div>
       {error && <div role="alert" className="space-y-1 text-xs">
         <p className="text-destructive">{error}</p>
-        {errorRaw && <details>
-          <summary className="cursor-pointer text-muted-foreground">详情</summary>
+        {errorRaw && <Disclosure summary="详情">
           <pre className="mt-1 whitespace-pre-wrap break-all rounded-md bg-secondary/40 p-2 font-mono text-muted-foreground">{errorRaw}</pre>
-        </details>}
+        </Disclosure>}
       </div>}
       {result && <ul aria-label="生成结果" className="space-y-0.5 text-xs text-muted-foreground">
         {result.notices.map(notice => <li key={notice}>{notice}</li>)}

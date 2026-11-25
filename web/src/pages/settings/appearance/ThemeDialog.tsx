@@ -9,7 +9,9 @@ import { ACCENT_THEME_NAME_MAX } from '@/schema/accentThemes';
 import { ColorFields, themeNameError } from './ThemeEditor';
 
 /** 新增主题 / 另存为：起名 + 四个颜色。 */
-export function ThemeDialog({ doc, initial, busy, error, onCreate, onClose }: {
+export function ThemeDialog({ open = true, doc, initial, busy, error, onCreate, onClose }: {
+  /** 受控弹窗：调用方关闭时传 false，带着原内容播完退场。 */
+  open?: boolean;
   doc: AccentDoc; initial: { name: string; colors: AccentColors }; busy: boolean; error: string | null;
   onCreate: (name: string, colors: AccentColors) => void; onClose: () => void;
 }) {
@@ -17,7 +19,7 @@ export function ThemeDialog({ doc, initial, busy, error, onCreate, onClose }: {
   const [name, setName] = useState(initial.name);
   const [colors, setColors] = useState(initial.colors);
   const nameError = themeNameError(doc, name);
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+  return <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
     <DialogContent className="max-w-xl">
       <DialogTitle>新主题</DialogTitle>
       <form autoComplete="off" className="space-y-4" onSubmit={event => {

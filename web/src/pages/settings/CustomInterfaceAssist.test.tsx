@@ -88,7 +88,7 @@ it('shows the chinese reason and keeps the upstream text behind 详情', async (
   expect(alert).toHaveTextContent('对话模型的账号欠费或余额不足');
   expect(within(alert).getByText('详情')).toBeInTheDocument();
   expect(within(alert).getByText(/AccountOverdueError/)).toBeInTheDocument();
-  expect(alert.querySelector('details')?.open).toBe(false);  // 原文默认收起
+  expect(within(alert).getByText('详情').closest('button')).toHaveAttribute('aria-expanded', 'false');  // 原文默认收起
 });
 
 it('disables generation when no chat model is configured', async () => {

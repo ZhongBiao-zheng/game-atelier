@@ -9,6 +9,12 @@ import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '
 import { FileInput } from '@/components/ui/file-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Hint } from '@/components/ui/tooltip';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
+import { prefersReducedMotion } from '@/lib/motion';
+
+/** 改类别后卡片落到新分组：目标处描边高亮这么久再淡掉，看得出它去了哪。 */
+const LANDED_MS = 1500;
 
 /** Select 不接受空字符串选项值，「无类别」用这个占位。 */
 const NO_CATEGORY = '__none__';
@@ -49,6 +55,18 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
   const [suggestions, setSuggestions] = useState<Record<string, CategorySuggestion>>(() => readPending(projectId).suggestions);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const shownError = useRetained(error);
+  const [dragOver, setDragOver] = useState(false);
+  const [landed, setLanded] = useState<string | null>(null);
+  useEffect(() => {
+    if (!landed) return;
+    const timer = window.setTimeout(() => setLanded(null), LANDED_MS);
+    return () => window.clearTimeout(timer);
+  }, [landed]);
+  // 落点不在可见区时滚过去（减弱动态效果时直接跳到）。
+  const revealLanded = useCallback((element: HTMLElement | null) => {
+    element?.scrollIntoView?.({ block: 'nearest', behavior: prefersReducedMotion() ? 'instant' : 'smooth' });
+  }, []);
   const input = useRef<HTMLInputElement>(null);
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -112,7 +130,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
   async function categorize(asset: CreationAsset, category: string | null) {
     setBusy(true);
     setError(null);
-    try { await updateCreationAssetCategory(asset.asset_id, category); await changed(); }
+    try { await updateCreationAssetCategory(asset.asset_id, category); await changed(); setLanded(asset.asset_id); }
     catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -139,7 +157,9 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     if (!media) return null;
     const suggestion = suggestions[asset.asset_id];
     const value = waiting ? suggestion?.category ?? '' : asset.category ?? '';
-    return <article key={asset.asset_id} className="mb-3 break-inside-avoid overflow-hidden rounded-lg border border-border bg-card p-3">
+    const isLanded = !waiting && landed === asset.asset_id;
+    return <article key={asset.asset_id} ref={isLanded ? revealLanded : undefined}
+      className={`mb-3 break-inside-avoid overflow-hidden rounded-lg border bg-card p-3 transition-[border-color,box-shadow] duration-300 ${isLanded ? 'content-swap-in border-primary ring-1 ring-primary/60' : 'border-border'}`}>
       <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-2 max-h-64 w-full rounded-md object-contain" />
       <Hint label={asset.title}><p className="truncate text-sm">{asset.title}</p></Hint>
       <div className="mt-2 flex items-center gap-2">
@@ -161,9 +181,13 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     </article>;
   }
 
-  return <div className="flex min-h-0 flex-1 flex-col" onDragOver={event => {
-    if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); }
+  // 拖着文件经过时整块描一圈虚线主色框，告诉用户这里能放；离开或放下即撤。
+  return <div className={`flex min-h-0 flex-1 flex-col rounded-lg outline-2 -outline-offset-4 transition-[outline-color] duration-150 ${dragOver ? 'outline-dashed outline-primary/60' : 'outline-transparent'}`} onDragOver={event => {
+    if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDragOver(true); }
+  }} onDragLeave={event => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false);
   }} onDrop={event => {
+    setDragOver(false);
     if (!event.dataTransfer.files.length) return;
     event.preventDefault(); event.stopPropagation();
     void importFiles(Array.from(event.dataTransfer.files));
@@ -173,7 +197,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       <FileInput ref={input} multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
         void importFiles(Array.from(event.target.files ?? [])); event.target.value = '';
       }} />
-      {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
+      <Collapse open={Boolean(error)}><p role="alert" className="mt-2 text-xs text-destructive">{shownError}</p></Collapse>
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto p-3" style={{ scrollbarGutter: 'stable' }}>
       {pending.length > 0 && <section aria-label="待分类" className="mb-4">

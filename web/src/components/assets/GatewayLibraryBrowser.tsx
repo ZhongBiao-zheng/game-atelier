@@ -3,6 +3,7 @@ import { AddIcon, AudioIcon, CopyIcon, HelpIcon, LoadingIcon, RetryIcon, SearchI
 import { gatewayContentUrl, gatewayThumbUrl, listGatewayAssets, listGatewayLibraries, type GatewayLibraryEntry,
   type GatewayLibrarySelection, type GatewayLibrarySource } from '@/api/gatewayLibraries';
 import { Button } from '@/components/ui/button';
+import { useRetained } from '@/components/ui/retained';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
 import { RevealImage } from '@/components/ui/reveal-image';
@@ -68,6 +69,8 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
     {using === entry.entry_id ? <LoadingIcon className="animate-spin" /> : <AddIcon />}使用</Button>;
   const [entries, setEntries] = useState<GatewayLibraryEntry[]>([]);
   const [viewing, setViewing] = useState<GatewayLibraryEntry | null>(null);
+  // 关闭后沿用最后一条内容，弹窗带着它播完退场。
+  const shownViewing = useRetained(viewing);
   const [preview, setPreview] = useState(0);
   const [query, setQuery] = useState('');
   const [type, setType] = useState('all');
@@ -113,7 +116,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
           <AssetFilterPill key={value} selected={type === value} onClick={() => setType(value)}>{label}</AssetFilterPill>)}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {visible.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{loading ? '读取中' : '库里还没有内容'}</p>}
+        {visible.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{loading ? '加载中…' : '库里还没有内容'}</p>}
         <AssetMasonry items={visible} itemKey={entry => entry.entry_id} ratio={entry => mediaRatio(sizes[entry.entry_id] ?? entry)}>
           {entry => <div className="group min-w-0" draggable={false}>
             <div className="relative">
@@ -136,25 +139,25 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
         </AssetMasonry>
       </div>
     </>}
-    {available && viewing && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
+    {shownViewing && <Dialog open={Boolean(available && viewing)} onOpenChange={open => { if (!open) setViewing(null); }}>
       <DialogContent aria-describedby={undefined}>
-        <DialogHeader><DialogTitle>{viewing.title}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{shownViewing.title}</DialogTitle></DialogHeader>
         <div className="min-h-0 space-y-3 overflow-y-auto">
-          {thumb(viewing, preview) ? <img src={thumb(viewing, preview)!} alt={viewing.title} draggable={false} onError={onUnavailable}
-            className="max-h-120 w-full rounded-lg object-contain" /> : viewing.kind !== 'prompt' ? placeholder(viewing) : null}
-          {viewing.kind === 'prompt' && viewing.preview_count > 1 && <div className="grid grid-cols-4 gap-2">
-            {Array.from({ length: viewing.preview_count }, (_, n) => <Button key={n} variant="outline" className="h-auto p-1" aria-label={`效果图 ${n + 1}`} aria-pressed={n === preview} onClick={() => setPreview(n)}>
-              <img src={thumb(viewing, n)!} draggable={false} alt="" onError={onUnavailable} className="aspect-square w-full rounded-md object-cover" />
+          {thumb(shownViewing, preview) ? <img src={thumb(shownViewing, preview)!} alt={shownViewing.title} draggable={false} onError={onUnavailable}
+            className="max-h-120 w-full rounded-lg object-contain" /> : shownViewing.kind !== 'prompt' ? placeholder(shownViewing) : null}
+          {shownViewing.kind === 'prompt' && shownViewing.preview_count > 1 && <div className="grid grid-cols-4 gap-2">
+            {Array.from({ length: shownViewing.preview_count }, (_, n) => <Button key={n} variant="outline" className="h-auto p-1" aria-label={`效果图 ${n + 1}`} aria-pressed={n === preview} onClick={() => setPreview(n)}>
+              <img src={thumb(shownViewing, n)!} draggable={false} alt="" onError={onUnavailable} className="aspect-square w-full rounded-md object-cover" />
             </Button>)}
           </div>}
-          {viewing.kind === 'prompt' && <>
+          {shownViewing.kind === 'prompt' && <>
             <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">提示词</span>
-              <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard.writeText(viewing.prompt_text ?? '').catch(() => setCopyError(true)); }}><CopyIcon />复制</Button>
-            </div><p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
+              <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard.writeText(shownViewing.prompt_text ?? '').catch(() => setCopyError(true)); }}><CopyIcon />复制</Button>
+            </div><p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{shownViewing.prompt_text}</p>
             {copyError && <p role="alert" className="text-xs text-destructive">复制失败</p>}
           </>}
         </div>
-        <div className="flex justify-end">{actionButton(viewing)}</div>
+        <div className="flex justify-end">{actionButton(shownViewing)}</div>
       </DialogContent>
     </Dialog>}
   </>;

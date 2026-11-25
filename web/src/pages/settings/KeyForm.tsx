@@ -3,11 +3,16 @@ import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderIconPicker } from '@/components/keys/ProviderIconPicker';
 import { defaultIconUrl } from '@/api/providerIcons';
 import { useEffect, useRef, useState } from 'react';
-import { CheckIcon, CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
+import { CheckIcon, CloseIcon, ErrorIcon, HelpIcon, HideIcon, LoadingIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { Collapse } from '@/components/ui/collapse';
+import { Disclosure } from '@/components/ui/disclosure';
+import { useRetained, useRetainedSession } from '@/components/ui/retained';
+import { revealInvalidField } from '@/components/ui/invalid-field';
 import { checkGateway } from '@/api/gateway';
 import { ApiError } from '@/api/http';
 import { listHttpProtocols } from '@/api/httpProtocols';
@@ -15,6 +20,7 @@ import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 import { probeKey, recordOnboardingEvent, type KeyProbeResult } from '@/api/onboarding';
 import { modelCatalog } from '@/lib/modelCatalog';
+import { MOTION_DURATION } from '@/lib/motion';
 
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -66,7 +72,13 @@ const TEXT_INPUT_MODALITIES = [
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
-type EditableModel = KeyModel & { _locked?: boolean; _price?: string; _priceIn?: string; _priceOut?: string };
+// _rowId：行的稳定身份，作 React key；删掉中间一行时后面的行不重挂，输入框不串值、不丢焦点。
+type EditableModel = KeyModel & { _locked?: boolean; _price?: string; _priceIn?: string; _priceOut?: string; _rowId?: number };
+let nextRowId = 0;
+/** 给还没有身份的行补 _rowId；已有的沿用（随 spread 传下去）。 */
+const withRowIds = (rows: EditableModel[]) => rows.some(row => row._rowId == null)
+  ? rows.map(row => (row._rowId == null ? { ...row, _rowId: ++nextRowId } : row))
+  : rows;
 
 const PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；留空为未计价';
 // 输入中的文本优先（允许「0.」这类中间态），否则回显已存的单价。
@@ -82,6 +94,8 @@ function parsePrice(text: string): number | null | undefined {
 }
 
 interface Props {
+  /** 受控弹窗：调用方关闭时传 false，弹窗带着原内容播完退场；不传即打开。 */
+  open?: boolean;
   initial?: Partial<KeyCreatePayload>;
   presetId?: string;
   onCreated: () => void;
@@ -123,7 +137,7 @@ const AGENT_UNVERIFIED_HELP = '经中转站走 Gemini 格式时工具调用未�
 const AUTO_DETECT_DELAY_MS = 500;
 const MIN_KEY_LENGTH = 8;
 
-export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create', autoDetect = false }: Props) {
+export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create', autoDetect = false }: Props) {
   const initialPreset = PROVIDER_PRESETS.find(p => p.id === presetId) ?? providerByValue(providerPresetId(initial ?? { provider: 'openai' }));
   const [activePresetId, setActivePresetId] = useState(initialPreset.id);
   const [enabled, setEnabled] = useState(initial?.enabled !== false);
@@ -150,21 +164,26 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
   // 编辑态打开时已存在的行打 _locked，分类锁死为只读；新增行不带标记，仍可选分类。
-  const [models, setModels] = useState<EditableModel[]>(
+  const [models, setModelRows] = useState<EditableModel[]>(() => withRowIds(
     initial?.models !== undefined
       ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial), _locked: mode === 'edit' }))
       : initialPreset.defaultModels,
-  );
+  ));
+  const setModels = (next: EditableModel[] | ((current: EditableModel[]) => EditableModel[])) =>
+    setModelRows(current => withRowIds(typeof next === 'function' ? next(current) : next));
   const pendingModelFocus = useRef<number | null>(null);
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const shownError = useRetained(error);
+  const formBodyRef = useRef<HTMLDivElement>(null);
   // preview 存整份响应（models + total + excluded），头部才能诚实说清「上游多少、过滤了多少」。
   const [preview, setPreview] = useState<(ModelsPreview & { includeAll: boolean; protocolId: string | null }) | null>(null);
   const [fetchedChecked, setFetchedChecked] = useState<Set<string>>(new Set());
   // 上游没判出分类的行（unknown / excluded）在 picker 里的显式二选一结果，按模型 id 存。
   const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const shownFetchError = useRetained(fetchError);
   useEffect(() => { if (fetchError) setManualOpen(true); }, [fetchError]);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
   const [pickerQuery, setPickerQuery] = useState('');
@@ -176,6 +195,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   // 自定义接口（ADR-0036）：只有自定义供应商的图片 / 视频模型可以绑定。
   const [interfaces, setInterfaces] = useState<HttpProtocolRow[]>([]);
   const [interfaceEditor, setInterfaceEditor] = useState<{ index: number; identifier: string | null; kind: HttpProtocolKind } | null>(null);
+  const shownInterfaceEditor = useRetainedSession(interfaceEditor);
   const reloadInterfaces = () => listHttpProtocols().then(result => setInterfaces(result.protocols));
   // 目录来源：空 = 默认 GET /models；否则按这份自定义接口的 catalog 发现（ADR-0036）。
   const [catalogSource, setCatalogSource] = useState('');
@@ -230,6 +250,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const isLocked = (model: EditableModel) => model._locked === true;
 
   const [probe, setProbe] = useState<KeyProbeResult | null>(null);
+  // 粘贴密钥后的自动校验：发出到返回之间显示「校验中…」，结果原位换图标。
+  const [probing, setProbing] = useState(false);
   // 切换凭证、地址或目录后，旧请求的结果和 finally 都不能改变当前表单。
   useEffect(() => {
     setPendingRequest(null);
@@ -239,6 +261,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     if (!autoDetect || editing) return;
     const key = accessKey.trim();
     setProbe(null);
+    setProbing(false);
     if (key.length < MIN_KEY_LENGTH) return;
     const run = listRun.current;
     let active = true;
@@ -262,8 +285,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           .catch(e => { if (run === listRun.current) setFetchError(e instanceof Error ? e.message : String(e)); })
           .finally(() => { if (run === listRun.current) setPendingRequest(null); });
       }
+      setProbing(true);
       void probeKey(activePresetId, key).then(result => {
         if (!active) return;
+        setProbing(false);
         setProbe(result);
         void recordOnboardingEvent({ event: 'key_probed', result });
       });
@@ -440,6 +465,11 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     if (models.some(model => [priceText(model), priceInText(model), priceOutText(model)]
       .some(text => parsePrice(text) === undefined))) {
       setError('单价请填 0 到 10000 之间的数字');
+      // 单价在「模型详情」里：收着就先展开，等展开动画走完再把第一个填错的框带到眼前。
+      const wasOpen = detailsOpen;
+      setDetailsOpen(true);
+      window.setTimeout(() => revealInvalidField(formBodyRef.current?.querySelector<HTMLElement>('input[aria-invalid="true"]') ?? null),
+        wasOpen ? 0 : MOTION_DURATION.slow * 1000);
       return;
     }
     setSaving(true);
@@ -598,7 +628,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   };
 
   return (
-    <Dialog open onOpenChange={open => { if (!open && !saving) onCancel(); }}>
+    <Dialog open={open} onOpenChange={next => { if (!next && !saving) onCancel(); }}>
       <DialogContent hideClose aria-describedby={undefined} className="flex max-h-[90dvh] max-w-[680px] flex-col gap-0 overflow-hidden p-0">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
           <ProviderIconPicker icon={icon} onChange={setIcon} defaultUrl={defaultIconUrl(homepage || preset.homepageUrl, baseUrl || preset.defaultBaseUrl)}
@@ -607,7 +637,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
           <Switch size="sm" checked={enabled} onCheckedChange={setEnabled} aria-label={`启用 ${alias || preset.label}`} />
         </header>
-        <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
+        <div ref={formBodyRef} className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
           {!editing && !presetId && <div className="mb-5 space-y-2">
             <Label htmlFor="key-provider" className={capLabelClass}>供应商选择</Label>
             <Select value={activePresetId} disabled={fetching || testing || connecting} onValueChange={changeProvider}>
@@ -628,12 +658,12 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               <Label htmlFor="comfy-address" className="pt-2 text-xs text-muted-foreground">ComfyUI 地址</Label>
               <Input id="comfy-address" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setConnectionTest(null); }} />
               <span />
-              <div className="space-y-2"><Button variant="outline" disabled={testing} onClick={testConnection}>{testing ? '测试中…' : '测试连接'}</Button>
-                {connectionTest && <p role={connectionTest.ok ? 'status' : 'alert'} className="text-xs text-muted-foreground">{connectionTest.message}</p>}
+              <div className="space-y-2"><Button variant="outline" disabled={testing} onClick={testConnection}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
+                {connectionTest && <p key={connectionTest.message} role={connectionTest.ok ? 'status' : 'alert'} className="content-swap-in text-xs text-muted-foreground">{connectionTest.message}</p>}
               </div>
             </> : isSubscription ? <>
               <span className="pt-2 text-xs text-muted-foreground">账号</span>
-              <div className="py-2 text-sm">{subscriptionError ? <p role="alert" className="text-destructive">{subscriptionError}</p> : !subscription ? <p role="status" className="text-muted-foreground">读取中…</p> : subscription.available ? <><p>{subscription.email}</p>{subscription.plan && <p className="mt-1 text-xs text-muted-foreground">{subscription.plan}</p>}</> : <p role="status" className="text-muted-foreground">请先在 Codex 里用 ChatGPT 登录</p>}</div>
+              <div className="py-2 text-sm">{subscriptionError ? <p role="alert" className="text-destructive">{subscriptionError}</p> : !subscription ? <p role="status" className="text-muted-foreground">加载中…</p> : subscription.available ? <><p>{subscription.email}</p>{subscription.plan && <p className="mt-1 text-xs text-muted-foreground">{subscription.plan}</p>}</> : <p role="status" className="text-muted-foreground">请先在 Codex 里用 ChatGPT 登录</p>}</div>
             </> : <>
             <Label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</Label>
             <div className="flex flex-wrap items-center gap-2">
@@ -644,8 +674,14 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </Button>
               </div>
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
-              {probe === 'ok' && <p role="status" className="basis-full text-xs text-[color:var(--status-done)]">Key 有效</p>}
-              {probe === 'invalid' && <p role="alert" className="basis-full text-xs text-destructive">Key 无效</p>}
+              <Collapse open={probing || probe === 'ok' || probe === 'invalid'} className="basis-full">
+                <p role={probe === 'invalid' ? 'alert' : 'status'} className={`flex items-center gap-1.5 text-xs ${probe === 'ok' ? 'text-[color:var(--status-done)]' : probe === 'invalid' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                  <SwapIcon swapKey={probing ? 'probing' : probe ?? 'none'} variant={probe === 'ok' && !probing ? 'pop' : 'subtle'}>
+                    {probing ? <LoadingIcon size="sm" className="animate-spin" aria-hidden /> : probe === 'invalid' ? <ErrorIcon size="sm" aria-hidden /> : <CheckIcon size="sm" aria-hidden />}
+                  </SwapIcon>
+                  {probing ? '校验中…' : probe === 'invalid' ? 'Key 无效' : 'Key 有效'}
+                </p>
+              </Collapse>
             </div>
             </>}
             {showInterface && <>
@@ -664,7 +700,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             <span className="pt-2 text-xs text-muted-foreground">{isComfy ? '工作流' : '模型'}</span>
             <div className="min-w-0 space-y-3">
               {isComfy ? (editing ? <ComfyWorkflows alias={initial!.alias!} /> : <p className="py-2 text-sm text-muted-foreground">保存后导入工作流</p>) : isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
-                <Button variant="ghost" size="sm" type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}><SwapLabel active={connecting} on="连接中…" off={gatewayModels.length ? '重新同步' : '连接网关'} /></Button>
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
                 {gatewayError && <p role="alert" className="text-sm text-destructive">{gatewayError}</p>}
                 <ul aria-label="网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
@@ -683,9 +719,9 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                       {catalogInterfaces.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
                     </SelectContent>
                   </Select>}
-                  <Button variant="ghost" size="sm" type="button" disabled={fetching || testing || !fetchModelsBaseUrl} onClick={() => void fetchModels()}>{fetching ? '获取中...' : '重新获取'}</Button>
+                  <Button variant="ghost" size="sm" type="button" disabled={fetching || testing || !fetchModelsBaseUrl} onClick={() => void fetchModels()}><SwapLabel active={fetching} on="获取中…" off="重新获取" /></Button>
                 </div>
-                {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
+                <Collapse open={Boolean(fetchError)}><p role="alert" className="text-sm text-destructive">{shownFetchError}</p></Collapse>
                 {preview ? <div className="min-w-0 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>上游 {preview.total} 个模型</span>
@@ -707,7 +743,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         if (next.has(model.id)) next.delete(model.id); else next.add(model.id);
                         setFetchedChecked(next);
                       }} className="max-w-full rounded-full px-3 font-mono font-normal aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-foreground">
-                        {fetchedChecked.has(model.id) ? <CheckIcon size="sm" aria-hidden /> : <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(resolvedModality(model))}`} />}<span className="truncate">{model.id}</span>
+                        {/* 勾与类型圆点占同一个 16px 槽位：勾选时标签宽度不变，旁边的标签不跟着挪。 */}
+                        <SwapIcon swapKey={fetchedChecked.has(model.id)} variant="pop" className="size-4">
+                          {fetchedChecked.has(model.id) ? <CheckIcon size="sm" aria-hidden /> : <span aria-hidden className={`size-1.5 rounded-full ${typeDot(resolvedModality(model))}`} />}
+                        </SwapIcon><span className="truncate">{model.id}</span>
                       </Toggle></Hint>
                       {!model.modality && fetchedChecked.has(model.id) && <ToggleGroup type="single" size="sm" aria-label={`分类 ${model.id}`} className="flex-wrap"
                         value={modalityPick[model.id] ?? ''}
@@ -729,8 +768,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     <CheckIcon size="sm" aria-hidden /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
                   </Button>)}
                 </div>}
-                {provider === 'custom' && <details open={manualOpen} onToggle={e => setManualOpen(e.currentTarget.open)}>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">手动添加模型</summary>
+                {provider === 'custom' && <Disclosure summary="手动添加模型" open={manualOpen} onOpenChange={setManualOpen}>
                   <div className="mt-3 flex flex-wrap gap-2">
                   <Input aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className="min-w-0 flex-1 basis-28 font-mono" />
                   <Select value={manualType} onValueChange={value => setManualType(value as ModelModality)}>
@@ -739,9 +777,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   </Select>
                   <Button variant="ghost" size="sm" type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel}>添加</Button>
                   </div>
-                </details>}
-                <details open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">模型详情</summary>
+                </Disclosure>}
+                <Disclosure summary="模型详情" open={detailsOpen} onOpenChange={setDetailsOpen}>
                   <div className="mt-3 space-y-3">
                     <Button variant="ghost" size="sm" type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '' }]); }}>添加模型</Button>
                 <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
@@ -750,7 +787,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-2 items-start gap-2">
+                    <div key={model._rowId} className="grid grid-cols-2 items-start gap-2">
                       <Label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</Label>
                       <Input
                         ref={(input) => {
@@ -840,6 +877,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                           <div className="flex items-center gap-1.5">
                             <Input
                               aria-label={`输入单价 ${index + 1}`}
+                              aria-invalid={parsePrice(priceInText(model)) === undefined || undefined}
                               inputMode="decimal"
                               value={priceInText(model)}
                               onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _priceIn: e.target.value } : m))}
@@ -848,6 +886,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             />
                             <Input
                               aria-label={`输出单价 ${index + 1}`}
+                              aria-invalid={parsePrice(priceOutText(model)) === undefined || undefined}
                               inputMode="decimal"
                               value={priceOutText(model)}
                               onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _priceOut: e.target.value } : m))}
@@ -862,6 +901,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                           <div className="flex items-center gap-1.5">
                             <Input
                               aria-label={`单价 ${index + 1}`}
+                              aria-invalid={parsePrice(priceText(model)) === undefined || undefined}
                               inputMode="decimal"
                               value={priceText(model)}
                               onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _price: e.target.value } : m))}
@@ -897,17 +937,16 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </div>
 
                   </div>
-                </details>
+                </Disclosure>
               </>}
             </div>
             {!isGateway && !isSubscription && !isComfy && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中…' : '测试连接'}</Button>
-                {connectionTest && <span role={connectionTest.ok ? 'status' : 'alert'} className={`text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
+                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
+                {connectionTest && <span key={connectionTest.message} role={connectionTest.ok ? 'status' : 'alert'} className={`content-swap-in text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
               </div>
-              <details className="col-span-full border-t border-border pt-3">
-                <summary className="cursor-pointer text-xs text-muted-foreground">高级：请求地址 · 计费分组</summary>
+              <Disclosure summary="高级：请求地址 · 计费分组" className="col-span-full border-t border-border pt-3">
                 <div className="mt-3 grid grid-cols-1 items-center gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
                   <Label htmlFor="key-base-url" className="text-xs text-muted-foreground">API 请求地址</Label>
                   <div className="flex gap-2"><Input id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className="font-mono" /><Button variant="ghost" size="sm" type="button" onClick={testBaseUrl}>测试</Button></div>
@@ -916,31 +955,33 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   <Input id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} placeholder="default" />
                   {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><Label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</Label><Input id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} /></>}
                 </div>
-              </details>
+              </Disclosure>
             </>}
           </div>
         </div>
-        {interfaceEditor && <CustomInterfaceDialog
-          identifier={interfaceEditor.identifier}
-          kind={interfaceEditor.kind}
+        {shownInterfaceEditor && <CustomInterfaceDialog
+          key={shownInterfaceEditor.session}
+          open={Boolean(interfaceEditor)}
+          identifier={shownInterfaceEditor.value.identifier}
+          kind={shownInterfaceEditor.value.kind}
           baseUrl={baseUrl.trim() || undefined}
-          model={models[interfaceEditor.index]?.id.trim() || undefined}
+          model={models[shownInterfaceEditor.value.index]?.id.trim() || undefined}
           onClose={() => setInterfaceEditor(null)}
           onSaved={(saved) => {
-            const { index } = interfaceEditor;
+            const { index } = shownInterfaceEditor.value;
             setModels(current => current.map((m, i) => i === index
               ? { ...m, protocol: 'declarative', declarative_id: saved.id } : m));
             setInterfaceEditor(null);
             void reloadInterfaces().catch(() => undefined);
           }}
         />}
-        {error && <p role="alert" className="px-6 pb-3 text-sm text-destructive">{error}</p>}
+        <Collapse open={Boolean(error)}><p role="alert" className="px-6 pb-3 text-sm text-destructive">{shownError}</p></Collapse>
         <footer className="flex shrink-0 items-center gap-2 border-t border-border px-6 py-4">
           {onDelete && <Button variant="bare" type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</Button>}
           <span className="flex-1" />
           {blockedReason && <span role="status" className="text-xs text-muted-foreground">{blockedReason}</span>}
           <Button variant="ghost" size="sm" type="button" onClick={onCancel} disabled={saving}>取消</Button>
-          <Button type="button" onClick={submit} disabled={!canSubmit} className="px-5">{saving ? '保存中...' : submitLabel}</Button>
+          <Button type="button" onClick={submit} disabled={!canSubmit} className="px-5"><SwapLabel active={saving} on="保存中…" off={submitLabel} /></Button>
         </footer>
       </DialogContent>
     </Dialog>

@@ -4,12 +4,13 @@ import {
   useAccent, withBuiltinOverride, type AccentDoc,
 } from '@/lib/accentTheme';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { setTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
+import { setTheme, transitionTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
 import { setBrandIconMode, useBrandIconMode, type BrandIconMode } from '@/lib/brandIconMode';
 import { ACCENT_PRESETS, type AccentColors, type AccentPreset } from '@/lib/accentPresets';
 import { ACCENT_USER_THEME_MAX, type AccentThemesBody } from '@/schema/accentThemes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { useRetainedSession } from '@/components/ui/retained';
 import { Collapse } from '@/components/ui/collapse';
 import { ChevronDownIcon } from '@/components/ui/icons';
 import { cn } from '@/lib/utils';
@@ -36,6 +37,7 @@ export function AppearanceSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState<{ name: string; colors: AccentColors } | null>(null);
+  const shownCreating = useRetainedSession(creating);
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
   useEffect(() => { syncAccentThemes().catch(cause => setError(message(cause))); }, []);
@@ -82,7 +84,11 @@ export function AppearanceSection() {
       <div className="space-y-3 px-4.5 py-3.5">
         <p className="text-sm">主题色</p>
         <ThemeGrid themes={themes} active={doc.active} canAdd={doc.custom.length < ACCENT_USER_THEME_MAX}
-          onSelect={id => void save(current => ({ ...body(current), active: id }))}
+          onSelect={id => transitionTheme(() => new Promise<void>(resolve => {
+            // 主题色在保存队列开头就写进页面；等这一拍过去再截新画面，交叉淡入到新主题色。
+            void save(current => ({ ...body(current), active: id }));
+            setTimeout(resolve, 0);
+          }))}
           onAdd={() => setCreating({ name: uniqueThemeName(doc, '新主题'), colors: theme.colors })} />
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
@@ -103,7 +109,7 @@ export function AppearanceSection() {
         </Collapse>
       </div>
     </div>
-    {creating && <ThemeDialog doc={doc} initial={creating} busy={busy} error={error}
+    {shownCreating && <ThemeDialog key={shownCreating.session} open={Boolean(creating)} doc={doc} initial={shownCreating.value} busy={busy} error={error}
       onCreate={create} onClose={() => { setCreating(null); setError(null); }} />}
     <ConfirmDialog open={deleting} variant="destructive" title={`删除「${theme.name}」？`} message="删除后无法恢复。" confirmText="删除"
       onCancel={() => setDeleting(false)}

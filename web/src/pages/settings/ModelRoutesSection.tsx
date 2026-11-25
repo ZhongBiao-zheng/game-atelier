@@ -1,6 +1,7 @@
 import { formatGenerationCost } from '@/lib/generationCost';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { ChevronLeftIcon, HelpIcon } from '@/components/ui/icons';
 import { fetchGatewayMembers, restoreGatewayMember, type GatewayMembers } from '@/api/gateway';
 import { listModelRoutes, setModelRouteMode, setModelRouteOrder, type ModelRoute, type RouteMode } from '@/api/models';
@@ -8,6 +9,10 @@ import { date } from './lan-sharing/shared';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { Disclosure } from '@/components/ui/disclosure';
+import { useRetained } from '@/components/ui/retained';
+import { MOTION_SPRING } from '@/lib/motion';
 
 const MODALITY_LABELS: Record<ModelRoute['modality'], string> = {
   image: '图片', video: '视频', text: '文本', audio: '音频',
@@ -23,6 +28,9 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const shownError = useRetained(error);
+  // 「提前」乐观换位：每条路由只认最后一次请求的结果，连点几下不会被先回来的旧响应覆盖。
+  const reorderSeq = useRef(new Map<string, number>());
 
   useEffect(() => {
     let cancelled = false;
@@ -65,10 +73,32 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     finally { setSavingId(null); }
   }
 
-  function moveEarlier(route: ModelRoute, index: number) {
+  /** 「提前」先在本地换位（成员行带布局动画滑到新位置），再保存；失败退回服务端最后确认的顺序。不禁用按钮，可以连点。 */
+  async function moveEarlier(route: ModelRoute, index: number) {
+    const key = routeKey(route);
     const aliases = route.members.map(member => member.alias);
     [aliases[index - 1], aliases[index]] = [aliases[index], aliases[index - 1]];
-    void save(route, () => setModelRouteOrder(route.modality, route.id, aliases));
+    const unavailable = new Set(status.members.filter(item => item.modality === route.modality).map(item => item.alias));
+    const optimistic: ModelRoute = {
+      ...route,
+      members: aliases.map(alias => route.members.find(member => member.alias === alias)!),
+      candidate_alias: route.mode === 'order' ? aliases.find(alias => !unavailable.has(alias)) ?? null : route.candidate_alias,
+    };
+    const seq = (reorderSeq.current.get(key) ?? 0) + 1;
+    reorderSeq.current.set(key, seq);
+    setRoutes(current => current.map(item => routeKey(item) === key ? optimistic : item));
+    setError(null);
+    try {
+      const saved = await setModelRouteOrder(route.modality, route.id, aliases);
+      if (reorderSeq.current.get(key) === seq) setRoutes(current => current.map(item => routeKey(item) === key ? saved : item));
+    } catch (e) {
+      if (reorderSeq.current.get(key) !== seq) return;
+      setError(e instanceof Error ? e.message : String(e));
+      try {
+        const fresh = (await listModelRoutes()).find(item => routeKey(item) === key);
+        if (fresh && reorderSeq.current.get(key) === seq) setRoutes(current => current.map(item => routeKey(item) === key ? fresh : item));
+      } catch { /* 读不回来就保留当前顺序，报错已经显示 */ }
+    }
   }
 
   return <section aria-label="智能路由" className="space-y-5">
@@ -86,7 +116,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
         </TabsList>
       </Tabs>
     </div>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
     {overdue.length > 0 && <div role="status" className="flex flex-wrap items-center gap-2.5 rounded-md border border-destructive/35 bg-destructive/10 px-3.5 py-2.5 text-sm">
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
       <span className="min-w-0 flex-1">{overdueAliases.join('、')} 欠费，已从 {affected} 条路由摘除</span>
@@ -111,7 +141,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
             {route.members.map((member, index) => {
               const unavailable = status.members.find(item => item.modality === route.modality && item.alias === member.alias);
               const first = route.mode !== 'round_robin' && member.alias === route.candidate_alias;
-              return <li key={member.alias} className="flex max-w-full items-center gap-1.5">
+              return <motion.li layout="position" transition={MOTION_SPRING.snappy} key={member.alias} className="flex max-w-full items-center gap-1.5">
                 {index > 0 && <span aria-hidden className="text-subtle-foreground">{route.mode === 'round_robin' ? '·' : '→'}</span>}
                 <span className={`flex min-w-0 flex-wrap items-center gap-2 rounded-md border py-1 pl-1 pr-1.5 ${first ? 'border-primary/45 bg-primary/10' : 'border-border'} ${unavailable ? 'opacity-75' : ''}`}>
                   {route.mode === 'order' && <span className={`flex size-5 items-center justify-center rounded tabular-nums text-xs ${first ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>{index + 1}</span>}
@@ -122,20 +152,19 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
                     {unavailable.reason !== 'unavailable' && <Button variant="bare" type="button" disabled={restoring || savingId !== null} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</Button>}
                   </span>}
                   {route.mode === 'order' && index > 0 && <Button variant="bare" type="button" aria-label={`把 ${member.alias} 提前`} disabled={savingId !== null || restoring}
-                    onClick={() => moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeftIcon size="sm" aria-hidden /></Button>}
+                    onClick={() => void moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeftIcon size="sm" aria-hidden /></Button>}
                 </span>
-              </li>;
+              </motion.li>;
             })}
           </ol>
           <span className="text-xs text-muted-foreground">{route.candidate_alias ? `${route.mode === 'round_robin' ? '下一次走' : '当前走'} ${route.candidate_alias}` : '全部不可用'}</span>
         </div>)}
       </div>}
-      {single.length > 0 && <details className="rounded-lg border border-border px-4 py-3">
-        <summary className="cursor-pointer text-sm text-muted-foreground">只有一家供应商的模型 · {single.length}</summary>
+      {single.length > 0 && <Disclosure summary={`只有一家供应商的模型 · ${single.length}`} className="rounded-lg border border-border px-4 py-3" triggerClassName="w-full text-sm">
         <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
           {single.map(route => <li key={routeKey(route)}><span>{route.name}</span><span className="ml-2 text-xs">{route.members[0].alias}</span></li>)}
         </ul>
-      </details>}
+      </Disclosure>}
       {visible.length === 0 && !error && <p className="text-sm text-muted-foreground">暂无{MODALITY_LABELS[modality]}模型</p>}
     </>}
   </section>;

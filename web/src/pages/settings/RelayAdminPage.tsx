@@ -130,7 +130,7 @@ export function RelayAdminPage() {
   const alias = selected && aliases.includes(selected) ? selected : aliases[0];
   const view = query.get('view') ?? 'members';
   function change(name: string, value: string) { const next = new URLSearchParams(search); next.set(name, value); navigate(`/settings/relay-admin?${next}`); }
-  if (!alias) return <p className="text-sm text-muted-foreground">{loaded ? '没有可用的管理员中转连接' : '读取中转连接…'}</p>;
+  if (!alias) return <p className="text-sm text-muted-foreground">{loaded ? '没有可用的管理员中转连接' : '加载中…'}</p>;
   return <div className="min-w-0 space-y-6">
     <div className="flex flex-wrap gap-3"><Select value={alias} onValueChange={value => change('alias', value)}>
       <SelectTrigger aria-label="管理的中转" className="w-auto"><SelectValue /></SelectTrigger>

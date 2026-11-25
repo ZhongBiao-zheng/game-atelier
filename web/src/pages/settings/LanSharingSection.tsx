@@ -27,6 +27,9 @@ import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
 import { date, PERIODS } from './lan-sharing/shared';
 import { Button } from '@/components/ui/button';
+import { useRetained } from '@/components/ui/retained';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { useCopyFeedback } from '@/lib/useCopyFeedback';
 
 export const GATEWAY_HINT =
   '同事在「添加供应商 → Remote Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
@@ -39,11 +42,14 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [error, setError] = useState('');
   const [port, setPort] = useState('');
   const [editingPort, setEditingPort] = useState(false);
-  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  // 复制地址：「已复制」1.5 秒后自动退回「复制」，失败给出可照做的提示。
+  const [copyState, copyAddress] = useCopyFeedback();
+  useEffect(() => { if (copyState === 'failed') setError('复制失败，请手动复制地址'); }, [copyState]);
   const [creating, setCreating] = useState(false);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<GatewayKey | null>(null);
   const [rename, setRename] = useState('');
+  const shownRenaming = useRetained(renaming);
   const [pendingReset, setPendingReset] = useState<GatewayKey | null>(null);
   const [tokenVersion, setTokenVersion] = useState(0);
   const [createdTokens, setCreatedTokens] = useState<Record<string, string>>({});
@@ -91,7 +97,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">共享本机供应商</h2>
             <span className={`rounded-full px-2 py-0.5 text-xs ${state?.enabled && state.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
-              {!state ? '读取中…' : state.config_error ? '配置损坏' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
+              {!state ? '加载中…' : state.config_error ? '配置损坏' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
             </span>
           </div>
           {state && !state.config_error && <p className="text-xs text-muted-foreground">{state.enabled
@@ -103,16 +109,10 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
         </div>
         {address && <div role="status" className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs">
           <span className="break-all font-mono">{address}</span>
-          <Button variant="outline" size="sm" aria-label="复制地址" className="shrink-0" onClick={async () => {
+          <Button variant="outline" size="sm" aria-label="复制地址" className="shrink-0" onClick={() => {
             setError('');
-            try {
-              await navigator.clipboard.writeText(address);
-              setCopiedAddress(address);
-            } catch {
-              setCopiedAddress(null);
-              setError('复制失败，请手动复制地址');
-            }
-          }}>{copiedAddress === address ? '已复制' : '复制'}</Button>
+            copyAddress(address);
+          }}><SwapLabel active={copyState === 'copied'} on="已复制" off="复制" /></Button>
         </div>}
         {state?.enabled && (editingPort ? (
           <form autoComplete="off" className="flex flex-wrap items-center gap-2" onSubmit={event => {
@@ -169,7 +169,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                   </thead>
                   <tbody className="border-b border-border">
                     {state?.keys.map((key) => (
-                      <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`group border-t border-border ${highlight === key.id ? "bg-secondary" : ""} ${key.revoked_at ? 'opacity-50' : ''}`}>
+                      <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`group border-t border-border transition-colors duration-300 ${highlight === key.id ? "bg-secondary" : ""} ${key.revoked_at ? 'opacity-50' : ''}`}>
                         <td
                           className={`max-w-64 px-4 py-3 align-middle ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
@@ -224,9 +224,9 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           </p>
         )}
       </div>}
-      {renaming && <Dialog open onOpenChange={open => { if (!open) setRenaming(null); }}><DialogContent aria-describedby={undefined}>
+      {shownRenaming && <Dialog open={Boolean(renaming)} onOpenChange={open => { if (!open) setRenaming(null); }}><DialogContent aria-describedby={undefined}>
         <DialogTitle>重命名成员</DialogTitle><form autoComplete="off" className="space-y-3" onSubmit={event => { event.preventDefault();
-          void run(() => updateGatewayKey(renaming.id, { name: rename.trim() }, ...(gatewayAlias ? [gatewayAlias] as const : []))).then(ok => { if (ok) setRenaming(null); });
+          void run(() => updateGatewayKey(shownRenaming.id, { name: rename.trim() }, ...(gatewayAlias ? [gatewayAlias] as const : []))).then(ok => { if (ok) setRenaming(null); });
         }}><Input autoFocus aria-label="名称" value={rename} maxLength={40} onChange={event => setRename(event.target.value)} /><Button disabled={busy || !rename.trim()} type="submit">保存</Button></form>
       </DialogContent></Dialog>}
       <ConfirmDialog open={pendingReset !== null} title={`重置 ${pendingReset?.name ?? ''} 的密钥？`} message="原密钥立即失效，需要把新密钥交给对方。" confirmText="重置"

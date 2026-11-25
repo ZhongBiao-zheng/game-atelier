@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listCreationAssets, setPromptPreviewFromJob } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { CreationAsset } from '@/schema/creationAssets';
@@ -46,10 +47,10 @@ export function SetPromptPreviewDialog({ request, onClose, onSaved }: {
       {assets.length ? <Select value={assetId} onValueChange={setAssetId} disabled={busy}>
         <SelectTrigger aria-label="提示词资产"><SelectValue placeholder="选择提示词资产" /></SelectTrigger>
         <SelectContent>{assets.map(asset => <SelectItem key={asset.asset_id} value={asset.asset_id}>{asset.title}</SelectItem>)}</SelectContent>
-      </Select> : <p className="text-sm text-muted-foreground">{loading ? '正在读取…' : '还没有提示词资产'}</p>}
+      </Select> : <p className="text-sm text-muted-foreground">{loading ? '加载中…' : '还没有提示词资产'}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button>
-        <Button disabled={!assetId || busy || loading} onClick={() => void save()}>{busy ? '保存中…' : '保存'}</Button></DialogFooter>
+        <Button disabled={!assetId || busy || loading} onClick={() => void save()}><SwapLabel active={busy} on="保存中…" off="保存" /></Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }

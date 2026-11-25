@@ -147,7 +147,7 @@ it('复制运行中的地址', async () => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '复制地址' }));
-  expect(writeText).toHaveBeenCalledWith('http://192.168.1.20:5180');
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://192.168.1.20:5180'));
   expect(await screen.findByText('已复制')).toBeInTheDocument();
 });
 

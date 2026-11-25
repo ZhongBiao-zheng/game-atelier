@@ -49,9 +49,11 @@ export function PluginsPage() {
     return () => { active = false; };
   }, []);
 
+  // 乐观切换：开关立刻到位，只有这一行在请求期间禁用；失败以服务端为准拉回。
   async function toggle(id: string, enabled: boolean) {
     setBusyId(id);
     setError(null);
+    setLocalPlugins(current => current?.map(plugin => plugin.id === id ? { ...plugin, enabled } : plugin) ?? current);
     try {
       setPlugins((await setPluginEnabled(id, enabled)).plugins);
     } catch (e) {
@@ -68,10 +70,10 @@ export function PluginsPage() {
       <p className="font-display text-display italic text-foreground/70">暂无插件</p>
     </div>}
     {plugins && plugins.length > 0 && <ul aria-label="插件" className="divide-y divide-border rounded-xl border border-border bg-card p-5">
-      {plugins.map(plugin => <PluginRow key={plugin.id} plugin={plugin} busy={busyId !== null}
+      {plugins.map(plugin => <PluginRow key={plugin.id} plugin={plugin} busy={busyId === plugin.id}
         Settings={hostPlugins.get(plugin.id)?.Settings} onToggle={enabled => void toggle(plugin.id, enabled)} />)}
     </ul>}
-    {!plugins && !error && <p role="status" className="text-xs text-muted-foreground">读取中…</p>}
+    {!plugins && !error && <p role="status" className="text-xs text-muted-foreground">加载中…</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </div>;
 }
