@@ -139,7 +139,8 @@ def test_agent_session_api_is_project_scoped_and_revision_safe(client, isolated_
         f"/api/canvas/projects/{project_id}/agent/sessions/{session_id}",
         headers={"If-Match": "1"},
     )
-    assert deleted.status_code == 204
+    assert deleted.status_code == 200
+    assert deleted.json()["trash_id"].startswith("trash-")
     assert not sessions_dir.joinpath(f"{session_id}.json").exists()
 
 

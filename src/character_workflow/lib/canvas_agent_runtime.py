@@ -79,7 +79,9 @@ class ModelScope:
     def of(cls, session: CanvasAgentSession) -> "ModelScope":
         preferred = None if session.auto_models else frozenset(
             (ref.alias, ref.model) for ref in session.preferred_models)
-        return cls(session.creation_mode, preferred)
+        # 画布 Agent 去掉了创作模式（D14）：类别由 Agent 从需求推断，旧会话里存的模式不再生效。
+        mode = "all" if isinstance(session, CanvasAgentSession) else session.creation_mode
+        return cls(mode, preferred)
 
     def kinds(self) -> tuple[str, ...]:
         return ("image", "video") if self.creation_mode == "all" else (self.creation_mode,)
@@ -117,6 +119,20 @@ class TurnContext:
     # 工具在本轮里推送面板事件用（update_plan 写完待办推 kind=plan）；测试里不传就不推。
     notify: Notify | None = None
     spend: cost.TurnSpend = field(default_factory=cost.TurnSpend)
+    # 本轮提交的生成：run_id → 结果节点 id。停止时据此说明还有几个生成在跑、在哪个节点。
+    submitted_runs: dict[str, str] = field(default_factory=dict)
+
+    def record_submitted(self, text: str) -> None:
+        try:
+            result = json.loads(text)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(result, dict):
+            return
+        rows = result["items"] if isinstance(result.get("items"), list) else [result]
+        for row in rows:
+            if isinstance(row, dict) and row.get("run_id") and row.get("status", "submitted") != "rejected":
+                self.submitted_runs[str(row["run_id"])] = str(row.get("result_node_id") or "")
 
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
@@ -721,6 +737,7 @@ def build_tools() -> list:
                 call_id = ctx.tool_call_id
                 text = cost.with_submitted_estimate(text, quotes.pop(call_id, []))
                 turn.spend.finish(call_id, text)
+                turn.record_submitted(text)
             turn.created_node_ids.update(created)
             return text
 
@@ -836,7 +853,7 @@ def generation_summary(project_id: str, arguments: dict, batch_changes: list[dic
     except Exception:  # noqa: BLE001 — 摘要只是展示，读不到 draft 也要能弹卡
         logger.warning("canvas agent generation estimate failed", exc_info=True)
         estimate = {"model": None, "estimate_cny": None}
-    lines = [f"在节点 {node_id} 上生成 {count} 个结果"]
+    lines = [f"在节点 {_node_titles(project_id).get(node_id, node_id)} 上生成 {count} 个结果"]
     if estimate["model"]:
         price = estimate["estimate_cny"]
         lines.append(f"{estimate['model']} · {'未计价' if price is None else '预计 ' + _money(price)}")
@@ -845,17 +862,65 @@ def generation_summary(project_id: str, arguments: dict, batch_changes: list[dic
     return "\n".join(lines)
 
 
-def generation_rows(project_id: str, arguments: dict, batch_changes: list[dict]) -> list[dict]:
-    """批量生成每一项：{index, node_id, title, model, count, estimate_cny}；估价按调用时的 draft 与价格现算。
-    确认卡（逐项接口）、待确认摘要、执行记录都用这一份，Auto 判断用同一个 _generations_estimate。"""
+def _node_titles(project_id: str) -> dict[str, str]:
     try:
-        titles = {node.id: node.title for node in read_canvas_document(project_id).nodes}
+        return {node.id: node.title for node in read_canvas_document(project_id).nodes}
     except Exception:  # noqa: BLE001 — 只是展示，读不到就显示节点 id
-        titles = {}
+        return {}
+
+
+# 确认卡上每项的提示词只露一行开头，参考缩略图最多这么几张。
+PREVIEW_PROMPT_CHARS = 120
+PREVIEW_REFERENCES = 4
+
+
+def _generation_preview(document, node_id: str, batch_changes: list[dict]) -> dict:
+    """确认卡上一项生成的提示词开头与参考图：同一批待确认里的 set_draft / connect 优先，其余读画布。"""
+    if document is None:
+        return {"prompt": None, "references": []}
+    nodes = {node.id: node for node in document.nodes}
+    prompt = None
+    for change in batch_changes:
+        if isinstance(change, dict) and change.get("op") == "set_draft" and change.get("node_id") == node_id:
+            prompt = str(change.get("prompt") or "")
+    if prompt is None:
+        draft = getattr(getattr(nodes.get(node_id), "data", None), "generation_draft", None)
+        prompt = draft.prompt if draft is not None else ""
+    sources = [edge.source_node_id for edge in document.connections
+               if edge.role == "input" and edge.target_node_id == node_id]
+    sources += [str(change.get("source_node_id")) for change in batch_changes
+                if isinstance(change, dict) and change.get("op") == "connect"
+                and change.get("target_node_id") == node_id]
+    references = []
+    for source_id in dict.fromkeys(sources):
+        source = nodes.get(source_id)
+        version_id = getattr(getattr(source, "data", None), "current_version_id", None) if source else None
+        if source is None or source.type != "image" or not version_id:
+            continue
+        references.append({"node_id": source_id, "version_id": version_id, "title": _one_line(source.title)})
+        if len(references) == PREVIEW_REFERENCES:
+            break
+    text = " ".join(prompt.split())
+    return {"prompt": (text[:PREVIEW_PROMPT_CHARS] + "…" if len(text) > PREVIEW_PROMPT_CHARS else text) or None,
+            "references": references}
+
+
+def generation_rows(project_id: str, arguments: dict, batch_changes: list[dict]) -> list[dict]:
+    """每一项生成：{index, node_id, title, model, count, estimate_cny, prompt, references}；估价按调用时的
+    draft 与价格现算。单次生成（run_generation）按一项算。确认卡（逐项接口）、待确认摘要、执行记录都用这一份，
+    Auto 判断用同一个 _generations_estimate。"""
+    try:
+        document = read_canvas_document(project_id)
+    except Exception:  # noqa: BLE001 — 只是展示，读不到就显示节点 id
+        document = None
+    titles = {node.id: node.title for node in document.nodes} if document is not None else {}
+    if "items" not in arguments and "surface_node_id" in arguments:
+        arguments = {"items": [{"surface_node_id": arguments["surface_node_id"], "count": _count(arguments)}]}
     return [{"index": index, "node_id": row["node_id"],
              "title": _one_line(titles.get(row["node_id"], row["node_id"])),
              "model": _one_line(row["model"]) if row["model"] else None,
-             "count": row["count"], "estimate_cny": row["estimate_cny"]}
+             "count": row["count"], "estimate_cny": row["estimate_cny"],
+             **_generation_preview(document, row["node_id"], batch_changes)}
             for index, row in enumerate(_generations_estimate(project_id, arguments, batch_changes)["rows"])]
 
 
@@ -890,8 +955,8 @@ def batch_items(project_id: str, session_id: str, call_id: str) -> dict:
     session = read_canvas_agent_session(project_id, session_id)
     approval = next((item for item in session.pending_approvals if item.call_id == call_id), None) \
         if session.status == "awaiting_approval" else None
-    if approval is None or approval.tool != "run_generations":
-        raise CanvasToolError("NOT_FOUND", "没有这个待确认的批量生成", 404)
+    if approval is None or approval.tool not in cost.GENERATION_TOOLS:
+        raise CanvasToolError("NOT_FOUND", "没有这个待确认的生成", 404)
     batch_changes = [change for item in session.pending_approvals if item.tool == "apply_changes"
                      for change in _arguments(item.arguments).get("changes") or []]
     prior = cost.TurnSpend(session.history).submitted if session.permission_mode == "auto" else 0
@@ -927,7 +992,7 @@ def _one_line(text: str, limit: int = 40) -> str:
     return " ".join(str(text).split())[:limit]
 
 
-def summarize_call(tool: str, arguments: dict) -> str:
+def summarize_call(tool: str, arguments: dict, titles: dict[str, str] | None = None) -> str:
     if tool == "load_skill":
         return "、".join(str(name) for name in arguments.get("names") or [])
     if tool == "read_skill_file":
@@ -942,20 +1007,60 @@ def summarize_call(tool: str, arguments: dict) -> str:
             # 确认卡显示这个参数的原文（PS 联动：脚本全文），前面一行说明是哪个工具。
             return f"{spec.get('description', tool)}\n{arguments[field]}"
     if tool == "run_generation":
-        return f"在节点 {arguments.get('surface_node_id')} 上生成 {arguments.get('count', 1)} 个结果"
+        node = str(arguments.get("surface_node_id", ""))
+        return f"在节点 {(titles or {}).get(node, node)} 上生成 {arguments.get('count', 1)} 个结果"
     if tool == "apply_changes":
-        lines = []
-        for change in arguments.get("changes") or []:
-            if not isinstance(change, dict):
-                continue
-            op = change.get("op")
-            target = change.get("title") or change.get("node_id") or change.get("connection_id") or ""
-            detail = ""
-            if op == "set_draft":
-                detail = f"：{str(change.get('prompt', ''))[:200]}（{change.get('model')}）"
-            lines.append(f"{op} {target}{detail}".strip())
-        return "\n".join(lines)
+        return describe_changes(arguments.get("changes") or [], titles or {})
     return json.dumps(arguments, ensure_ascii=False)[:500]
+
+
+_SURFACE_KINDS = {"image": "图片", "video": "视频", "audio": "音频"}
+# 确认卡与执行记录里，删除排第一行（面板标危险色），其余按模型给出的顺序。
+DELETE_PREFIX = "删除"
+
+
+def describe_changes(changes: list, titles: dict[str, str]) -> str:
+    """apply_changes 的每一步翻成一行人话：「删除「角色正面」」「连接「A」→「B」」「改提示词「B」：…」。
+    titles 是画布上已有节点的标题；同一批新建的节点用它自己的 title。读不到标题时退回节点 id。"""
+    known = dict(titles)
+    for change in changes:
+        if isinstance(change, dict) and change.get("node_id") and change.get("title"):
+            known.setdefault(str(change["node_id"]), str(change["title"]))
+
+    def name(node_id) -> str:
+        return f"「{_one_line(known.get(str(node_id), str(node_id or '')))}」"
+
+    removals: list[str] = []
+    lines: list[str] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        op = change.get("op")
+        node = change.get("node_id")
+        if op == "remove_node":
+            removals.append(f"{DELETE_PREFIX}{name(node)}")
+        elif op == "add_text":
+            lines.append(f"新建文本「{_one_line(change.get('title', ''))}」")
+        elif op == "add_media_node":
+            lines.append(f"放入图片「{_one_line(change.get('title', ''))}」")
+        elif op == "add_asset_node":
+            lines.append("放入一项资产")
+        elif op == "add_surface":
+            kind = _SURFACE_KINDS.get(str(change.get("kind")), "")
+            lines.append(f"新建{kind}节点「{_one_line(change.get('title', ''))}」")
+        elif op == "set_text":
+            lines.append(f"改写{name(node)}的文字")
+        elif op == "set_draft":
+            prompt = _one_line(change.get("prompt", ""), 80)
+            model = _one_line(change.get("model", ""))
+            lines.append(f"改提示词{name(node)}：{prompt}（{model}）" if prompt else f"改生成设置{name(node)}（{model}）")
+        elif op == "connect":
+            lines.append(f"连接{name(change.get('source_node_id'))} → {name(change.get('target_node_id'))}")
+        elif op == "disconnect":
+            lines.append("断开一条连线")
+        elif op == "move":
+            lines.append(f"移动{name(node)}")
+    return "\n".join([*removals, *lines])
 
 
 def display_messages(items: list[dict], turn_id: str, *, describe=summarize_call, canvas_references=True) -> list[CanvasAgentMessageCreate]:
@@ -1177,8 +1282,7 @@ class CanvasWorkspace:
         return mutate_canvas_agent_session(self.project_id, self.session_id, update)
 
     def instructions(self, session):
-        return (INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
-                + skills.skills_prompt() + team_library_specs.agent_instructions(self.project_id))
+        return (INSTRUCTIONS + skills.skills_prompt() + team_library_specs.agent_instructions(self.project_id))
 
     def tools(self):
         return build_tools()
@@ -1201,7 +1305,7 @@ class CanvasWorkspace:
             return generation_summary(self.project_id, arguments, changes)
         if tool == "run_generations":
             return generations_summary(self.project_id, arguments, changes)
-        return summarize_call(tool, arguments)
+        return summarize_call(tool, arguments, _node_titles(self.project_id))
 
     def created_fields(self, current, created):
         return {"created_node_ids": sorted(set(current.created_node_ids) | created)}
@@ -1222,6 +1326,7 @@ class DeltaBuffer:
         self.workspace = workspace
         self.pending = ""
         self.last = 0.0
+        self.context: TurnContext | None = None
 
     def add(self, text: str) -> None:
         self.pending += text
@@ -1272,6 +1377,8 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
                           set(getattr(session, "created_node_ids", ())), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "",
                           buffer.notify, cost.TurnSpend(session.history))
+    # 停止时 run_model 不会返回：上下文挂在 buffer 上，停止结论行要读本轮提交过的生成。
+    buffer.context = context
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
                                  hooks=usage_hooks(getattr(buffer.workspace, "observe_response", None)),
                                  run_config=_run_config(buffer.workspace))
@@ -1337,8 +1444,9 @@ async def run_workspace_turn(workspace, notify):
     try:
         result, context = await run_model(session, base, buffer)
     except asyncio.CancelledError:
+        message, references = await asyncio.to_thread(stopped_message, workspace, buffer.context)
         await asyncio.to_thread(finish_failed, workspace, turn_id,
-                                "interrupted", "已停止")
+                                "interrupted", message, references)
         notify(workspace.event, {**workspace.address(), "kind": "session"})
         raise
     except Exception as error:  # noqa: BLE001 — 任何失败都要落到会话里，面板才看得到
@@ -1459,10 +1567,28 @@ def _finish_failed(project_id, session_id, turn_id, status, message):
     finish_failed(CanvasWorkspace(project_id, session_id), turn_id, status, message)
 
 
+def stopped_message(workspace, context: TurnContext | None) -> tuple[str, list[CanvasAgentReference]]:
+    """停止后的结论行：本轮已提交、还没跑完的生成不会跟着停（照样计费），写明几个并带上节点，面板可定位。"""
+    if context is None or not context.submitted_runs or not isinstance(workspace, CanvasWorkspace):
+        return "已停止", []
+    statuses = {run_id: _lookup_run(context.project_id, run_id).get("status")
+                for run_id in context.submitted_runs}
+    running = [context.submitted_runs[run_id] for run_id, status in statuses.items()
+               if status and status not in vision.TERMINAL_STATUSES]
+    if not running:
+        return "已停止", []
+    titles = _node_titles(context.project_id)
+    references = [CanvasAgentReference(reference_id=node_id, kind="node", node_id=node_id,
+                                       title=_one_line(titles.get(node_id, node_id)) or "生成节点")
+                  for node_id in dict.fromkeys(running) if node_id]
+    return f"已停止，{len(running)} 个生成仍在运行", references
+
+
 def finish_failed(workspace, turn_id: str, status: str,
-                   message: str) -> None:
+                   message: str, references: list[CanvasAgentReference] | None = None) -> None:
     def update(current: CanvasAgentSession, now: str) -> dict:
-        error = CanvasAgentMessageCreate(role="error", turn_id=turn_id, text=message)
+        error = CanvasAgentMessageCreate(role="error", turn_id=turn_id, text=message,
+                                         references=references or [])
         return {**with_appended_messages(current, [error], now), "status": status,
                 "error": message, "pending_approvals": []}
 

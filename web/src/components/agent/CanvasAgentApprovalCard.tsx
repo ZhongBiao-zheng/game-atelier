@@ -4,16 +4,57 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapse } from '@/components/ui/collapse';
 import { Label } from '@/components/ui/label';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { RevealImage } from '@/components/ui/reveal-image';
+import { Hint } from '@/components/ui/tooltip';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { shakeOnError } from '@/lib/motion';
-import type { CanvasAgentApproval, CanvasAgentBatchItems } from '@/schema/canvas';
+import { cn } from '@/lib/utils';
+import type { CanvasAgentApproval, CanvasAgentBatchItem, CanvasAgentBatchItems } from '@/schema/canvas';
 
 const COLLAPSED_LINES = 12;
 const BATCH_TOOL = 'run_generations';
+const SINGLE_TOOL = 'run_generation';
+/** 服务端把删除排在第一行、以这两个字开头（describe_changes）：确认卡上标危险色。 */
+const DELETE_PREFIX = '删除';
+
+/** 确认卡上看得到、点得到的东西：节点定位与参考缩略图。画布传；创作台不传就只显示文字。 */
+export interface ApprovalCanvasLinks {
+  onLocateNode: (nodeId: string) => void;
+  thumbUrl: (versionId: string) => string;
+}
+
+/** 一项生成的说明：标题（可定位）· 模型 · 张数 · 估价，下面一行截断的提示词与参考缩略图。 */
+function GenerationDetail({ item, unit, links }: { item: CanvasAgentBatchItem; unit: string; links?: ApprovalCanvasLinks }) {
+  const stop = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
+    // 在批量勾选的 Label 里：点标题 / 缩略图只定位，不切换勾选。
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const facts = [item.model ?? '读不到生成配置', `${item.count} ${unit}`,
+    item.estimate_cny === null ? '未计价' : `预计 ${formatGenerationCost(item.estimate_cny)}`];
+  return <span className="flex min-w-0 flex-1 flex-col gap-1 break-words text-muted-foreground">
+    {links ? <span>
+      <Hint label="在画布上定位"><Button variant="link" size="sm" className="h-auto p-0 align-baseline text-xs font-medium text-foreground"
+        onClick={event => { stop(event); links.onLocateNode(item.node_id); }}>{item.title}</Button></Hint>
+      {` · ${facts.join(' · ')}`}
+    </span> : <span>{[item.title, ...facts].join(' · ')}</span>}
+    {item.prompt && <span className="line-clamp-2">{item.prompt}</span>}
+    {links && item.references && item.references.length > 0 && <span className="flex flex-wrap gap-1">
+      {item.references.map(ref => <Hint key={ref.node_id} label={ref.title}>
+        <Button variant="ghost" aria-label={`定位参考图 ${ref.title}`}
+          className="size-8 shrink-0 overflow-hidden rounded-md border border-border bg-secondary/55 p-0"
+          onClick={event => { stop(event); links.onLocateNode(ref.node_id); }}>
+          <RevealImage src={links.thumbUrl(ref.version_id)} alt="" loading="lazy" className="size-full object-cover" />
+        </Button>
+      </Hint>)}
+    </span>}
+  </span>;
+}
 
 /** 批量生成的逐项勾选；合计、未计价数、是否超过确认金额都按勾上的项重算。 */
-function BatchItems({ data, selected, disabled, onToggle, unit }: {
+function BatchItems({ data, selected, disabled, onToggle, unit, links }: {
   unit: string;
+  links?: ApprovalCanvasLinks;
   data: CanvasAgentBatchItems;
   selected: ReadonlySet<number>;
   disabled?: boolean;
@@ -40,10 +81,7 @@ function BatchItems({ data, selected, disabled, onToggle, unit }: {
             onCheckedChange={checked => onToggle(item.index, checked === true)}
             className="mt-0.5"
           />
-          <span className="min-w-0 flex-1 break-words text-muted-foreground">
-            {[item.title, item.model ?? '读不到生成配置', `${item.count} ${unit}`,
-              item.estimate_cny === null ? '未计价' : `预计 ${formatGenerationCost(item.estimate_cny)}`].join(' · ')}
-          </span>
+          <GenerationDetail item={item} unit={unit} links={links} />
         </Label>
       ))}
     </div>
@@ -60,9 +98,15 @@ function ApprovalSummary({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const lines = text.split('\n');
   const long = lines.length > COLLAPSED_LINES;
-  const shown = long && !expanded ? lines.slice(0, COLLAPSED_LINES).join('\n') : text;
+  const shownLines = long && !expanded ? lines.slice(0, COLLAPSED_LINES) : lines;
+  const shown = shownLines.join('\n');
+  // 修改画布里的删除排在最前（服务端排好），整行标危险色；其余摘要照原文显示。
+  const deletes = shownLines.some(line => line.startsWith(DELETE_PREFIX));
   return <>
-    <p className="mt-0.5 whitespace-pre-wrap break-words text-muted-foreground">{shown}</p>
+    {deletes ? <p className="mt-0.5 flex flex-col break-words text-muted-foreground">
+      {shownLines.map((line, index) => <span key={index}
+        className={cn('whitespace-pre-wrap', line.startsWith(DELETE_PREFIX) && 'text-destructive')}>{line}</span>)}
+    </p> : <p className="mt-0.5 whitespace-pre-wrap break-words text-muted-foreground">{shown}</p>}
     {long && <Button variant="ghost" size="sm" className="-ml-2 mt-0.5"
       onClick={event => { event.preventDefault(); event.stopPropagation(); setExpanded(value => !value); }}>
       {expanded ? '收起' : `展开全文（共 ${lines.length} 行）`}
@@ -84,9 +128,13 @@ export function approvalConclusion(total: number, chosen: number, onlyLabel: str
  * 批量生成：loadBatchItems 拿到逐项数据后按项勾选（一项都不勾等于拒绝这次调用）、按勾选重算合计；
  * 拿不到时整段显示服务端摘要，只能整条执行或拒绝。onDecide 的 items：批量生成里没全选时，勾上的项下标；conclusion：收起后显示的结论行。
  * onDecide 返回 Promise 时等它结束：结果为空（提交失败）就让按下的按钮微抖、恢复可再点。
+ * 单次生成：loadGenerationPreview 拿到这一项的标题、模型、张数、估价、提示词与参考图后替换整段摘要（画布传）；
+ * links 给了就能点标题 / 参考缩略图定位到画布节点。
  */
-export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide, loadBatchItems, unit = '张' }: {
+export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide, loadBatchItems, loadGenerationPreview, links, unit = '张' }: {
   unit?: string;
+  loadGenerationPreview?: (callId: string) => Promise<CanvasAgentBatchItems>;
+  links?: ApprovalCanvasLinks;
   approvals: CanvasAgentApproval[];
   labels: Record<string, string>;
   disabled?: boolean;
@@ -117,6 +165,20 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
     }
     return () => { alive = false; };
   }, [batchIds]);
+  // 单次生成的结构化说明：只用于显示，勾选仍按整条调用。
+  const [previews, setPreviews] = useState<Map<string, CanvasAgentBatchItem>>(() => new Map());
+  const previewLoader = useRef(loadGenerationPreview);
+  const singleIds = approvals.filter(item => item.tool === SINGLE_TOOL).map(item => item.call_id).join(',');
+  useEffect(() => {
+    let alive = true;
+    for (const callId of singleIds ? singleIds.split(',') : []) {
+      previewLoader.current?.(callId).then(data => {
+        if (!alive || !data.items[0]) return;
+        setPreviews(current => new Map(current).set(callId, data.items[0]));
+      }).catch(() => undefined);  // 拿不到就保持整段摘要
+    }
+    return () => { alive = false; };
+  }, [singleIds]);
 
   // 明细到达前用户可能已拒绝整条调用；逐项选择第一次编辑前沿用当前整条选择。
   function selectedItems(callId: string) {
@@ -177,7 +239,12 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
     <div role="group" aria-label="待确认的操作" className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3">
       {approvals.map(item => {
         const data = details.get(item.call_id);
+        const preview = previews.get(item.call_id);
         const title = <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>;
+        const body = <>
+          <Collapse open={!preview}><ApprovalSummary text={item.summary} /></Collapse>
+          <Collapse open={Boolean(preview)}>{preview && <p className="mt-0.5 flex"><GenerationDetail item={preview} unit={unit} links={links} /></p>}</Collapse>
+        </>;
         const plain = multiple ? (
           <Label className="flex cursor-pointer items-start gap-2 text-xs font-normal leading-normal">
             <Checkbox
@@ -187,9 +254,9 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
               onCheckedChange={checked => toggle(item.call_id, checked === true)}
               className="mt-0.5"
             />
-            <span className="min-w-0 flex-1">{title}<ApprovalSummary text={item.summary} /></span>
+            <span className="min-w-0 flex-1">{title}{body}</span>
           </Label>
-        ) : <div className="text-xs">{title}<ApprovalSummary text={item.summary} /></div>;
+        ) : <div className="text-xs">{title}{body}</div>;
         if (item.tool !== BATCH_TOOL) return <div key={item.call_id}>{plain}</div>;
         // 批量生成的逐项明细异步到达：整段摘要收起，逐项列表从同一位置展开，不整块替换。
         return <div key={item.call_id}>
@@ -197,7 +264,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide,
           <Collapse open={Boolean(data)}>
             {data && <div className="text-xs">
               {title}
-              <BatchItems unit={unit} data={data} selected={selectedItems(item.call_id)} disabled={disabled}
+              <BatchItems unit={unit} links={links} data={data} selected={selectedItems(item.call_id)} disabled={disabled}
                 onToggle={(index, checked) => togglePick(item.call_id, index, checked)} />
             </div>}
           </Collapse>

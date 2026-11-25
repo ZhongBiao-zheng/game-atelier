@@ -443,9 +443,11 @@ def test_card_items_are_computed_now_and_include_drafts_from_the_same_batch(clie
     response = client.get(f"{base}/approvals/g1/items")
     assert response.status_code == 200, response.text
     assert response.json() == {"confirm_above_cny": 10.0, "items": [
-        {"index": 0, "node_id": "a", "title": "角色1", "model": "seedream", "count": 1, "estimate_cny": 6.0},
-        # 同一批待确认的 set_draft 计入估价（画布上的 draft 还是 unknown）。
-        {"index": 1, "node_id": "c", "title": "角色2", "model": "cheap", "count": 3, "estimate_cny": 0.6},
+        {"index": 0, "node_id": "a", "title": "角色1", "model": "seedream", "count": 1, "estimate_cny": 6.0,
+         "prompt": "一只猫", "references": []},
+        # 同一批待确认的 set_draft 计入估价与提示词（画布上的 draft 还是 unknown）。
+        {"index": 1, "node_id": "c", "title": "角色2", "model": "cheap", "count": 3, "estimate_cny": 0.6,
+         "prompt": "x", "references": []},
     ]}
     # 现算：等待期间 a 的 draft 改了，卡片拿到的是新估价。
     _set_model(project_id, "a", "cheap")

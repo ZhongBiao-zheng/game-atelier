@@ -90,5 +90,5 @@ def test_plan_goes_away_with_its_session_and_stays_out_of_project_packages(clien
 
     revision = client.get(base).json()["revision"]
     deleted = client.delete(base, headers={"If-Match": f'"{revision}"'})
-    assert deleted.status_code == 204, deleted.text
+    assert deleted.status_code == 200, deleted.text
     assert not plans.plan_path(project_id, session_id).exists()

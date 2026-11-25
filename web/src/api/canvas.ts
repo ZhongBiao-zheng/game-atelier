@@ -105,16 +105,20 @@ export function getCanvasAgentSession<P extends string | null>(
   );
 }
 
-export function deleteCanvasAgentSession(
+/** 删除对话：进回收站时返回 trash_id（撤销 toast 用它还原）；服务端直接删的（204）返回 null。 */
+export async function deleteCanvasAgentSession(
   projectId: string | null,
   sessionId: string,
   revision: number,
-): Promise<void> {
-  return request(
+): Promise<string | null> {
+  const response = await request(
     `${agentSessionsPath(projectId)}/${encodeURIComponent(sessionId)}`,
-    '删除Agent 会话',
+    '删除对话',
     { method: 'DELETE', headers: { 'If-Match': String(revision) } },
-  ).then(() => undefined);
+  );
+  if (response.status === 204) return null;
+  const body = await response.json().catch(() => null) as { trash_id?: unknown } | null;
+  return typeof body?.trash_id === 'string' ? body.trash_id : null;
 }
 
 export function agentSessionPath(projectId: string | null, sessionId: string): string {

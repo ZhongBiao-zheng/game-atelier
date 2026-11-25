@@ -256,12 +256,21 @@ def delete_canvas_agent_session(
     project_id: str,
     session_id: str,
     expected_revision: int,
-) -> None:
+) -> str:
+    """会话文件与待办一起移进回收站（规格 2.1：对话进回收站、不弹确认、可撤销），返回 trash_id。
+    还原就是原样移回：会话目录按文件列出，不需要另外重建索引。"""
+    from character_workflow.lib import trash
+
     _validate_session_id(session_id)
     with file_lock(canvas_agent_sessions_lock_path(project_id)):
         with file_lock(_session_lock_path(project_id, session_id)):
             current = _read_session_unlocked(project_id, session_id)
             if current.revision != expected_revision:
                 raise RuntimeError(f"revision_conflict:{current.revision}")
-            _session_path(project_id, session_id).unlink()
-            canvas_agent_plan_path(project_id, session_id).unlink(missing_ok=True)
+            plan = canvas_agent_plan_path(project_id, session_id)
+            return trash.move_to_trash(
+                "conversation",
+                current.title,
+                [_session_path(project_id, session_id), *([plan] if plan.exists() else [])],
+                {"workspace": "canvas", "project_id": project_id, "session_id": session_id},
+            )

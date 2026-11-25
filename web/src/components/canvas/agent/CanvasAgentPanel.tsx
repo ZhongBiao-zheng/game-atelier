@@ -5,16 +5,17 @@ import { AgentMarkdown, AgentStreamingMarkdown, agentToolStatusLabel, useAgentTo
 import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
+import { restoreTrash } from '@/api/trash';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { CanvasAgentApproval, CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
-import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
+import { errorText } from '@/lib/errorText';
+import { notify } from '@/lib/notify';
+import type { CanvasAgentApproval, CanvasAgentMessage } from '@/schema/canvas';
+import { CanvasAgentApprovalCard, type ApprovalCanvasLinks } from '@/components/agent/CanvasAgentApprovalCard';
+import { AgentSessionList, type AgentSessionListItem } from '@/components/agent/AgentSessionList';
 import { CanvasAgentPlanList } from '@/components/agent/CanvasAgentPlanList';
-import { CanvasAgentModeMenu } from '@/components/agent/CanvasAgentModeMenu';
 import { CanvasAgentPermissionMenu } from '@/components/agent/CanvasAgentPermissionMenu';
 import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
 import { CanvasAgentModelPicker } from '@/components/agent/CanvasAgentModelPicker';
@@ -52,11 +53,10 @@ function NodeIcon({ type }: { type: string }) {
 }
 
 /** 空对话里的示例需求：点一下填进输入框（不直接发送，生成要花钱）。 */
-const PRESETS: Record<CanvasAgentCreationMode, string[]> = {
-  all: ['生成一只像素风格的小狗', '设计一个赛博朋克风格的女性角色立绘', '把选中的图片做成 5 秒的动态视频'],
-  image: ['生成一只像素风格的小狗', '设计一组奇幻 RPG 的道具图标', '为选中的角色画正面、侧面、背面三视图'],
-  video: ['把选中的图片做成 5 秒的动态视频', '生成一段像素风小狗奔跑的循环动画', '做一个角色登场的 5 秒镜头'],
-};
+const PRESETS = ['生成一只像素风格的小狗', '设计一个赛博朋克风格的女性角色立绘', '把选中的图片做成 5 秒的动态视频'];
+
+/** 等确认时输入框与发送键说明为什么发不出去（Q10）。 */
+const AWAITING_HINT = '先处理上方确认';
 
 /** 显示宽度 = 缩略图格子宽（w-20 = 80px）的 2 倍，留给高分屏。 */
 const THUMB_DISPLAY_WIDTH = 160;
@@ -127,10 +127,22 @@ const ProcessGroup = memo(function ProcessGroup({ projectId, messages, steps, ar
 });
 
 /** memo：流式输出每来一块面板都会重渲染，历史消息的引用不变就跳过，不重新解析 Markdown。 */
-const Message = memo(function Message({ projectId, message, arriving }: {
+/** 结论行里带的节点（如停止后仍在运行的生成）：点一下定位到画布上的节点。 */
+function NodeChips({ message, onLocateNode }: { message: CanvasAgentMessage; onLocateNode?: (nodeId: string) => void }) {
+  const nodes = message.references.filter(ref => ref.kind === 'node' && ref.node_id);
+  if (!onLocateNode || nodes.length === 0) return null;
+  return <span className="mt-1 flex flex-wrap gap-1">
+    {nodes.map(ref => <Button key={ref.reference_id} variant="outline" size="sm"
+      className="h-6 max-w-[12rem] rounded-full px-2 text-xs font-normal"
+      onClick={() => onLocateNode(ref.node_id!)}><span className="truncate">{ref.title}</span></Button>)}
+  </span>;
+}
+
+const Message = memo(function Message({ projectId, message, arriving, onLocateNode }: {
   projectId: string;
   message: CanvasAgentMessage;
   arriving: boolean;
+  onLocateNode?: (nodeId: string) => void;
 }) {
   const labels = useAgentToolLabels();
   const ref = useArrival<HTMLDivElement>(arriving);
@@ -184,7 +196,10 @@ const Message = memo(function Message({ projectId, message, arriving }: {
     );
   }
   if (message.role === 'error') {
-    return <p ref={ref} role="alert" className="text-xs text-destructive">{message.text}</p>;
+    return <div ref={ref} role="alert" className="text-xs text-destructive">
+      <p className="tabular-nums">{message.text}</p>
+      <NodeChips message={message} onLocateNode={onLocateNode} />
+    </div>;
   }
   if (message.role === 'system') {
     return <p ref={ref} className="text-xs text-muted-foreground">{message.text}</p>;
@@ -248,8 +263,10 @@ function SettlingReply({ streamed, children }: { streamed: string; children: Rea
   );
 }
 
-export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, onOpenKeySettings, className }: {
+export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, onOpenKeySettings, onLocateNode, className }: {
   projectId: string;
+  /** 确认卡、停止结论行里的节点：定位（fitView）到画布上的节点。画布编辑器提供；不给就只显示文字。 */
+  onLocateNode?: (nodeId: string) => void;
   /** 画布当前选中的节点：自动带进下一条消息，可逐个移除。 */
   selectedNodes: CanvasAgentNodeRef[];
   onClose: () => void;
@@ -282,11 +299,11 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const thinkingOn = Boolean(settings.effort && settings.effort !== 'off');
   // 草稿里没设过权限时跟服务端默认一致：Auto。
   const autoMode = (settings.permission_mode ?? 'auto') === 'auto';
-  const creationMode = settings.creation_mode ?? 'all';
+  // 画布 Agent 没有创作模式（D14）：类别由 Agent 推断，模型偏好按图像、视频分别可选「自动」。
   const setupNotice = canvasAgentSetupNotice({
     chatModels: agent.models?.models ?? null,
     generationModels: agent.generationModels,
-    mode: creationMode,
+    mode: 'all',
     auto: settings.auto_models ?? true,
     preferred: settings.preferred_models ?? [],
   });
@@ -320,6 +337,21 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   }
   const decisionLine = decision && decision.sessionId === session?.session_id
     ? <DecisionLine key={`decision:${decision.after}`} text={decision.text} /> : null;
+  const approvalLinks: ApprovalCanvasLinks | undefined = onLocateNode
+    ? { onLocateNode, thumbUrl: versionId => canvasMediaUrl(projectId, versionId, THUMB_DISPLAY_WIDTH) } : undefined;
+
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  /** 一点就删（进回收站），toast 里撤销 = 从回收站还原，再回到这个对话。 */
+  async function removeSession(item: AgentSessionListItem) {
+    const trashId = await agent.removeSession(item.session_id, item.revision);
+    if (!trashId) return;
+    notify.undo('已删除对话', () => {
+      restoreTrash(trashId)
+        .then(() => agent.refreshSessions())
+        .then(() => agent.selectSession(item.session_id))
+        .catch(caught => notify.error(errorText(caught, '还原对话失败')));
+    });
+  }
 
   // 选中的节点变了：之前移除过的不再记着，免得重新选中却带不进来。
   const selectionKey = selectedNodes.map(node => node.id).join(',');
@@ -438,30 +470,34 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         <span className="absolute inset-y-3 left-0.5 w-0.5 rounded-full bg-primary/0 transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary/60 group-active:bg-primary" />
       </div>
       <header className="flex items-center gap-1 border-b border-border px-2 py-1.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="bare" type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium transition-colors hover:bg-secondary">
+        <Popover open={sessionsOpen} onOpenChange={setSessionsOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="bare" type="button" aria-label="切换对话" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium transition-colors hover:bg-secondary">
               <span className="truncate">{session?.title ?? (loading ? '\u00a0' : '新对话')}</span>
+              {agent.sessions.some(item => item.status === 'running' && item.session_id !== session?.session_id)
+                && <span aria-label="有对话在运行" className="size-1.5 shrink-0 rounded-full bg-status-running" />}
               <ChevronDownIcon size="sm" className="shrink-0 text-muted-foreground" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="z-50 max-h-80 w-72 overflow-y-auto">
-            {agent.sessions.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">还没有对话</p>}
-            {agent.sessions.map(item => (
-              <DropdownMenuItem key={item.session_id} onSelect={() => void agent.selectSession(item.session_id)} className="gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                {item.session_id === session?.session_id && <CheckIcon size="sm" className="shrink-0" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </PopoverTrigger>
+          {/* 面板 z-40：弹层必须 z-50，否则画在面板下面、整页被模态挡住。 */}
+          <PopoverContent align="start" className="z-50 max-h-80 w-72 overflow-y-auto p-1">
+            <AgentSessionList
+              sessions={agent.sessions}
+              currentId={session?.session_id ?? null}
+              disabled={agent.pending}
+              onSelect={id => { setSessionsOpen(false); void agent.selectSession(id); }}
+              onDelete={item => void removeSession(item)}
+            />
+          </PopoverContent>
+        </Popover>
         {/* 用量常驻占位：第一次请求后数字出现时标题不被挤得一跳。 */}
         {usageLabel ? (
           <Hint label={usageLabel.detail}>
             <span aria-label={`本对话用量：${usageLabel.text}`} className="min-w-24 shrink-0 px-1 text-right text-xs tabular-nums text-muted-foreground">{usageLabel.text}</span>
           </Hint>
         ) : session && <span aria-hidden="true" className="min-w-24 shrink-0" />}
-        <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><NewChatIcon /></Button></Hint>
+        {/* 运行中也能开新对话：旧对话留在后台继续跑，列表里有运行中圆点。 */}
+        <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending} onClick={() => void agent.newSession()} className={ICON_BUTTON}><NewChatIcon /></Button></Hint>
         <Hint label="关闭"><Button variant="bare" type="button" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><CloseIcon /></Button></Hint>
       </header>
 
@@ -481,7 +517,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           <div className="my-auto flex flex-col gap-3 px-1">
             <p className="font-display text-display leading-tight">想在画布上创作什么？</p>
             <div className="flex flex-col items-start gap-1.5">
-              {PRESETS[creationMode].map(preset => (
+              {PRESETS.map(preset => (
                 <Button variant="bare"
                   key={preset}
                   type="button"
@@ -503,6 +539,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               arriving={block.messages.some(arriving)} />;
           } else {
             const item = <Message key={block.message.message_id} projectId={projectId} message={block.message}
+              onLocateNode={onLocateNode}
               arriving={arriving(block.message) && settling?.messageId !== block.message.message_id} />;
             node = settling?.messageId === block.message.message_id
               ? <SettlingReply key={block.message.message_id} streamed={settling.text}>{item}</SettlingReply>
@@ -537,6 +574,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               disabled={pending || waitingForSession || !awaiting}
               onDecide={decide}
               loadBatchItems={callId => getCanvasAgentBatchItems(projectId, approvalCard.sessionId, callId)}
+              loadGenerationPreview={callId => getCanvasAgentBatchItems(projectId, approvalCard.sessionId, callId)}
+              links={approvalLinks}
             />
           )}
         </Collapse>
@@ -598,7 +637,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           onChange={event => setText(event.target.value)}
           onKeyDown={onKeyDown}
           rows={3}
-          placeholder="描述你想在画布上做什么"
+          placeholder={awaiting ? AWAITING_HINT : '描述你想在画布上做什么'}
           aria-label="给 Agent 的消息"
           className="block max-h-48 min-h-[4.5rem] w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
         />
@@ -611,14 +650,9 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             onSelect={setSkill}
             onChanged={agent.reloadSkills}
           />
-          <CanvasAgentModeMenu
-            mode={creationMode}
-            disabled={running || pending}
-            onSelect={mode => void agent.updateSettings({ creation_mode: mode })}
-          />
           <CanvasAgentPreferencePicker
             models={agent.generationModels}
-            mode={creationMode}
+            mode="all"
             auto={settings.auto_models ?? true}
             preferred={settings.preferred_models ?? []}
             disabled={running || pending}
@@ -648,7 +682,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           />
           <span className="min-w-1 flex-1" />
           {/* 发送与停止是同一个按钮壳，图标与底色换态，不整颗换掉。 */}
-          <Hint label={running ? '停止' : '发送'}><Button variant="bare"
+          <Hint label={running ? '停止' : awaiting ? AWAITING_HINT : '发送'}><Button variant="bare"
             ref={sendRef}
             type="button"
             aria-label={running ? '停止' : '发送'}

@@ -137,4 +137,6 @@ def test_workspace_prompt_includes_core_mode_and_skills(isolated_data_root, monk
     prompt = workspace.instructions(SimpleNamespace(creation_mode="image"))
     assert runtime.CORE in prompt
     assert ("## 创作台" if studio else "## 画布操作") in prompt
-    assert "three-view" in prompt and "图像创作" in prompt
+    assert "three-view" in prompt
+    # 画布 Agent 去掉了创作模式（D14），只有创作台还按模式加提示。
+    assert ("图像创作" in prompt) is studio

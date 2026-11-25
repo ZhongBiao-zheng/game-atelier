@@ -274,7 +274,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const onAgentEvent = (event: CanvasAgentEventPayload) => {
       if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;
       if (event.session_id !== sessionIdRef.current) {
-        if (projectId === null && event.kind === 'session') void refreshList().catch(() => undefined);
+        // 别的对话落盘（后台继续跑的旧对话结束了）：刷新列表，运行中圆点跟着变。
+        if (event.kind === 'session') void refreshList().catch(() => undefined);
         return;
       }
       if (projectId === null && ['delta', 'tool'].includes(event.kind ?? '') &&
@@ -450,13 +451,15 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return updated;
   });
 
+  /** 删除对话；返回回收站条目 id（没进回收站时为 null），调用方用它发撤销 toast。 */
   const removeSession = (id: string, revision: number) => run(async () => {
-    await deleteCanvasAgentSession(projectId, id, revision);
+    const trashId = await deleteCanvasAgentSession(projectId, id, revision);
     if (sessionIdRef.current === id) {
       if (projectId === null) await selectSession(DEFAULT_STUDIO_SESSION_ID);
       else newSession();
     }
     await refreshList();
+    return trashId;
   });
 
   /** approved：每个待确认调用是否执行；没列出的按拒绝。items：批量生成里勾选执行的项（没给就是全部）。 */
@@ -505,6 +508,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     selectedSessionId: (selecting ? session?.session_id : null) ?? sessionIdRef.current
       ?? (projectId === null && restoring ? readStudioView().activeSessionId : null),
     onAgentEvent, onReconnect, createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
+    refreshSessions: refreshList,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }

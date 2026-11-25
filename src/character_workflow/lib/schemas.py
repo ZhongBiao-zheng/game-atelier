@@ -2079,8 +2079,17 @@ class CanvasAgentApprovalDecision(BaseModel):
                                                                    max_length=20)
 
 
+class CanvasAgentBatchItemReference(BaseModel):
+    """确认卡上一项生成的参考图（画布节点的当前版本）：显示缩略图，点一下定位到节点。"""
+    model_config = ConfigDict(extra="forbid")
+    node_id: str
+    version_id: str
+    title: str
+
+
 class CanvasAgentBatchItem(BaseModel):
-    """批量生成确认卡的一项（只在响应里，不落盘）；估价按打开卡片时的 draft 现算，None = 未计价。"""
+    """生成确认卡的一项（只在响应里，不落盘）；估价按打开卡片时的 draft 现算，None = 未计价。
+    prompt 是截断后的提示词开头；画布单次生成也按一项返回。"""
     model_config = ConfigDict(extra="forbid")
     index: int = Field(ge=0, le=19)
     node_id: str
@@ -2088,6 +2097,8 @@ class CanvasAgentBatchItem(BaseModel):
     model: str | None = None
     count: int = Field(ge=1)
     estimate_cny: float | None = None
+    prompt: str | None = None
+    references: list[CanvasAgentBatchItemReference] = Field(default_factory=list, max_length=4)
 
 
 class CanvasAgentBatchItems(BaseModel):

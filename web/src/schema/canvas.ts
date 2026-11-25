@@ -547,7 +547,14 @@ export interface CanvasAgentApprovalDecision {
   items?: number[];
 }
 
-/** 批量生成确认卡的一项（服务端现算，不落盘）；estimate_cny 为 null = 未计价。 */
+/** 确认卡上一项生成的参考图（画布节点的当前版本）。 */
+export interface CanvasAgentBatchItemReference {
+  node_id: string;
+  version_id: string;
+  title: string;
+}
+
+/** 生成确认卡的一项（服务端现算，不落盘）；estimate_cny 为 null = 未计价。画布单次生成也按一项返回。 */
 export interface CanvasAgentBatchItem {
   index: number;
   node_id: string;
@@ -555,6 +562,9 @@ export interface CanvasAgentBatchItem {
   model: string | null;
   count: number;
   estimate_cny: number | null;
+  /** 截断后的提示词开头；创作台不给。 */
+  prompt?: string | null;
+  references?: CanvasAgentBatchItemReference[];
 }
 
 export interface CanvasAgentBatchItems {
