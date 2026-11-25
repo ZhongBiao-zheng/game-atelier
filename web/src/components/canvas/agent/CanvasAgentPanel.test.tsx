@@ -15,7 +15,7 @@ const message = (role: CanvasAgentMessage['role'], text: string, sequence: numbe
 function renderPanel(status: string, messages: CanvasAgentMessage[]) {
   agentState.current = {
     session: { session_id: 's1', title: '对话', status, messages, pending_approvals: [], model: null, model_alias: null },
-    streaming: '', activeTool: null, pending: false, error: null, draft: {}, models: null, generationModels: [],
+    streaming: '', tool: null, loading: false, outgoing: null, pending: false, error: null, draft: {}, models: null, generationModels: [],
     usage: null, plan: null, sessions: [], skills: [], confirmAbove: null,
     clearError: vi.fn(), decide: vi.fn(), newSession: vi.fn(), reloadSkills: vi.fn(), selectSession: vi.fn(),
     send: vi.fn(), stop: vi.fn(), updateConfirmAbove: vi.fn(), updateSettings: vi.fn(),

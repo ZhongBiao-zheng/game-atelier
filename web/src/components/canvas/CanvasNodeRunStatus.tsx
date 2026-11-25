@@ -1,4 +1,8 @@
+import { useEffect, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+
 import { LoadingIcon } from '@/components/ui/icons';
+import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
@@ -137,46 +141,76 @@ export function CanvasNodeRunLiveRegion({ state }: { state: CanvasNodeRunState }
   );
 }
 
+/** 生成中 / 失败的遮罩。holdUntilReady：结果已经回来、新图还在解码——遮罩按最后一次生成中的样子
+ *  继续盖着，新图盖上来以后再淡出（150ms）；整张卡片式的遮罩等新图淡入播完再撤，中途不露出画布。 */
 export function CanvasNodeRunOverlay({
   state,
   hasContent,
+  holdUntilReady = false,
 }: {
   state: CanvasNodeRunState;
   hasContent: boolean;
+  holdUntilReady?: boolean;
 }) {
-  if (state.status !== 'loading' && state.status !== 'error') return null;
-  const compact = hasContent;
+  const active = state.status === 'loading' || state.status === 'error';
+  const lastLoading = useRef<OverlayFrame | null>(null);
+  const current: OverlayFrame = { state, compact: hasContent };
+  const shown = active ? current : holdUntilReady ? lastLoading.current : null;
+  useEffect(() => {
+    if (state.status === 'loading') lastLoading.current = { state, compact: hasContent };
+    else if (!holdUntilReady) lastLoading.current = null;
+  });
   return (
-    <div
-      className={cn(
-        'nodrag nowheel pointer-events-none absolute z-20 flex min-w-0 overflow-hidden text-xs backdrop-blur-glass',
-        compact
-          ? 'bottom-2 left-2 max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md border bg-card/95 px-2 py-1.5'
-          : 'inset-0 flex-col items-center justify-center gap-3 rounded-lg bg-card/95 px-5 text-center',
-        state.status === 'loading'
-          ? 'border-[color:var(--status-running)]/30 text-[color:var(--status-running)]'
-          : 'border-[color:var(--status-failed)]/30 text-[color:var(--status-failed)]',
-      )}
-    >
-      {state.status === 'loading' && (
-        <span
-          data-canvas-generation-indicator="true"
-          className={cn('canvas-generation-indicator shrink-0', compact ? 'size-5' : 'size-12')}
-          aria-hidden="true"
+    <AnimatePresence>
+      {shown && (
+        <motion.div
+          key="run-overlay"
+          initial={false}
+          // 没有 matchMedia 的环境（jsdom）不播退场，与 lib/motion 的约定一致。
+          exit={typeof window.matchMedia === 'function' ? {
+            opacity: 0,
+            transition: {
+              duration: MOTION_DURATION.fast,
+              ease: MOTION_EASE.subtle,
+              delay: shown.compact ? 0 : MOTION_DURATION.base,
+            },
+          } : undefined}
+          className={cn(
+            'nodrag nowheel pointer-events-none absolute z-20 flex min-w-0 overflow-hidden text-xs backdrop-blur-glass',
+            shown.compact
+              ? 'bottom-2 left-2 max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md border bg-card/95 px-2 py-1.5'
+              : 'inset-0 flex-col items-center justify-center gap-3 rounded-lg bg-card/95 px-5 text-center',
+            shown.state.status === 'loading'
+              ? 'border-[color:var(--status-running)]/30 text-[color:var(--status-running)]'
+              : 'border-[color:var(--status-failed)]/30 text-[color:var(--status-failed)]',
+          )}
         >
-          <LoadingIcon size="lg" className={compact ? '': ''} />
-        </span>
+          {shown.state.status === 'loading' && (
+            <span
+              data-canvas-generation-indicator="true"
+              className={cn('canvas-generation-indicator shrink-0', shown.compact ? 'size-5' : 'size-12')}
+              aria-hidden="true"
+            >
+              <LoadingIcon size="lg" />
+            </span>
+          )}
+          <Hint label={shown.state.detail || shown.state.label}><span
+            className={cn(
+              'min-w-0 max-w-full',
+              shown.compact ? 'truncate' : 'line-clamp-3 break-words leading-relaxed',
+            )}
+          >
+            {shown.state.detail || shown.state.label}
+          </span></Hint>
+        </motion.div>
       )}
-      <Hint label={state.detail || state.label}><span
-        className={cn(
-          'min-w-0 max-w-full',
-          compact ? 'truncate' : 'line-clamp-3 break-words leading-relaxed',
-        )}
-      >
-        {state.detail || state.label}
-      </span></Hint>
-    </div>
+    </AnimatePresence>
   );
+}
+
+interface OverlayFrame {
+  state: CanvasNodeRunState;
+  compact: boolean;
 }
 
 export function isReversePromptJob(job: Job): boolean {

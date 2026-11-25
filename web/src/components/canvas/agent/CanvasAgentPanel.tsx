@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AgentProcessToggle } from '@/components/agent/AgentProcessToggle';
-import { AgentMarkdown, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
+import { AgentMarkdown, AgentStreamingMarkdown, agentToolStatusLabel, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
 import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
@@ -19,13 +19,19 @@ import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
 import { CanvasAgentModelPicker } from '@/components/agent/CanvasAgentModelPicker';
 import { CanvasAgentPreferencePicker } from '@/components/agent/CanvasAgentPreferencePicker';
 import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
-import { buildCanvasAgentTimeline } from '@/components/agent/canvasAgentTimeline';
+import { buildCanvasAgentTimeline, isOutgoingMessage } from '@/components/agent/canvasAgentTimeline';
 import { canvasAgentSetupNotice } from '@/components/agent/canvasAgentSetupNotice';
 import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from '@/components/agent/CanvasAgentSkillPicker';
 import { useCanvasAgent } from '@/components/agent/useWorkspaceAgent';
+import { Collapse } from '@/components/ui/collapse';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
+import {
+  animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, prefersReducedMotion, useAnimateOnChange,
+} from '@/lib/motion';
 
 export interface CanvasAgentNodeRef {
   id: string;
@@ -53,44 +59,88 @@ const PRESETS: Record<CanvasAgentCreationMode, string[]> = {
 /** 显示宽度 = 缩略图格子宽（w-20 = 80px）的 2 倍，留给高分屏。 */
 const THUMB_DISPLAY_WIDTH = 160;
 
-/** 已结束一轮的中间过程：默认收起成一行，可展开；生成出的图收起时也露在外面。 */
-function ProcessGroup({ projectId, messages, steps }: {
-  projectId: string;
-  messages: CanvasAgentMessage[];
-  steps: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const images = messages.flatMap(message => message.role === 'tool'
-    ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
+/** 列表距底不到这么多时算「在底部」：流式输出与新消息只在这时自动贴底，往上翻过就不再拽回来。 */
+const STICK_TO_BOTTOM_PX = 24;
+
+/** 没有 matchMedia 的环境（jsdom）不播 vanilla animate，与 lib/motion 的约定一致。 */
+function motionAvailable() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+}
+
+/** 新到达的一项（不是打开面板、切会话时已有的历史）挂载时轻轻淡入并上移 4px；减弱动态效果时只淡入。 */
+function useArrival<T extends HTMLElement>(arriving: boolean) {
+  const ref = useRef<T>(null);
+  const arrivingOnMount = useRef(arriving);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!arrivingOnMount.current || !element || !motionAvailable()) return;
+    const keyframes = prefersReducedMotion() ? { opacity: [0, 1] } : { opacity: [0, 1], y: [4, 0] };
+    clearOnFinish(animate(element, keyframes, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), element);
+  }, []);
+  return ref;
+}
+
+function ProcessImages({ projectId, images }: { projectId: string; images: CanvasAgentMessage['references'] }) {
   return (
-    <div className="flex flex-col gap-2">
-      <AgentProcessToggle label={`处理过程 · ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
-      {open ? (
-        <div className="flex flex-col gap-3 border-l border-border pl-3">
-          {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
-        </div>
-      ) : images.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {images.map(ref => (
-            <img
-              key={ref.reference_id}
-              src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
-              alt={ref.title}
-              loading="lazy"
-              className="size-20 rounded-md border border-border object-cover"
-            />
-          ))}
-        </div>
-      )}
+    <div className="flex flex-wrap gap-1.5">
+      {images.map(ref => (
+        <img
+          key={ref.reference_id}
+          src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
+          alt={ref.title}
+          loading="lazy"
+          className="size-20 rounded-md border border-border object-cover"
+        />
+      ))}
     </div>
   );
 }
 
-function Message({ projectId, message }: { projectId: string; message: CanvasAgentMessage }) {
+/** 已结束一轮的中间过程：默认收起成一行，可展开；生成出的图收起时也露在外面。
+ *  一轮刚结束时（arriving）这一行从 0 高度展开出来，不整块冒出。 */
+const ProcessGroup = memo(function ProcessGroup({ projectId, messages, steps, arriving }: {
+  projectId: string;
+  messages: CanvasAgentMessage[];
+  steps: number;
+  arriving: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [entered, setEntered] = useState(!arriving);
+  useEffect(() => { setEntered(true); }, []);
+  const images = messages.flatMap(message => message.role === 'tool'
+    ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
+  return (
+    <Collapse open={entered}>
+      <div className="flex flex-col gap-2">
+        <AgentProcessToggle label={`处理过程 · ${steps} 步`} open={open} onToggle={() => setOpen(value => !value)} />
+        <Collapse open={open}>
+          <div className="flex flex-col gap-3 border-l border-border pl-3">
+            {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} arriving={false} />)}
+          </div>
+        </Collapse>
+        {images.length > 0 && (
+          <Collapse open={!open}>
+            <ProcessImages projectId={projectId} images={images} />
+          </Collapse>
+        )}
+      </div>
+    </Collapse>
+  );
+});
+
+/** memo：流式输出每来一块面板都会重渲染，历史消息的引用不变就跳过，不重新解析 Markdown。 */
+const Message = memo(function Message({ projectId, message, arriving }: {
+  projectId: string;
+  message: CanvasAgentMessage;
+  arriving: boolean;
+}) {
   const labels = useAgentToolLabels();
+  const ref = useArrival<HTMLDivElement>(arriving);
   if (message.role === 'user') {
+    // 刚发出、服务端还没收下：先半透明显示，收下后换成正式的那条。
+    const sending = isOutgoingMessage(message);
     return (
-      <div className="flex flex-col items-end gap-1">
+      <div ref={ref} aria-busy={sending || undefined} className={cn('flex flex-col items-end gap-1 transition-opacity', sending && 'opacity-60')}>
         <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-secondary px-3 py-2 text-sm">{message.text}</p>
         {message.title && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground"><SkillIcon size="sm" />{message.title}</span>
@@ -117,7 +167,7 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
     const label = labels[message.title ?? ''] ?? message.title;
     const images = message.references.filter(ref => ref.kind === 'content' && ref.version_id);
     return (
-      <div className="flex gap-2 text-xs text-muted-foreground">
+      <div ref={ref} className="flex gap-2 text-xs text-muted-foreground">
         <ToolIcon size="sm" className="mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="whitespace-pre-line break-words">
@@ -125,16 +175,8 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
             {message.text && message.text !== label && <span className="ml-1.5">{message.text}</span>}
           </p>
           {images.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {images.map(ref => (
-                <img
-                  key={ref.reference_id}
-                  src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
-                  alt={ref.title}
-                  loading="lazy"
-                  className="size-20 rounded-md border border-border object-cover"
-                />
-              ))}
+            <div className="mt-1.5">
+              <ProcessImages projectId={projectId} images={images} />
             </div>
           )}
         </div>
@@ -142,13 +184,13 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
     );
   }
   if (message.role === 'error') {
-    return <p role="alert" className="text-xs text-destructive">{message.text}</p>;
+    return <p ref={ref} role="alert" className="text-xs text-destructive">{message.text}</p>;
   }
   if (message.role === 'system') {
-    return <p className="text-xs text-muted-foreground">{message.text}</p>;
+    return <p ref={ref} className="text-xs text-muted-foreground">{message.text}</p>;
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div ref={ref} className="flex flex-col gap-1">
       {message.reasoning_summary && (
         <details className="text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">思考过程</summary>
@@ -156,6 +198,25 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
         </details>
       )}
       {message.text && <AgentMarkdown text={parseAgentReply(message.text).body} />}
+    </div>
+  );
+});
+
+/** 一轮刚结束：最后一段流式文字盖在最终回复上同位淡出，最终回复淡入（底边对齐——流式文字的末段就是最终回复）。 */
+function SettlingReply({ streamed, children }: { streamed: string; children: ReactNode }) {
+  const replyRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!replyRef.current || !streamRef.current) return;
+    clearOnFinish(animate(replyRef.current, { opacity: [0, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), replyRef.current);
+    animate(streamRef.current, { opacity: [1, 0] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle });
+  }, []);
+  return (
+    <div className="grid">
+      <div ref={replyRef} className="col-start-1 row-start-1 self-end">{children}</div>
+      <div ref={streamRef} aria-hidden="true" className="pointer-events-none col-start-1 row-start-1 self-end">
+        <AgentMarkdown text={parseAgentReply(streamed).body || streamed} />
+      </div>
     </div>
   );
 }
@@ -172,7 +233,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 }) {
   const labels = useAgentToolLabels();
   const agent = useCanvasAgent(projectId, true);
-  const { session, streaming, activeTool, pending } = agent;
+  const { session, streaming, tool, pending, loading, outgoing } = agent;
   const [text, setText] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [skill, setSkill] = useState<string | null>(null);
@@ -200,7 +261,10 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
     preferred: settings.preferred_models ?? [],
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const empty = messages.length === 0 && !running && !awaiting;
+  // 正在读会话时既不是空对话也不是新内容：旧内容留着（降透明度），读完才决定显示什么。
+  const empty = !loading && messages.length === 0 && !running && !awaiting && !outgoing;
+  // 刚发出、服务端还没收下（消息显示为「发送中」）：底部先转起来。
+  const sending = Boolean(outgoing) || messages.some(isOutgoingMessage);
   // 只有会话正常停下、最后一条是 Agent 回复时，才显示它末尾的推荐追问。
   const lastMessage = status === 'idle' ? messages.at(-1) : undefined;
   const suggestions = lastMessage?.role === 'assistant' ? parseAgentReply(lastMessage.text).suggestions : [];
@@ -210,23 +274,87 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const selectionKey = selectedNodes.map(node => node.id).join(',');
   useEffect(() => { setDismissed(new Set()); }, [selectionKey]);
 
+  // 贴底：只有本来就在底部（距底 < 24px）时，新消息、流式文字、底部报错条或附件挤矮列表，才把列表拉回底部；
+  // 往上翻看过的不拽回来。
+  const stickToBottom = useRef(true);
+  const followBottom = useCallback(() => {
+    const list = listRef.current;
+    if (list && stickToBottom.current) list.scrollTop = list.scrollHeight;
+  }, []);
+  useLayoutEffect(followBottom);
+  // 列表变矮（底部报错条、附件出现）或内容变高（过程组展开、图片加载）都要跟住底部。
+  const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const list = listRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [messages.length, streaming, status]);
+    const content = contentRef.current;
+    if (!list || !content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(followBottom);
+    observer.observe(list);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [followBottom]);
+
+  // 读完会话（打开面板恢复上次的、或切到另一个会话）：列表整体淡入新内容，回到底部。
+  useAnimateOnChange(loading, stillLoading => {
+    const list = listRef.current;
+    if (stillLoading || !list) return;
+    stickToBottom.current = true;
+    followBottom();
+    clearOnFinish(animate(list, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), list, ['opacity']);
+  }, { keepWhenReduced: true });
+
+  // 哪些消息是新到达的：打开面板、切会话时已有的历史不算，只给之后到达的播入场。
+  // 服务端收下的用户消息不算新到达——它刚以「发送中」出现过。
+  const sessionKey = session?.session_id ?? 'draft';
+  const seen = useRef<{ sessionKey: string; ids: Set<string> } | null>(null);
+  const arriving = (message: CanvasAgentMessage) => seen.current?.sessionKey === sessionKey
+    && !seen.current.ids.has(message.message_id)
+    && (message.role !== 'user' || isOutgoingMessage(message));
+  useLayoutEffect(() => {
+    if (loading) return;
+    const ids = new Set(messages.map(message => message.message_id));
+    if (outgoing) ids.add(outgoing.id);
+    seen.current = { sessionKey, ids };
+  });
+
+  // 一轮结束：流式文字与最终回复同位交叉淡化（见 SettlingReply）。
+  const lastStreamed = useRef('');
+  useEffect(() => { if (running && streaming) lastStreamed.current = streaming; }, [running, streaming]);
+  const [settling, setSettling] = useState<{ text: string; messageId: string } | null>(null);
+  useAnimateOnChange(running, (nowRunning, _was, reduced) => {
+    const streamed = lastStreamed.current;
+    lastStreamed.current = '';
+    const final = messages.at(-1);
+    if (nowRunning || reduced || !streamed || final?.role !== 'assistant') return;
+    setSettling({ text: streamed, messageId: final.message_id });
+  });
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setTimeout(() => setSettling(null), MOTION_DURATION.base * 1000);
+    return () => window.clearTimeout(timer);
+  }, [settling]);
 
   // 列表读到之后，只有列表里的模型能发（Key 里停用的文本模型不再可用）。
   const modelReady = !agent.models || Boolean(selectedModel);
   const canSend = text.trim().length > 0 && !running && !awaiting && !pending && modelReady;
 
+  /** 发出去立刻清空输入、回到底部，消息先以「发送中」出现；失败时把文字、技能、带入的节点填回去
+   *  （期间又打了字就不覆盖）。 */
   async function submit() {
     if (!canSend) return;
-    const sent = await agent.send(text.trim(), attached.map(node => node.id), skill);
-    if (!sent) return;
+    const message = text.trim();
+    const sentSkill = skill;
+    const sentDismissed = dismissed;
     setText('');
     setSkill(null);
     // 发出去的节点不再自动带进下一条；重新选中才会再带。
     setDismissed(new Set(selectedNodes.map(node => node.id)));
+    stickToBottom.current = true;
+    const sent = await agent.send(message, attached.map(node => node.id), sentSkill);
+    if (sent) return;
+    setText(current => current || message);
+    setSkill(current => current ?? sentSkill);
+    setDismissed(sentDismissed);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -260,7 +388,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="bare" type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary">
-              <span className="truncate">{session?.title ?? '新对话'}</span>
+              <span className="truncate">{session?.title ?? (loading ? '\u00a0' : '新对话')}</span>
               <ChevronDownIcon size="sm" className="shrink-0 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
@@ -285,7 +413,16 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 
       <CanvasAgentPlanList plan={agent.plan} running={running} />
 
-      <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+      <div
+        ref={listRef}
+        aria-busy={loading || undefined}
+        onScroll={event => {
+          const list = event.currentTarget;
+          stickToBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < STICK_TO_BOTTOM_PX;
+        }}
+        className={cn('min-h-0 flex-1 overflow-y-auto px-3 py-3 transition-opacity', loading && session && 'opacity-50')}
+      >
+      <div ref={contentRef} className="flex min-h-full flex-col gap-3">
         {empty && (
           <div className="my-auto flex flex-col gap-3 px-1">
             <p className="font-display text-display leading-tight">想在画布上创作什么？</p>
@@ -301,15 +438,32 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             </div>
           </div>
         )}
-        {buildCanvasAgentTimeline(messages, running || awaiting).map(block => block.kind === 'message'
-          ? <Message key={block.message.message_id} projectId={projectId} message={block.message} />
-          : <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps} />)}
+        {buildCanvasAgentTimeline(messages, running || awaiting).map(block => {
+          if (block.kind === 'process') {
+            return <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps}
+              arriving={block.messages.some(arriving)} />;
+          }
+          const item = <Message key={block.message.message_id} projectId={projectId} message={block.message}
+            arriving={arriving(block.message) && settling?.messageId !== block.message.message_id} />;
+          return settling?.messageId === block.message.message_id
+            ? <SettlingReply key={block.message.message_id} streamed={settling.text}>{item}</SettlingReply>
+            : item;
+        })}
+        {outgoing && (
+          <Message projectId={projectId} arriving message={{
+            role: 'user', title: outgoing.title, text: outgoing.text, reasoning_summary: null, references: [],
+            turn_id: null, message_id: outgoing.id, sequence: 0, created_at: '',
+          }} />
+        )}
         <AgentSuggestions suggestions={suggestions} onPick={value => { setText(value); textareaRef.current?.focus(); }} />
-        {running && streaming && <AgentMarkdown text={parseAgentReply(streaming).body || streaming} />}
-        {running && (
+        {running && streaming && <AgentStreamingMarkdown text={parseAgentReply(streaming).body || streaming} />}
+        {/* 工具状态单独一行贴在底部：文字到达时原位换成完成态，不被清空。 */}
+        {(running || sending) && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <LoadingIcon size="sm" aria-label="Agent 正在处理" className="animate-spin" />
-            {activeTool && `${labels[activeTool] ?? activeTool}…`}
+            {tool && <SwapLabel active={tool.running}
+              on={agentToolStatusLabel(tool.name, labels, true)}
+              off={agentToolStatusLabel(tool.name, labels, false)} />}
           </p>
         )}
         {awaiting && session && (
@@ -322,6 +476,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             loadBatchItems={callId => getCanvasAgentBatchItems(projectId, session.session_id, callId)}
           />
         )}
+      </div>
       </div>
 
       {agent.error && (
@@ -428,11 +583,19 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             onConfirmAboveChange={value => void agent.updateConfirmAbove(value)}
           />
           <span className="min-w-1 flex-1" />
-          {running ? (
-            <Hint label="停止"><Button variant="bare" type="button" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><StopIcon size="sm" className="fill-current" /></Button></Hint>
-          ) : (
-            <Hint label="发送"><Button variant="bare" type="button" aria-label="发送" disabled={!canSend} onClick={() => void submit()} className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><ArrowUpIcon /></Button></Hint>
-          )}
+          {/* 发送与停止是同一个按钮壳，图标与底色换态，不整颗换掉。 */}
+          <Hint label={running ? '停止' : '发送'}><Button variant="bare"
+            type="button"
+            aria-label={running ? '停止' : '发送'}
+            disabled={!running && !canSend}
+            onClick={() => void (running ? agent.stop() : submit())}
+            className={cn(
+              'grid size-8 shrink-0 place-items-center rounded-full transition-[background-color,color,opacity] disabled:opacity-40',
+              running ? 'bg-secondary text-foreground hover:bg-secondary/80' : 'bg-primary text-primary-foreground',
+            )}
+          >
+            <SwapIcon swapKey={running}>{running ? <StopIcon size="sm" className="fill-current" /> : <ArrowUpIcon />}</SwapIcon>
+          </Button></Hint>
         </div>
       </div>
     </aside>

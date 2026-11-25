@@ -41,14 +41,29 @@ export function useStudioComposer(home = false) {
     setSkill(null);
     messageId.current = null;
   }
+  /** 发出去立刻清空输入、回到对话底部，消息先以「发送中」出现在对话里；失败时把这次的文字、附件、技能填回去
+   *  （输入框里已经重新打了字就不覆盖）。幂等标识留到成功才换，失败重发仍是同一条。 */
   async function send(prompt: string) {
     if (sending.current) return;
     sending.current = true;
+    const sentText = text;
+    const sentFiles = files;
+    const sentSkill = skill;
     try {
       messageId.current ??= crypto.randomUUID();
-      const sent = await agent.sendStudio(prompt, files, [], skill, messageId.current);
-      if (!sent) return;
-      clearDraft();
+      setText('');
+      setFiles([]);
+      setSkill(null);
+      // 记录区是 col-reverse，scrollTop 0 就是底部；回到底部不要滚动过程（飙哥指定）。
+      document.querySelector<HTMLElement>('[data-studio-history-scroll]')?.scrollTo?.({ top: 0, behavior: 'auto' });
+      const sent = await agent.sendStudio(prompt, sentFiles, [], sentSkill, messageId.current);
+      if (!sent) {
+        setText(current => current || sentText);
+        setFiles(current => current.length ? current : sentFiles);
+        setSkill(current => current ?? sentSkill);
+        return;
+      }
+      messageId.current = null;
       if (home) navigate('/studio');
     } finally {
       sending.current = false;

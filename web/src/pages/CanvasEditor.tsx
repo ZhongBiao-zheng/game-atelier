@@ -83,9 +83,15 @@ import {
   ToolButton,
   canvasNodeTypes,
   copyablePromptForNode,
+  canvasStackMemberMotion,
+  clearStackMemberMotion,
+  playStackMemberExit,
   type CanvasNodeContextValue,
+  type CanvasStackMemberMotion,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
+import { AnimatePresence, motion } from 'motion/react';
+import { MOTION_DURATION, MOTION_EASE, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
@@ -596,8 +602,20 @@ function CanvasEditorInner({
     liveLayout: LiveNodeLayout | undefined;
     hidden: boolean;
     stackMember: boolean;
+    shownVersionId: string | null;
     flowNode: FlowNode;
   }>());
+  // 图片节点屏上已经画出来的版本（节点卡在新图解码完成时上报）。版本刚换、新图还没盖上来时，
+  // 节点尺寸先按屏上那一版算：按新比例改尺寸与新图淡入同帧发生，旧图不会先被拉成新比例。
+  // 第一次见到的节点按当前版本记，打开画布、新建节点都不压尺寸。
+  const revealedImageVersions = useRef(new Map<string, string | null>());
+  const [revealRevision, setRevealRevision] = useState(0);
+  const reportMediaRevealed = useCallback((nodeId: string, versionId: string) => {
+    const revealed = revealedImageVersions.current;
+    if (revealed.get(nodeId) === versionId) return;
+    revealed.set(nodeId, versionId);
+    setRevealRevision(value => value + 1);
+  }, []);
   const flowEdgeCache = useRef(new Map<string, {
     connection: CanvasConnection;
     active: boolean;
@@ -830,6 +848,7 @@ function CanvasEditorInner({
     setToolNotice(null);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
+    revealedImageVersions.current.clear();
     flowEdgeCache.current.clear();
     flowEdgesRef.current = [];
     activeResizeNodeId.current = null;
@@ -1386,6 +1405,8 @@ function CanvasEditorInner({
   }, [collapsedStackMemberIds]);
 
   const flowNodes = useMemo<FlowNode[]>(() => {
+    // 节点卡上报新图已盖上来时重算：屏上版本记在 ref 里，这个计数把它变成依赖。
+    void revealRevision;
     const activeIds = new Set<string>();
     const maximumPersistedZIndex = Math.max(0, ...(document?.nodes ?? []).map(node => node.z_index));
     const next = (document?.nodes ?? []).map(node => {
@@ -1395,6 +1416,11 @@ function CanvasEditorInner({
       const selectable = !sweeping;
       const stackMember = resultStackOwnerById.has(node.id);
       const hidden = collapsedStackMemberIds.has(node.id);
+      const currentImageVersionId = node.type === 'image' ? node.data.current_version_id : null;
+      if (node.type === 'image' && !revealedImageVersions.current.has(node.id)) {
+        revealedImageVersions.current.set(node.id, currentImageVersionId);
+      }
+      const shownVersionId = node.type === 'image' ? revealedImageVersions.current.get(node.id) ?? null : null;
       const cached = flowNodeCache.current.get(node.id);
       if (
         cached?.node === node
@@ -1403,9 +1429,13 @@ function CanvasEditorInner({
         && cached.liveLayout === liveLayout
         && cached.hidden === hidden
         && cached.stackMember === stackMember
+        && cached.shownVersionId === shownVersionId
       ) return cached.flowNode;
+      const sizedNode = node.type === 'image' && shownVersionId !== currentImageVersionId
+        ? { ...node, data: { ...node.data, current_version_id: shownVersionId } }
+        : node;
       const renderedSize = liveLayout?.size
-        ?? canvasNodeRenderedSize(node, document?.content_versions ?? {});
+        ?? canvasNodeRenderedSize(sizedNode, document?.content_versions ?? {});
       const flowNode: FlowNode = {
         id: node.id,
         type: 'canvasNode',
@@ -1424,11 +1454,14 @@ function CanvasEditorInner({
         draggable: !stackMember,
         data: { domain: node },
       };
-      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, hidden, stackMember, flowNode });
+      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, hidden, stackMember, shownVersionId, flowNode });
       return flowNode;
     });
     for (const id of flowNodeCache.current.keys()) {
       if (!activeIds.has(id)) flowNodeCache.current.delete(id);
+    }
+    for (const id of revealedImageVersions.current.keys()) {
+      if (!activeIds.has(id)) revealedImageVersions.current.delete(id);
     }
     if (mediaPlaceholder) {
       next.push({
@@ -1449,7 +1482,7 @@ function CanvasEditorInner({
       });
     }
     return next;
-  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, selectedNodeIds, sweeping]);
+  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, revealRevision, selectedNodeIds, sweeping]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -3383,7 +3416,7 @@ function CanvasEditorInner({
       const group = [...expanded.nodes, ...current.nodes].find(node => node.id === expanded.groupId);
       if (group?.size) {
         const bounds = { ...group.position, ...group.size };
-        void runViewportCommand(() => fitBounds(bounds, { duration: 150, padding: 0.14 }));
+        void runViewportCommand(() => fitBounds(bounds, { duration: viewportMotionMs(MOTION_DURATION.fast), padding: 0.14 }));
       }
     } catch (error) {
       setError((error as Error).message);
@@ -3534,22 +3567,78 @@ function CanvasEditorInner({
   const expandedResultStackIdsRef = useRef(expandedResultStackIds);
   expandedResultStackIdsRef.current = expandedResultStackIds;
 
+  // 结果组展开 / 收起的成员动效。展开：记下这一批成员的起点，成员节点挂载时各取一次（平移回视口的
+  // 重新挂载取不到，不播）。收起：先在成员内层外壳上播 150ms 收回，播完再把成员设成 hidden。
+  const resultStackEntrances = useRef(new Map<string, CanvasStackMemberMotion>());
+  const resultStackCollapses = useRef(new Map<string, { controls: AnimationPlaybackControls[]; shells: Element[] }>());
+  const resultStackEntriesRef = useRef(resultStackEntries);
+  resultStackEntriesRef.current = resultStackEntries;
+  const consumeResultStackEntrance = useCallback((memberId: string) => {
+    const entrance = resultStackEntrances.current.get(memberId) ?? null;
+    resultStackEntrances.current.delete(memberId);
+    return entrance;
+  }, []);
+  const resultStackMemberMotions = useCallback((coverId: string) => {
+    const nodes = latestDocument.current?.nodes ?? [];
+    const cover = nodes.find(node => node.id === coverId);
+    if (!cover) return [];
+    return resultStackEntriesRef.current
+      .filter(([, owner]) => owner === coverId)
+      .flatMap(([memberId]) => {
+        const member = nodes.find(node => node.id === memberId);
+        return member ? [member] : [];
+      })
+      .sort((a, b) => Math.hypot(a.position.x - cover.position.x, a.position.y - cover.position.y)
+        - Math.hypot(b.position.x - cover.position.x, b.position.y - cover.position.y))
+      .map((member, index) => ({ memberId: member.id, motion: canvasStackMemberMotion(cover.position, member.position, index) }));
+  }, []);
+
   /** 展开 / 收起结果组。最近一次生成还没拆成节点时（旧数据、或生成结束时页面不在），展开时先拆。 */
   const toggleResultStack = useCallback((coverId: string) => {
     const cover = latestDocument.current?.nodes.find(node => node.id === coverId);
     if (!cover) return;
+    // 收回途中又点了一次：停在当前位置，按展开处理（成员本来就还挂着）。
+    const collapsing = resultStackCollapses.current.get(coverId);
+    if (collapsing) {
+      resultStackCollapses.current.delete(coverId);
+      collapsing.controls.forEach(control => control.stop());
+      clearStackMemberMotion(collapsing.shells);
+      return;
+    }
     const opening = !expandedResultStackIdsRef.current.has(coverId);
+    const collapse = () => setExpandedResultStackIds(current => {
+      const next = new Set(current);
+      next.delete(coverId);
+      return next;
+    });
     if (opening) {
       const pending = pendingResultStack(cover, jobsByResultNodeIdRef.current.get(coverId));
       if (pending) commit(current => settleResultStack(current, coverId, pending, () => makeId('image')), true);
+      for (const { memberId, motion } of resultStackMemberMotions(coverId)) resultStackEntrances.current.set(memberId, motion);
+      // 没挂载上的成员（在视口外）不留着入场参数，免得之后平移过去才补播。
+      window.setTimeout(() => resultStackEntrances.current.clear(), MOTION_DURATION.slow * 1000);
+      setExpandedResultStackIds(current => new Set(current).add(coverId));
+      return;
     }
-    setExpandedResultStackIds(current => {
-      const next = new Set(current);
-      if (opening) next.add(coverId);
-      else next.delete(coverId);
-      return next;
+    const members = resultStackMemberMotions(coverId).flatMap(({ memberId, motion }) => {
+      const shell = editorRegionRef.current?.querySelector(`.react-flow__node[data-id="${CSS.escape(memberId)}"] .canvas-node-shell`);
+      return shell ? [{ shell, motion }] : [];
     });
-  }, [commit]);
+    const shells = members.map(member => member.shell);
+    const controls = playStackMemberExit(shells, members.map(member => member.motion));
+    if (!controls) {
+      collapse();
+      return;
+    }
+    resultStackCollapses.current.set(coverId, { controls, shells });
+    void Promise.all(controls.map(control => control.finished)).then(() => {
+      if (resultStackCollapses.current.get(coverId)?.controls !== controls) return;
+      resultStackCollapses.current.delete(coverId);
+      collapse();
+      // 成员此时已卸载；万一还挂着（比如正在重新生成），别把透明态留在外壳上。
+      window.requestAnimationFrame(() => clearStackMemberMotion(shells));
+    });
+  }, [commit, resultStackMemberMotions]);
 
   const setResultStackCover = useCallback((coverId: string, memberId: string) => {
     commit(current => swapResultStackCover(current, coverId, memberId), true);
@@ -4759,7 +4848,7 @@ function CanvasEditorInner({
       bottom = Math.max(bottom, node.position.y + size.height);
     }
     void runViewportCommand(() => setCenter((left + right) / 2, (top + bottom) / 2,
-      { zoom: getZoom(), duration: 250 }));
+      { zoom: getZoom(), duration: viewportMotionMs(MOTION_DURATION.slow) }));
   };
 
   // 框选时选中数每帧在变；context 只关心「是否多选」，依赖写成 size 会让所有节点跟着每帧重渲染。
@@ -4865,6 +4954,8 @@ function CanvasEditorInner({
     resultStackOwnerById,
     expandedResultStackIds,
     toggleResultStack,
+    consumeResultStackEntrance,
+    reportMediaRevealed,
     setResultStackCover,
     reportError,
     submitRun,
@@ -4982,6 +5073,8 @@ function CanvasEditorInner({
     resultStackOwnerById,
     expandedResultStackIds,
     toggleResultStack,
+    consumeResultStackEntrance,
+    reportMediaRevealed,
     setResultStackCover,
     selectOnlyNode,
     setMaterialConnected,
@@ -5091,7 +5184,7 @@ function CanvasEditorInner({
     else setLibraryMode('prompts');
   };
   const fitAllNodes = () => {
-    void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
+    void runViewportCommand(() => fitView({ duration: viewportMotionMs(MOTION_DURATION.fast), padding: 0.12 }));
   };
   const runningNodeIds = document.nodes
     .filter(node => canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).status === 'loading')
@@ -5225,7 +5318,7 @@ function CanvasEditorInner({
               maskColor="var(--scrim)"
               onClick={(event, position) => {
                 event.stopPropagation();
-                void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 }));
+                void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: viewportMotionMs(MOTION_DURATION.fast) }));
               }}
             />
           )}
@@ -5329,15 +5422,15 @@ function CanvasEditorInner({
             minimapToggle={minimapToggle}
             onZoomOut={() => {
               if (getZoom() <= CANVAS_MIN_ZOOM + 0.0005) return;
-              void runViewportCommand(() => zoomOut({ duration: 150 }));
+              void runViewportCommand(() => zoomOut({ duration: viewportMotionMs(MOTION_DURATION.fast) }));
             }}
             onZoomIn={() => {
               if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
-              void runViewportCommand(() => zoomIn({ duration: 150 }));
+              void runViewportCommand(() => zoomIn({ duration: viewportMotionMs(MOTION_DURATION.fast) }));
             }}
             onResetZoom={() => {
               if (Math.abs(getZoom() - 1) < 0.001) return;
-              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
+              void runViewportCommand(() => zoomTo(1, { duration: viewportMotionMs(MOTION_DURATION.fast) }));
             }}
             onFitView={fitAllNodes}
           />
@@ -5497,7 +5590,7 @@ function CanvasEditorInner({
                 onClick={() => {
                   void runViewportCommand(() => fitView({
                     nodes: runningNodeIds.map(id => ({ id })),
-                    duration: 150,
+                    duration: viewportMotionMs(MOTION_DURATION.fast),
                     padding: 0.4,
                     maxZoom: 1,
                   }));
@@ -5588,7 +5681,10 @@ function CanvasEditorInner({
           </div>
         )}
 
+        {/* 资产库与 Agent 面板共用右侧一个位置：从右侧滑入淡入，收起淡出，互切时交叉淡化。 */}
+        <AnimatePresence initial={false}>
         {libraryMode && (
+          <CanvasSidePanelMotion key="library">
           <CreationAssetPanel
             key={libraryPanelKey}
             ref={creationAssetPanelRef}
@@ -5659,11 +5755,11 @@ function CanvasEditorInner({
             teamRelatedSha256={teamRelatedSha256}
             initialTeamLibraryId={teamLibraryId}
           />
+          </CanvasSidePanelMotion>
         )}
 
-        {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
-
         {agentOpen && !libraryMode && (
+          <CanvasSidePanelMotion key="agent">
           <CanvasAgentPanel
             key={projectId}
             className="canvas-library-panel"
@@ -5678,7 +5774,11 @@ function CanvasEditorInner({
             onUpload={() => uploadRef.current?.click()}
             onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings/providers'); })}
           />
+          </CanvasSidePanelMotion>
         )}
+        </AnimatePresence>
+
+        {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
 
         <SetPromptPreviewDialog request={promptPreviewRequest} onClose={() => setPromptPreviewRequest(null)}
           onSaved={() => { setAssetsRevision(value => value + 1); announceToolNotice('已设为效果图'); }} />
@@ -6554,4 +6654,28 @@ function CanvasZoomDock({
     </div>
     </>
   );
+}
+
+/** 右侧面板（资产库、画布 Agent）的进出场：从右侧 16px 滑入并淡入 200ms，收起 150ms 淡出。
+ *  面板本身是 fixed 定位，外层铺满视口：带 transform 的祖先会成为 fixed 的定位参照，铺满才不改面板位置。
+ *  外层不接事件，只有面板本身接。减弱动态效果时只淡变。 */
+function CanvasSidePanelMotion({ children }: { children: ReactNode }) {
+  // 没有 matchMedia 的环境（jsdom）不播，与 lib/motion 的约定一致。
+  const animated = typeof window.matchMedia === 'function';
+  const reduced = prefersReducedMotion();
+  return (
+    <motion.div
+      className="pointer-events-none fixed inset-0 z-40 [&>*]:pointer-events-auto"
+      initial={animated ? { opacity: 0, x: reduced ? 0 : 16 } : false}
+      animate={{ opacity: 1, x: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+      exit={animated ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** 视口平移 / 缩放的时长（xyflow 收毫秒）。减弱动态效果时直接跳到位。 */
+function viewportMotionMs(seconds: number) {
+  return prefersReducedMotion() ? 0 : seconds * 1000;
 }

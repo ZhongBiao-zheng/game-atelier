@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
-import { AgentMarkdown, TOOL_LABELS } from '@/components/agent/AgentMarkdown';
+import { AgentMarkdown, AgentStreamingMarkdown, TOOL_LABELS, agentToolStatusLabel, useAgentToolLabels } from '@/components/agent/AgentMarkdown';
 import { AgentSuggestions, parseAgentReply } from '@/components/agent/AgentSuggestions';
 import { CanvasAgentApprovalCard } from '@/components/agent/CanvasAgentApprovalCard';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
-import { AiIcon, ChevronDownIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
+import { Collapse } from '@/components/ui/collapse';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { AiIcon, ChevronRightIcon, ImageIcon, LoadingIcon, SkillIcon, ToolIcon } from '@/components/ui/icons';
 import type { StudioAgentSession, StudioAgentStep, StudioAgentTurn } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { StudioComposerState } from './StudioComposer';
@@ -30,9 +32,8 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
       style={{
         width: TURN_REF_W + Math.max(0, urls.length - 1) * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST)),
         height: TURN_REF_H,
-        transition: 'width 250ms ease',
       }}
-      className="relative z-20 flex shrink-0 items-center"
+      className="relative z-20 flex shrink-0 items-center transition-[width] duration-200 ease-out motion-reduce:transition-none"
     >
       {urls.map((item, i) => {
         const angle = TURN_REF_ROTATIONS[i % TURN_REF_ROTATIONS.length];
@@ -55,9 +56,8 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
               zIndex: isActive ? 30 : i,
               transform: `translateX(${i * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
               transformOrigin: 'center',
-              transition: 'transform 250ms ease',
             }}
-            className="absolute block cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0"
+            className="absolute block cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0 transition-transform duration-200 ease-out motion-reduce:transition-none"
           >
             <img src={item.src} alt={item.alt} className="h-full w-full object-cover" onError={event => { event.currentTarget.hidden = true; }} />
           </Button>
@@ -96,11 +96,13 @@ function StepGroup({ steps, awaiting }: { steps: StudioAgentStep[]; awaiting: bo
       <span>{label + suffix}</span>
       <ChevronRightIcon size="sm" className={`shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
     </Button>
-    {expanded && <div className="space-y-1 border-l border-border pl-4">
-      {steps.map(step => <p key={step.step_id} className="whitespace-pre-wrap text-xs text-muted-foreground">
-        {step.summary || TOOL_LABELS[step.tool] || step.tool}
-      </p>)}
-    </div>}
+    <Collapse open={expanded}>
+      <div className="space-y-1 border-l border-border pl-4">
+        {steps.map(step => <p key={step.step_id} className="whitespace-pre-wrap text-xs text-muted-foreground">
+          {step.summary || TOOL_LABELS[step.tool] || step.tool}
+        </p>)}
+      </div>
+    </Collapse>
   </div>;
 }
 
@@ -169,6 +171,7 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   const awaiting = turn.status === 'awaiting_approval';
   const [override, setOverride] = useState<{ status: string; open: boolean } | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const toolLabels = useAgentToolLabels();
   const open = awaiting || (override?.status === turn.status ? override.open : false);
   const title = running || awaiting ? '任务响应中…' : turn.status === 'idle' ? '已完成'
     : turn.status === 'interrupted' ? '已停止' : '出错了';
@@ -200,9 +203,10 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
       <Button variant="ghost" size="sm" className="-ml-2 h-7 text-xs text-muted-foreground" aria-expanded={open}
         aria-disabled={awaiting} onClick={() => { if (!awaiting) setOverride({ status: turn.status, open: !open }); }}>
         {(running || awaiting) && <LoadingIcon size="sm" className="animate-spin" />}{title}
-        {open ? <ChevronDownIcon size="sm" /> : <ChevronRightIcon size="sm" />}
+        <ChevronRightIcon size="sm" className={`transition-transform ${open ? 'rotate-90' : ''}`} />
       </Button>
-      {open && <div className="space-y-2.5 border-l border-border pl-3.5 text-xs text-muted-foreground">
+      {/* 过程区展开收起走高度动画：确认卡裁决、一轮结束时收起，不整块消失。 */}
+      <Collapse open={open}><div className="space-y-2.5 border-l border-border pl-3.5 text-xs text-muted-foreground">
         {user?.title && (
           <div className="flex items-center gap-2 py-0.5">
             <SkillIcon size="sm" className="shrink-0" />
@@ -216,7 +220,7 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
         {awaiting && <CanvasAgentApprovalCard unit="份" key={session.pending_approvals.map(a => a.call_id).join()} approvals={session.pending_approvals} labels={TOOL_LABELS}
           disabled={agent.pending} onDecide={agent.decide}
           loadBatchItems={id => getCanvasAgentBatchItems(null, session.session_id, id)} />}
-      </div>}
+      </div></Collapse>
       {!open && errors.map(m => <p key={m.message_id} className="whitespace-pre-wrap text-xs text-destructive">{m.text}</p>)}
     </div>
     {visibleReplies.length > 0 && (
@@ -228,8 +232,16 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
     )}
     {running && agent.streaming && (
       <div className="text-muted-foreground">
-        <AgentMarkdown text={parseAgentReply(agent.streaming).body || agent.streaming} />
+        <AgentStreamingMarkdown text={parseAgentReply(agent.streaming).body || agent.streaming} />
       </div>
+    )}
+    {/* 运行中的工具单独一行：下一段文字到达时原位换成完成态，不被清空。 */}
+    {running && agent.tool && (
+      <p className="text-xs text-muted-foreground">
+        <SwapLabel active={agent.tool.running}
+          on={agentToolStatusLabel(agent.tool.name, toolLabels, true)}
+          off={agentToolStatusLabel(agent.tool.name, toolLabels, false)} />
+      </p>
     )}
     {hasJobs && <div data-testid="agent-multi-job-batch" className="pt-1">{renderJobs(sortedJobs)}</div>}
     {onPickSuggestion && <AgentSuggestions suggestions={suggestions} onPick={onPickSuggestion} />}

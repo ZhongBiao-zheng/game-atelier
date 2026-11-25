@@ -34,7 +34,8 @@ import {
   type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_STAGGER, prefersReducedMotion, stagger, useAnimateOnChange } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, prefersReducedMotion, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
+import { RevealImage } from '@/components/ui/reveal-image';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -247,6 +248,10 @@ export interface CanvasNodeContextValue {
   /** 展开中的结果组（封面 id）。 */
   expandedResultStackIds?: ReadonlySet<string>;
   toggleResultStack?: (coverId: string) => void;
+  /** 结果组刚展开时，成员挂载取一次自己的入场参数（从封面方向抽出）；平移回视口等其他挂载拿到 null。 */
+  consumeResultStackEntrance?: (memberId: string) => CanvasStackMemberMotion | null;
+  /** 节点上的图片某个版本已经解码并盖住旧版：编辑器据此放开按新比例改尺寸。 */
+  reportMediaRevealed?: (nodeId: string, versionId: string) => void;
   /** 封面与该成员交换图片，连线跟着图片走。 */
   setResultStackCover?: (coverId: string, memberId: string) => void;
   reportError?: (message: string) => void;
@@ -460,12 +465,27 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     });
   }, [completeNodeResize, node.id]);
 
-  // 出了新结果（版本变化）时媒体淡入；首次挂载与平移回视口重新挂载都不播。
-  useAnimateOnChange(nodeContent?.version_id ?? null, versionId => {
+  // 视频与音频出了新结果（版本变化）时淡入；首次挂载与平移回视口重新挂载都不播。
+  // 图片不走这里：CanvasCrossfadeImage 让旧图垫底，新图解码完再淡入。
+  useAnimateOnChange(nodeContent?.kind === 'image' ? null : nodeContent?.version_id ?? null, versionId => {
     const media = versionId ? contentSurfaceRef.current?.querySelector('[data-canvas-media]') : null;
     if (!media) return;
     clearOnFinish(animate(media, { opacity: [0, 1], scale: [0.985, 1] }, { duration: MOTION_DURATION.slow, ease: MOTION_EASE.out }), media);
   });
+  // 屏上已经画出来的图片版本：生成中的遮罩要撑到新图盖上来才撤，尺寸也等它一起变（见 reportMediaRevealed）。
+  const [revealedVersionId, setRevealedVersionId] = useState<string | null>(null);
+  const reportMediaRevealed = context?.reportMediaRevealed;
+  const revealImageVersion = useCallback((versionId: string) => {
+    setRevealedVersionId(versionId);
+    reportMediaRevealed?.(node.id, versionId);
+  }, [node.id, reportMediaRevealed]);
+  // 结果组展开：成员从封面方向抽出来。只动内层外壳，不碰 xyflow 外层的定位 transform。
+  const consumeResultStackEntrance = context?.consumeResultStackEntrance;
+  useLayoutEffect(() => {
+    const entrance = shellElement ? consumeResultStackEntrance?.(node.id) : null;
+    if (!entrance || !shellElement) return;
+    playStackMemberEntrance(shellElement, [entrance]);
+  }, [consumeResultStackEntrance, node.id, shellElement]);
 
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
     setMaterialPickPointer({
@@ -966,6 +986,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               title={node.title}
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
+              onReady={content.kind === 'image' ? () => revealImageVersion(content.version_id) : undefined}
             />
           )}
           {node.type === 'image' && content?.kind === 'image' && context.resolveFinalCategory?.(content.sha256) && (
@@ -1015,7 +1036,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       <CanvasNodeRunLiveRegion state={nodeRunState} />
       <CanvasNodeRunOverlay
         state={nodeRunState}
-        hasContent={Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
+        // 图片节点以「屏上已经有图」为准：首次生成的新图还在解码时，整张生成中卡片继续盖着。
+        hasContent={content?.kind === 'image'
+          ? revealedVersionId !== null
+          : Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
+        holdUntilReady={content?.kind === 'image' && revealedVersionId !== content.version_id}
       />
       {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
         <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
@@ -1229,12 +1254,15 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *
  *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
  *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
-/** 拖动节点时工具条与生成面板朝节点方向收起，松手再浮现；进出动画同创作台的「回到底部」。
+/** 拖动节点时工具条与生成面板朝节点方向收起（150ms，退场曲线），松手再浮现（200ms，进场曲线）。
+ *  减弱动态效果时不位移，只淡变。
  *  静止时不留 translate / opacity：祖先上残留的 translate 会让面板里的 backdrop-blur 失效。 */
 function canvasDragChromeClass(dragging: boolean, toward: 'up' | 'down') {
   return cn(
-    'transition-[opacity,translate] duration-300 motion-reduce:transition-none',
-    dragging && cn('pointer-events-none opacity-0', toward === 'down' ? 'translate-y-2' : '-translate-y-2'),
+    'transition-[opacity,translate] motion-reduce:translate-y-0',
+    dragging
+      ? cn('pointer-events-none opacity-0 duration-150', toward === 'down' ? 'translate-y-2' : '-translate-y-2')
+      : 'duration-200 ease-out',
   );
 }
 
@@ -1367,11 +1395,85 @@ function ResultStackBadge({ total, expanded, onToggle }: { total: number; expand
   );
 }
 
+/** 一次出多张的成员（结果组节点、候选卡）从封面背后抽出 / 收回时的起点。
+ *  位移只取「封面 → 成员」方向上的一小段（封顶 48px），离得再远也不横跨画布飞过来；
+ *  成员间错开 20ms，总共不超过 100ms，八张图也不会拖成一长串。 */
+export interface CanvasStackMemberMotion {
+  x: number;
+  y: number;
+  delay: number;
+}
+
+const STACK_MEMBER_TRAVEL = 48;
+const STACK_MEMBER_STAGGER = 0.02;
+const STACK_MEMBER_STAGGER_CAP = 0.1;
+
+export function canvasStackMemberMotion(cover: CanvasPoint, member: CanvasPoint, index: number): CanvasStackMemberMotion {
+  const dx = member.x - cover.x;
+  const dy = member.y - cover.y;
+  const distance = Math.hypot(dx, dy);
+  const ratio = distance > 0 ? Math.min(distance, STACK_MEMBER_TRAVEL) / distance : 0;
+  return { x: -dx * ratio, y: -dy * ratio, delay: Math.min(index * STACK_MEMBER_STAGGER, STACK_MEMBER_STAGGER_CAP) };
+}
+
+/** jsdom 没有 matchMedia：vanilla animate() 一律不播，测试里元素不停在动画起点。 */
+function stackMotionAvailable() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+}
+
+/** 抽出：从封面方向 + 96% 缩放 + 透明进到原位。减弱动态效果时只淡入。 */
+export function playStackMemberEntrance(elements: Element | Element[], motions: CanvasStackMemberMotion[]) {
+  if (!stackMotionAvailable()) return;
+  const list = Array.isArray(elements) ? elements : [elements];
+  const reduced = prefersReducedMotion();
+  list.forEach((element, index) => {
+    const motion = motions[index];
+    if (!motion) return;
+    const fade = { duration: MOTION_DURATION.base, ease: MOTION_EASE.out, delay: motion.delay };
+    clearOnFinish(reduced
+      ? animate(element, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle, delay: motion.delay })
+      : animate(element, { x: [motion.x, 0], y: [motion.y, 0], scale: [0.96, 1], opacity: [0, 1] },
+        { ...MOTION_SPRING.snappy, delay: motion.delay, opacity: fade }), element);
+  });
+}
+
+/** 收回：150ms 同步退回封面方向并淡出，不错开。返回 null 表示不播（直接收起）。 */
+export function playStackMemberExit(elements: Element[], motions: CanvasStackMemberMotion[]): AnimationPlaybackControls[] | null {
+  if (!stackMotionAvailable() || elements.length === 0) return null;
+  const reduced = prefersReducedMotion();
+  const timing = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
+  return elements.map((element, index) => {
+    const motion = motions[index] ?? { x: 0, y: 0, delay: 0 };
+    return reduced
+      ? animate(element, { opacity: 0 }, timing)
+      : animate(element, { x: motion.x, y: motion.y, scale: 0.96, opacity: 0 }, timing);
+  });
+}
+
+export function clearStackMemberMotion(elements: Element[]) {
+  for (const element of elements) {
+    if (!(element instanceof HTMLElement)) continue;
+    element.style.removeProperty('opacity');
+    element.style.removeProperty('transform');
+  }
+}
+
+/** 收起后封面身后的叠层边框跟着成员收回一起淡回来。 */
+function useStackBordersFadeIn(ref: RefObject<HTMLElement | null>, expanded: boolean) {
+  useAnimateOnChange(expanded, open => {
+    const borders = open ? [] : Array.from(ref.current?.querySelectorAll('[data-stack-border]') ?? []);
+    if (borders.length) clearOnFinish(animate(borders, { opacity: [0, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), borders, ['opacity']);
+  }, { keepWhenReduced: true });
+}
+
 /** 已拆成节点的结果组挂在封面上的外观：收起时身后叠几层边框，右上角是展开按钮。
  *  不加 nowheel：这一层没有自己的滚动内容，滚轮 / 双指要照常平移画布。 */
 function ResultStackChrome({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useStackBordersFadeIn(ref, expanded);
   return (
     <div
+      ref={ref}
       data-testid="canvas-result-stack"
       data-expanded={expanded ? 'true' : 'false'}
       className="nodrag pointer-events-none absolute inset-0 overflow-visible"
@@ -1380,6 +1482,7 @@ function ResultStackChrome({ total, expanded, onToggle }: { total: number; expan
         <span
           key={index}
           aria-hidden="true"
+          data-stack-border
           className="pointer-events-none absolute inset-0 rounded-lg border border-border"
           style={{ transform: `translate(${10 + index * 6}px, ${5 + index * 4}px) rotate(${index + 1}deg)` }}
         />
@@ -1387,6 +1490,13 @@ function ResultStackChrome({ total, expanded, onToggle }: { total: number; expan
       <ResultStackBadge total={total} expanded={expanded} onToggle={onToggle} />
     </div>
   );
+}
+
+/** 候选卡排在主结果右边，起点都是向左退回主结果背后。 */
+function candidateMotions(count: number) {
+  return Array.from({ length: count }, (_, index) => canvasStackMemberMotion(
+    { x: 0, y: 0 }, { x: (index + 1) * STACK_MEMBER_TRAVEL, y: 0 }, index,
+  ));
 }
 
 function MediaCandidateBatch({
@@ -1410,15 +1520,33 @@ function MediaCandidateBatch({
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
   const primaryNumber = primary.candidate.index + 1;
   const stackRef = useRef<HTMLDivElement>(null);
-  // 展开时候选卡从主结果背后依次滑出。
+  // 收起时候选卡先退回主结果背后、淡出，播完再卸载；中途再展开就停在当前位置接着出来。
+  const [cardsMounted, setCardsMounted] = useState(expanded);
+  if (expanded && !cardsMounted) setCardsMounted(true);
+  // 展开时候选卡与结果组成员同一套手势：从主结果背后抽出。
   useAnimateOnChange(expanded, open => {
-    const cards = open ? stackRef.current?.querySelectorAll<HTMLElement>('[data-candidate-card]') : null;
-    if (!cards?.length) return;
-    clearOnFinish(
-      animate(cards, { opacity: [0, 1], x: [-24, 0] }, { duration: MOTION_DURATION.slow, ease: MOTION_EASE.out, delay: stagger(MOTION_STAGGER) }),
-      cards,
-    );
-  });
+    const cards = open ? Array.from(stackRef.current?.querySelectorAll<HTMLElement>('[data-candidate-card]') ?? []) : [];
+    if (cards.length) playStackMemberEntrance(cards, candidateMotions(cards.length));
+  }, { keepWhenReduced: true });
+  useLayoutEffect(() => {
+    if (expanded || !cardsMounted) return;
+    const cards = Array.from(stackRef.current?.querySelectorAll<HTMLElement>('[data-candidate-card]') ?? []);
+    const controls = playStackMemberExit(cards, candidateMotions(cards.length));
+    if (!controls) {
+      setCardsMounted(false);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(controls.map(control => control.finished)).then(() => {
+      if (!cancelled) setCardsMounted(false);
+    });
+    return () => {
+      cancelled = true;
+      controls.forEach(control => control.stop());
+      clearStackMemberMotion(cards);
+    };
+  }, [cardsMounted, expanded]);
+  useStackBordersFadeIn(stackRef, expanded);
 
   return (
     <div
@@ -1432,11 +1560,12 @@ function MediaCandidateBatch({
         <span
           key={entry.candidate.candidate_id}
           aria-hidden="true"
+          data-stack-border
           className="pointer-events-none absolute inset-0 rounded-lg border border-border"
           style={{ transform: `translate(${10 + index * 6}px, ${5 + index * 4}px) rotate(${index + 1}deg)` }}
         />
       ))}
-      {expanded && entries.length > 1 && others.map((entry, index) => (
+      {cardsMounted && entries.length > 1 && others.map((entry, index) => (
         <MediaCandidateCard
           key={entry.candidate.candidate_id}
           node={node}
@@ -3839,6 +3968,55 @@ function EmptyMediaSurface({
   );
 }
 
+/** 节点上的图换版本（生成完成、重新生成、撤销）时旧图留在底下，新图解码完成后在上面淡入，
+ *  淡入播完再卸掉旧图，全程不露出画布。已在缓存里的图（平移回视口、撤销回旧版）直接显示，不播。
+ *  旧图改按 cover 铺满：新版本比例不同时节点尺寸与淡入同帧变化，contain 会在两侧露出透明边。 */
+function CanvasCrossfadeImage({ src, alt, fitClassName, className, onReady }: {
+  src: string;
+  alt: string;
+  fitClassName: string;
+  className?: string;
+  onReady?: () => void;
+}) {
+  const [layers, setLayers] = useState<readonly string[]>([src]);
+  const [readySrc, setReadySrc] = useState<string | null>(null);
+  if (layers[layers.length - 1] !== src) setLayers([...layers.filter(layer => layer !== src), src]);
+  const settled = readySrc === src && layers.length > 1;
+  useEffect(() => {
+    if (!settled) return;
+    const timer = window.setTimeout(
+      () => setLayers(current => current[current.length - 1] === src ? [src] : current),
+      MOTION_DURATION.base * 1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [settled, src]);
+  return (
+    <div data-canvas-media className={cn('relative size-full', className)}>
+      {layers.map(layer => {
+        const top = layer === src;
+        return (
+          <RevealImage
+            key={layer}
+            src={layer}
+            alt={top ? alt : ''}
+            aria-hidden={top ? undefined : true}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className={cn(
+              'media-checker block size-full select-none',
+              // 新图在文档流里且排在后面，叠在绝对定位的旧图上面。
+              top ? cn('relative', fitClassName) : 'absolute inset-0 object-cover',
+              className,
+            )}
+            onReady={top ? () => { setReadySrc(layer); onReady?.(); } : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function MediaPreview({
   kind,
   src,
@@ -3846,6 +4024,7 @@ function MediaPreview({
   fit = 'contain',
   freeResize = false,
   compact = false,
+  onReady,
 }: {
   kind: 'image' | 'video' | 'audio';
   src: string;
@@ -3853,6 +4032,8 @@ function MediaPreview({
   fit?: 'contain' | 'cover';
   freeResize?: boolean;
   compact?: boolean;
+  /** 图片：这一版解码完成、已盖住旧版时回调。 */
+  onReady?: () => void;
 }) {
   const { mediaRef, resolvedSrc } = useLazyMedia(src);
   const videoElement = useRef<HTMLVideoElement | null>(null);
@@ -3911,18 +4092,12 @@ function MediaPreview({
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, []);
   if (kind === 'image') return (
-    <img
+    <CanvasCrossfadeImage
       src={src}
       alt={title}
-      data-canvas-media
-      loading="lazy"
-      decoding="async"
-      draggable={false}
-      className={cn(
-        'media-checker block size-full select-none',
-        freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
-        compact && 'max-h-48 rounded-md',
-      )}
+      fitClassName={freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain'}
+      className={compact ? 'max-h-48 rounded-md' : undefined}
+      onReady={onReady}
     />
   );
   if (kind === 'video') {

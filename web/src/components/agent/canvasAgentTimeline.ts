@@ -1,5 +1,12 @@
 import type { CanvasAgentMessage } from '@/schema/canvas';
 
+/** 刚发出、服务端还没收下的那条用户消息的 id 前缀：先在对话里显示成「发送中」，收下后换成服务端的那条，失败就撤掉。 */
+export const OUTGOING_MESSAGE_PREFIX = 'outgoing:';
+
+export function isOutgoingMessage(message: Pick<CanvasAgentMessage, 'message_id'>): boolean {
+  return message.message_id.startsWith(OUTGOING_MESSAGE_PREFIX);
+}
+
 /** 对话时间线：已结束的一轮里，中间过程（工具步骤、过程中的说明）收成一组，最终回复、报错与提示照常显示。 */
 export type CanvasAgentTimelineBlock =
   | { kind: 'message'; message: CanvasAgentMessage }

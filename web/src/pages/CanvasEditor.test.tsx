@@ -1006,8 +1006,10 @@ it('does not force a minimum preview height or overlay metadata on a short popul
   fireEvent.click(await screen.findByRole('button', { name: 'flow-node-strip' }));
   const image = await screen.findByRole('img', { name: '说明文字' });
   expect(image).toHaveClass('object-contain', 'block');
-  expect(image.parentElement).toHaveClass('h-full', 'min-h-0');
-  expect(image.parentElement).not.toHaveClass('min-h-44');
+  // 图片外面包一层换版本交叉淡化的叠层容器，再往外才是节点内容区。
+  const surface = image.parentElement?.parentElement;
+  expect(surface).toHaveClass('h-full', 'min-h-0');
+  expect(surface).not.toHaveClass('min-h-44');
   expect(within(image.closest('article')!).queryByText(/1361 × 55/)).not.toBeInTheDocument();
 });
 

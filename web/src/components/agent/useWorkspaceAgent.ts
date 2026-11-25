@@ -18,9 +18,11 @@ import {
   updateCanvasAgentSession,
   updateCanvasAgentSettings,
 } from '@/api/canvas';
+import { OUTGOING_MESSAGE_PREFIX } from './canvasAgentTimeline';
 import { DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import type {
+  CanvasAgentMessage,
   CanvasAgentChatModelList,
   CanvasAgentGenerationModel,
   CanvasAgentSession,
@@ -69,6 +71,45 @@ function rememberedCreation(): RememberedCreation {
   } catch { return {}; }
 }
 
+interface OutgoingMessage {
+  id: string;
+  text: string;
+  title: string | null;
+  /** 创作台按幂等标识认领；画布没有，按会话版本号认领（版本变了就是服务端已经收下）。 */
+  clientId: string | null;
+  sessionId: string | null;
+  revision: number | null;
+}
+
+/** 正在跑 / 刚跑完的工具：运行中显示「读取画布…」，下一段文字到达时原位换成「已读取画布」，不被清掉。 */
+export interface AgentToolStatus {
+  name: string;
+  running: boolean;
+}
+
+/** 把发送中的消息并进会话：服务端还没收下时补一条用户消息（创作台另补一轮），收下后原样返回。 */
+function withOutgoing<T extends CanvasAgentSession | StudioAgentSession>(session: T | null, outgoing: OutgoingMessage | null): T | null {
+  if (!session || !outgoing || outgoing.sessionId !== session.session_id) return session;
+  const message: CanvasAgentMessage = {
+    role: 'user', title: outgoing.title, text: outgoing.text, reasoning_summary: null, references: [],
+    turn_id: null, message_id: outgoing.id,
+    sequence: (session.messages.at(-1)?.sequence ?? 0) + 1, created_at: new Date().toISOString(),
+  };
+  if ('turns' in session) {
+    if (session.turns.some(turn => turn.client_message_id === outgoing.clientId)) return session;
+    return {
+      ...session,
+      turns: [...session.turns, {
+        turn_id: outgoing.id, client_message_id: outgoing.clientId ?? outgoing.id, status: 'running',
+        attachment_ids: [], asset_ids: [], steps: [],
+      }],
+      messages: [...session.messages, { ...message, turn_id: outgoing.id }],
+    };
+  }
+  if (session.revision !== outgoing.revision) return session;
+  return { ...session, messages: [...session.messages, message] };
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -89,17 +130,22 @@ function carriedSettings(session: CanvasAgentSession | StudioAgentSession): Canv
 export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false, loadControls = open, sharedEvents = false) {
   const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
   const [selecting, setSelecting] = useState(false);
-  const [restoring, setRestoring] = useState(() => projectId === null && !home && Boolean(readStudioView().activeSessionId));
+  // 「加载中」与「为空」是两个状态：打开面板时先读上次停留的会话，读完之前不显示空对话。
+  const [restoring, setRestoring] = useState(() => projectId === null
+    ? !home && Boolean(readStudioView().activeSessionId)
+    : open);
   const [session, setSession] = useState<CanvasAgentSession | StudioAgentSession | null>(null);
+  const [outgoing, setOutgoing] = useState<OutgoingMessage | null>(null);
   const [streaming, setStreaming] = useState('');
-  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [tool, setTool] = useState<AgentToolStatus | null>(null);
   const [models, setModels] = useState<CanvasAgentChatModelList | null>(null);
   const [generationModels, setGenerationModels] = useState<CanvasAgentGenerationModel[] | null>(null);
   const [skills, setSkills] = useState<CanvasAgentSkill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [usage, setUsage] = useState<CanvasAgentSessionUsage | null>(null);
-  const [plan, setPlan] = useState<CanvasAgentPlan | null>(null);
+  // 用量与待办按会话记：切会话时旧会话的内容留着显示，不会把旧会话的数挂到新会话上。
+  const [usage, setUsage] = useState<{ sessionId: string; value: CanvasAgentSessionUsage } | null>(null);
+  const [plan, setPlan] = useState<{ sessionId: string; value: CanvasAgentPlan | null } | null>(null);
   const [confirmAbove, setConfirmAbove] = useState<number | null>(null);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
@@ -125,7 +171,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   // 待办只用于显示：读不到不报错，保持上一次的。
   const loadPlan = useCallback((sessionId: string) => {
     getCanvasAgentPlan(projectId, sessionId).then(
-      loaded => { if (sessionIdRef.current === sessionId) setPlan(loaded); },
+      loaded => { if (sessionIdRef.current === sessionId) setPlan({ sessionId, value: loaded }); },
       () => undefined,
     );
   }, [projectId]);
@@ -134,22 +180,21 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     const loaded = await getCanvasAgentSession(projectId, sessionId);
     if (sessionIdRef.current !== sessionId) return;  // 期间切到了别的会话
     acceptSession(loaded);
-    if (loaded.status !== 'running') { setStreaming(''); setActiveTool(null); }
+    if (loaded.status !== 'running') { setStreaming(''); setTool(null); }
     // 用量只用于显示：读不到不报错，下次会话刷新再读。
     getCanvasAgentSessionUsage(projectId, sessionId).then(
-      loadedUsage => { if (sessionIdRef.current === sessionId) setUsage(loadedUsage); },
+      loadedUsage => { if (sessionIdRef.current === sessionId) setUsage({ sessionId, value: loadedUsage }); },
       () => undefined,
     );
     loadPlan(sessionId);
   }, [acceptSession, loadPlan, projectId]);
 
+  // 切会话不先清空：旧会话留在原处（面板降透明度），新会话读到后整体替换。
   const selectSession = useCallback(async (sessionId: string) => {
     setError(null);
     setStreaming('');
-    setUsage(null);
-    setPlan(null);
+    setTool(null);
     sessionIdRef.current = sessionId;
-    setSession(null);
     setSelecting(true);
     if (projectId === null) updateStudioView({ activeSessionId: sessionId });
     else writeStorage(sessionStorageKey(projectId), sessionId);
@@ -174,12 +219,15 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         if (projectId === null && (home || last === null)) return;
         const target = list.find(item => item.session_id === last) ?? list[0];
         if (target) await selectSession(target.session_id);
-        else if (projectId === null) {
-          updateStudioView({ activeSessionId: null });
+        else {
+          if (projectId === null) updateStudioView({ activeSessionId: null });
           setRestoring(false);
         }
       } catch (loadError) {
-        if (!cancelled) setError(messageOf(loadError));
+        if (!cancelled) {
+          setError(messageOf(loadError));
+          setRestoring(false);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -218,8 +266,11 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       }
       if (projectId === null && ['delta', 'tool'].includes(event.kind ?? '') &&
           (!session || !('turns' in session) || session.status !== 'running' || event.turn_id !== session.turns.at(-1)?.turn_id)) return;
-      if (event.kind === 'delta' && event.text) { setStreaming(current => current + event.text); setActiveTool(null); }
-      if (event.kind === 'tool' && event.text) setActiveTool(event.text);
+      if (event.kind === 'delta' && event.text) {
+        setStreaming(current => current + event.text);
+        setTool(current => current?.running ? { ...current, running: false } : current);
+      }
+      if (event.kind === 'tool' && event.text) setTool({ name: event.text, running: true });
       if (event.kind === 'plan') loadPlan(event.session_id);
       if (event.kind === 'step' && event.step) {
         const step = event.step;
@@ -296,7 +347,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     setUsage(null);
     setPlan(null);
     setStreaming('');
-    setActiveTool(null);
+    setTool(null);
     setError(null);
   }, [projectId, session]);
 
@@ -323,8 +374,29 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     });
   }, [acceptSession, projectId, run, session]);
 
-  const send = useCallback((text: string, nodeIds: string[], skill: string | null) => run(async () => {
+  /** 发送时先把消息显示成「发送中」，服务端确认后换成正式的那条；失败撤掉，由调用方把文字填回输入框。 */
+  const sendOptimistic = useCallback(<T,>(
+    text: string,
+    title: string | null,
+    clientId: string | null,
+    action: (claim: (target: CanvasAgentSession | StudioAgentSession) => void) => Promise<T>,
+  ) => {
+    const id = OUTGOING_MESSAGE_PREFIX + (clientId ?? crypto.randomUUID());
+    setOutgoing({ id, text, title, clientId, sessionId: session?.session_id ?? null, revision: session?.revision ?? null });
+    const claim = (target: CanvasAgentSession | StudioAgentSession) => setOutgoing(current => current?.id === id
+      ? { ...current, sessionId: target.session_id, revision: target.revision } : current);
+    return run(async () => {
+      try {
+        return await action(claim);
+      } finally {
+        setOutgoing(current => current?.id === id ? null : current);
+      }
+    });
+  }, [run, session]);
+
+  const send = useCallback((text: string, nodeIds: string[], skill: string | null) => sendOptimistic(text, skill, null, async claim => {
     const target = session ?? await createSession();
+    claim(target);
     setStreaming('');
     if (projectId === null) throw new Error('需要画布项目');
     const updated = await sendCanvasAgentMessage(projectId, target.session_id, {
@@ -333,12 +405,15 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     acceptSession(updated);
     void refreshList().catch(() => undefined);
     return updated;
-  }), [acceptSession, createSession, projectId, refreshList, run, session]);
+  }), [acceptSession, createSession, projectId, refreshList, sendOptimistic, session]);
 
-  const waitingForSession = restoring || (projectId === null && sessionIdRef.current !== null && !session);
-  const sendStudio = (text: string, files: File[], assets: string[], skill: string | null, clientId: string) => run(async () => {
-    if (waitingForSession) throw new Error('请先载入对话或选择新对话');
+  // 切会话期间显示的还是旧会话：这时发出去会发进旧会话，等新会话读到再发。
+  const waitingForSession = restoring || selecting || (projectId === null && sessionIdRef.current !== null && !session);
+  const sendStudio = (text: string, files: File[], assets: string[], skill: string | null, clientId: string) => waitingForSession
+    ? run(() => Promise.reject(new Error('请先载入对话或选择新对话')))
+    : sendOptimistic(text, skill, clientId, async claim => {
     const target = session ?? await createSession();
+    claim(target);
     const attachmentIds = await Promise.all(files.map(async file =>
       (await uploadStudioAgentAttachment(target.session_id, file)).attachment_id));
     setStreaming('');
@@ -398,10 +473,19 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const clearError = useCallback(() => setError(null), []);
 
+  const displayedSession = withOutgoing(session, outgoing);
   return {
-    sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending: pending || selecting,
-    usage, confirmAbove, plan,
-    selectedSessionId: sessionIdRef.current ?? (restoring ? readStudioView().activeSessionId : null),
+    sessions, session: displayedSession, draft, streaming, tool, models, generationModels, skills, error, pending: pending || selecting,
+    usage: usage && usage.sessionId === session?.session_id ? usage.value : null,
+    plan: plan && plan.sessionId === session?.session_id ? plan.value : null,
+    confirmAbove,
+    /** 正在读会话（打开面板时恢复上次的、或切到另一个会话）：期间显示的仍是旧内容，不是空对话。 */
+    loading: restoring || selecting,
+    /** 发送中、服务端还没收下的消息（还没有会话时，面板直接显示它）。 */
+    outgoing: outgoing && (!session || outgoing.sessionId !== session.session_id) ? outgoing : null,
+    // 切会话期间旧会话还在显示，创作台按它过滤记录，等新会话读到再一起换。
+    selectedSessionId: (selecting ? session?.session_id : null) ?? sessionIdRef.current
+      ?? (projectId === null && restoring ? readStudioView().activeSessionId : null),
     onAgentEvent, onReconnect, createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
