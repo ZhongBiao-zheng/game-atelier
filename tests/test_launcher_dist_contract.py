@@ -24,7 +24,8 @@ def test_one_click_launchers_only_consume_committed_dist():
         assert "pnpm build" not in launcher
         assert "pnpm install" not in launcher
         assert "web/dist/index.html" in launcher or "web\\dist\\index.html" in launcher
-        assert "一键修复" in launcher
+        # Mac/Linux 启动器缺 web/dist 时直接调起修复脚本；Windows 仍提示双击一键修复。
+        assert "一键修复" in launcher or ("repair-update.sh" in launcher and "--repair-only" in launcher)
 
 
 def test_one_click_launchers_delegate_runtime_to_bootstrap():
