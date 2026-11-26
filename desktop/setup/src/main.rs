@@ -1,8 +1,9 @@
-//! Atelier's Windows installer and uninstaller (docs/contracts/desktop-shell.md「Windows 安装程序」).
+//! Cobrush's Windows installer and uninstaller (docs/contracts/desktop-shell.md「Windows 安装程序」).
 //!
 //! One exe, two roles, chosen by the manifest appended to it (`payload.rs`):
-//! - install (`Atelier-<version>-windows-x64-setup.exe`): window, or `--silent [--dir <path>]
-//!   [--no-desktop-shortcut]`;
+//! - install (`<product>-<version>-windows-x64-setup.exe`): window, or `--silent [--dir <path>]
+//!   [--no-desktop-shortcut]`. An install under an earlier product name is taken over
+//!   (`takeover.rs`);
 //! - uninstall (`<install dir>\uninstall.exe`): window, or `--silent`. It first copies itself to
 //!   %TEMP% and runs from there (`--relocated <dir>`), so it can remove its own folder.
 //!
@@ -15,6 +16,8 @@ mod install;
 mod payload;
 #[cfg(windows)]
 mod system;
+#[cfg(windows)]
+mod takeover;
 #[cfg(windows)]
 mod ui;
 
@@ -34,7 +37,7 @@ mod windows_main {
     use crate::{
         install::{self, Plan},
         payload::{Payload, Role, SETUP_ONLY},
-        system, ui,
+        system, takeover, ui,
     };
     use std::{os::windows::process::CommandExt, path::PathBuf, process::Command};
 
@@ -77,7 +80,7 @@ mod windows_main {
             Err(e) => {
                 install::log(&format!("payload: {e}"));
                 if !args.silent {
-                    system::alert("Atelier", &e);
+                    system::alert("Cobrush", &e);
                 }
                 return 1;
             }
@@ -105,20 +108,31 @@ mod windows_main {
         let product = payload.manifest.product.clone();
         let main = payload.manifest.main.clone();
         let existing = install::existing(&product, &main);
+        let app_files: Vec<String> = payload.app_files().map(|f| f.path.clone()).collect();
+        let earlier = takeover::find(&product, &main, &app_files);
         let dir = args
             .dir
             .clone()
             .or_else(|| existing.as_ref().map(|e| e.dir.clone()))
+            .or_else(|| {
+                earlier
+                    .as_ref()
+                    .map(|e| takeover::target_dir(&e.dir, &e.product, &product))
+            })
             .unwrap_or_else(|| install::default_dir(&product));
+        let existing_version = existing
+            .and_then(|e| e.version)
+            .or_else(|| earlier.as_ref().and_then(|e| e.version.clone()));
         if args.silent {
-            if install::app_running(&dir) && !install::quit_app(&dir, &main) {
-                install::log("the app is still running");
-                return 3;
-            }
             let plan = Plan {
                 dir,
                 desktop_shortcut: !args.no_desktop_shortcut,
+                earlier,
             };
+            if install::plan_running(&plan) && !install::quit_plan(&plan, &main) {
+                install::log("the app is still running");
+                return 3;
+            }
             let result = install::install(&payload, &plan, &mut |_| {});
             return report_exit(&product, true, result);
         }
@@ -127,7 +141,8 @@ mod windows_main {
         }
         let code = ui::run(ui::Context {
             dir,
-            existing_version: existing.and_then(|e| e.version),
+            existing_version,
+            earlier,
             preview: args.preview,
             auto: args.auto,
             payload,
@@ -191,6 +206,7 @@ mod windows_main {
             ui::run(ui::Context {
                 dir: dir.clone(),
                 existing_version: None,
+                earlier: None,
                 preview: None,
                 auto: args.auto,
                 payload,

@@ -4,14 +4,14 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { allowedNavigation, externalAllowed, isServerUrl, trustedSender } from '../src/security.mjs';
 
-const LOCAL = path.resolve('/Applications/Atelier.app/Contents/Resources/app.asar/ui/index.html');
+const LOCAL = path.resolve('/Applications/Cobrush.app/Contents/Resources/app.asar/ui/index.html');
 const localUrl = (query = '') => `${pathToFileURL(LOCAL)}${query}`;
 const SERVER = 'http://127.0.0.1:5174';
 
-test('only the loopback Atelier page and the bundled page are navigable', () => {
+test('only the loopback Cobrush page and the bundled page are navigable', () => {
   assert.ok(isServerUrl(`${SERVER}/canvas`));
   assert.ok(allowedNavigation(`${SERVER}/`, LOCAL));
-  assert.ok(allowedNavigation(localUrl('?error=start&name=Atelier'), LOCAL));
+  assert.ok(allowedNavigation(localUrl('?error=start&name=Cobrush'), LOCAL));
   for (const url of [
     'http://localhost:5174/', 'https://127.0.0.1:5174/', 'http://127.0.0.1/', 'http://127.0.0.2:5174/',
     'https://example.com/', `${pathToFileURL('/etc/passwd')}`, 'data:text/html,x', 'javascript:alert(1)', 'about:blank',

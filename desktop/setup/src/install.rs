@@ -9,6 +9,7 @@
 use crate::{
     payload::{self, Manifest, Payload},
     system,
+    takeover::{self, Earlier},
 };
 use std::{
     fs,
@@ -20,9 +21,9 @@ use std::{
 };
 use winreg::{enums::*, RegKey};
 
-const UNINSTALL_ROOT: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+pub const UNINSTALL_ROOT: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
 /// Written by the earlier NSIS installer (`Software\<publisher>\<product>`); removed on takeover.
-const NSIS_PUBLISHER_KEY: &str = r"Software\atelier";
+pub const NSIS_PUBLISHER_KEY: &str = r"Software\atelier";
 /// Shared with the shell and the Python side, independent of the product name.
 const RUNTIME_PARENT: &str = r"game-atelier\runtime";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -32,7 +33,7 @@ const QUIT_WAIT: Duration = Duration::from_secs(90);
 const RELEASE_WAIT: Duration = Duration::from_secs(30);
 /// Windows error 145: the folder is not empty (the user put something there).
 const ERROR_DIR_NOT_EMPTY: i32 = 145;
-const UNINSTALLER: &str = "uninstall.exe";
+pub const UNINSTALLER: &str = "uninstall.exe";
 
 pub fn log(line: &str) {
     use std::io::Write;
@@ -115,7 +116,7 @@ pub fn quit_app(dir: &Path, main: &str) -> bool {
 }
 
 /// Wait until no other process holds any of `files`. Fails, naming the file, after RELEASE_WAIT.
-fn wait_until_released(dir: &Path, files: &[PathBuf]) -> Result<(), String> {
+pub fn wait_until_released(dir: &Path, files: &[PathBuf]) -> Result<(), String> {
     let started = Instant::now();
     let mut delay = Duration::from_millis(100);
     loop {
@@ -164,6 +165,22 @@ fn stop_processes_under(dir: &Path) {
 pub struct Plan {
     pub dir: PathBuf,
     pub desktop_shortcut: bool,
+    /// An install under an earlier product name, taken over by this one (`takeover.rs`).
+    pub earlier: Option<Earlier>,
+}
+
+/// Whether the app runs from the folder being installed into, or from the install taken over.
+pub fn plan_running(plan: &Plan) -> bool {
+    app_running(&plan.dir) || plan.earlier.as_ref().is_some_and(|e| app_running(&e.dir))
+}
+
+/// Quit the app wherever the plan finds it running; false when one of them is still running.
+pub fn quit_plan(plan: &Plan, main: &str) -> bool {
+    let earlier = plan
+        .earlier
+        .as_ref()
+        .is_none_or(|e| !app_running(&e.dir) || quit_app(&e.dir, &e.main));
+    earlier && (!app_running(&plan.dir) || quit_app(&plan.dir, main))
 }
 
 pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> Result<(), String> {
@@ -181,6 +198,17 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     // with nothing running, `--quit` just exits.
     if app_exe(dir, &manifest.main).is_file() && !quit_app(dir, &manifest.main) {
         return Err(format!("{product} 没有退出，请从任务栏通知区域退出后重试"));
+    }
+    // The install taken over may still be running under its own name.
+    if let Some(earlier) = &plan.earlier {
+        if app_exe(&earlier.dir, &earlier.main).is_file() && !quit_app(&earlier.dir, &earlier.main)
+        {
+            return Err(format!(
+                "{} 没有退出，请从任务栏通知区域退出后重试",
+                earlier.product
+            ));
+        }
+        stop_processes_under(&earlier.dir);
     }
 
     if !payload.app_files().any(|f| f.path == manifest.main) {
@@ -203,23 +231,30 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     }
     let mut installed: Vec<String> = payload.app_files().map(|f| f.path.clone()).collect();
     installed.push(UNINSTALLER.to_string());
-    payload.write_uninstaller(&dir.join(UNINSTALLER), installed)?;
+    payload.write_uninstaller(&dir.join(UNINSTALLER), installed.clone())?;
 
-    // 2. Shortcuts and the Settings > Apps entry.
+    // 2. Shortcuts and the Settings > Apps entry. Taking over, the desktop shortcut follows
+    // whether the earlier install had one.
     let exe = app_exe(dir, &manifest.main);
     let link = format!("{product}.lnk");
     if let Some(programs) = system::programs_dir() {
         system::create_shortcut(&programs.join(&link), &exe, &manifest.app_id)?;
     }
+    let desktop_shortcut =
+        plan.desktop_shortcut && plan.earlier.as_ref().is_none_or(|e| e.desktop_shortcut);
     if let Some(desktop) = system::desktop_dir() {
         let shortcut = desktop.join(&link);
-        if plan.desktop_shortcut {
+        if desktop_shortcut {
             system::create_shortcut(&shortcut, &exe, &manifest.app_id)?;
         } else {
             let _ = fs::remove_file(shortcut);
         }
     }
     register(payload, dir)?;
+    // 3. Only now, with the new install complete, the one it takes over goes.
+    if let Some(earlier) = &plan.earlier {
+        takeover::retire(earlier, dir, &installed, &exe, &manifest.app_id);
+    }
     report(1.0);
     log("install finished");
     Ok(())
@@ -343,7 +378,7 @@ pub fn uninstall(
     Ok(())
 }
 
-fn remove_installed(dir: &Path, installed: &[String]) {
+pub fn remove_installed(dir: &Path, installed: &[String]) {
     let mut parents = Vec::new();
     for path in installed {
         let file = dir.join(path);
@@ -365,7 +400,7 @@ fn remove_installed(dir: &Path, installed: &[String]) {
 /// The install folder itself, once empty. Another process's handle on it (a scanner, a process
 /// started from it) can hold it for a moment; what still holds it is removed when this process
 /// exits (`cleanup` in main.rs). A folder with the user's own files in it stays.
-fn remove_install_folder(dir: &Path) {
+pub fn remove_install_folder(dir: &Path) {
     for _ in 0..10 {
         match fs::remove_dir(dir) {
             Ok(()) => return,

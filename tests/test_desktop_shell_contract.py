@@ -396,13 +396,13 @@ def test_installer_and_build_script_share_the_payload_format(tmp_path):
     spec.loader.exec_module(module)
     app = tmp_path / "win-unpacked"
     (app / "resources").mkdir(parents=True)
-    (app / "Atelier.exe").write_bytes(b"MZ-app")
+    (app / "Cobrush.exe").write_bytes(b"MZ-app")
     (app / "resources/app.asar").write_bytes(b"asar")
     setup, extra = tmp_path / "setup.exe", tmp_path / "boot.exe"
     setup.write_bytes(b"MZ-setup")
     extra.write_bytes(b"MZ-boot")
     target = tmp_path / "out.exe"
-    module.write_payload(setup, target, product="Atelier", version="1.2.3", main="Atelier.exe",
+    module.write_payload(setup, target, product="Cobrush", version="1.2.3", main="Cobrush.exe",
                          app_id="app.atelier.desktop", app=app, setup_files=[extra])
     data = target.read_bytes()
     source = (REPO_ROOT / "desktop/setup/src/payload.rs").read_text(encoding="utf-8")
@@ -413,16 +413,57 @@ def test_installer_and_build_script_share_the_payload_format(tmp_path):
     assert data.endswith(module.PAYLOAD_MAGIC) and data.startswith(b"MZ-setup")
     (length,) = struct.unpack("<Q", data[-16:-8])
     manifest = json.loads(data[-16 - length:-16])
-    assert manifest["role"] == "install" and manifest["main"] == "Atelier.exe"
+    assert manifest["role"] == "install" and manifest["main"] == "Cobrush.exe"
     assert manifest["app_id"] == "app.atelier.desktop" and manifest["exe_len"] == len(b"MZ-setup")
     import zlib
     contents = {}
     for e in manifest["files"]:
         stored = data[e["offset"]:e["offset"] + e["size"]]
         contents[e["path"]] = zlib.decompress(stored, -15) if e["codec"] == "deflate" else stored
-    assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar", "setup/boot.exe": b"MZ-boot"}
+    assert contents == {"Cobrush.exe": b"MZ-app", "resources/app.asar": b"asar", "setup/boot.exe": b"MZ-boot"}
     codecs = {e["path"]: e["codec"] for e in manifest["files"]}
-    assert codecs["Atelier.exe"] == "deflate" and codecs["setup/boot.exe"] == "store"
+    assert codecs["Cobrush.exe"] == "deflate" and codecs["setup/boot.exe"] == "store"
     # The installer carries no runtime: the app downloads it on first start.
     assert not any(e["path"].startswith("seed/") for e in manifest["files"])
     assert 'Deflate,' in source and "flate2::read::DeflateDecoder" in source
+
+
+def _product_name() -> str:
+    import json
+    return json.loads((REPO_ROOT / "desktop/package.json").read_text(encoding="utf-8"))["productName"]
+
+
+def _earlier_names() -> tuple[list[str], list[str]]:
+    """The earlier product names the Windows installer and the macOS shell each take over."""
+    import re
+    takeover = (REPO_ROOT / "desktop/setup/src/takeover.rs").read_text(encoding="utf-8")
+    shell = (REPO_ROOT / "desktop/src/earlier-app.mjs").read_text(encoding="utf-8")
+    rust = re.search(r"pub const EARLIER_PRODUCTS: &\[&str\] = &\[(.*?)\];", takeover, re.S)[1]
+    js = re.search(r"export const EARLIER_NAMES = \[(.*?)\];", shell, re.S)[1]
+    return re.findall(r'"([^"]+)"', rust), re.findall(r"'([^']+)'", js)
+
+
+def test_an_install_under_the_earlier_name_is_taken_over():
+    # docs/contracts/desktop-shell.md「Windows 安装程序」: the app was installed as Atelier before;
+    # an install of the renamed app retires that one instead of sitting next to it.
+    rust, js = _earlier_names()
+    assert rust == js == ["Atelier"]
+    assert _product_name() not in rust
+    main = (REPO_ROOT / "desktop/setup/src/main.rs").read_text(encoding="utf-8")
+    assert "takeover::find(&product, &main, &app_files)" in main
+    assert "takeover::target_dir(" in main
+    install = (REPO_ROOT / "desktop/setup/src/install.rs").read_text(encoding="utf-8")
+    assert "takeover::retire(earlier, dir, &installed, &exe, &manifest.app_id)" in install
+    # Retired only after the new install is registered: a failed install leaves the old one as is.
+    assert install.index("register(payload, dir)?;") < install.index("takeover::retire(")
+
+
+def test_the_takeover_never_runs_the_earlier_uninstaller_or_touches_the_runtime():
+    # The earlier uninstaller removes the runtime both installs share (%LOCALAPPDATA%\game-atelier\runtime).
+    takeover = (REPO_ROOT / "desktop/setup/src/takeover.rs").read_text(encoding="utf-8")
+    code = takeover.split("#[cfg(test)]", 1)[0]
+    for forbidden in ("Command", "uninstall(", "remove_dir_all", "remove_dir_with_retry"):
+        assert forbidden not in code, forbidden
+    # Its uninstaller is only read, for the list of files its installer recorded.
+    assert "payload::read_manifest(&dir.join(install::UNINSTALLER))" in code
+    assert "&install::runtime_parent()" in code

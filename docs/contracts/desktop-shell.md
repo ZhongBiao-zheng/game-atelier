@@ -8,14 +8,14 @@
 
 | 位置 | 内容 | 谁写 |
 | --- | --- | --- |
-| 安装位置（macOS `/Applications/Atelier.app`；Windows 默认 `%LOCALAPPDATA%\Atelier\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳（macOS 应用包；Windows 应用目录与 `uninstall.exe`）。不带运行包，只带 `stage/runtime.json`：配套运行包的版本、文件名、整个压缩包的 sha256、版本目录的 `BUILD_ID` 与契约级别（`scripts/build_desktop.py` 从压缩包本身算出） | 安装器，只读 |
+| 安装位置（macOS `/Applications/Cobrush.app`；Windows 默认 `%LOCALAPPDATA%\Cobrush\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳（macOS 应用包；Windows 应用目录与 `uninstall.exe`）。不带运行包，只带 `stage/runtime.json`：配套运行包的版本、文件名、整个压缩包的 sha256、版本目录的 `BUILD_ID` 与契约级别（`scripts/build_desktop.py` 从压缩包本身算出） | 安装器，只读 |
 | `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时下载并解压（见「运行包下载」），何时替换见「运行包替换」；之后只由应用内更新修改 |
 | `<运行包根>/versions/<版本>/DESKTOP_CONTRACT` | 一行整数：该版本提供的外壳契约级别（见「契约级别」） | `scripts/build_release.py` |
 | `<本地应用数据>/game-atelier/runtime/download/` | 下载中的运行包：`<文件>.part` 与记录版本、sha256 的 `.part.json`；解压后删除 | 外壳 |
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志（含每个来源的下载结果、用时与速度） | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
-本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包父目录（下载残留一并删除），数据目录不动；卸载程序从 `%TEMP%` 运行且工作目录也设在 `%TEMP%`，安装目录在空了之后删除（暂时被占用时在卸载程序退出后再删一次，里面有用户自己的文件则保留）。
+本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。产品名只决定安装位置、主程序名、快捷方式与「设置 → 应用」条目；运行包父目录与 Chromium 配置（`<本地应用数据>/game-atelier/desktop`，含单实例锁）与产品名无关，改名前后的外壳共用。Windows 卸载时删除运行包父目录（下载残留一并删除），数据目录不动；卸载程序从 `%TEMP%` 运行且工作目录也设在 `%TEMP%`，安装目录在空了之后删除（暂时被占用时在卸载程序退出后再删一次，里面有用户自己的文件则保留）。
 
 ## 运行包替换
 
@@ -26,7 +26,7 @@
 | `missing` | 没有可用的运行包（首次启动、上次解压中断） | 下载并解压 |
 | `contract` | 运行包没有声明外壳要求的契约级别，且不比外壳新 | 下载并替换 |
 | `build` | 运行包版本与外壳相同，但该版本目录的 `BUILD_ID` 不是本次构建记下的（或没有）。日常提交不改版本号，未发版构建与已发布版本同号，外壳绝不在用户不知情时沿用不配套的同版本运行包 | 下载并替换 |
-| `too-old` | 运行包没有声明契约级别，且比外壳新 | 报错（请安装新版 Atelier），不动运行包 |
+| `too-old` | 运行包没有声明契约级别，且比外壳新 | 报错（请安装新版 Cobrush），不动运行包 |
 | 无 | 其他：版本不同且满足契约级别（更旧的由应用内更新升级，更新的绝不降级），或同版本且 `BUILD_ID` 相同（含经应用内更新升到同版本的情况，压缩包里本就带 `BUILD_ID`） | 保留 |
 
 替换时先把压缩包解到临时目录并校验，再整体换入，失败时旧运行包原样保留；下载失败时不回落到旧运行包（`contract` 下它不满足契约，`build` 下它不配套），显示失败页。旧运行包的服务由外壳启动且有进行中的工作时先确认；用户取消则本次沿用旧运行包（明示的选择）。解压或下载途中退出：先中止再退出，下次启动清掉临时目录，未解压的完整压缩包校验通过即直接使用。
@@ -90,16 +90,31 @@ Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入�
 
 ## Windows 安装程序（`desktop/setup`）
 
-`Atelier-<版本>-windows-x64-setup.exe` 是 Atelier 自己的安装程序（Rust + WebView2 界面，不用 NSIS），不认外壳用什么构建：它只接收「应用目录 + 主程序相对路径 + `appId`」，不带运行包。这些附在安装程序本体后面（格式见 `desktop/setup/src/payload.rs`，`setup/` 下的条目只给安装程序自己用，即 WebView2 引导程序），由 `scripts/build_desktop.py` 的 `write_payload` 写入，守卫测试比对两边。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载，并记下安装时放进安装目录的每个文件。
+`Cobrush-<版本>-windows-x64-setup.exe` 是 Cobrush 自己的安装程序（Rust + WebView2 界面，不用 NSIS），不认外壳用什么构建：它只接收「应用目录 + 主程序相对路径 + `appId`」，不带运行包。这些附在安装程序本体后面（格式见 `desktop/setup/src/payload.rs`，`setup/` 下的条目只给安装程序自己用，即 WebView2 引导程序），由 `scripts/build_desktop.py` 的 `write_payload` 写入，守卫测试比对两边。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载，并记下安装时放进安装目录的每个文件。
 
 | 用法 | 行为 |
 | --- | --- |
-| 双击 | 窗口：立即安装（「更改」可改位置，选的目录名不是产品名时在其下建 `Atelier\`；可关桌面快捷方式）→ 进度（复制应用目录）→ 开始使用（打开应用，由应用下载运行环境）。已安装时为「立即更新」，沿用原位置 |
+| 双击 | 窗口：立即安装（「更改」可改位置，选的目录名不是产品名时在其下建 `Cobrush\`；可关桌面快捷方式）→ 进度（复制应用目录）→ 开始使用（打开应用，由应用下载运行环境）。已安装时为「立即更新」，沿用原位置 |
 | `--silent [--dir <路径>] [--no-desktop-shortcut]` | 无界面安装；退出码 0 成功、1 失败、3 应用仍在运行 |
 | `uninstall.exe [--silent]` | 先把自己复制到 `%TEMP%` 再运行；停止安装目录与运行包根下的进程，删除快捷方式、「设置 → 应用」条目、运行包父目录（`<本地应用数据>\game-atelier\runtime`），以及安装时记下的文件和因此变空的文件夹。数据目录与 WebView 本地存储不动 |
 | `--preview <界面>`、`--auto` | 只供 CI 截图：渲染某个界面不做任何事；自动点主按钮 |
 
 覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出，再等要替换的文件都不被其他程序占用（最多 30 秒，超时报出被占用的文件，安装目录不变，可直接重试）；新文件先全部写成同目录的 `.partial`，最后逐个替换，替换遇到占用时退避重试约 15 秒；不碰运行包，是否需要另一份运行包由外壳下次启动时决定（见「运行包替换」）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
+
+## 改名接管
+
+产品原名 Atelier（`desktop/setup/src/takeover.rs` 的 `EARLIER_PRODUCTS`、`desktop/src/earlier-app.mjs` 的 `EARLIER_NAMES`，两处必须一致）。`appId` 不变，任务栏分组、Chromium 配置与运行包照旧。
+
+Windows：安装时若「设置 → 应用」里有 `HKCU\…\Uninstall\Atelier`，视为已安装（界面为「立即更新」）：
+
+| 步骤 | 约定 |
+| --- | --- |
+| 安装位置 | 旧目录名是 `Atelier`（默认 `%LOCALAPPDATA%\Atelier`，或用户所选目录下建的 `Atelier\`）时装到同级的 `Cobrush\`，保留用户选的位置；其他目录名（用户自己起的）原地安装。`--dir` 或已有的 Cobrush 安装优先 |
+| 退出旧应用 | 先对旧主程序（旧 `uninstall.exe` 清单里的 `main`，读不到时为 `Atelier.exe`）调用 `--quit`，与覆盖安装相同；旧应用没退出则安装不改动任何文件 |
+| 收尾（新安装写完并登记后） | 删除开始菜单与桌面的 `Atelier.lnk`（桌面快捷方式按旧安装是否有决定新安装是否建）；任务栏固定的 `Atelier.lnk` 改指新主程序；删除 `Uninstall\Atelier` 与 `HKCU\Software\atelier\Atelier`；删除旧安装器记下的文件（旧 `uninstall.exe` 的 `installed`；NSIS 时代没有清单，按本安装包的文件列表加 `Atelier.exe`、`uninstall.exe`）及因此变空的文件夹，原地安装时只删新安装没写的文件 |
+| 不做 | 不运行旧卸载程序（它会删除运行包父目录）；不删运行包父目录、数据目录，清单里指向安装目录之外或运行包内的路径一律跳过 |
+
+macOS：dmg 无法替换另一个名字的应用包，旧 `Atelier.app` 留在原处，与 `Cobrush.app` bundle id 相同，共用单实例锁、Chromium 配置与运行包，两者不会同时运行。外壳以新名字首次启动时，若 `/Applications` 或 `~/Applications` 下有 `Atelier.app`，提示一次（记在 `<userData>/earlier-app-noticed`），可「在访达中显示」，不自动删除。
 
 ## 服务记录（`<数据目录>/.runtime/`）
 

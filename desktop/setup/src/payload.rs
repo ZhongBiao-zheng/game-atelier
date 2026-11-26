@@ -120,29 +120,35 @@ pub fn replace(partial: &Path, dest: &Path) -> Result<(), String> {
     }
 }
 
+/// The manifest appended to a setup or uninstall exe (an earlier install's `uninstall.exe` too).
+pub fn read_manifest(source: &Path) -> Result<Manifest, String> {
+    let mut file = File::open(source).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len < TRAILER {
+        return Err(INCOMPLETE.into());
+    }
+    let mut trailer = [0u8; TRAILER as usize];
+    file.seek(SeekFrom::Start(len - TRAILER))
+        .and_then(|_| file.read_exact(&mut trailer))
+        .map_err(|e| e.to_string())?;
+    if &trailer[8..] != MAGIC {
+        return Err(INCOMPLETE.into());
+    }
+    let manifest_len = u64::from_le_bytes(trailer[..8].try_into().unwrap());
+    let start = len.checked_sub(TRAILER + manifest_len).ok_or(INCOMPLETE)?;
+    let mut json = vec![0u8; manifest_len as usize];
+    file.seek(SeekFrom::Start(start))
+        .and_then(|_| file.read_exact(&mut json))
+        .map_err(|e| e.to_string())?;
+    let manifest: Manifest =
+        serde_json::from_slice(&json).map_err(|e| format!("安装程序清单无效：{e}"))?;
+    Ok(manifest)
+}
+
 impl Payload {
     pub fn read_self() -> Result<Payload, String> {
         let source = std::env::current_exe().map_err(|e| e.to_string())?;
-        let mut file = File::open(&source).map_err(|e| e.to_string())?;
-        let len = file.metadata().map_err(|e| e.to_string())?.len();
-        if len < TRAILER {
-            return Err(INCOMPLETE.into());
-        }
-        let mut trailer = [0u8; TRAILER as usize];
-        file.seek(SeekFrom::Start(len - TRAILER))
-            .and_then(|_| file.read_exact(&mut trailer))
-            .map_err(|e| e.to_string())?;
-        if &trailer[8..] != MAGIC {
-            return Err(INCOMPLETE.into());
-        }
-        let manifest_len = u64::from_le_bytes(trailer[..8].try_into().unwrap());
-        let start = len.checked_sub(TRAILER + manifest_len).ok_or(INCOMPLETE)?;
-        let mut json = vec![0u8; manifest_len as usize];
-        file.seek(SeekFrom::Start(start))
-            .and_then(|_| file.read_exact(&mut json))
-            .map_err(|e| e.to_string())?;
-        let manifest: Manifest =
-            serde_json::from_slice(&json).map_err(|e| format!("安装程序清单无效：{e}"))?;
+        let manifest = read_manifest(&source)?;
         Ok(Payload { manifest, source })
     }
 

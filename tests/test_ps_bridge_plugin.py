@@ -85,7 +85,7 @@ def ps(isolated_data_root, monkeypatch):
     bridge = sys.modules[f"{plugin_server._module_name(PLUGIN_ID)}.bridge"]
     fake = FakePhotoshop(bridge)
     monkeypatch.setattr(bridge, "EXECUTOR", fake)
-    monkeypatch.setattr(bridge, "responsible_app", lambda: "Atelier")
+    monkeypatch.setattr(bridge, "responsible_app", lambda: "Cobrush")
     yield fake
     plugin_server.unload(PLUGIN_ID)
 
@@ -134,7 +134,7 @@ def test_ps_bridge_is_a_host_plugin_that_ships_disabled(isolated_data_root):
 def test_status_without_probe_does_not_talk_to_photoshop(ps):
     project_id = create_canvas_project("PS").project_id
     assert call(project_id, "/status") == {
-        "supported": True, "unsupported_reason": None, "installed": True, "running": True, "responsible_app": "Atelier",
+        "supported": True, "unsupported_reason": None, "installed": True, "running": True, "responsible_app": "Cobrush",
         "version": None, "active_document": None}
     assert ps.calls == []
 
@@ -349,7 +349,7 @@ def test_osascript_errors_become_one_sentence_for_the_user(ps, tmp_path, stderr,
     error = ps.bridge.osascript_error(tmp_path, stderr)
     assert (error.code, error.status) == (code, status)
     if code == "PS_AUTOMATION_DENIED":
-        assert error.message == "需要在「系统设置 → 隐私与安全性 → 自动化」里允许 Atelier 控制 Photoshop"
+        assert error.message == "需要在「系统设置 → 隐私与安全性 → 自动化」里允许 Cobrush 控制 Photoshop"
 
 
 def test_old_request_directories_are_swept(ps):

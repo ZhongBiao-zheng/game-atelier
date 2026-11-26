@@ -5,6 +5,7 @@ use crate::{
     install::{self, Plan},
     payload::{Payload, Role},
     system,
+    takeover::Earlier,
 };
 use serde_json::{json, Value};
 use std::{
@@ -44,6 +45,8 @@ pub struct Context {
     /// folder being removed.
     pub dir: PathBuf,
     pub existing_version: Option<String>,
+    /// Install: an install under an earlier product name this one takes over.
+    pub earlier: Option<Earlier>,
     /// CI screenshots: render one state, act on nothing.
     pub preview: Option<String>,
     /// CI: start right away, as if the main button had been clicked.
@@ -133,7 +136,7 @@ fn plan_dir(command: &Value, fallback: &Path) -> PathBuf {
 
 /// Install or uninstall, after making sure the app is not running from that folder.
 fn start(proxy: &EventLoopProxy<UserEvent>, payload: &Arc<Payload>, step: &str, plan: Plan) {
-    if install::app_running(&plan.dir) {
+    if install::plan_running(&plan) {
         eval(proxy, "show", json!("running"));
         return;
     }
@@ -152,14 +155,16 @@ fn start(proxy: &EventLoopProxy<UserEvent>, payload: &Arc<Payload>, step: &str, 
     }
 }
 
-fn plan_for(command: &Value, step: &str, context_dir: &Path) -> Plan {
+fn plan_for(command: &Value, step: &str, context_dir: &Path, earlier: &Option<Earlier>) -> Plan {
+    let install = step == "install";
     Plan {
-        dir: if step == "install" {
+        dir: if install {
             plan_dir(command, context_dir)
         } else {
             context_dir.to_path_buf()
         },
         desktop_shortcut: command["plan"]["desktop"].as_bool().unwrap_or(true),
+        earlier: if install { earlier.clone() } else { None },
     }
 }
 
@@ -262,6 +267,7 @@ pub fn run(ctx: Context) -> i32 {
     });
 
     let context_dir = ctx.dir;
+    let earlier = ctx.earlier;
     let is_preview = preview.is_some();
     let mut shown = false;
     // run_return, not run: the caller still cleans up after the window closes.
@@ -314,14 +320,15 @@ pub fn run(ctx: Context) -> i32 {
                 }
             }
             "install" | "uninstall" => {
-                start(&proxy, &payload, cmd, plan_for(&command, cmd, &context_dir));
+                let plan = plan_for(&command, cmd, &context_dir, &earlier);
+                start(&proxy, &payload, cmd, plan);
             }
             "quit-app" => {
                 let step = command["then"].as_str().unwrap_or("install").to_string();
-                let plan = plan_for(&command, &step, &context_dir);
+                let plan = plan_for(&command, &step, &context_dir, &earlier);
                 let (proxy, payload, product) = (proxy.clone(), payload.clone(), product.clone());
                 thread::spawn(move || {
-                    if install::quit_app(&plan.dir, &payload.manifest.main) {
+                    if install::quit_plan(&plan, &payload.manifest.main) {
                         start(&proxy, &payload, &step, plan);
                     } else {
                         let reason = format!("{product} 没有退出，请从任务栏通知区域退出后重试");

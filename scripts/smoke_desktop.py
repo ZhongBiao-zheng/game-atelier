@@ -23,6 +23,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -475,6 +476,84 @@ def _shortcut_app_id(link: Path) -> str:
     return out.stdout.strip()
 
 
+def _desktop_dir() -> Path:
+    out = subprocess.run(["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
+                         capture_output=True, text=True, encoding="utf-8", check=True)
+    return Path(out.stdout.strip())
+
+
+def _make_shortcut(link: Path, target: Path) -> None:
+    script = (f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{link}'); "
+              f"$s.TargetPath = '{target}'; $s.Save()")
+    subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True)
+
+
+EARLIER_PRODUCT = "Atelier"
+
+
+def _seed_earlier_install(setup: Path, local: Path, product: str, app_id: str) -> Path:
+    """What the installer of the app's earlier name left (desktop/setup/src/takeover.rs): its
+    folder under LOCALAPPDATA with the app as <earlier>.exe and an uninstall.exe listing its files,
+    its Apps entry, Start menu and desktop shortcuts."""
+    import winreg
+    earlier = local / EARLIER_PRODUCT
+    shutil.unpack_archive(setup.with_name(setup.name.replace("-setup.exe", ".zip")), earlier)
+    (earlier / f"{product}.exe").rename(earlier / f"{EARLIER_PRODUCT}.exe")
+    installed = sorted(p.relative_to(earlier).as_posix() for p in earlier.rglob("*") if p.is_file())
+    data = setup.read_bytes()
+    (length,) = struct.unpack("<Q", data[-16:-8])
+    exe_len = json.loads(data[-16 - length:-16])["exe_len"]
+    manifest = json.dumps({"role": "uninstall", "product": EARLIER_PRODUCT, "version": _version(),
+                           "main": f"{EARLIER_PRODUCT}.exe", "app_id": app_id, "exe_len": exe_len,
+                           "files": [], "installed": [*installed, "uninstall.exe"]}).encode()
+    (earlier / "uninstall.exe").write_bytes(
+        data[:exe_len] + manifest + struct.pack("<Q", len(manifest)) + data[-8:])
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                          rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{EARLIER_PRODUCT}") as key:
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, EARLIER_PRODUCT)
+        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, _version())
+        winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, f'"{earlier}"')
+    for folder in (_programs_dir(), _desktop_dir()):
+        _make_shortcut(folder / f"{EARLIER_PRODUCT}.lnk", earlier / f"{EARLIER_PRODUCT}.exe")
+    return earlier
+
+
+def _takeover(setup: Path, local: Path, product: str, app_id: str, env: dict[str, str]) -> list[str]:
+    """An install over the app's earlier name: one app afterwards, in <LOCALAPPDATA>/<product>,
+    the earlier folder, entry and shortcuts gone, the shared runtime untouched."""
+    if _windows_registration(EARLIER_PRODUCT) != (False, False):
+        return [f"the runner already has {EARLIER_PRODUCT} registered"]
+    earlier = _seed_earlier_install(setup, local, product, app_id)
+    runtime_marker = local / "game-atelier/runtime/window-theme"
+    runtime_marker.parent.mkdir(parents=True, exist_ok=True)
+    runtime_marker.write_text("dark", encoding="utf-8")
+    problems: list[str] = []
+    code, _ = _timed([str(setup), "--silent"], env)
+    target = local / product
+    if code != 0:
+        problems.append(f"takeover install exited {code}")
+    if not (target / f"{product}.exe").is_file():
+        problems.append(f"takeover did not install into {target}")
+    if earlier.exists():
+        problems.append(f"takeover left the earlier folder: {sorted(p.name for p in earlier.iterdir())}")
+    if _windows_registration(EARLIER_PRODUCT) != (False, False):
+        problems.append(f"takeover left the earlier registration: {_windows_registration(EARLIER_PRODUCT)}")
+    if (_desktop_dir() / f"{EARLIER_PRODUCT}.lnk").exists():
+        problems.append("takeover left the earlier desktop shortcut")
+    if _windows_registration(product) != (True, True):
+        problems.append(f"takeover registration (Apps entry, Start menu) = {_windows_registration(product)}")
+    if not (_desktop_dir() / f"{product}.lnk").is_file():
+        problems.append("takeover dropped the desktop shortcut the earlier install had")
+    if runtime_marker.read_text(encoding="utf-8") != "dark":
+        problems.append("takeover touched the runtime")
+    uninstaller = target / "uninstall.exe"
+    if uninstaller.is_file():
+        subprocess.run([str(uninstaller), "--silent"], env=env, check=False, timeout=300)
+        if not _wait_gone(target, 120):
+            problems.append("uninstalling after the takeover left its folder")
+    return problems
+
+
 def _timed(command: list[str], env: dict[str, str]) -> tuple[int, float]:
     started = time.monotonic()
     code = subprocess.run(command, env=env, timeout=900, check=False).returncode
@@ -482,8 +561,8 @@ def _timed(command: list[str], env: dict[str, str]) -> tuple[int, float]:
 
 
 def smoke_windows_setup(setup: Path, runtime: Path, timeout: int) -> int:
-    """Atelier's installer around the Electron app (desktop/setup): fresh install (no runtime yet)
-    → first start downloads it → install over the running app keeps it → install under a newer
+    """The app's installer around the Electron app (desktop/setup): takeover of an install under the
+    earlier name → fresh install (no runtime yet) → first start downloads it → install over the running app keeps it → install under a newer
     runtime keeps that too → uninstall. Runtime and data root stay in a throwaway LOCALAPPDATA;
     the Apps entry and Start menu are the runner's real ones."""
     feed = Feed(runtime, _version())
@@ -501,7 +580,7 @@ def smoke_windows_setup(setup: Path, runtime: Path, timeout: int) -> int:
     runtime_parent, data_runtime = local / "game-atelier/runtime", data / ".runtime"
     executable = install_dir / f"{product}.exe"
     install = [str(setup), "--silent", "--dir", str(install_dir)]
-    problems: list[str] = []
+    problems: list[str] = [f"takeover: {p}" for p in _takeover(setup, local, product, app_id, quiet)]
 
     code, fresh = _timed(install, quiet)
     if code != 0:

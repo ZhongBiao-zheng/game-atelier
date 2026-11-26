@@ -68,7 +68,7 @@ class Executor(Protocol):
 
 
 def responsible_app() -> str | None:
-    """macOS 的自动化授权记在发起进程的「负责应用」名下（探针第 2 项）：桌面应用拉起时是 Atelier。"""
+    """macOS 的自动化授权记在发起进程的「负责应用」名下（探针第 2 项）：桌面应用拉起时是 Cobrush（旧版外壳是 Atelier）。"""
     if sys.platform != "darwin":
         return None
     try:
@@ -183,7 +183,7 @@ def osascript_error(request_dir: Path, stderr: str) -> PsError:
         cancel(request_dir)
         return busy_timeout()
     if code == -1743:
-        app = responsible_app() or "Atelier"
+        app = responsible_app() or "Cobrush"
         return PsError("PS_AUTOMATION_DENIED",
                        f"需要在「系统设置 → 隐私与安全性 → 自动化」里允许 {app} 控制 Photoshop", 403)
     if code in (-600, -609):

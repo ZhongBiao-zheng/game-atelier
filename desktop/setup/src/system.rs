@@ -30,8 +30,9 @@ use windows::{
         },
         UI::{
             Shell::{
-                FOLDERID_Desktop, FOLDERID_Programs, IShellLinkW, PropertiesSystem::IPropertyStore,
-                SHGetKnownFolderPath, SHStrDupW, ShellLink, KF_FLAG_DEFAULT,
+                FOLDERID_Desktop, FOLDERID_Programs, FOLDERID_RoamingAppData, IShellLinkW,
+                PropertiesSystem::IPropertyStore, SHGetKnownFolderPath, SHStrDupW, ShellLink,
+                KF_FLAG_DEFAULT,
             },
             WindowsAndMessaging::{
                 MessageBoxW, IDOK, MB_ICONERROR, MB_ICONINFORMATION, MB_OKCANCEL,
@@ -138,6 +139,12 @@ pub fn programs_dir() -> Option<PathBuf> {
 /// The desktop, wherever it was redirected to (OneDrive included).
 pub fn desktop_dir() -> Option<PathBuf> {
     known_folder(&FOLDERID_Desktop)
+}
+
+/// Shortcuts pinned to the taskbar (each pin is one `.lnk` here).
+pub fn taskbar_pins_dir() -> Option<PathBuf> {
+    known_folder(&FOLDERID_RoamingAppData)
+        .map(|d| d.join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
 }
 
 fn wide(path: &Path) -> Vec<u16> {

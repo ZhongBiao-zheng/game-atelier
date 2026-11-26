@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import {
   checkImported, downloadRuntime, plannedSources, readRelease,
 } from './download.mjs';
+import { bundlesToNotice, markNoticed } from './earlier-app.mjs';
 import { buildMenu } from './menu.mjs';
 import { securityProbe } from './probe.mjs';
 import * as rt from './runtime.mjs';
@@ -331,7 +332,7 @@ async function prepareRuntime() {
     if (reason && fs.existsSync(path.join(root, 'updates', 'pending.json'))) {
       throw failure('start', '运行包尚有更新事务，请稍后重试');
     }
-    if (reason === 'too-old') throw failure('install', '已有的运行环境比本安装包新，请安装新版 Atelier');
+    if (reason === 'too-old') throw failure('install', '已有的运行环境比本安装包新，请安装新版 Cobrush');
     if (reason === 'missing' || (reason && await releaseRuntime(root))) {
       root = await downloadAndUnpack(info);
     } else if (reason) {
@@ -716,6 +717,28 @@ function runSmoke() {
   }, 500);
 }
 
+/** macOS: once, point at an old Atelier.app left in Applications (desktop/src/earlier-app.mjs). */
+async function noticeEarlierApp() {
+  const userData = app.getPath('userData');
+  const bundles = bundlesToNotice({
+    userData, name: app.getName(), exe: app.getPath('exe'), home: app.getPath('home'),
+  });
+  if (!bundles.length) return;
+  markNoticed(userData, bundles);
+  log(`earlier app found: ${bundles.join(', ')}`);
+  const { response } = await dialog.showMessageBox(state.win, {
+    type: 'info',
+    title: app.getName(),
+    message: '「应用程序」里还有旧版 Atelier',
+    detail: `${app.getName()} 是 Atelier 的新名字，作品与设置照常保留。旧版可以移到废纸篓。`,
+    buttons: ['在访达中显示', '好'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (response === 0) shell.showItemInFolder(bundles[0]);
+}
+
 /** Same id as the installer's shortcuts (electron-builder appId, passed in as build metadata). */
 function appUserModelId() {
   try {
@@ -742,6 +765,7 @@ function start() {
   listen('atelier:import', 'local', () => { importRuntime(); });
   createWindow();
   createTray();
+  if (MAC && !SMOKE) noticeEarlierApp().catch((error) => log(`earlier app notice: ${error.message}`));
   // macOS: shut down, restart or log out. preventDefault asks the system to wait for the quit.
   powerMonitor.on('shutdown', (event) => {
     event.preventDefault();
