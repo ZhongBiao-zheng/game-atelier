@@ -6,6 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 
 import type { useSSE as UseSSE } from '@/hooks/useSSE';
 import { AppShell } from './AppShell';
+import { updateStudioView } from '@/pages/studioDraft';
 import type { UpdateState } from '@/api/update';
 
 type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
@@ -44,6 +45,8 @@ vi.mock('@/api/gateway', async importOriginal => ({
 }));
 
 beforeEach(() => {
+  // 首页输入框默认 Agent 会拉对话模型；这里的 fetch 桩只回 {}，固定成图片模式。
+  updateStudioView({ inputMode: 'image' });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({}),

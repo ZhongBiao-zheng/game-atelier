@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as desktopShell from '@/lib/desktopShell';
 
 import { App } from './App';
+import { updateStudioView } from './pages/studioDraft';
 
 // Authentication and retained drafts are exercised by LocalConnectionGate.test.tsx.
 vi.mock('@/components/LocalConnectionGate', () => ({
@@ -11,6 +12,8 @@ vi.mock('@/components/LocalConnectionGate', () => ({
 
 beforeEach(() => {
   sessionStorage.removeItem('atelier:pending-update');
+  // 首页输入框默认 Agent 会拉对话模型；这里的 fetch 桩只回 {}，固定成图片模式。
+  updateStudioView({ inputMode: 'image' });
   vi.stubGlobal('fetch', vi.fn());
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
 });
