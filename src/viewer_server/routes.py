@@ -832,12 +832,9 @@ def onboarding_status() -> dict:
 
     body = _bootstrap_check("--cached-update")
     if body.get("status") == "needs_data_root":
-        # 首启不再问存放位置：服务本来就按默认目录运行，这里把默认目录固定下来（设置里随时可换）。
+        # 首启先确认存放位置：预填服务正在用的目录，确认走 POST /api/onboarding/data-root。
         onboarding_metrics.note_first_seen()
-        default_root = Path.home() / "game-atelier"
-        _init_data_root(str(default_root))
-        onboarding_metrics.record_data_root_set(default_root.resolve())
-        body = _bootstrap_check("--cached-update")
+        body["data_root"] = str(data_root.resolve_data_root())
     if body.get("status") in {"needs_first_key", "needs_keys_repair", "ready"}:
         with _provider_config_io(read_only=True):
             db = keys.read_keys_for_onboarding()
@@ -875,6 +872,31 @@ def _init_data_root(path: str) -> dict:
     return json.loads(proc.stdout)
 
 
+#: 首启选了一个不是空的、也不是数据目录的文件夹（比如整个 D 盘）时，数据放进它下面这个子文件夹。
+_FIRST_RUN_FOLDER = "Cobrush"
+
+
+@router.post("/onboarding/data-root")
+def confirm_data_root(payload: _DataRootPayload) -> dict:
+    """首启确认存放位置。留在服务正在用的目录就把它固定下来；选了别处按「更换数据目录」迁过去
+    （复制在后台进行，用 GET /api/data-root 看进度），迁完才算确认，失败时下次启动还会问。"""
+    from character_workflow.lib import data_root_move, onboarding_metrics
+
+    if not payload.path.strip():
+        raise HTTPException(422, detail="请选择一个文件夹")
+    current = data_root.resolve_data_root()
+    target = Path(payload.path).expanduser().resolve()
+    if (target != current and target.is_dir() and not data_root_move.is_atelier_root(target)
+            and any(target.iterdir())):
+        target = target / _FIRST_RUN_FOLDER
+    if target == current or not (data_root.read_global_config() or "").strip():
+        _init_data_root(str(current))
+        if target == current:
+            onboarding_metrics.record_data_root_set(current)
+            return data_root_state()
+    return change_data_root(_DataRootPayload(path=str(target)))
+
+
 @router.get("/data-root")
 def data_root_state() -> dict:
     """当前数据目录与更换进度（复制中 / 校验中 / 完成 / 失败）。"""
@@ -900,7 +922,12 @@ def change_data_root(payload: _DataRootPayload) -> dict:
         counts = data_root_move_work()
         return counts["jobs"] + counts["agents"] + counts["gateway"]
 
+    previous = data_root.resolve_data_root()
+
     def switched() -> None:
+        if data_root.resolve_data_root() != previous:
+            # 从首启还没确认的目录迁走 = 用户选定了新位置（标记本身不随数据复制）。
+            (previous / ".runtime" / data_root.UNCONFIRMED_MARKER).unlink(missing_ok=True)
         from viewer_server.collab_app import reload_collab_root
         reload_collab_root()
         restart_watchers()  # 抛错 = 切换失败，data_root_move 退回原目录后再调一次把监听挪回去

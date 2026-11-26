@@ -7,7 +7,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   compareVersions, contractLevel, DESKTOP_CONTRACT, meetsContract, readRuntimeInfo,
-  repairBundlePointers, replacementReason, uniqueDownloadPath, validVersion,
+  imageFileName, repairBundlePointers, replacementReason, uniqueDownloadPath, validVersion,
 } from '../src/runtime.mjs';
 
 function tmp(name) {
@@ -221,4 +221,16 @@ test('downloads never overwrite', () => {
   fs.writeFileSync(path.join(dir, 'a (1).png'), 'x');
   assert.equal(uniqueDownloadPath(dir, 'a.png'), path.join(dir, 'a (2).png'));
   assert.equal(uniqueDownloadPath(dir, '../escape.png'), path.join(dir, 'escape.png'));
+});
+
+test('save-as names come from the image URL without any directory', () => {
+  const raw = 'http://127.0.0.1:5174/api/raw?path=%2FUsers%2Fa%2Fgame-atelier%2Fstudio%2Fout%2Fcat.png&job_id=j1';
+  assert.equal(imageFileName(raw, 'raw.png'), 'cat.png');
+  assert.equal(imageFileName('http://127.0.0.1:5174/api/gallery/image?path=C%3A%5Cdata%5Cdog.webp', 'image.webp'), 'dog.webp');
+  assert.equal(imageFileName('http://127.0.0.1:5174/static/%E5%9B%BE.jpg', 'x.jpg'), '图.jpg');
+  // No extension in the URL (canvas media): the browser's name for the download, which has one.
+  assert.equal(imageFileName('http://127.0.0.1:5174/api/canvas/projects/p/versions/v/media', 'media.png'), 'media.png');
+  assert.equal(imageFileName('blob:http://127.0.0.1:5174/1234', 'C:\\Users\\a\\b.png'), 'b.png');
+  assert.equal(imageFileName('data:image/png;base64,AAAA', ''), 'image.png');
+  assert.equal(imageFileName('http://127.0.0.1:5174/a%E0%A4%A', ''), 'image.png');
 });

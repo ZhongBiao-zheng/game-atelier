@@ -26,6 +26,9 @@ except ModuleNotFoundError:  # 系统 python 常无 platformdirs，degrade 到�
 
 APP_NAME = "game-atelier"
 ENV_VAR = "GAME_ATELIER_DATA_ROOT"
+# 首启时 launch 先用默认目录写好指针让服务跑起来，留这个标记等用户在页面上确认存放位置；
+# init_data_root（显式选定）删除它。与 character_workflow.lib.data_root.UNCONFIRMED_MARKER 同名。
+DATA_ROOT_UNCONFIRMED = "data-root-unconfirmed"
 
 # Plugin directory == repo root (this file lives in scripts/).
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
@@ -546,10 +549,11 @@ def check() -> dict:
         }
 
     data_root = resolve_data_root()
-    if data_root is None:
+    if data_root is None or (data_root / ".runtime" / DATA_ROOT_UNCONFIRMED).exists():
+        # 没有指针，或首启用默认目录先跑了起来、用户还没确认存放位置（见 launch）。
         return {
             "status": "needs_data_root",
-            "data_root": None,
+            "data_root": None if data_root is None else str(data_root),
             "uv_path": shutil.which("uv"),
             "venv_python": None,
             "platform": sys.platform,
@@ -721,6 +725,7 @@ def init_data_root(target: Path) -> int:
 
     cfg = global_config_file()
     atomic_write_text(cfg, str(resolved) + "\n")
+    (resolved / ".runtime" / DATA_ROOT_UNCONFIRMED).unlink(missing_ok=True)
 
     print(json.dumps({
         "status": "ok",
@@ -770,7 +775,10 @@ def launch(*, open_browser: bool = True, desktop: bool = False) -> int:
         print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
         return 1
     if resolve_data_root() is None:
-        init_data_root(effective_data_root())
+        # 首启：先按默认目录跑起来，页面再让用户确认或换个位置（GET /api/onboarding/status）。
+        fresh = effective_data_root()
+        init_data_root(fresh)
+        atomic_write_text(fresh / ".runtime" / DATA_ROOT_UNCONFIRMED, "")
     if is_bundle() and not desktop:
         update_info()
     started = time.perf_counter()

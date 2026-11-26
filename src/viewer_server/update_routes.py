@@ -96,7 +96,7 @@ def move_gated(path: str, method: str) -> bool:
     更换请求本身不进门闩（否则排空要等它自己）；连接握手不写业务数据。"""
     if method in {"GET", "HEAD", "OPTIONS"} or path.startswith("/api/connection/"):
         return False
-    if path == "/api/data-root":
+    if path in {"/api/data-root", "/api/onboarding/data-root"}:
         return False
     return path.startswith(("/api/", "/gateway/", "/collab/v1/"))
 

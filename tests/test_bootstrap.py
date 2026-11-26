@@ -613,7 +613,21 @@ def test_launch_initializes_default_data_root(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "ensure_venv", lambda **kwargs: 3)
     assert mod.launch() == 3
     assert mod.resolve_data_root() == tmp_path / "game-atelier"
-    assert (tmp_path / "game-atelier" / ".runtime").is_dir()
+    marker = tmp_path / "game-atelier" / ".runtime" / mod.DATA_ROOT_UNCONFIRMED
+    # 首启用默认目录先跑起来，存放位置等用户在页面上确认：--check 照报 needs_data_root。
+    assert marker.is_file()
+    monkeypatch.setattr(mod, "_web_dist_ok", lambda: True)
+    assert mod.check() | {"uv_path": None} == {
+        "status": "needs_data_root", "data_root": str(tmp_path / "game-atelier"), "uv_path": None,
+        "venv_python": None, "platform": mod.sys.platform, "next_action": "选数据目录（CC 向导问用户）",
+    }
+    # 已有指针的老用户再启动不留标记；显式 --init-data-root 视为已确认。
+    assert mod.init_data_root(tmp_path / "game-atelier") == 0
+    assert not marker.exists()
+    assert mod.launch() == 3
+    assert not marker.exists()
+    from character_workflow.lib import data_root
+    assert data_root.UNCONFIRMED_MARKER == mod.DATA_ROOT_UNCONFIRMED
 
 
 def test_launch_does_not_start_after_stop_failure(monkeypatch, isolated_data_root):

@@ -1,7 +1,7 @@
 import { request, requestJson } from './http';
 import type { GuideVendor } from '@/lib/onboardingGuide';
-/** 服务端已把「缺数据目录」静默补成默认目录、把损坏的 keys.json 备份成空库，前端只见这两态。 */
-export type OnboardingStatus = 'ready' | 'needs_first_key';
+/** 服务端把损坏的 keys.json 备份成空库，前端只见这三态；needs_data_root 是首启还没确认存放位置。 */
+export type OnboardingStatus = 'ready' | 'needs_first_key' | 'needs_data_root';
 
 export interface OnboardingState {
   status: OnboardingStatus;
@@ -44,6 +44,15 @@ export function fetchDataRoot(): Promise<DataRootState> {
 /** 更换数据目录：空目标复制后切换、已有 Atelier 数据直接切换；复制在后台进行，用 fetchDataRoot 看进度。 */
 export function changeDataRoot(path: string): Promise<DataRootState> {
   return requestJson<DataRootState>('/api/data-root', '更换数据目录', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+}
+
+/** 首启确认存放位置：留在原处直接完成；换到别处时与 changeDataRoot 一样在后台迁移。 */
+export function confirmDataRoot(path: string): Promise<DataRootState> {
+  return requestJson<DataRootState>('/api/onboarding/data-root', '保存存放位置', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),

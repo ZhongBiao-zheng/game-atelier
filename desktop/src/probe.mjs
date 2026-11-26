@@ -44,7 +44,7 @@ export async function securityProbe(win, port, webPreferences) {
   const problems = [];
   const wc = win.webContents;
   const main = await wc.executeJavaScript(IN_MAIN);
-  if (JSON.stringify(main.keys) !== '["setTheme","openLog"]') problems.push(`main frame exposes ${JSON.stringify(main.keys)}`);
+  if (JSON.stringify(main.keys) !== '["setTheme","openLog","showDownload"]') problems.push(`main frame exposes ${JSON.stringify(main.keys)}`);
   if (main.loading !== 'undefined' || main.require !== 'undefined' || main.process !== 'undefined') {
     problems.push(`main frame sees loading=${main.loading} require=${main.require} process=${main.process}`);
   }

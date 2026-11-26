@@ -528,16 +528,53 @@ const EDIT_MENU = [
   { role: 'selectAll', label: '全选' },
 ];
 
-/** No web context menu, except the edit items in text fields and on selected text. */
+/** URLs whose next download is a 图片另存为: will-download lets the system save dialog pick the place. */
+const saveAsPending = new Set();
+
+function saveImageAs(win, url) {
+  saveAsPending.add(url);
+  win.webContents.downloadURL(url);
+}
+
+/** No web context menu, except the edit items in text fields, on selected text and on images. */
 function contextMenu(win, params) {
   if (params.isEditable) {
     const flags = params.editFlags;
     const enabled = { cut: flags.canCut, copy: flags.canCopy, paste: flags.canPaste, selectAll: flags.canSelectAll };
     Menu.buildFromTemplate(EDIT_MENU.map((item) => (item.role ? { ...item, enabled: enabled[item.role] } : item)))
       .popup({ window: win });
+  } else if (params.mediaType === 'image' && params.srcURL) {
+    const { x, y, srcURL } = params;
+    Menu.buildFromTemplate([
+      { label: '复制图片', click: () => win.webContents.copyImageAt(x, y) },
+      { label: '图片另存为…', click: () => saveImageAs(win, srcURL) },
+    ]).popup({ window: win });
   } else if (params.selectionText) {
     Menu.buildFromTemplate([{ role: 'copy', label: '拷贝' }]).popup({ window: win });
   }
+}
+
+/**
+ * Files this shell saved to 下载, by the id sent with the download event. The page only ever passes
+ * an id back (打开所在文件夹), never a path.
+ */
+const savedDownloads = new Map();
+const SAVED_DOWNLOADS_KEPT = 50;
+let downloadCount = 0;
+
+function rememberDownload(file) {
+  downloadCount += 1;
+  const id = String(downloadCount);
+  savedDownloads.set(id, file);
+  if (savedDownloads.size > SAVED_DOWNLOADS_KEPT) savedDownloads.delete(savedDownloads.keys().next().value);
+  return id;
+}
+
+function showDownload(id) {
+  const file = typeof id === 'string' ? savedDownloads.get(id) : undefined;
+  if (!file) return;
+  if (fs.existsSync(file)) shell.showItemInFolder(file);
+  else shell.openPath(path.dirname(file)).then((error) => { if (error) log(`open folder failed: ${error}`); });
 }
 
 function openSettings() {
@@ -665,12 +702,21 @@ function setupSession() {
   ses.setPermissionCheckHandler((_wc, permission, origin, details) => permitted(permission, origin, details?.isMainFrame));
   ses.on('will-download', (_event, item) => {
     const dir = MAC ? path.join(process.env.HOME || app.getPath('home'), 'Downloads') : app.getPath('downloads');
+    const url = item.getURLChain()[0] ?? item.getURL();
+    if (saveAsPending.delete(url)) {
+      // No save path set: Electron asks with the system save dialog; cancelling it cancels the download.
+      const name = rt.imageFileName(url, item.getFilename());
+      item.setSaveDialogOptions({ title: '图片另存为', defaultPath: path.join(dir, name) });
+      log(`save as ${url.slice(0, 200)} (${name})`);
+      item.once('done', (_e, result) => log(`save as finished ${item.getSavePath()} ${result}`));
+      return;
+    }
     const target = rt.uniqueDownloadPath(dir, item.getFilename());
     item.setSavePath(target);
     log(`download ${item.getURL().slice(0, 200)} -> ${target}`);
     item.once('done', (_e, result) => {
       log(`download finished ${target} ${result}`);
-      if (result === 'completed') dispatch(DOWNLOAD_EVENT, { name: path.basename(target) });
+      if (result === 'completed') dispatch(DOWNLOAD_EVENT, { name: path.basename(target), id: rememberDownload(target) });
     });
   });
 }
@@ -760,6 +806,7 @@ function start() {
   listen('atelier:retry', 'local', () => { boot(); });
   listen('atelier:open-log', 'local', openLog);
   listen('atelier:page-open-log', 'page', openLog);
+  listen('atelier:show-download', 'page', showDownload);
   listen('atelier:cancel', 'local', cancelDownload);
   listen('atelier:resume', 'local', () => { boot(); });
   listen('atelier:import', 'local', () => { importRuntime(); });

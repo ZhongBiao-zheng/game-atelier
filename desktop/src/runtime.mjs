@@ -441,6 +441,25 @@ export function clearOwned(dataRoot) {
   try { fs.rmSync(path.join(dataRoot, '.runtime', 'shell-owned'), { force: true }); } catch { /* ignore */ }
 }
 
+/**
+ * Suggested file name for 图片另存为: the last segment of the image URL's `path` query (the page's
+ * media URLs, e.g. /api/raw?path=…), else of the URL path; never a directory. Without an extension
+ * there, the browser's own name for the download (`fallback`, which carries one) is used.
+ */
+export function imageFileName(url, fallback) {
+  let name = '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      name = (parsed.searchParams.get('path') ?? decodeURIComponent(parsed.pathname)).split(/[\\/]/).pop() ?? '';
+    }
+  } catch { /* not a URL, or a malformed escape */ }
+  const usable = (value) => value && value !== '.' && value !== '..' && path.extname(value);
+  if (usable(name)) return name;
+  const other = String(fallback || '').split(/[\\/]/).pop();
+  return usable(other) ? other : 'image.png';
+}
+
 /** `name.ext`, `name (1).ext`, … so a download never overwrites an existing file. */
 export function uniqueDownloadPath(dir, name) {
   const safe = path.basename(name || 'download') || 'download';

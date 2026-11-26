@@ -134,9 +134,9 @@ macOS：dmg 无法替换另一个名字的应用包，旧 `Atelier.app` 留在�
 ## 窗口与页面
 
 - 窗口加载 `http://127.0.0.1:<端口>/`，页面与浏览器访问同源，会话与编辑租约照常工作。
-- 页面只拿到两个接口：preload 暴露的 `window.atelierShell.setTheme("light" | "dark")`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）与 `window.atelierShell.openLog()`（首屏读不到状态时打开服务日志；旧外壳没有它，页面先判断再显示按钮）。内置加载页另有 `window.atelierLoading.retry()` / `openLog()` / `cancel()` / `resume()` / `importFile()`。主进程收到的每条消息都核对发送方是主框架且来自本机服务或加载页；页面运行在沙箱里、没有 Node。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到任何接口。
+- 页面只拿到三个接口，都由 preload 暴露：`window.atelierShell.setTheme("light" | "dark")`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）、`window.atelierShell.openLog()`（首屏读不到状态时打开服务日志）与 `window.atelierShell.showDownload(id)`（在访达 / 资源管理器里定位外壳存进「下载」的文件；页面只传下载事件给的 `id`，外壳按自己记下的最近 50 个文件查路径，查不到不做事）。旧外壳没有后两个，页面先判断再显示按钮。内置加载页另有 `window.atelierLoading.retry()` / `openLog()` / `cancel()` / `resume()` / `importFile()`。主进程收到的每条消息都核对发送方是主框架且来自本机服务或加载页；页面运行在沙箱里、没有 Node。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到任何接口。
 - 拖动窗口与双击缩放由页面的 `app-region: drag`（顶栏）交给系统处理；根元素声明 `no-drag`，避免沿用上一页的拖动区。
-- preload 在页面脚本之前给 `<html>` 写 `data-shell="macos|windows"` 与 `data-titlebar="overlay"`：macOS 页面给左上红绿灯留位，Windows 页面给右上系统按钮留位（`env(titlebar-area-*)`，按钮高 40px、背景透明、符号颜色跟随深浅色）；铺满窗口的浮层用 `desktop-clear-top` 避开它们。网页自带的右键菜单被屏蔽（输入框与选中文字除外）。
-- 外壳向页面派发的 `window` 事件：下载落盘后 `atelier:download-saved`（`detail: { name }`）；系统菜单「设置…」`atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
+- preload 在页面脚本之前给 `<html>` 写 `data-shell="macos|windows"` 与 `data-titlebar="overlay"`：macOS 页面给左上红绿灯留位，Windows 页面给右上系统按钮留位（`env(titlebar-area-*)`，按钮高 40px、背景透明、符号颜色跟随深浅色）；铺满窗口的浮层用 `desktop-clear-top` 避开它们。网页自带的右键菜单被屏蔽，只留外壳自己的菜单：输入框（剪切 / 拷贝 / 粘贴 / 全选）、选中文字（拷贝）、图片（复制图片 / 图片另存为…）。另存为由系统保存对话框选位置，默认文件名取图片地址 `path` 参数或路径的最后一段（没有扩展名时用浏览器给的下载名），不带目录。
+- 外壳向页面派发的 `window` 事件：下载存进「下载」后 `atelier:download-saved`（`detail: { name, id }`，`id` 交给 `showDownload`；旧外壳只有 `name`；图片另存为不派发）；系统菜单「设置…」`atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
 - `127.0.0.1` 以外的导航与新窗口转交系统浏览器。
 - 关窗口收进托盘，服务继续运行；退出时只停止外壳自己启动的服务，有进行中的工作先确认。

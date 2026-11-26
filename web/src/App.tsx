@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
+import { DataRootPage } from './pages/onboarding/DataRoot';
 import { FirstRunGuide } from './pages/onboarding/FirstRunGuide';
 import { DiagnosticsExport } from './pages/settings/DiagnosticsExport';
 import { AppShell } from '@/components/AppShell';
@@ -99,6 +100,8 @@ function StartupError({ message, canExport, onRetry }: { message: string; canExp
 
 function connectedView(state: OnboardingState, reload: () => void) {
   switch (state.status) {
+    case 'needs_data_root':
+      return <DataRootPage initialPath={state.data_root ?? ''} onComplete={reload} />;
     case 'needs_first_key':
       // 供应商配置刚因损坏被备份：即使之前点过「稍后」也回到引导，说明一次。
       if (!state.onboarding_skipped || state.keys_recovered) {

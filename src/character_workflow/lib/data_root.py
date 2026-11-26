@@ -10,6 +10,8 @@ from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_r
 
 _APP_NAME = "game-atelier"
 _ENV_VAR = "GAME_ATELIER_DATA_ROOT"
+# 首启的存放位置还没经用户确认（scripts/bootstrap.py 的 DATA_ROOT_UNCONFIRMED）；在 .runtime/ 下。
+UNCONFIRMED_MARKER = "data-root-unconfirmed"
 
 
 def _global_config_file() -> Path:

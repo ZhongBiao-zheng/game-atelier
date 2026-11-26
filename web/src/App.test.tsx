@@ -112,10 +112,42 @@ describe('App onboarding gate', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: '连接一个模型' })).toBeInTheDocument();
-    // 首启只剩这一步（存放位置已静默用默认目录），不再显示步数。
     expect(screen.queryByRole('list', { name: /步/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '稍后' })).toBeInTheDocument();
     expect(screen.queryByLabelText('作品集首页')).not.toBeInTheDocument();
+  });
+
+  it('asks where to keep data first, then moves on to connecting a model', async () => {
+    let confirmed = false;
+    const network = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/folder-picker') return new Response(JSON.stringify({ path: 'D:\\Art' }));
+      if (path === '/api/onboarding/data-root') {
+        expect(JSON.parse(String(init?.body))).toEqual({ path: 'D:\\Art' });
+        return new Response(JSON.stringify({ data_root: 'C:\\Users\\a\\game-atelier',
+          move: { phase: 'copying', mode: 'copy', target: 'D:\\Art\\Cobrush', total_bytes: 1, copied_bytes: 0, error: null, detail: null } }));
+      }
+      if (path === '/api/data-root') {
+        confirmed = true;
+        return new Response(JSON.stringify({ data_root: 'D:\\Art\\Cobrush',
+          move: { phase: 'done', mode: 'copy', target: 'D:\\Art\\Cobrush', total_bytes: 1, copied_bytes: 1, error: null, detail: null } }));
+      }
+      if (path === '/api/onboarding/status') {
+        return new Response(JSON.stringify({ status: confirmed ? 'needs_first_key' : 'needs_data_root',
+          data_root: 'C:\\Users\\a\\game-atelier', platform: 'win32', next_action: '', onboarding_skipped: false }));
+      }
+      return new Response(JSON.stringify({}), { status: 404 });
+    });
+    vi.stubGlobal('fetch', network);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '选择存放位置' })).toBeInTheDocument();
+    expect(screen.getByLabelText('存放位置')).toHaveValue('C:\\Users\\a\\game-atelier');
+    fireEvent.click(screen.getByRole('button', { name: '更改' }));
+    await waitFor(() => expect(screen.getByLabelText('存放位置')).toHaveValue('D:\\Art'));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(await screen.findByRole('heading', { name: '连接一个模型' }, { timeout: 3000 })).toBeInTheDocument();
+    expect(network.mock.calls.map(([path]) => path)).toContain('/api/data-root');
   });
 
   it('opens the home page once the connect-a-model step was skipped', async () => {

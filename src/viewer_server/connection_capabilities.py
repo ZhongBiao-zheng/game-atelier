@@ -25,6 +25,7 @@ POST /api/jobs/{job_id}/confirm
 POST /api/jobs/{job_id}/cancel
 POST /api/config
 GET /api/onboarding/status
+POST /api/onboarding/data-root
 POST /api/folder-picker
 GET /api/data-root
 POST /api/data-root
@@ -311,7 +312,7 @@ LOCAL_MANAGEMENT = frozenset({
     # 自定义接口模板决定密钥发往哪个路径、怎么发（ADR-0036），只给本机页面。
     "/api/http-protocols", "/api/http-protocols/validate", "/api/http-protocols/{identifier}",
     "/api/http-protocols/assist/models", "/api/http-protocols/assist",
-    "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
+    "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status", "/api/onboarding/data-root",
     "/api/data-root", "/api/onboarding/events", "/api/onboarding/metrics",
     # 引导里的 Key 探针会把密钥发给固定的厂商地址，只给本机页面。
     "/api/onboarding/key-probe",

@@ -8,7 +8,7 @@ import type { Theme } from './theme';
 /** 外壳的系统菜单「设置…」等入口：detail.path 是站内路径。 */
 export const DESKTOP_NAVIGATE_EVENT = 'atelier:navigate';
 
-type ShellBridge = { setTheme: (theme: Theme) => void; openLog?: () => void };
+type ShellBridge = { setTheme: (theme: Theme) => void; openLog?: () => void; showDownload?: (id: string) => void };
 
 function shell(): ShellBridge | null {
   if (!document.documentElement.dataset.shell) return null;
@@ -24,6 +24,12 @@ export function syncShellTheme(theme: Theme) {
 export function shellLogOpener(): (() => void) | null {
   const open = shell()?.openLog;
   return open ? () => open() : null;
+}
+
+/** 桌面版在访达 / 资源管理器里定位存进「下载」的文件（id 来自下载事件）；浏览器与旧外壳返回 null。 */
+export function shellDownloadRevealer(): ((id: string) => void) | null {
+  const show = shell()?.showDownload;
+  return show ? (id) => show(id) : null;
 }
 
 /** 只接受站内路径，避免事件被用来导航到别处。 */

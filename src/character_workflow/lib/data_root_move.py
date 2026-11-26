@@ -41,7 +41,7 @@ _ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 _SKIP_TOP = {".venv"}
 _SKIP_RUNTIME = {
     "server.pid", "server.port", "server.instance", "server.log", "server.start.lock",
-    "shell-control.json", "shell-owned", "locks", "maintenance",
+    "shell-control.json", "shell-owned", "locks", "maintenance", data_root.UNCONFIRMED_MARKER,
 }
 # 本进程的运行身份：切换提交时交接到新目录（CLI / 外壳 / MCP 都按数据目录找它）。旧目录里的那份保留：
 # 外壳缓存着旧目录，靠它继续核对和停止同一个服务；进程退出后两边都按失效记录清理。
@@ -141,7 +141,7 @@ def _set(**changes) -> None:
             setattr(_state, key, value)
 
 
-def _is_atelier_root(path: Path) -> bool:
+def is_atelier_root(path: Path) -> bool:
     return any((path / name).is_dir() for name in ATELIER_MARKERS)
 
 
@@ -158,7 +158,7 @@ def classify(target: Path, current: Path) -> Literal["same", "switch", "copy"]:
         return "copy"
     if (target / INCOMPLETE_MARKER).exists():
         raise MoveRejected("这个文件夹里有一次没完成的迁移，请清空后再选")
-    if _is_atelier_root(target):
+    if is_atelier_root(target):
         return "switch"
     if any(target.iterdir()):
         raise MoveRejected("这个文件夹不是空的，请在里面新建一个子文件夹再选")
@@ -375,7 +375,7 @@ def recover_interrupted() -> str | None:
         logger.info("data root move finished after restart: %s", root)
         return "completed"
     source = marker.get("source")
-    if os.environ.get(_ENV_VAR) or not isinstance(source, str) or not _is_atelier_root(Path(source)):
+    if os.environ.get(_ENV_VAR) or not isinstance(source, str) or not is_atelier_root(Path(source)):
         logger.warning("data root %s is an unfinished copy; pointer left unchanged", root)
         return None
     data_root.write_global_config(Path(source))

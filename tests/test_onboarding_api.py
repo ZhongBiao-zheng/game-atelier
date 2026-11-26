@@ -83,6 +83,65 @@ def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     assert os.environ["GAME_ATELIER_DATA_ROOT"] == str(new_root.resolve())
 
 
+def _unconfirmed_first_run(isolated_data_root, tmp_path, monkeypatch):
+    """launch() 首启后的状态：服务在默认目录跑着、指针已写，存放位置还没确认。"""
+    from character_workflow.lib import data_root as data_root_module
+    from viewer_server import routes
+
+    cfg_file = tmp_path / "cfg" / "data-root"
+    cfg_file.parent.mkdir()
+    cfg_file.write_text(f"{isolated_data_root}\n", encoding="utf-8")
+    monkeypatch.setattr(data_root_module, "_global_config_file", lambda: cfg_file)
+    marker = isolated_data_root / ".runtime" / data_root_module.UNCONFIRMED_MARKER
+    marker.parent.mkdir(exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+    monkeypatch.setattr(routes, "_bootstrap_check", lambda *_: {
+        "status": "needs_data_root" if marker.exists() else "needs_first_key",
+        "data_root": str(isolated_data_root),
+    })
+    monkeypatch.setattr(routes, "_init_data_root", lambda path: (
+        marker.unlink(missing_ok=True), {"data_root": path})[1])
+    return marker
+
+
+def test_first_run_asks_for_the_data_root_before_anything_else(client, isolated_data_root, tmp_path, monkeypatch):
+    marker = _unconfirmed_first_run(isolated_data_root, tmp_path, monkeypatch)
+    state = client.get("/api/onboarding/status").json()
+    assert state["status"] == "needs_data_root"
+    assert state["data_root"] == str(isolated_data_root.resolve())
+    # 留在默认目录：确认即完成，进入「连接一个模型」。
+    resp = client.post("/api/onboarding/data-root", json={"path": str(isolated_data_root)})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data_root"] == str(isolated_data_root.resolve())
+    assert not marker.exists()
+    assert client.get("/api/onboarding/status").json()["status"] == "needs_first_key"
+
+
+def test_first_run_moves_into_a_subfolder_of_a_busy_folder(client, isolated_data_root, tmp_path, monkeypatch):
+    import time
+
+    marker = _unconfirmed_first_run(isolated_data_root, tmp_path, monkeypatch)
+    drive = tmp_path / "D"
+    drive.mkdir()
+    (drive / "photos.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", os.environ["GAME_ATELIER_DATA_ROOT"])
+    resp = client.post("/api/onboarding/data-root", json={"path": str(drive)})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["move"]["target"] == str((drive / "Cobrush").resolve())
+    from character_workflow.lib import data_root as data_root_module, data_root_move
+
+    for _ in range(100):
+        move = data_root_move.snapshot()
+        if move["phase"] in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    assert move["phase"] == "done", move
+    assert data_root_module.resolve_data_root() == (drive / "Cobrush").resolve()
+    # 标记留在原目录被删掉，也没跟着复制过去：下次启动不再问。
+    assert not marker.exists()
+    assert not (drive / "Cobrush" / ".runtime" / marker.name).exists()
+
+
 def test_post_data_root_validates_payload(client):
     resp = client.post("/api/data-root", json={})
     assert resp.status_code == 422

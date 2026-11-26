@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-/** 首启整页外框：标题、正文、底部操作。首启只剩「连接一个模型」一步，不再显示步数。 */
+/** 首启整页外框：标题、正文、底部操作（存放位置、连接一个模型两页共用）。 */
 export function OnboardingFrame({ title, children, footer }: {
   title: string;
   children: ReactNode;
