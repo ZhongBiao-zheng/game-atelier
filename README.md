@@ -4,6 +4,8 @@
 
 [![Release](https://img.shields.io/github/v/release/ZhongBiao-zheng/game-atelier?label=版本)](https://github.com/ZhongBiao-zheng/game-atelier/releases/latest) [![平台](https://img.shields.io/badge/平台-macOS%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/ZhongBiao-zheng/game-atelier/releases/latest)
 
+**简体中文** · [English](README.en.md)
+
 Cobrush 装在你自己的电脑上：在画布里摆素材、连节点，调用多家模型出图、出视频，作品和数据都存在本地。你接好的模型，开启团队网关后，同一局域网的队友不用自己配 Key 也能用；你画到一半的画布，可以共享给队友接着画。模型由你自己配置的服务商提供，Cobrush 不卖模型，也不经手你的作品。
 
 ## 快速安装
