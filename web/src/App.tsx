@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
 import { FirstRunGuide } from './pages/onboarding/FirstRunGuide';
+import { DiagnosticsExport } from './pages/settings/DiagnosticsExport';
 import { AppShell } from '@/components/AppShell';
 import { LocalConnectionGate } from '@/components/LocalConnectionGate';
 import { StartupScreen } from '@/components/StartupScreen';
@@ -20,7 +21,7 @@ export function App() {
 
 function ConnectedApp() {
   const [state, setState] = useState<OnboardingState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; canExport: boolean } | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout>>();
   const loadGeneration = useRef(0);
 
@@ -38,7 +39,7 @@ function ConnectedApp() {
             const recovering = { ...pending, restartAt: pending.restartAt ?? Date.now() };
             if (updateRecoveryExpired(recovering)) {
               savePendingUpdate(null);
-              setError(NOT_RECOVERED);
+              setError({ message: NOT_RECOVERED, canExport: e instanceof ApiError && e.status > 0 });
               return;
             }
             savePendingUpdate(recovering);
@@ -59,7 +60,10 @@ function ConnectedApp() {
             retryTimer.current = setTimeout(() => load(attempt + 1), 1000);
           } else if (attempt < STATUS_RETRY_DELAYS_MS.length) {
             retryTimer.current = setTimeout(() => load(attempt + 1), STATUS_RETRY_DELAYS_MS[attempt]);
-          } else setError(errorText(e, '暂时读不到 Atelier 的状态'));
+          } else setError({
+            message: errorText(e, '暂时读不到 Atelier 的状态'),
+            canExport: e instanceof ApiError && e.status > 0,
+          });
         });
     };
     load(0);
@@ -74,19 +78,20 @@ function ConnectedApp() {
     return cancelLoad;
   }, [reload, cancelLoad]);
 
-  if (error) return <StartupError message={error} onRetry={reload} />;
+  if (error) return <StartupError {...error} onRetry={reload} />;
   if (!state) return <StartupScreen label={readPendingUpdate() ? '重启中…' : '启动中…'} />;
 
   // 主内容第一次出现时 200ms 淡入，接住启动页；之后在引导与主界面之间切换不再重播。
   return <div className="content-reveal">{connectedView(state, reload)}</div>;
 }
 
-function StartupError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function StartupError({ message, canExport, onRetry }: { message: string; canExport: boolean; onRetry: () => void }) {
   const openLog = shellLogOpener();
   return <StartupScreen label="暂时打不开 Atelier">
     <p role="alert" className="break-words text-sm text-pretty text-muted-foreground">{message}</p>
-    <div className="flex justify-center gap-2">
+    <div className="flex flex-wrap items-center justify-center gap-2">
       {openLog && <Button variant="outline" onClick={openLog}>查看日志</Button>}
+      {canExport && <DiagnosticsExport />}
       <Button onClick={onRetry}>重试</Button>
     </div>
   </StartupScreen>;

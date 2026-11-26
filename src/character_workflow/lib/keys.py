@@ -6,18 +6,20 @@ which strips secrets, and turn-start uses `keys_for_turn_start()` (same).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
+from datetime import datetime
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_serializer, model_validator
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import _replace_with_retry, read_text_with_retry
+from character_workflow.lib.atomic_io import _replace_with_retry, atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.comfyui_schema import WorkflowInput, local_base_url
 
@@ -209,41 +211,48 @@ def _recovered_marker() -> Path:
     return data_root.config_dir() / RECOVERED_MARKER
 
 
-def recover_corrupted_keys_file() -> str | None:
-    """keys.json 解析不了 → 原文件改名备份，之后按空库继续；返回备份文件名，无事可做返回 None。
+class KeysConfigError(ValueError):
+    """读取供应商配置失败；提示不得包含 Pydantic 错误中的密钥。"""
 
-    损坏的配置没人能修：读取和保存都会失败，用户卡在首启。备份保留原文件（含密钥，留在 .config/ 内），
-    并写一个标记让界面说明一次「供应商配置损坏，已备份」；第一次成功写入供应商后标记清除。
-    """
-    path = data_root.keys_file()
-    try:
-        raw = json.loads(read_text_with_retry(path))
-    except FileNotFoundError:
-        return None
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raw = None
-    if isinstance(raw, dict):
-        return None
-    from datetime import datetime
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+class _UnreadableKeysJSON(KeysConfigError):
+    """只有损坏的 JSON 文本才由首启流程备份。"""
+
+
+def read_keys_for_onboarding() -> KeysDB:
+    """显示首次配置或备份损坏文件前，持供应商写锁复核一次。"""
+    from uuid import uuid4
+
     try:
-        _replace_with_retry(path, backup)
-    except FileNotFoundError:
-        return None  # 另一个进程刚备份过
-    marker = _recovered_marker()
-    marker.write_text(
-        json.dumps({"backup": backup.name, "at": datetime.now().isoformat(timespec="seconds")}),
-        encoding="utf-8",
-    )
-    return backup.name
+        db = read_keys_db()
+        if db.keys:
+            return db
+    except _UnreadableKeysJSON:
+        pass
+    with keys_lock():
+        try:
+            return read_keys_db()
+        except _UnreadableKeysJSON:
+            pass
+        path = data_root.keys_file()
+        now = datetime.now()
+        backup = path.with_name(f"{path.name}.corrupt-{now:%Y%m%d-%H%M%S}-{uuid4().hex}")
+        # 先记下备份名：进程突然退出时，原文件仍在，或已有提示能找到移走的原文件。
+        marker = path.with_name(RECOVERED_MARKER)
+        atomic_write_json(marker, {"backup": backup.name, "at": now.isoformat(timespec="seconds")},
+                          durable=True)
+        try:
+            _replace_with_retry(path, backup)
+        except OSError:
+            marker.unlink(missing_ok=True)
+            raise
+        return KeysDB()
 
 
 def keys_recovery_notice() -> dict | None:
     """最近一次自动备份损坏配置的记录；界面据此提示重新添加供应商。"""
     try:
-        value = json.loads(_recovered_marker().read_text(encoding="utf-8"))
+        value = json.loads(read_text_with_retry(_recovered_marker()))
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -251,18 +260,22 @@ def keys_recovery_notice() -> dict | None:
 
 def read_keys_db() -> KeysDB:
     path = data_root.keys_file()
-    if not path.exists():
-        return KeysDB()
     try:
         raw = json.loads(read_text_with_retry(path))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raw = None
-    if not isinstance(raw, dict):
-        # 不取 keys_lock：调用方常已持锁（锁不可重入）。备份前会再读一遍确认仍是坏的。
-        recover_corrupted_keys_file()
+    except FileNotFoundError:
         return KeysDB()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise _UnreadableKeysJSON("供应商配置内容损坏，请重新打开 Atelier 以备份原文件。") from None
+    invalid_structure = "供应商配置格式无法识别，原文件已保留。请检查数据目录中的 .config/keys.json。"
+    if not isinstance(raw, dict) or "keys" not in raw:
+        raise KeysConfigError(invalid_structure)
     _migrate_legacy_providers(raw)
-    db = KeysDB.model_validate(raw)
+    try:
+        db = KeysDB.model_validate(raw)
+    except ValidationError:
+        raise KeysConfigError(invalid_structure) from None
+    if db.version != 1:
+        raise KeysConfigError(invalid_structure)
     _backfill_model_protocols(db)
     return db
 
@@ -338,16 +351,29 @@ def write_keys_db(db: KeysDB) -> None:
     path = data_root.keys_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     # mkstemp 创建时即为 0600，原子替换让不持锁的模型目录读取也只看到完整配置。
-    fd, temporary = tempfile.mkstemp(prefix=".keys-", suffix=".tmp", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix="keys.", suffix=".tmp", dir=path.parent)
     tmp = Path(temporary)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            _restrict_permissions(tmp)
             stream.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
-        _restrict_permissions(tmp)
-        _replace_with_retry(tmp, path)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            _replace_with_retry(tmp, path)
+        except PermissionError as error:
+            if sys.platform != "win32" or getattr(error, "winerror", None) != 5 or not path.is_file():
+                raise
+            from character_workflow.lib.win_acl import repair_legacy_keys_acl
+            if not repair_legacy_keys_acl(path):
+                raise
+            _replace_with_retry(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
-    _recovered_marker().unlink(missing_ok=True)
+    try:
+        _recovered_marker().unlink(missing_ok=True)
+    except OSError:
+        logging.getLogger(__name__).warning("供应商配置已保存，旧恢复提示暂时无法清理")
     # 引用集合只在这里变：每次写完顺手清掉没人引用、过了宽限期的图标文件（调用方已持 keys_lock）。
     from character_workflow.lib import provider_icons
     provider_icons.prune(provider_icons.referenced_shas([k.icon for k in db.keys]))
@@ -355,11 +381,8 @@ def write_keys_db(db: KeysDB) -> None:
 
 def _restrict_permissions(path: Path) -> None:
     if sys.platform == "win32":
-        try:
-            from character_workflow.lib.win_acl import restrict_keys_file_windows  # type: ignore  # noqa: E501
-            restrict_keys_file_windows(path)
-        except ImportError:
-            pass
+        from character_workflow.lib.win_acl import restrict_keys_file_windows
+        restrict_keys_file_windows(path)
     else:
         os.chmod(path, 0o600)
 
@@ -477,13 +500,14 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
     return None
 
 
-def keys_for_api() -> list[dict]:
+def keys_for_api(db: KeysDB | None = None) -> list[dict]:
     from character_workflow.lib import generation_pricing
     from character_workflow.lib.callers.openai_text import text_callable
     from character_workflow.lib.http_protocols import declared_for
     from character_workflow.lib.llm_protocols import detect
 
-    db = read_keys_db()
+    if db is None:
+        db = read_keys_db()
     out = []
     for k in db.keys:
         d = k.model_dump()

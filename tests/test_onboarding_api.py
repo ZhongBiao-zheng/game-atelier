@@ -23,6 +23,48 @@ def test_onboarding_status_returns_bootstrap_check_payload(client):
     assert "platform" in data
 
 
+@pytest.mark.parametrize("outdated", ["needs_first_key", "needs_keys_repair"])
+def test_onboarding_rechecks_before_reporting_first_key(client, isolated_data_root, monkeypatch, outdated):
+    from character_workflow.lib import keys
+    from viewer_server import routes
+
+    keys.add_key(keys.KeySpec(alias="saved", provider="custom", created_at="2026-10-01"))
+    monkeypatch.setattr(routes, "_bootstrap_check", lambda *_: {
+        "status": outdated, "data_root": str(isolated_data_root),
+    })
+    state = client.get("/api/onboarding/status").json()
+    assert state["status"] == state["next_action"] == "ready"
+    assert state["keys_recovered"] is None
+    assert not list((isolated_data_root / ".config").glob("keys.json.corrupt-*"))
+
+
+@pytest.mark.parametrize(("contents", "expected_status"), [
+    (b"broken.", 200),
+    (b'{"keys":[{"access_key":"private-test-value"}]}', 409),
+])
+def test_server_starts_and_diagnostics_available_with_bad_keys(isolated_data_root, contents, expected_status):
+    from tests.test_bootstrap import _make_fake_venv
+
+    _make_fake_venv(isolated_data_root)
+    path = isolated_data_root / ".config" / "keys.json"
+    path.write_bytes(contents)
+    with TestClient(base_url="http://127.0.0.1", app=build_app()) as live:
+        assert live.get("/").status_code == 200
+        assert live.get("/api/diagnostics/export").status_code == 200
+        response = live.get("/api/onboarding/status")
+        assert response.status_code == expected_status, response.text
+        if expected_status == 200:
+            state = response.json()
+            assert state["status"] == "needs_first_key"
+            assert path.with_name(state["keys_recovered"]["backup"]).read_bytes() == contents
+            assert not path.exists()
+        else:
+            assert "配置格式无法识别" in response.json()["detail"]
+            assert "private-test-value" not in response.text
+            assert path.read_bytes() == contents
+            assert not list(path.parent.glob("keys.json.corrupt-*"))
+
+
 def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     # 目标已是 Atelier 数据目录（有 .config/）→ 直接切换指针，不复制。
     new_root = tmp_path / "switched-root"

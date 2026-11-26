@@ -33,6 +33,22 @@ describe('EvoLink key preset', () => {
 
 
 describe('供应商弹窗', () => {
+  it.each(['create', 'edit'] as const)('offers a diagnostic download when %s fails', async mode => {
+    const error = new Error('无法保存供应商');
+    if (mode === 'edit') vi.mocked(patchKey).mockRejectedValueOnce(error);
+    else vi.mocked(createKey).mockRejectedValueOnce(error);
+    render(<KeyForm mode={mode} presetId="tuzi" initial={{ alias: 'Tuzi', provider: 'custom',
+      base_url: 'https://api.tu-zi.com', access_key: 'fixture', models: [] }}
+      onCreated={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.queryByRole('link', { name: '导出诊断日志' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(error.message);
+    const download = within(alert).getByRole('link', { name: '导出诊断日志' });
+    expect(download).toHaveAttribute('href', '/api/diagnostics/export');
+    expect(download).toHaveAttribute('download');
+  });
+
   it('opens the Tuzi preset directly and saves its name and address', async () => {
     vi.mocked(createKey).mockResolvedValue({ alias: 'Tuzi' });
     render(<KeyForm presetId="tuzi" onCreated={vi.fn()} onCancel={vi.fn()} />);

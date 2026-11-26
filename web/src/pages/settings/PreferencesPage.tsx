@@ -6,6 +6,7 @@ import { fetchConfig, updateConfig } from '@/api/config';
 import { changeDataRoot, fetchDataRoot, type DataRootMove } from '@/api/onboarding';
 import { errorText } from '@/lib/errorText';
 import { ProfileSection } from './ProfileSection';
+import { DiagnosticsExport } from './DiagnosticsExport';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
 import { UpdateSettings } from '@/components/UpdateControl';
@@ -139,6 +140,10 @@ export function PreferencesPage() {
         <div className="flex items-center justify-between gap-3 px-4.5 py-3.5">
           <span className="text-sm">首页展示画布出图</span>
           <Switch checked={showCanvasOnHome} aria-label="首页展示画布出图" disabled={togglingStudio} onCheckedChange={() => void toggleShowStudioOnHome()} />
+        </div>
+        <div className="flex items-center justify-between gap-3 px-4.5 py-3.5">
+          <span className="text-sm">故障排查</span>
+          <DiagnosticsExport />
         </div>
       </div>
       {/* 报错展开出现，不把下面的分组一下顶开。 */}

@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
 import { aliasTaken, defaultAliasBase, nextFreeAlias, type FormIssue, toIssue } from './keyFormNaming';
+import { DiagnosticsExport } from './DiagnosticsExport';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1160,6 +1161,7 @@ function IssueText({ issue, className }: { issue: FormIssue | null; className?: 
     {issue.raw && <Disclosure summary="查看技术详情">
       <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{issue.raw}</pre>
     </Disclosure>}
+    <DiagnosticsExport compact />
   </div>;
 }
 

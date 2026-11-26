@@ -622,3 +622,36 @@ def test_key_enabled_round_trip_retains_management_data(client):
         assert row["enabled"] is enabled
         assert row["models"]
         assert keys.find_by_alias("lov").access_key == "ak"
+
+
+@pytest.mark.parametrize("provider", ["custom", "openrouter"])
+def test_provider_disk_write_errors_keep_previous_configuration(client, monkeypatch, provider):
+    import errno
+    from character_workflow.lib import data_root
+
+    saved = {**_make_payload("first"), "provider": provider}
+    models = [{"name": model, "id": model, "modality": "image"} for model in (
+        "gemini-3.1-flash-lite-image", "gpt-image-2.5-1k", "gpt-image-2.6",
+        "gpt-image-2.6-1k", "nano-banana-2-2k", "qwen-image-3.0",
+    )]
+    assert client.post("/api/keys", json=saved).status_code == 201
+    before = data_root.keys_file().read_bytes()
+
+    def out_of_space(*_):
+        raise OSError(errno.ENOSPC, "private-path-that-must-not-be-returned")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(keys, "_replace_with_retry", out_of_space)
+        for response in [
+            client.post("/api/keys", json={**_make_payload("second"), "provider": provider}),
+            client.patch("/api/keys/first", json={"models": models}),
+        ]:
+            assert response.status_code == 503
+            assert "磁盘空间不足" in response.json()["detail"]
+            assert "private-path" not in response.text
+    assert data_root.keys_file().read_bytes() == before
+    assert not list(data_root.keys_file().parent.glob("keys.*.tmp"))
+    assert client.patch("/api/keys/first", json={"models": models}).status_code == 200
+    stored = keys.find_by_alias("first")
+    assert stored.access_key == saved["access_key"]
+    assert [model.id for model in stored.models] == [model["id"] for model in models]

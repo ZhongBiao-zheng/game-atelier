@@ -604,7 +604,8 @@ function createWindow() {
   wc.on('context-menu', (_event, params) => contextMenu(win, params));
   if (!MAC) wc.on('before-input-event', windowsShortcut);
   wc.on('render-process-gone', (_event, details) => {
-    log(`page process gone: ${details.reason}`);
+    const exitCode = Number.isInteger(details.exitCode) ? ` (exit ${details.exitCode})` : '';
+    log(`page process gone: ${details.reason}${exitCode}`);
     if (!state.quitting) wc.reload();
   });
   // Windows: the user is logging off or shutting down.

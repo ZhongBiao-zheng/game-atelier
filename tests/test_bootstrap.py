@@ -149,6 +149,47 @@ def _load_bootstrap_module():
     return mod
 
 
+def test_startup_and_server_read_custom_root_during_rename_gap(tmp_path, monkeypatch):
+    from character_workflow.lib import atomic_io, data_root
+
+    mod = _load_bootstrap_module()
+    _make_fake_venv(tmp_path)
+    cfg = tmp_path / "data-root"
+    cfg.write_text(str(tmp_path), encoding="utf-8")
+    key_file = tmp_path / ".config" / "keys.json"
+    key_file.write_text('{"keys": [{"alias": "saved"}]}', encoding="utf-8")
+    for path in (cfg, key_file):
+        path.with_suffix(".in-flight.tmp").touch()
+    monkeypatch.delenv("GAME_ATELIER_DATA_ROOT")
+    monkeypatch.setattr(mod, "global_config_file", lambda: cfg)
+    monkeypatch.setattr(data_root, "_global_config_file", lambda: cfg)
+    monkeypatch.setattr(mod.shutil, "which", lambda _: "uv")
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
+    pending = {cfg, key_file}
+    exists, read = Path.exists, Path.read_text
+
+    def temporarily_missing(path, *args, **kwargs):
+        if path in pending:
+            pending.remove(path)
+            raise FileNotFoundError()
+        return read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", lambda path: False if path in {cfg, key_file} else exists(path))
+    monkeypatch.setattr(Path, "read_text", temporarily_missing)
+    assert mod.check()["status"] == "ready"
+    pending.add(cfg)
+    assert data_root.resolve_data_root() == tmp_path
+    assert not pending
+
+
+def test_bootstrap_check_with_stdlib_only(tmp_path):
+    env = {**os.environ, "GAME_ATELIER_DATA_ROOT": str(tmp_path)}
+    result = subprocess.run([sys.executable, "-I", "-S", str(BOOTSTRAP), "--check", "--cached-update"],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["data_root"] == str(tmp_path)
+
+
 def test_check_needs_web_build_when_dist_missing(tmp_path, monkeypatch):
     """前端产物缺失先于一切：check() 第一位返回 needs_web_build，不启 server。"""
     mod = _load_bootstrap_module()
@@ -303,6 +344,29 @@ def test_init_data_root_writes_global_config(tmp_path):
     matches = list(cfg_home.rglob("data-root"))
     assert len(matches) == 1, f"expected one data-root config file, got {matches}"
     assert matches[0].read_text().strip() == str(target.resolve())
+
+
+def test_init_data_root_keeps_old_pointer_on_write_error_and_can_retry(tmp_path, monkeypatch):
+    from character_workflow.lib import atomic_io
+
+    mod = _load_bootstrap_module()
+    cfg = tmp_path / "global" / "data-root"
+    monkeypatch.setattr(mod, "global_config_file", lambda: cfg)
+    old, target = tmp_path / "old", tmp_path / "new"
+    assert mod.init_data_root(old) == 0
+
+    def deny_replace(_temporary, _destination):
+        raise PermissionError("busy")
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(atomic_io, "_replace_with_retry", deny_replace)
+        with pytest.raises(PermissionError):
+            mod.init_data_root(target)
+    assert cfg.read_text(encoding="utf-8").strip() == str(old)
+    assert not list(cfg.parent.glob("*.tmp"))
+    for _ in range(2):
+        assert mod.init_data_root(target) == 0
+        assert cfg.read_text(encoding="utf-8").strip() == str(target)
 
 
 def test_run_fails_when_no_data_root(tmp_path):

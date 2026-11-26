@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import * as desktopShell from '@/lib/desktopShell';
 
 import { App } from './App';
 
@@ -22,6 +23,30 @@ afterEach(() => {
 });
 
 describe('App onboarding gate', () => {
+  it.each([true, false])('offers diagnostics only when the service responds (online=%s)', async online => {
+    vi.useFakeTimers();
+    const openLog = vi.fn();
+    vi.spyOn(desktopShell, 'shellLogOpener').mockReturnValue(openLog);
+    const network = vi.fn(async () => {
+      if (!online) throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({ detail: '供应商配置版本无法识别' }), { status: 409 });
+    });
+    vi.stubGlobal('fetch', network);
+    await act(async () => { render(<App />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(screen.getByRole('alert')).toHaveTextContent(online ? '供应商配置版本无法识别' : '连不上 Atelier 服务');
+    const download = screen.queryByRole('link', { name: '导出诊断日志' });
+    if (online) {
+      expect(download).toHaveAttribute('href', '/api/diagnostics/export');
+      expect(download).toHaveAttribute('download');
+    } else expect(download).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看日志' }));
+    expect(openLog).toHaveBeenCalledOnce();
+    const calls = network.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(network).toHaveBeenCalledTimes(calls + 1);
+  });
+
   it('keeps update recovery beyond 30 seconds and follows a rollback instance before onboarding is ready', async () => {
     vi.useFakeTimers();
     const { updateNavigation } = await import('@/api/update');

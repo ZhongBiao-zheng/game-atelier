@@ -94,6 +94,9 @@ describe('SettingsPage', () => {
     const path = await screen.findByLabelText('数据目录');
     await waitFor(() => expect(path).toHaveTextContent('/Users/me/game-atelier'));
     const rootSection = within(path.closest('section') as HTMLElement);
+    const download = screen.getByRole('link', { name: '导出诊断日志' });
+    expect(download).toHaveAttribute('href', '/api/diagnostics/export');
+    expect(download).toHaveAttribute('download');
 
     // 选完文件夹直接更换（目标已是 Atelier 数据目录时服务端直接切换），不再有「保存」这一步。
     fireEvent.click(rootSection.getByRole('button', { name: /更换文件夹/ }));

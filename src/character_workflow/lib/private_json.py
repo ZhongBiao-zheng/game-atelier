@@ -18,20 +18,26 @@ def _windows_acl(path: Path, *, restrict: bool = False) -> None:
     try:
         _apply_windows_acl(path, restrict)
     except pywintypes.error as error:
-        raise OSError(error.winerror, f"{error.funcname}: {error.strerror}") from error
+        raise OSError(None, f"{error.funcname}: {error.strerror}", None, error.winerror) from error
 
 
-def _apply_windows_acl(path: Path, restrict: bool) -> None:
-    import ntsecuritycon
+def windows_user_sid():
     import win32api
     import win32con
     import win32security
 
     token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
     try:
-        owner = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+        return win32security.GetTokenInformation(token, win32security.TokenUser)[0]
     finally:
         token.Close()
+
+
+def _apply_windows_acl(path: Path, restrict: bool) -> None:
+    import ntsecuritycon
+    import win32security
+
+    owner = windows_user_sid()
     if restrict:
         dacl = win32security.ACL()
         dacl.AddAccessAllowedAce(win32security.ACL_REVISION, ntsecuritycon.FILE_ALL_ACCESS, owner)

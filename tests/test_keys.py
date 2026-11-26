@@ -1,3 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
+
 import pytest
 
 from character_workflow.lib import data_root, keys
@@ -12,6 +16,93 @@ def test_read_empty_when_file_missing(isolated_data_root):
     assert db.version == 1
     assert db.default_alias is None
     assert db.keys == []
+
+
+def test_rename_gap_during_add_preserves_existing_provider(isolated_data_root, monkeypatch):
+    from character_workflow.lib import atomic_io
+
+    saved = keys.KeySpec(alias="saved", provider="custom", created_at="2026-10-01")
+    keys.add_key(saved)
+    path = data_root.keys_file()
+    pending = path.with_name("keys.pending.tmp")
+    pending.touch()
+    exists, read = Path.exists, Path.read_text
+    attempts = 0
+
+    def interrupted_read(target, *args, **kwargs):
+        nonlocal attempts
+        if target == path:
+            attempts += 1
+            if attempts == 1:
+                raise FileNotFoundError()
+        return read(target, *args, **kwargs)
+
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
+    monkeypatch.setattr(Path, "exists", lambda target: False if target == path else exists(target))
+    monkeypatch.setattr(Path, "read_text", interrupted_read)
+    keys.add_key(saved.model_copy(update={"alias": "added"}))
+    assert [key.alias for key in keys.read_keys_db().keys] == ["saved", "added"]
+    assert attempts >= 2
+
+
+@pytest.mark.parametrize("contents", [b"broken", b'\xff', b"null", b"[]", b'{"version":2,"keys":[]}'])
+def test_bad_config_blocks_ordinary_write_without_moving_original(isolated_data_root, contents):
+    path = data_root.keys_file()
+    path.write_bytes(contents)
+    with pytest.raises(keys.KeysConfigError):
+        keys.add_key(keys.KeySpec(alias="new", provider="custom", created_at="2026-10-01"))
+    assert path.read_bytes() == contents
+    assert not list(path.parent.glob("keys.json.corrupt-*"))
+    assert keys.keys_recovery_notice() is None
+
+
+def test_onboarding_rechecks_bad_json_after_writer_finishes(isolated_data_root, monkeypatch):
+    path = data_root.keys_file()
+    path.write_bytes(b"broken")
+    writer_lock = keys.keys_lock()
+    about_to_lock = Event()
+    original_lock = keys.keys_lock
+
+    def tracked_lock():
+        about_to_lock.set()
+        return original_lock()
+
+    monkeypatch.setattr(keys, "keys_lock", tracked_lock)
+    restored = keys.KeySpec(alias="restored", provider="custom", created_at="2026-10-01")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with writer_lock:
+            future = pool.submit(keys.read_keys_for_onboarding)
+            assert about_to_lock.wait(5)
+            keys.write_keys_db(keys.KeysDB(keys=[restored]))
+        assert future.result(timeout=5).keys == [restored]
+    assert keys.read_keys_db().keys == [restored]
+    assert not list(path.parent.glob("keys.json.corrupt-*"))
+    assert keys.keys_recovery_notice() is None
+
+
+def test_backup_notice_write_error_preserves_original_for_retry(isolated_data_root, monkeypatch):
+    path = data_root.keys_file()
+    path.write_bytes(b"broken")
+
+    def fail_notice(*_args, **_kwargs):
+        raise PermissionError("busy")
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(keys, "atomic_write_json", fail_notice)
+        with pytest.raises(PermissionError):
+            keys.read_keys_for_onboarding()
+    assert path.read_bytes() == b"broken"
+    assert not list(path.parent.glob("keys.json.corrupt-*"))
+    assert keys.read_keys_for_onboarding().keys == []
+    first = path.with_name(keys.keys_recovery_notice()["backup"])
+    assert first.read_bytes() == b"broken"
+
+    path.write_bytes(b"another broken file")
+    assert keys.read_keys_for_onboarding().keys == []
+    second = path.with_name(keys.keys_recovery_notice()["backup"])
+    assert second != first
+    assert first.read_bytes() == b"broken"
+    assert second.read_bytes() == b"another broken file"
 
 
 def test_write_and_read_roundtrip(isolated_data_root):

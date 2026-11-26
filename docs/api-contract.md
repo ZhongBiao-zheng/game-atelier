@@ -1629,6 +1629,8 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 ## 首次启动引导（2026-11-17）
 
 - `GET /onboarding/status` 在 bootstrap 结果上多带 `onboarding_skipped: bool` 与 `keys_recovered: {backup, at} | null`：`needs_first_key` 且未跳过（或刚备份过损坏配置）时前端显示「连接一个模型」整页，跳过后进首页。服务端把 `needs_data_root` 静默补成默认目录 `~/game-atelier`、把 `needs_keys_repair` 的 keys.json 改名备份为 `keys.json.corrupt-<时间>` 后按 `needs_first_key` 返回，前端只见 `ready | needs_first_key`。更新信息只读缓存，源码版在后台联网刷新缓存。
+- 首启遇到损坏的供应商 JSON 时，在 `keys.lock` 内复读确认后备份原始字节。对于可解析但版本或结构不受支持的配置，保留原件，`GET /onboarding/status` 及供应商读写接口返回 409。
+- 新增或编辑供应商时遇到本机文件权限、文件占用或空间不足，接口返回 503 和相应的中文说明。表单可导出诊断日志。
 - `GET /data-root` → `{data_root, move}`；`POST /data-root {path}` 更换数据目录（规格 D1）：目标与当前相同不动；目标不存在或为空 → 后台复制（跳过 `.venv/` 与 `.runtime/` 下本次服务的运行文件，JSON 里的旧目录绝对路径前缀改写为新目录）、逐文件校验后切换指针，原目录保留；目标已有 `.config/` 或 `canvases/` → 直接切换；其他非空目录、当前目录的上级或子目录 → 409。有进行中的生成时 409。`move = {phase: idle|copying|verifying|done|failed, mode: copy|switch|null, source, target, total_bytes, copied_bytes, total_files, copied_files, error, detail, started_at, finished_at}`；复制期间除 `/api/connection/*` 外的写请求一律 503 `code=moving_data_root`（未受理，可原样重发）。
 - `GET /ui-prefs` → `{prefs}`；`PUT /ui-prefs/{key} {value}`（`value: null` 删除）。存 `.config/ui-prefs.json`，键名 `[a-z0-9][a-z0-9_.-]{0,63}`，整份 ≤ 64 KiB。当前用到 `announcements-seen: string[]`、`changelog-seen: string`；不随端口变化丢失。
 - `POST /onboarding/events`（204）：本机度量，只收枚举。`event ∈ guide_opened | path_selected | step_opened | models_detected | key_probed | provider_saved | skipped | closed`；可选 `source ∈ first_run | model_chip | providers`、`path ∈ key | chatgpt | comfyui | gateway | other`、`vendor ∈ tuzi | tokendance`、`step ∈ signup | topup | key_page | key_form`、`count`（0–10000）、`result ∈ ok | invalid | unknown`。其他字段或取值返回 422。`skipped` 同时写入跳过时间。
@@ -1704,3 +1706,12 @@ ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保
 节点可选的 `collab_run` 存放任务编号、来源节点、执行渠道、发起人和状态。状态含 `pending`、`done`、`failed`、`interrupted`。用量按实际执行方记录。房主的画布任务记录 `JobParams.collab_guest_name` 和 `collab_guest_client`，访客本机执行的任务记录 `collab_source_canvas`。
 
 访客生成完成但回传未获确认时，本机把成功的候选原件和冻结参数保存至「未回传的生成结果」画布。多张候选按原顺序组成可展开的结果组，任务部分成功时保留其中已生成的图片。
+
+
+### 本机错误诊断导出
+
+本机界面通过 `GET /api/diagnostics/export` 下载 UTF-8 JSON 附件，文件名为 `atelier-diagnostics-YYYYMMDD.json`。接口受本机浏览器会话保护。
+
+报告包含 `schema_version`、UTC 导出时间 `exported_at`、导出时的应用版本 `app_version`、系统类别 `os` 和 `events`。每条事件包含 UTC 时间 `time` 与类别 `event`。其中 `traceback`、`key_read_failed` 和 `key_save_failed` 记录异常类型 `exception`、可能为空的 `errno` 和 `winerror`，以及最多 6 个产品源码相对位置 `locations: [{file, line}]`。报告从本机当前服务日志和最近 3 份按日轮转的日志读取，每个文件最多取末尾 1 MiB，共保留最后 100 条事件。没有匹配记录时返回空数组。
+
+官方 Windows 和 macOS 桌面安装另外读取同一运行环境下固定 `shell.log` 的末尾 1 MiB。`desktop_renderer_gone` 记录已知异常退出原因 `reason` 和可用的数值 `exit_code`，旧版本缺少退出码时返回 `null`。`desktop_server_restart` 记录外壳检测到服务停止后尝试重启的时间。来源代码模式和便携包只导出服务诊断。

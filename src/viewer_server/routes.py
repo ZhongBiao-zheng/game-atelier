@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import inspect
 import json
 import logging
@@ -14,7 +15,7 @@ import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -837,10 +838,11 @@ def onboarding_status() -> dict:
         _init_data_root(str(default_root))
         onboarding_metrics.record_data_root_set(default_root.resolve())
         body = _bootstrap_check("--cached-update")
-    if body.get("status") == "needs_keys_repair":
-        # 损坏的 keys.json 没人能修：备份后按空库继续，首启引导重新添加。
-        keys.recover_corrupted_keys_file()
-        body["status"] = "needs_first_key"
+    if body.get("status") in {"needs_first_key", "needs_keys_repair", "ready"}:
+        with _provider_config_io(read_only=True):
+            db = keys.read_keys_for_onboarding()
+        body["status"] = "ready" if db.keys else "needs_first_key"
+        body["next_action"] = "ready" if db.keys else "添加第一把供应商 Key"
     if body.get("runtime_mode") == "source" and not os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
         _refresh_update_cache()
     root = body.get("data_root")
@@ -1047,8 +1049,9 @@ def announcements() -> dict:
 
 @router.get("/keys")
 def list_keys() -> dict:
-    db = keys.read_keys_db()
-    return {"keys": keys.keys_for_api(), "default_alias": db.default_alias}
+    with _provider_config_io(read_only=True):
+        db = keys.read_keys_db()
+        return {"keys": keys.keys_for_api(db), "default_alias": db.default_alias}
 
 
 def _route_payload(route: model_routes.ModelRoute) -> dict:
@@ -1180,6 +1183,35 @@ def _sync_new_model_prices(provider: str) -> None:
         start_missing_sync()
 
 
+@contextmanager
+def _provider_config_io(*, read_only: bool = False):
+    from viewer_server import diagnostics
+
+    try:
+        yield
+    except keys.KeysConfigError as error:
+        diagnostics.record_key_config_error(error, read_only=read_only)
+        raise HTTPException(409, str(error)) from None
+    except OSError as error:
+        diagnostics.record_key_config_error(error, read_only=read_only)
+        winerror = getattr(error, "winerror", None)
+        if winerror in {32, 33}:
+            reason = "配置文件正被占用，请稍后重试"
+        elif error.errno == errno.ENOSPC or winerror == 112:
+            reason = "数据目录磁盘空间不足，请腾出空间后重试"
+        elif isinstance(error, PermissionError) or winerror == 5 or error.errno == errno.EROFS:
+            reason = "请检查当前系统用户对数据目录的读写权限"
+        else:
+            reason = "请检查数据目录是否可用"
+        action = "读取" if read_only else "保存"
+        detail = f"无法{action}本机供应商配置，{reason}"
+        if winerror is not None:
+            detail += f"（WinError {winerror}）"
+        elif error.errno is not None:
+            detail += f"（errno {error.errno}）"
+        raise HTTPException(503, detail) from None
+
+
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
@@ -1212,7 +1244,8 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         detail = "ChatGPT 订阅配置无效" if payload.provider == "chatgpt" else str(e)
         raise HTTPException(422, detail) from e
     try:
-        keys.add_key(spec)
+        with _provider_config_io():
+            keys.add_key(spec)
     except keys.DuplicateAliasError:
         raise HTTPException(
             409, f"名称「{payload.alias}」已被另一个供应商使用：换个名称，或直接编辑那一个"
@@ -1227,7 +1260,8 @@ def create_key(payload: _KeyCreatePayload) -> dict:
 @router.patch("/keys/{alias}")
 def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     patch_data = {k: v for k, v in payload.model_dump().items() if v is not None}
-    stored = keys.find_by_alias(alias)
+    with _provider_config_io():
+        stored = keys.find_by_alias(alias)
     if stored and stored.provider == "comfyui" and "models" in patch_data:
         raise HTTPException(422, "请通过工作流编辑修改 ComfyUI 模型")
     if stored and payload.models is not None:
@@ -1249,7 +1283,8 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     if "access_key" in patch_data and not str(patch_data["access_key"]).strip():
         raise HTTPException(422, "供应商密钥不能为空")
     try:
-        keys.patch_key(alias, patch_data)
+        with _provider_config_io():
+            keys.patch_key(alias, patch_data)
     except keys.NoSuchAliasError:
         raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）") from None
     except ValidationError as error:

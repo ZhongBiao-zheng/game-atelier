@@ -6,7 +6,7 @@ from pathlib import Path
 
 import platformdirs
 
-from character_workflow.lib.atomic_io import atomic_write_text
+from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_retry
 
 _APP_NAME = "game-atelier"
 _ENV_VAR = "GAME_ATELIER_DATA_ROOT"
@@ -19,11 +19,9 @@ def _global_config_file() -> Path:
 def resolve_data_root() -> Path:
     if env := os.environ.get(_ENV_VAR):
         return Path(env).expanduser().resolve()
-    cfg = _global_config_file()
-    if cfg.exists():
-        text = cfg.read_text(encoding="utf-8").strip()
-        if text:
-            return Path(text).expanduser().resolve()
+    text = (read_global_config() or "").strip()
+    if text:
+        return Path(text).expanduser().resolve()
     return (Path.home() / "game-atelier").resolve()
 
 
@@ -92,7 +90,7 @@ def agent_credential_file() -> Path:
 def read_global_config() -> str | None:
     """全局 data-root 配置文件的原文；没有文件时 None（换目录失败时按它原样退回）。"""
     try:
-        return _global_config_file().read_text(encoding="utf-8")
+        return read_text_with_retry(_global_config_file())
     except FileNotFoundError:
         return None
 

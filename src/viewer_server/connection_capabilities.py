@@ -12,6 +12,7 @@ GET /api/update/result
 POST /api/update/check
 POST /api/update/apply
 POST /api/update/cancel
+GET /api/diagnostics/export
 GET /api/jobs
 GET /api/jobs/{job_id}
 GET /api/config
@@ -279,6 +280,7 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/diagnostics/export",
     "/api/gateway-shares", "/api/gateway-shares/{library_id}",
     "/api/gateway/keys/{key_id}/reset", "/api/gateway/providers/{alias}/admin/keys/{key_id}/reset",
     "/api/team-library-gateway-share", "/api/team-library-gateway-share/{library_id}",

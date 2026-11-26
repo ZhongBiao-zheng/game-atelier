@@ -29,6 +29,9 @@ ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 
 # Plugin directory == repo root (this file lives in scripts/).
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
+if str(PLUGIN_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(PLUGIN_DIR / "src"))
+from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_retry  # noqa: E402
 
 
 def is_bundle() -> bool:
@@ -73,9 +76,6 @@ def select_bundle_version(root: Path) -> Path:
         payload = bundle_version(root, version)
         if payload is not None:
             if pointer == "last-good":
-                # Use the existing Windows-aware atomic replacement implementation.
-                sys.path.insert(0, str(PLUGIN_DIR / "src"))
-                from character_workflow.lib.atomic_io import atomic_write_text
                 atomic_write_text(root / "current", version + "\n")
             return payload
     raise ValueError("安装包版本目录不完整，请重新下载安装包。")
@@ -272,12 +272,11 @@ def global_config_file() -> Path:
 def resolve_data_root() -> Path | None:
     if env := os.environ.get(ENV_VAR):
         return Path(env).expanduser().resolve()
-    cfg = global_config_file()
-    if cfg.exists():
-        text = cfg.read_text(encoding="utf-8").strip()
-        if text:
-            return Path(text).expanduser().resolve()
-    return None
+    try:
+        text = read_text_with_retry(global_config_file()).strip()
+    except FileNotFoundError:
+        return None
+    return Path(text).expanduser().resolve() if text else None
 
 
 def effective_data_root() -> Path:
@@ -580,30 +579,24 @@ def check() -> dict:
         }
 
     keys_file = data_root / ".config" / "keys.json"
-    if not keys_file.exists():
-        return {
-            "status": "needs_first_key",
-            "data_root": str(data_root),
-            "uv_path": uv_path,
-            "venv_python": str(venv_py),
-            "platform": sys.platform,
-            "next_action": "添加第一把图像服务 key（CC 向导问用户）",
-        }
-
     try:
-        payload = json.loads(keys_file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        payload = json.loads(read_text_with_retry(keys_file))
+    except FileNotFoundError:
+        payload = {"keys": []}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        payload = None
+
+    keys = payload.get("keys") if isinstance(payload, dict) else None
+    if not isinstance(keys, list):
         return {
             "status": "needs_keys_repair",
             "data_root": str(data_root),
             "uv_path": uv_path,
             "venv_python": str(venv_py),
             "platform": sys.platform,
-            "stderr": f"keys.json 解析失败: {e}",
-            "next_action": "手动修复 keys.json 或删除后重新添加 key",
+            "next_action": "打开 Atelier 检查供应商配置",
         }
 
-    keys = payload.get("keys") if isinstance(payload, dict) else None
     if not keys:
         return {
             "status": "needs_first_key",
@@ -727,8 +720,7 @@ def init_data_root(target: Path) -> int:
         memory_file.write_text(_MEMORY_TEMPLATE, encoding="utf-8")
 
     cfg = global_config_file()
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(str(resolved) + "\n", encoding="utf-8")
+    atomic_write_text(cfg, str(resolved) + "\n")
 
     print(json.dumps({
         "status": "ok",
