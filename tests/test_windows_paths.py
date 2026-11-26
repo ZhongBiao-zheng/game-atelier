@@ -81,7 +81,10 @@ def test_provider_save_in_modify_only_directory_replaces_legacy_file(isolated_da
 
     def restrict(item, mask):
         acl = win32security.ACL()
-        acl.AddAccessAllowedAce(win32security.ACL_REVISION, mask, sid)
+        # Keep the directory's ordinary files (including keys.lock) writable.
+        # Only the legacy credentials below get an explicit read/write-only ACL.
+        inheritance = win32security.OBJECT_INHERIT_ACE | win32security.CONTAINER_INHERIT_ACE if item.is_dir() else 0
+        acl.AddAccessAllowedAceEx(win32security.ACL_REVISION, inheritance, mask, sid)
         flags = win32security.DACL_SECURITY_INFORMATION | win32security.PROTECTED_DACL_SECURITY_INFORMATION
         win32security.SetNamedSecurityInfo(str(item), win32security.SE_FILE_OBJECT, flags, None, None, acl, None)
 
