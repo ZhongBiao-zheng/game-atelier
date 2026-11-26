@@ -1,3 +1,5 @@
+import { copySharedNodes, reproduceFrozen } from '@/api/collabTransfer';
+import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import { pluginInputsFromDocument } from '@/plugin-host/inputs';
@@ -42,22 +44,17 @@ import {
   cancelCanvasRun,
   resumeCanvasMjEdit,
   canvasDownloadUrl,
-  canvasMediaUrl,
   createCanvasReversePromptConfig,
   dismissCanvasCandidate,
-  getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
   renameCanvasProject,
   discardEmptyCanvasProject,
   updateCanvasCategories,
   replaceCanvasNodeMedia,
-  pasteIntoCanvas,
-  reproduceIntoCanvas,
   runCanvasMediaOperation,
   getCanvasMattingModel,
   downloadCanvasMattingModel,
-  saveCanvasDocument,
   submitCanvasAngleRun,
   submitCanvasLayerDecomposition,
   submitCanvasUpscaleRun,
@@ -109,6 +106,9 @@ import {
   type CanvasGenerationPreferencesTab,
 } from '@/components/canvas/CanvasGenerationPreferencesDialog';
 import { ApiError } from '@/api/http';
+import { EditorSharedStatus } from '@/components/canvas/SharedCanvasList';
+import { SharedCanvasView } from './canvas/SharedCanvasView';
+import { localCanvasTransport, type CanvasTransport } from './canvas/canvasTransport';
 import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
 import { CanvasInpaintEditor } from '@/components/canvas/CanvasInpaintEditor';
 import { CanvasOutpaintEditor } from '@/components/canvas/CanvasOutpaintEditor';
@@ -453,6 +453,7 @@ interface ExternalRound {
 }
 
 interface CanvasClipboardPayload {
+  source?: {kind: 'remote'; peerKey: string; projectId: string};
   schema_version: 1;
   source_project_id: string;
   nodes: CanvasNode[];
@@ -507,11 +508,21 @@ const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full
 const CANVAS_PRO_OPTIONS = { hideAttribution: true };
 
 export function CanvasEditor(props: {
+  transport?: CanvasTransport;
   projectId: string;
   onBack: () => void;
   onSwitchProject: (projectId: string) => void;
 }) {
-  return <ReactFlowProvider><CanvasEditorInner {...props} /></ReactFlowProvider>;
+  const transport = props.transport ?? localCanvasTransport;
+  return <ReactFlowProvider>{transport.kind === 'remote'
+    ? <SharedCanvasView transport={transport} projectId={props.projectId} onBack={props.onBack} zoomDock={<ReadOnlyZoomDock />} />
+    : <CanvasEditorInner {...props} />}</ReactFlowProvider>;
+}
+
+function ReadOnlyZoomDock() {
+  const flow = useReactFlow();
+  return <CanvasZoomDock assetControl={null} minimapToggle={null} onZoomIn={() => void flow.zoomIn()}
+    onZoomOut={() => void flow.zoomOut()} onResetZoom={() => void flow.zoomTo(1)} onFitView={() => void flow.fitView()} />;
 }
 
 function CanvasEditorInner({
@@ -1027,7 +1038,7 @@ function CanvasEditorInner({
     void loadTokenDancePrices();
     Promise.all([
       listCanvasProjects(true),
-      getCanvasDocument(projectId),
+      localCanvasTransport.read(projectId),
       listKeys(),
       listCanvasJobs(projectId),
     ])
@@ -1286,7 +1297,7 @@ function CanvasEditorInner({
           setSaveState('saving');
           // 当前批次的文本版本 ID 从此冻结；保存途中继续输入必须创建下一版。
           pendingTextVersions.current.clear();
-          const saved = await saveCanvasDocument(projectId, {
+          const saved = await localCanvasTransport.save(projectId, {
             ...snapshot,
             revision: serverRevision.current,
           });
@@ -1401,7 +1412,7 @@ function CanvasEditorInner({
   }, []);
 
   const reloadDocumentFromServer = useCallback(async () => {
-    const remote = await getCanvasDocument(projectId);
+    const remote = await localCanvasTransport.read(projectId);
     const before = latestDocument.current;
     const base = serverBaseDocument.current;
     const hydrated = materializeEmptyTextContent(remote);
@@ -2640,7 +2651,7 @@ function CanvasEditorInner({
       node,
       version,
       projectId,
-      previewUrl: canvasMediaUrl(projectId, version.version_id),
+      previewUrl: localCanvasTransport.mediaUrl(projectId, version.version_id),
       requestId: crypto.randomUUID(),
     });
     if (!save) {
@@ -2658,7 +2669,7 @@ function CanvasEditorInner({
       node,
       version,
       projectId,
-      previewUrl: canvasMediaUrl(projectId, version.version_id),
+      previewUrl: localCanvasTransport.mediaUrl(projectId, version.version_id),
       // ref 在下方定义，回调只在点击时读它，不进依赖。
       finalCategory: 'sha256' in version ? assetsByDigestRef.current.get(version.sha256)?.category : null,
     });
@@ -2812,7 +2823,7 @@ function CanvasEditorInner({
     const match = resolveRecipeModel(recipe, keys);
     let warnings: string[] = [];
     const reproduced = await applyServerInsertion(async documentRevision => {
-      const { warnings: responseWarnings, ...remote } = await reproduceIntoCanvas({
+      const { warnings: responseWarnings, ...remote } = await localCanvasTransport.reproduce({
         projectId,
         assetId: asset.asset_id,
         position: defaultPosition(),
@@ -3297,7 +3308,7 @@ function CanvasEditorInner({
         ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
         : [];
     });
-    const pasted = await applyServerInsertion(documentRevision => pasteIntoCanvas({
+    const pasted = await applyServerInsertion(documentRevision => localCanvasTransport.paste({
       projectId,
       sourceProjectId: payload.source_project_id,
       nodes,
@@ -3419,7 +3430,11 @@ function CanvasEditorInner({
         : parseCanvasClipboardPayload(serialized);
       if (payload) {
         event.preventDefault();
-        if (payload.source_project_id === projectId) pasteCanvasNodes(payload);
+        if (payload.source?.kind === 'remote') {
+          const { peerKey, projectId: sourceId } = payload.source;
+          void applyServerInsertion(revision => copySharedNodes(peerKey, sourceId,
+            payload.nodes.map(node => node.id), projectId, revision), { placement: 'group' });
+        } else if (payload.source_project_id === projectId) pasteCanvasNodes(payload);
         else void pasteCanvasNodesFromOtherProject(payload);
         return;
       }
@@ -6198,6 +6213,7 @@ function CanvasEditorInner({
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => leaveCanvas(onBack)}><BackIcon /></Button>
             <div className="h-6 w-px bg-border" />
+            <EditorSharedStatus />
             <div className="flex min-w-0 items-center">
                 <EditableText
                   ref={projectNameEditorRef}
@@ -6670,7 +6686,7 @@ function CanvasEditorInner({
             open={maskEdit.open}
             title={maskEditSourceTitle ?? maskEdit.title}
             version={maskEdit.version}
-            mediaUrl={canvasMediaUrl(projectId, maskEdit.version.version_id)}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, maskEdit.version.version_id)}
             keys={keys}
             initialData={maskEditData}
             busy={maskEditBusy}
@@ -6690,7 +6706,7 @@ function CanvasEditorInner({
           <CanvasAngleDialog
             open
             title={angleState.title}
-            mediaUrl={canvasMediaUrl(projectId, angleState.version.version_id)}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, angleState.version.version_id)}
             busy={angleBusy}
             error={angleError}
             onOpenChange={open => {
@@ -6738,7 +6754,7 @@ function CanvasEditorInner({
             tool={mediaOperation.tool}
             title={mediaOperation.title}
             version={mediaOperation.version}
-            mediaUrl={canvasMediaUrl(projectId, mediaOperation.version.version_id)}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, mediaOperation.version.version_id)}
             busy={mediaOperationBusy}
             error={mediaOperationError}
             updatesMaterial={layerMaterialNodeIds(document).has(mediaOperation.nodeId)}
@@ -6797,6 +6813,18 @@ function CanvasEditorInner({
               <CanvasPreview
                 projectId={projectId}
                 preview={preview}
+                onReproduce={preview.version.frozen_generation ? () => {
+                  const snapshot = preview.version.frozen_generation!;
+                  const candidates = keys.filter(key => key.models.some(item => item.id === snapshot.model_id));
+                  const key = candidates.find(item => item.provider === snapshot.provider) ?? candidates[0];
+                  void applyServerInsertion(revision => reproduceFrozen(projectId, preview.version.version_id,
+                    revision, defaultPosition(), key?.alias ?? null, key ? snapshot.model_id : null),
+                  { placement: 'group' }).then(inserted => {
+                    if (!inserted) return;
+                    setPreview(null);
+                    if (!key) announceToolNotice(`原模型为 ${snapshot.model_name || snapshot.model_id}（${snapshot.provider_label || snapshot.provider}），请选择本机可用模型`);
+                  });
+                } : undefined}
                 job={previewJob}
                 nodes={document.nodes}
                 onCopyPrompt={previewNode && previewPrompt && isContentNode(previewNode)
@@ -6897,6 +6925,7 @@ function CanvasShortcutList() {
 }
 
 function CanvasPreview({
+  onReproduce,
   projectId,
   preview,
   job,
@@ -6905,6 +6934,7 @@ function CanvasPreview({
 }: {
   projectId: string;
   preview: PreviewState;
+  onReproduce?: () => void;
   job?: Job;
   nodes: CanvasNode[];
   onCopyPrompt?: () => void;
@@ -6918,7 +6948,7 @@ function CanvasPreview({
     source_version_id?: string; mode?: string; width?: number; height?: number; x?: number; y?: number;
     source_width?: number; source_height?: number;
   } | undefined;
-  const src = version.kind === 'text' ? null : canvasMediaUrl(projectId, version.version_id);
+  const src = version.kind === 'text' ? null : localCanvasTransport.mediaUrl(projectId, version.version_id);
   return (
     <div className="space-y-4">
       {version.kind === 'text' && (
@@ -6930,8 +6960,8 @@ function CanvasPreview({
         <div className="flex flex-col items-center gap-2">
           <div className="relative inline-block max-w-full">
             <img src={src} alt={preview.title} decoding="async" className={`block max-h-[58dvh] max-w-full rounded-lg object-contain ${showSource ? 'invisible' : ''}`} />
-            {showMask && maskId && <div aria-label="可编辑区域" className="pointer-events-none absolute inset-0 bg-primary/50" style={{ maskImage: `linear-gradient(white, white), url("${canvasMediaUrl(projectId, maskId)}")`, maskMode: 'luminance', maskComposite: 'subtract', maskSize: '100% 100%' }} />}
-            {showSource && edit?.source_version_id && <img src={canvasMediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
+            {showMask && maskId && <div aria-label="可编辑区域" className="pointer-events-none absolute inset-0 bg-primary/50" style={{ maskImage: `linear-gradient(white, white), url("${localCanvasTransport.mediaUrl(projectId, maskId)}")`, maskMode: 'luminance', maskComposite: 'subtract', maskSize: '100% 100%' }} />}
+            {showSource && edit?.source_version_id && <img src={localCanvasTransport.mediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
               left: `${(edit.x || 0) / edit.width * 100}%`, top: `${(edit.y || 0) / edit.height * 100}%`,
               width: `${(edit.source_width || edit.width) / edit.width * 100}%`, height: `${(edit.source_height || edit.height) / edit.height * 100}%`,
             } : { inset: 0, width: '100%', height: '100%' }} />}
@@ -6957,7 +6987,10 @@ function CanvasPreview({
         <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
         <MetadataItem label="版本" value={version.version_id} technical />
       </dl>
-      {job?.canvas_run && (
+      {version.frozen_generation && <FrozenGenerationDetails generation={version.frozen_generation}
+        mediaUrl={id => localCanvasTransport.mediaUrl(projectId, id)} />}
+      {onReproduce && <Button size="sm" variant="outline" onClick={onReproduce}>复刻生成</Button>}
+      {!version.frozen_generation && job?.canvas_run && (
         <CanvasGenerationMetadata snapshot={job.canvas_run.snapshot} job={job} nodes={nodes} />
       )}
       <DialogFooter>
@@ -7040,6 +7073,7 @@ function contentKindLabel(kind: CanvasContentVersion['kind']) {
 }
 
 function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
+  if (version.frozen_generation) return `AI 生成 · ${version.frozen_generation.model_name || version.frozen_generation.model_id}`;
   const { origin } = version;
   if (origin.kind === 'user_edit') return '人工编辑';
   if (origin.kind === 'upload') return '上传素材';

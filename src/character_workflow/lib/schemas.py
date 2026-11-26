@@ -1142,6 +1142,8 @@ class CanvasCompareNodeData(BaseModel):
 
 class CanvasNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    created_by: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
+    created_by_client: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
     id: str = Field(min_length=1, max_length=120)
     title: str = Field(min_length=1, max_length=120)
     position: CanvasPoint
@@ -1340,12 +1342,57 @@ CanvasContentOrigin = Annotated[
 ]
 
 
+class CanvasFrozenInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    role: Literal["reference", "mask", "markup", "first_frame", "last_frame", "source",
+                  "mj_sref", "mj_cref", "mj_oref"]
+    kind: Literal["image", "video", "audio", "text"]
+    order: int = Field(ge=0)
+    version_id: str | None = Field(default=None, min_length=1, max_length=160)
+    text: str | None = Field(default=None, max_length=40_000)
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "CanvasFrozenInput":
+        if self.kind == "text":
+            if self.text is None or self.version_id is not None:
+                raise ValueError("frozen text inputs must contain inline text")
+        elif self.version_id is None or self.text is not None:
+            raise ValueError("frozen media inputs require a content version")
+        return self
+
+
+class CanvasFrozenGeneration(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: Literal[1] = 1
+    source_kind: Literal["canvas", "studio", "shared_canvas"]
+    mode: Literal["image", "video", "audio", "text"]
+    prompt: str = ""
+    model_id: str
+    model_name: str | None = None
+    provider: str
+    provider_label: str | None = None
+    provider_icon: str | None = Field(default=None, pattern=r"^brand:[a-z0-9-]+$")
+    params: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    inputs: list[CanvasFrozenInput] = Field(default_factory=list)
+    duration_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    cost_cny: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    created_by: str | None = None
+    submitted_at: str | None = None
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def public_creation_params(cls, value):
+        from character_workflow.lib.collab_sanitize import public_params
+        return public_params(value)
+
+
 class CanvasContentVersionBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version_id: str = Field(min_length=1, max_length=160)
     created_at: str
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     origin: CanvasContentOrigin
+    frozen_generation: CanvasFrozenGeneration | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class CanvasTextVersion(CanvasContentVersionBase):
@@ -1611,6 +1658,12 @@ class CanvasDocument(BaseModel):
         for version_id, version in self.content_versions.items():
             if version_id != version.version_id:
                 raise ValueError("canvas content version key must match version_id")
+            if version.frozen_generation is not None:
+                for row in version.frozen_generation.inputs:
+                    if row.version_id is not None:
+                        owned = self.content_versions.get(row.version_id)
+                        if owned is None or owned.kind != row.kind:
+                            raise ValueError("frozen input must reference an owned matching version")
             if version.origin.kind == "user_mask":
                 source = self.content_versions.get(version.origin.source_version_id)
                 if (

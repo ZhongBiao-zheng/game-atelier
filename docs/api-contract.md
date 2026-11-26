@@ -1675,3 +1675,11 @@ Auto 确认金额按最近一条用户消息之后已提交的生成估价累计
 - `POST /api/trash/{trash_id}/restore` → 还原后的同形条目；原路径被占用 409 `TRASH_CONFLICT`（message 指出哪一项），找不到 404 `TRASH_NOT_FOUND`。
 - `DELETE /api/trash/{trash_id}` → `{ok: true}`，彻底删除。
 - `DELETE /api/trash` → `{purged: n}`，清空。
+
+## 局域网共享画布 v1
+
+本机会话通过 `/api/collab/status`、`/api/collab/shares` 与 `/api/collab/peers` 读取监听状态、自有共享和发现列表。房主通过 `PUT /api/collab/shares/{project_id}` 设置权限和口令。省略口令保留原值，空串清除口令。`DELETE` 停止该画布共享。访客在本机的远端项目代理上调用 `auth`、`document` 和 `versions/{version_id}/media`。局域网端口仅提供协作协议，见 ADR-0045。
+
+画布内容版本支持可选的 `frozen_generation`，表示来源生成快照 v1，含模态、提示词、模型 ID、平台名称和品牌图标、公开参数、按顺序存放的参考输入、费用与耗时。参考输入通过当前项目中的版本 ID 引用媒体，文本可内联。节点的可选 `created_by` 和 `created_by_client` 分别记录显示名与协作客户端身份。
+
+`POST /api/collab/remote/{peer_key}/projects/{project_id}/copy-to-local` 接收 `node_ids`、`target_project_id` 和可选的 `document_revision`，返回更新后的本地画布。相同前缀的 `send-to-studio` 接收 `version_id`，返回本地上传路径及快照。`POST /api/studio/jobs/{job_id}/shared-canvas` 接收 `peer_key`、`project_id` 与 `output_index`，将结果与参考媒体作为一笔操作写入房主画布。

@@ -22,6 +22,7 @@ from viewer_server.connection_auth import ConnectionError, ConnectionStore
 from viewer_server.connection_middleware import ConnectionMiddleware, connection_error
 from viewer_server.connection_routes import connection_router
 from viewer_server.gateway_app import gateway_server
+from viewer_server.collab_app import start_collab, stop_collab
 from viewer_server.gateway_routes import gateway_router
 from viewer_server.model_route_status import member_status_router
 from viewer_server.usage_routes import usage_router
@@ -305,6 +306,7 @@ async def normal_lifespan(app: FastAPI):
     start_watchers()
     # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。配置损坏时网关停在错误状态。
     await asyncio.to_thread(gateway_server.apply_saved)
+    await asyncio.to_thread(start_collab)
     heartbeat_task = asyncio.create_task(_record_host_lifecycle(app))
     from viewer_server import loop_watch
 
@@ -378,6 +380,7 @@ async def normal_lifespan(app: FastAPI):
         gateway_sync.cancel()
         share_sync.cancel()
         await asyncio.gather(share_sync, return_exceptions=True)
+        await asyncio.to_thread(stop_collab)
         await asyncio.to_thread(gateway_server.stop)
         # 换过数据目录后监听已不是启动时那个 observer：停当前的。
         stop_watchers()
@@ -456,6 +459,10 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.add_middleware(
         LocalRequestBoundary, dev_origin=development_origin(),
     )
+    from viewer_server.collab_routes import router as collab_router
+    from viewer_server.collab_transfer_routes import collab_transfer_local_router
+    app.include_router(collab_router)
+    app.include_router(collab_transfer_local_router)
     app.include_router(router)
     from viewer_server.comfyui_routes import router as comfyui_router
     app.include_router(comfyui_router)

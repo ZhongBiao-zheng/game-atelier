@@ -156,6 +156,8 @@ export interface CanvasMediaDisplay {
 }
 
 interface CanvasNodeBase {
+  created_by?: string | null;
+  created_by_client?: string | null;
   id: string;
   title: string;
   position: CanvasPoint;
@@ -360,7 +362,34 @@ export type CanvasContentOrigin =
   | { kind: 'import'; package_id: string }
   | { kind: 'creation_asset_snapshot'; title: string; asset_id?: string | null };
 
+export interface CanvasFrozenInput {
+  role: 'reference' | 'mask' | 'markup' | 'first_frame' | 'last_frame' | 'source' | 'mj_sref' | 'mj_cref' | 'mj_oref';
+  kind: 'image' | 'video' | 'audio' | 'text';
+  order: number;
+  version_id?: string | null;
+  text?: string | null;
+}
+
+export interface CanvasFrozenGeneration {
+  schema_version: 1;
+  source_kind: 'canvas' | 'studio' | 'shared_canvas';
+  mode: 'image' | 'video' | 'audio' | 'text';
+  prompt: string;
+  model_id: string;
+  model_name?: string | null;
+  provider: string;
+  provider_label?: string | null;
+  provider_icon?: string | null;
+  params: Record<string, string | number | boolean>;
+  inputs: CanvasFrozenInput[];
+  duration_s?: number | null;
+  cost_cny?: number | null;
+  created_by?: string | null;
+  submitted_at?: string | null;
+}
+
 interface CanvasContentVersionBase {
+  frozen_generation?: CanvasFrozenGeneration | null;
   version_id: string;
   created_at: string;
   sha256: string;

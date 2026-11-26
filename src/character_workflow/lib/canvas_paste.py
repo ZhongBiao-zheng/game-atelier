@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,8 @@ from pydantic import TypeAdapter
 
 from character_workflow.lib.canvas_projects import (
     CanvasDocumentError,
+    _MEDIA_MIME,
+    _sniff_media_mime,
     _now,
     _read_canvas_document_unlocked,
     _recover_canvas_transactions_unlocked,
@@ -23,6 +27,7 @@ from character_workflow.lib.canvas_projects import (
     resolve_canvas_media,
 )
 from character_workflow.lib.canvas_reproduce import _commit
+from character_workflow.lib.collab_provenance import hydrate_document_provenance
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import (
     CanvasConnection,
@@ -39,7 +44,7 @@ _NODES = TypeAdapter(list[CanvasNode])
 
 
 def _copied_version(
-    source_project_id: str,
+    media_reader: Callable[[CanvasMediaVersion], bytes],
     version: CanvasContentVersion,
     target_project_id: str,
     timestamp: str,
@@ -51,9 +56,17 @@ def _copied_version(
             "origin": CanvasUserEditOrigin(kind="user_edit"),
         })
         return copied, None
-    source_path, _ = resolve_canvas_media(source_project_id, version.version_id)
+    suffix = next((ext for ext, mime in _MEDIA_MIME.items() if mime == version.mime_type), None)
+    if suffix is None or not version.mime_type.startswith(f"{version.kind}/"):
+        raise CanvasDocumentError("canvas_paste_media_type", "不支持这种媒体格式。")
+    body = media_reader(version)
+    if len(body) != version.bytes or hashlib.sha256(body).hexdigest() != version.sha256:
+        raise CanvasDocumentError("canvas_paste_media_changed", "媒体内容与来源版本不一致。")
+    detected = _sniff_media_mime(body)
+    if detected and detected.split("/")[0] != version.kind:
+        raise CanvasDocumentError("canvas_paste_media_type", "媒体内容与类型不符。")
     upload_id = secrets.token_hex(16)
-    target = canvas_project_dir(target_project_id) / "uploads" / f"{upload_id}{source_path.suffix}"
+    target = canvas_project_dir(target_project_id) / "uploads" / f"{upload_id}{suffix}"
     copied = CanvasMediaVersion.model_validate({
         **version.model_dump(mode="json"),
         "version_id": version_id,
@@ -61,7 +74,7 @@ def _copied_version(
         "origin": CanvasUploadOrigin(kind="upload", upload_id=upload_id).model_dump(),
         "path": target.relative_to(canvas_project_dir(target_project_id)).as_posix(),
     })
-    return copied, (target, source_path.read_bytes())
+    return copied, (target, body)
 
 
 def _rewritten(value: Any, mapping: dict[str, str]) -> Any:
@@ -86,9 +99,25 @@ def paste_nodes_into_canvas(
 ) -> CanvasDocument:
     if source_project_id == project_id:
         raise CanvasDocumentError("canvas_paste_same_project", "同一张画布内的粘贴不走复制。")
+    source = hydrate_document_provenance(source_project_id, read_canvas_document(source_project_id))
+
+    def media_reader(version: CanvasMediaVersion) -> bytes:
+        path, _ = resolve_canvas_media(source_project_id, version.version_id)
+        return path.read_bytes()
+
+    return paste_from_document(
+        project_id=project_id, source=source, nodes=nodes, connections=connections,
+        document_revision=document_revision, media_reader=media_reader,
+    )
+
+
+def paste_from_document(
+    *, project_id: str, source: CanvasDocument, nodes: list[CanvasNode],
+    connections: list[CanvasConnection], document_revision: int,
+    media_reader: Callable[[CanvasMediaVersion], bytes],
+) -> CanvasDocument:
     if not nodes:
         raise CanvasDocumentError("canvas_paste_empty", "没有可粘贴的节点。")
-    source = read_canvas_document(source_project_id)
     raw_nodes = [node.model_dump(mode="json") for node in nodes]
     referenced = {
         value for node in raw_nodes for value in _strings(node) if value in source.content_versions
@@ -97,21 +126,24 @@ def paste_nodes_into_canvas(
     pending = list(referenced)
     while pending:
         version = source.content_versions[pending.pop()]
-        if version.origin.kind != "user_mask":
-            continue
-        source_id = version.origin.source_version_id
-        if source_id not in source.content_versions:
-            raise CanvasDocumentError("canvas_paste_source_missing", "蒙版的源图版本不存在。")
-        if source_id not in referenced:
-            referenced.add(source_id)
-            pending.append(source_id)
+        dependencies = [
+            row.version_id for row in version.frozen_generation.inputs if row.version_id
+        ] if version.frozen_generation else []
+        if version.origin.kind == "user_mask":
+            dependencies.append(version.origin.source_version_id)
+        for dependency in dependencies:
+            if dependency not in source.content_versions:
+                raise CanvasDocumentError("canvas_paste_source_missing", "来源引用的输入版本不存在。")
+            if dependency not in referenced:
+                referenced.add(dependency)
+                pending.append(dependency)
     timestamp = _now()
     mapping: dict[str, str] = {}
     versions: list[CanvasContentVersion] = []
     writes: list[tuple[Path, bytes]] = []
     for version_id in sorted(referenced):
         copied, write = _copied_version(
-            source_project_id, source.content_versions[version_id], project_id, timestamp,
+            media_reader, source.content_versions[version_id], project_id, timestamp,
         )
         mapping[version_id] = copied.version_id
         versions.append(copied)
@@ -119,13 +151,18 @@ def paste_nodes_into_canvas(
             writes.append(write)
     copied_by_id = {version.version_id: version for version in versions}
     for old_id, new_id in mapping.items():
+        version = copied_by_id[new_id]
         origin = source.content_versions[old_id].origin
         if origin.kind == "user_mask":
-            copied_by_id[new_id] = copied_by_id[new_id].model_copy(update={
-                "origin": origin.model_copy(update={
-                    "source_version_id": mapping[origin.source_version_id],
-                }),
-            })
+            version = version.model_copy(update={"origin": origin.model_copy(update={
+                "source_version_id": mapping[origin.source_version_id],
+            })})
+        frozen = version.frozen_generation
+        if frozen:
+            inputs = [row.model_copy(update={"version_id": mapping[row.version_id]})
+                      if row.version_id else row for row in frozen.inputs]
+            version = version.model_copy(update={"frozen_generation": frozen.model_copy(update={"inputs": inputs})})
+        copied_by_id[new_id] = version
     pasted_ids = {node.id for node in nodes}
     pasted = _NODES.validate_python([
         _detached(_rewritten(node, mapping), pasted_ids) for node in raw_nodes

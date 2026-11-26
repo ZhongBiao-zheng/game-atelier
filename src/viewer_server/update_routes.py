@@ -94,7 +94,7 @@ def move_gated(path: str, method: str) -> bool:
         return False
     if path == "/api/data-root":
         return False
-    return path.startswith("/api/") or path.startswith("/gateway/")
+    return path.startswith(("/api/", "/gateway/", "/collab/v1/"))
 
 
 class UpdateAdmissionMiddleware:

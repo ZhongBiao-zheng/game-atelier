@@ -71,6 +71,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/agent-images/` | 画布 Agent（插件工具返回的预览图，服务端生成文件名；24 小时 / 200 张 / 64 MiB 清理） | 画布 Agent vision（调模型前附图） |
 | `.runtime/ps-bridge/execute-log.jsonl`（+ `.1.jsonl`） | PS 联动插件（Agent 执行脚本，1 MiB 轮转留一份） | 设置 → 插件 → PS 联动（最近 20 条）；只在本机，网关、用量统计、项目包都不读 |
 | `.config/ps-bridge.json` | 设置 → 插件 → PS 联动（「允许 Agent 执行脚本」，默认关） | PS 联动插件（关着时藏起 execute） |
+| `.config/collab-shares.json` | 本机协作设置（持锁原子写） | 局域网协作监听器与发现服务，保存房主标识、共享配置及手动连接地址 |
 | `.config/plugins.json` | Web (`POST /api/plugins/{id}/enable\|disable`) | viewer-server（`lib/plugin_registry.py`，决定加载哪些插件） |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
 
@@ -152,7 +153,7 @@ uv run python src/viewer_server/server.py open-browser
 
 ## 安全 / 部署约束
 
-- viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。唯一例外是局域网网关（ADR-0025）：独立端口、只挂 `/gateway/v1/*`、必须带网关密钥、默认关闭，不接受任何本机路径参数。
+- viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。局域网监听例外包括共享画布（ADR-0045，按需独立端口，只挂 `/collab/v1/*`）和局域网网关（ADR-0025）：独立端口、只挂 `/gateway/v1/*`、必须带网关密钥、默认关闭，不接受任何本机路径参数。
 - `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 

@@ -49,7 +49,7 @@ import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
@@ -148,6 +148,7 @@ export interface RoundFailure {
 
 /** 「加入画布」可选的目标画布。 */
 export interface CanvasTarget {
+  sharedBy?: string;
   projectId: string;
   name: string;
 }
@@ -1293,11 +1294,18 @@ function ResultMoreMenu({
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className="gap-2"><CanvasIcon />加入画布</DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
-              {canvasTargets.map(target => (
+              {canvasTargets.filter(target => !target.sharedBy).map(target => (
                 <DropdownMenuItem key={target.projectId} onSelect={() => onAddToCanvas(target.projectId)}>
                   <span className="truncate">{target.name}</span>
                 </DropdownMenuItem>
               ))}
+              {canvasTargets.some(target => target.sharedBy) && <>
+                <DropdownMenuLabel>共享画布</DropdownMenuLabel>
+                {canvasTargets.filter(target => target.sharedBy).map(target =>
+                  <DropdownMenuItem key={target.projectId} onSelect={() => onAddToCanvas(target.projectId)}>
+                    {target.name} · {target.sharedBy}
+                  </DropdownMenuItem>)}
+              </>}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}

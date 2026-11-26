@@ -131,6 +131,8 @@ def _sniff_media_mime(body: bytes) -> str | None:
         return "image/png"
     if body.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
+    if body.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
     if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WEBP":
         return "image/webp"
     if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WAVE":
@@ -448,7 +450,8 @@ def _normalized_web_document(
     for version_id, candidate in list(versions.items()):
         if version_id in current.content_versions:
             continue
-        if candidate.kind != "text" or candidate.origin.kind != "user_edit":
+        if (candidate.kind != "text" or candidate.origin.kind != "user_edit"
+                or candidate.frozen_generation is not None):
             raise CanvasDocumentError(
                 "canvas_version_not_user_text",
                 "保存只能新建手动编辑的文本版本；生成产物由服务端写入，没有保存。",

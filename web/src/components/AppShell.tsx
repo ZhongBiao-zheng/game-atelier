@@ -14,6 +14,7 @@ import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
+import { remoteCanvasTransport } from '@/pages/canvas/canvasTransport';
 import { CanvasEditor } from '@/pages/CanvasEditor';
 import { ConsoleLayout, rememberCreativeLocation } from '@/pages/settings/ConsoleLayout';
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
@@ -121,7 +122,7 @@ function AppShellContent() {
     };
   }, []);
   const onSettings = loc.startsWith('/settings');
-  const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
+  const immersiveCanvas = /^\/canvas\/(?:shared\/[^/]+\/)?[^/]+$/.test(loc);
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
   const pageOwnsScroll = loc === '/studio' || loc === '/canvas';
   const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : -1;
@@ -180,6 +181,12 @@ function AppShellContent() {
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
+          <Route path="/canvas/shared/:peerKey/:projectId">{params => (
+            <CanvasEditor key={params.peerKey + '/' + params.projectId} projectId={params.projectId}
+              transport={remoteCanvasTransport(params.peerKey)}
+              onBack={() => setLocation('/canvas?view=shared')}
+              onSwitchProject={projectId => setLocation(`/canvas/${encodeURIComponent(projectId)}`)} />
+          )}</Route>
           <Route path="/canvas/:projectId">{params => (
             <CanvasEditor
               key={params.projectId}

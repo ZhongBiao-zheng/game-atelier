@@ -268,3 +268,67 @@ def reproduce_generation_asset_into_canvas(
     return CanvasReproduceResponse.model_validate(
         {**document.model_dump(mode="json"), "warnings": warnings}
     )
+
+
+def reproduce_frozen_version(project_id: str, version_id: str, position: CanvasPoint,
+                             alias: str | None, model: str | None, revision: int) -> CanvasDocument:
+    """Expand the immutable inputs already owned by this canvas without duplicating media files."""
+    import hashlib
+
+    from character_workflow.lib.schemas import (
+        CanvasAudioNode, CanvasTextNode, CanvasTextVersion, CanvasUserEditOrigin,
+    )
+    with file_lock(canvas_project_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        document = _read_canvas_document_unlocked(project_id)
+        if document.revision != revision:
+            raise RuntimeError(f"revision_conflict:{document.revision}")
+        version = document.content_versions.get(version_id)
+        frozen = version.frozen_generation if version else None
+        if not frozen:
+            raise KeyError(version_id)
+        stamp = _now()
+        params = {key: value for key, value in frozen.params.items()
+                  if key in CANVAS_DRAFT_PARAM_FIELDS[frozen.mode]}
+        draft = CanvasGenerationDraft(mode=frozen.mode, prompt=frozen.prompt, model=model or "",
+                                      alias=alias, params=JobParams(**params), updated_at=stamp)
+        inputs, links = [], []
+        config_id = f"{frozen.mode}-{secrets.token_hex(8)}"
+        y = position.y
+        column_width = 0.0
+        for row in sorted(frozen.inputs, key=lambda item: item.order):
+            content = document.content_versions.get(row.version_id or "")
+            if content is None and row.kind == "text" and row.text is not None:
+                content = CanvasTextVersion(
+                    version_id=f"version-{secrets.token_hex(12)}", created_at=stamp, kind="text",
+                    text=row.text, sha256=hashlib.sha256(row.text.encode()).hexdigest(),
+                    origin=CanvasUserEditOrigin(kind="user_edit"),
+                )
+                document.content_versions[content.version_id] = content
+            if content is None or content.kind != row.kind:
+                raise ValueError("复刻参考版本缺失")
+            node = _content_node(content.version_id, f"{_SKIPPED_ROLE_LABELS.get(row.role, '参考')} {row.order + 1}",
+                                 CanvasPoint(x=position.x, y=y), content.kind)
+            inputs.append(node)
+            width, height = _rendered_size(getattr(content, "width", None), getattr(content, "height", None))
+            y += height + _NODE_GAP
+            column_width = max(column_width, width)
+            if row.role in {"reference", "source", "first_frame", "last_frame"}:
+                links.append(CanvasInputConnection(
+                    id=f"connection-{secrets.token_hex(10)}", role="input", source_node_id=node.id,
+                    target_node_id=config_id, slot=row.role if row.role.endswith("_frame") else None,
+                ))
+        node_type = {"image": CanvasImageNode, "video": CanvasVideoNode,
+                     "audio": CanvasAudioNode, "text": CanvasTextNode}[frozen.mode]
+        config = node_type.model_validate({
+            "id": config_id, "type": frozen.mode, "title": "复刻生成", "position": {
+                "x": position.x + (column_width + _COLUMN_GAP if inputs else 0), "y": position.y,
+            }, "data": {"generation_draft": draft.model_dump()},
+        })
+        document.nodes.extend([*inputs, config])
+        document.connections.extend(links)
+        document.revision += 1
+        document.updated_at = stamp
+        checked = CanvasDocument.model_validate(document.model_dump(mode="json"))
+        _commit(project_id, checked, [], stamp)
+        return checked

@@ -1292,6 +1292,11 @@ def delete_canvas_project(
                 {"project_id": project_id, "mounts": mounts,
                  "asset_ids": canvas_project_asset_ids(project_id)},
             )
+        from character_workflow.lib.collab_config import disable_share
+        stopped_share = disable_share(project_id)
+    if stopped_share:
+        from viewer_server.collab_app import collab_server
+        collab_server.apply_saved()
     # 缩略图是派生缓存，还原后按需重建；资产关系与团队库挂载随删除清掉，还原时按条目记录接回。
     discard_canvas_thumbnails(project_id)
     from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
@@ -1337,6 +1342,9 @@ def discard_empty_canvas_project(project_id: str, expected_revision: int) -> boo
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_canvas_document_unlocked(project_id)
         project = read_canvas_project(project_id)
+        from character_workflow.lib.collab_config import read_config
+        if project_id in read_config().shares:
+            return False
         pristine_document = (
             current.revision == 0
             and expected_revision == current.revision

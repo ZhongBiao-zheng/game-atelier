@@ -1,3 +1,5 @@
+import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
+import type { CanvasFrozenGeneration } from '@/schema/canvas';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AddImageIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, DeleteIcon, DownloadIcon } from '@/components/ui/icons';
@@ -12,6 +14,7 @@ import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { animate, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 
 export interface LightboxMediaMeta {
+  frozenGeneration?: { generation: CanvasFrozenGeneration; mediaUrl: (versionId: string) => string };
   title?: string;
   prompt?: string;
   model?: string;
@@ -308,6 +311,7 @@ export function Lightbox({
             </header>
 
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+              {meta?.frozenGeneration && <FrozenGenerationDetails {...meta.frozenGeneration} />}
               {meta?.prompt && (
                 <section className="space-y-2">
                   <div className="flex items-center justify-between gap-2">

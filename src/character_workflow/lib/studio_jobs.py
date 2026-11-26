@@ -21,65 +21,65 @@ def studio_output_dir(job_id: str) -> Path:
 # 新节点放在画布现有内容右侧，留一段空隙；没有尺寸的节点按默认卡宽估算。
 _CANVAS_GAP = 80
 _CANVAS_DEFAULT_NODE_WIDTH = 320
-_CANVAS_SAVE_ATTEMPTS = 3
 _CANVAS_TITLE_LENGTH = 40
 
 
 def add_job_output_to_canvas(job_id: str, output_index: int, project_id: str) -> dict:
-    """创作台结果卡「加入画布」：把一张图 / 一条视频作为新节点放进目标画布（D4）。
-
-    不建个人资产；节点标题取提示词开头。返回 {project_id, node_id, revision}。
-    结果不存在抛 LookupError，格式或大小不合适抛 ValueError，画布连续被改抛 RuntimeError。"""
+    """在同一笔画布事务里复制 Studio 输出、不可变参数与所有输入素材。"""
     from character_workflow.lib.canvas_projects import (
-        IMAGE_UPLOAD_EXTS, VIDEO_UPLOAD_EXTS, read_canvas_document, save_canvas_upload, upload_max_bytes,
+        _new_upload_version, _now, _read_canvas_document_unlocked,
+        _recover_canvas_transactions_unlocked, canvas_project_lock_path, upload_max_bytes,
     )
+    from character_workflow.lib.canvas_reproduce import _commit
+    from character_workflow.lib.collab_provenance import studio_output_snapshot
+    from character_workflow.lib.file_lock import file_lock
     from character_workflow.lib.jobs import read_job
     from character_workflow.lib.schemas import (
-        CanvasImageNode, CanvasMediaNodeData, CanvasPoint, CanvasVideoNode,
+        CanvasDocument, CanvasImageNode, CanvasMediaNodeData, CanvasPoint, CanvasVideoNode,
     )
 
     job = read_job(job_id)
-    if job.namespace != "studio":
-        raise ValueError("只能加入创作台的生成结果")
-    if not 0 <= output_index < len(job.output_paths):
-        raise LookupError("这张结果不存在")
-    raw = Path(job.output_paths[output_index])
-    source = raw if raw.is_absolute() else resolve_data_root() / raw
-    if not source.is_file():
-        raise LookupError("结果文件已不在磁盘上")
-    ext = source.suffix.lower()
-    if ext in IMAGE_UPLOAD_EXTS:
-        kind = "image"
-    elif ext in VIDEO_UPLOAD_EXTS:
-        kind = "video"
-    else:
-        raise ValueError("画布不支持这种格式")
-    if source.stat().st_size > upload_max_bytes(ext):
-        raise ValueError("文件超过画布导入大小上限")
-    body = source.read_bytes()
-    title = " ".join(job.prompt.split())[:_CANVAS_TITLE_LENGTH] or ("图片" if kind == "image" else "视频")
-    node_id = f"studio-{uuid.uuid4().hex[:12]}"
-    node_type = CanvasImageNode if kind == "image" else CanvasVideoNode
-    for _ in range(_CANVAS_SAVE_ATTEMPTS):
-        document = read_canvas_document(project_id)
-        right = max(
-            (node.position.x + (node.size.width if node.size else _CANVAS_DEFAULT_NODE_WIDTH)
-             for node in document.nodes),
-            default=-_CANVAS_GAP,
-        )
-        top = min((node.position.y for node in document.nodes), default=0)
-        position = CanvasPoint(x=right + _CANVAS_GAP, y=top)
+    source, frozen, inputs = studio_output_snapshot(job, output_index)
+    timestamp = _now()
+    versions = {}
+    writes = []
 
-        def factory(version, position=position):
-            return node_type(id=node_id, title=title, position=position, type=kind,
-                             data=CanvasMediaNodeData(current_version_id=version.version_id))
-        try:
-            _, saved, _ = save_canvas_upload(
-                project_id, source.name, ext, body, kind, document.revision, node_factory=factory,
-            )
-        except RuntimeError as error:
-            if str(error).startswith("revision_conflict:"):
-                continue
-            raise
-        return {"project_id": project_id, "node_id": node_id, "revision": saved.revision}
-    raise RuntimeError("画布正在被修改，请稍后重试")
+    def prepare(path: Path, kind: str):
+        ext = path.suffix.lower()
+        if path.stat().st_size > upload_max_bytes(ext):
+            raise ValueError("文件超过画布导入大小上限")
+        body = path.read_bytes()
+        version, target = _new_upload_version(project_id, ext, body, kind, timestamp)
+        writes.append((target, body))
+        return version
+
+    rewritten = {}
+    input_kinds = {row.version_id: row.kind for row in frozen.inputs}
+    for old_id, path in inputs.items():
+        version = prepare(path, input_kinds[old_id])
+        versions[version.version_id] = version
+        rewritten[old_id] = version.version_id
+    frozen = frozen.model_copy(update={"inputs": [
+        row.model_copy(update={"version_id": rewritten[row.version_id]}) for row in frozen.inputs
+    ]})
+    output = prepare(source, frozen.mode).model_copy(update={"frozen_generation": frozen})
+    versions[output.version_id] = output
+    node_type = CanvasImageNode if output.kind == "image" else CanvasVideoNode
+    title = " ".join(job.prompt.split())[:_CANVAS_TITLE_LENGTH] or ("图片" if output.kind == "image" else "视频")
+    with file_lock(canvas_project_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        current = _read_canvas_document_unlocked(project_id)
+        right = max((node.position.x + (node.size.width if node.size else _CANVAS_DEFAULT_NODE_WIDTH)
+                     for node in current.nodes), default=-_CANVAS_GAP)
+        top = min((node.position.y for node in current.nodes), default=0)
+        node = node_type(
+            id=f"studio-{uuid.uuid4().hex[:12]}", type=output.kind, title=title,
+            position=CanvasPoint(x=right + _CANVAS_GAP, y=top),
+            data=CanvasMediaNodeData(current_version_id=output.version_id),
+        )
+        updated = CanvasDocument.model_validate(current.model_copy(update={
+            "nodes": [*current.nodes, node], "revision": current.revision + 1,
+            "updated_at": timestamp, "content_versions": {**current.content_versions, **versions},
+        }).model_dump(mode="json"))
+        _commit(project_id, updated, writes, timestamp)
+    return {"project_id": project_id, "node_id": node.id, "revision": updated.revision}

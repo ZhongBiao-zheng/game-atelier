@@ -15,7 +15,12 @@ import { errorText } from '@/lib/errorText';
 import { presentJobError, type JobErrorAction } from '@/lib/errorPresentation';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { modelDisplayName } from '@/lib/modelCatalog';
-import { apiError } from '@/api/http';
+import { ApiError, apiError } from '@/api/http';
+import { authenticateCollab, listCollabPeers } from '@/api/collab';
+import { shareStudioResult } from '@/api/collabTransfer';
+import { COLLAB_PROTOCOL_VERSION, type CollabCard } from '@/schema/collab';
+import { SharedCanvasPasscodeDialog } from '@/components/canvas/SharedCanvasPasscodeDialog';
+import { takeSharedStudioInput } from './sharedStudioInput';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
@@ -61,7 +66,7 @@ import { recipeToDraft } from './studioRecipe';
 import { costLabel, referenceImageLimit, studioEstimateLabel } from './studioEstimate';
 import { creationAssetInputUrl, readCreationMediaFile, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
+import { adoptTeamAsset, fetchProfile, listTeamLibraries } from '@/api/teamLibraries';
 import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
 import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
@@ -310,6 +315,28 @@ function StudioFull() {
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
   const canvasTargetOptions = useMemo<CanvasTarget[]>(
     () => canvasTargets.map(target => ({ projectId: target.project_id, name: target.name })), [canvasTargets]);
+  const [sharedTargets, setSharedTargets] = useState<CollabCard[]>([]);
+  const [sharedAuth, setSharedAuth] = useState<{
+    target: CollabCard; needsName: boolean; jobId: string; index: number;
+  } | null>(null);
+  const roundCanvasOptions = useMemo<CanvasTarget[]>(() => [
+    ...canvasTargetOptions, ...sharedTargets.map(card => ({
+      projectId: card.peer_key + '/' + card.project_id, name: card.name, sharedBy: card.display_name,
+    })),
+  ], [canvasTargetOptions, sharedTargets]);
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const cards = await listCollabPeers();
+        if (active) setSharedTargets(cards.filter(card => !card.is_self && card.mode === 'edit'
+          && card.protocol_version === COLLAB_PROTOCOL_VERSION));
+      } catch { if (active) setSharedTargets([]); }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
   const [assetsRevision, setAssetsRevision] = useState(0);
   const [promptPreviewRequest, setPromptPreviewRequest] = useState<PromptPreviewRequest | null>(null);
   const [promptAssetId, setPromptAssetId] = useState<string | null>(draft?.promptAssetId ?? null);
@@ -628,6 +655,44 @@ function StudioFull() {
   }, [inputMode, agentFiles, setAgentFiles, kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
 
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
+  useEffect(() => {
+    if (!keysLoaded) return;
+    const shared = takeSharedStudioInput();
+    if (!shared) return;
+    if (shared.kind === 'reference') {
+      addReferenceFile(shared.file, shared.file.type, shared.title);
+      return;
+    }
+    const snapshot = shared.generation;
+    const before = snapshotIfFilled();
+    if (snapshot.mode === 'image' || snapshot.mode === 'video') {
+      const draft = recipeToDraft({
+        mode: snapshot.mode, model: snapshot.model_id, provider: snapshot.provider, alias: null,
+        final_prompt: snapshot.prompt, draft_prompt: null, params: snapshot.params, inputs: [],
+        cost_cny: snapshot.cost_cny ?? null, cost_basis: null, submitted_at: snapshot.submitted_at ?? '',
+      }, keys);
+      const files: RoundReferenceFiles = { images: [], videos: [], audios: [], sref: [], cref: [], oref: [] };
+      for (const { row, file } of shared.inputs) {
+        if (row.role === 'mask' || row.role === 'markup') continue;
+        const slot = row.role === 'mj_sref' ? 'sref' : row.role === 'mj_cref' ? 'cref'
+          : row.role === 'mj_oref' ? 'oref' : row.kind === 'video' ? 'videos' : row.kind === 'audio' ? 'audios' : 'images';
+        files[slot].push(file);
+      }
+      const textRefs = snapshot.inputs.flatMap(row => row.kind === 'text' && row.text ? [row.text] : []);
+      applyRoundConfig({ ...draft.config, prompt: [draft.config.prompt, ...textRefs].join('\n') }, files);
+      if (shared.inputs.some(({row}) => row.role === 'mask' || row.role === 'markup'))
+        setAssetNotice('蒙版与标注保存在原画布中，创作台仅恢复常规参考素材');
+      if (!draft.model) {
+        setModel('');
+        setRecipeNotice({ missingModel: `${snapshot.model_name || snapshot.model_id}（${snapshot.provider_label || snapshot.provider}）`, warnings: [] });
+      }
+    } else {
+      setPromptText(snapshot.prompt);
+    }
+    offerUndo(before);
+    // Consume the explicit handoff once the local model list is available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysLoaded]);
   const search = useSearch();
   const targetJobId = useMemo(() => new URLSearchParams(search).get('job'), [search]);
   const selectSession = composer.agent.selectSession;
@@ -1311,7 +1376,7 @@ function StudioFull() {
           onDeleteBatch={jobId => trashRound(jobId)}
           onDeleteResult={(jobId, path) => trashRound(jobId, path)}
           onFailureAction={handleFailureAction}
-          canvasTargets={canvasTargetOptions}
+          canvasTargets={roundCanvasOptions}
           onAddToCanvas={addResultToCanvas}
           onReuseReferences={embedded ? undefined : handleReuseReferences}
           onEditAsReference={handleEditAsReference}
@@ -1341,6 +1406,14 @@ function StudioFull() {
       className="relative h-full overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
+      {sharedAuth && <SharedCanvasPasscodeDialog peerKey={sharedAuth.target.peer_key}
+        projectId={sharedAuth.target.project_id} name={sharedAuth.target.name} needsName={sharedAuth.needsName}
+        needsCode={sharedAuth.target.requires_passcode} onClose={() => setSharedAuth(null)} onEntered={() => {
+          const { jobId, index, target } = sharedAuth;
+          setSharedAuth(null);
+          void shareStudioResult(jobId, index, target.peer_key, target.project_id)
+            .then(() => setAssetNotice(`已加入画布「${clipName(target.name)}」`)).catch(e => notify.error(errorText(e)));
+        }} />}
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
         <div className="mx-auto flex w-full max-w-[1024px] items-center justify-between gap-2">
@@ -1927,6 +2000,24 @@ function StudioFull() {
 
   async function addResultToCanvas(jobId: string, index: number, projectId: string) {
     try {
+      const target = sharedTargets.find(card => card.peer_key + '/' + card.project_id === projectId);
+      if (target) {
+        try {
+          await shareStudioResult(jobId, index, target.peer_key, target.project_id);
+        } catch (error) {
+          if (!(error instanceof ApiError) || (error.status !== 401 && !(error.status === 403 &&
+              (error.reason === '请先进入共享画布' || error.reason === '请重新输入访问口令')))) throw error;
+          const profile = await fetchProfile();
+          if (!profile.display_name || target.requires_passcode) {
+            setSharedAuth({ target, needsName: !profile.display_name, jobId, index });
+            return;
+          }
+          await authenticateCollab(target.peer_key, target.project_id);
+          await shareStudioResult(jobId, index, target.peer_key, target.project_id);
+        }
+        setAssetNotice(`已加入画布「${clipName(target.name)}」`);
+        return;
+      }
       await addStudioResultToCanvas(jobId, index, projectId);
     } catch (error) {
       notify.error(errorText(error));

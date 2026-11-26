@@ -24,6 +24,11 @@ def isolated_data_root(tmp_path, monkeypatch):
     client_home = tmp_path / "client-home"
     monkeypatch.setattr(agent_clients, "_home", lambda: client_home)
     monkeypatch.setenv("APPDATA", str(client_home / "AppData" / "Roaming"))
+    # The discovery listener in lifespan must never join a real workspace's broadcast port.
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        monkeypatch.setenv("GAME_ATELIER_COLLAB_DISCOVERY_PORT", str(probe.getsockname()[1]))
     # 服务启动会起价格同步线程：测试里关掉，绝不联外网。
     from character_workflow.lib import (
         announcement_feed, openai_hk_prices, tokendance_prices, tuzi_prices,

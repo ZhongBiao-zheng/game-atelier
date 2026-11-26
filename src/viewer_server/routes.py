@@ -899,6 +899,8 @@ def change_data_root(payload: _DataRootPayload) -> dict:
         return counts["jobs"] + counts["agents"] + counts["gateway"]
 
     def switched() -> None:
+        from viewer_server.collab_app import reload_collab_root
+        reload_collab_root()
         restart_watchers()  # 抛错 = 切换失败，data_root_move 退回原目录后再调一次把监听挪回去
         from character_workflow.lib import onboarding_metrics
 

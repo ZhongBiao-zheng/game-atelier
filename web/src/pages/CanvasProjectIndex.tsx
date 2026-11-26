@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, type Transition } from 'motion/react';
-import { Link } from 'wouter';
-import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, HideIcon, MoreIcon, RetryIcon, SearchIcon, ShowIcon, UploadIcon } from '@/components/ui/icons';
+import { Link, useLocation } from 'wouter';
+import { SharedCanvasSettingsDialog } from '@/components/canvas/SharedCanvasSettingsDialog';
+import { SharedCanvasList, SharedStatusButton, useSharedCanvases } from '@/components/canvas/SharedCanvasList';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
+import { stopCollabShare } from '@/api/collab';
+import type { CollabCard } from '@/schema/collab';
+import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, HideIcon, MoreIcon, RetryIcon, SearchIcon, ShowIcon, ShareIcon, UploadIcon } from '@/components/ui/icons';
 import { fetchHiddenCanvasProjects, setCanvasProjectGalleryHidden } from '@/api/gallery';
 
 import {
@@ -52,6 +57,11 @@ type ListMotion = 'reveal' | 'instant';
 
 
 export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectId: string) => void }) {
+  const [, navigate] = useLocation();
+  const [shared, setShared] = useState(() => new URLSearchParams(window.location.search).get('view') === 'shared');
+  const peers = useSharedCanvases();
+  const ownShares = peers.cards.filter(card => card.is_self);
+  const [settings, setSettings] = useState<CanvasProjectSummary | null>(null);
   const [projects, setProjects] = useState<CanvasProjectSummary[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -221,6 +231,16 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     }
   }
 
+  function openShared(card: CollabCard) {
+    if (card.is_self) onOpenProject(card.project_id);
+    else navigate(`/canvas/shared/${encodeURIComponent(card.peer_key)}/${encodeURIComponent(card.project_id)}`);
+  }
+
+  async function stopSharing(projectId: string) {
+    try { await stopCollabShare(projectId); await peers.refresh(); }
+    catch (error) { setActionError(errorText(error)); }
+  }
+
   const filteredProjects = projects.filter(project =>
     project.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -231,12 +251,13 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
         <header className="mb-8 flex flex-wrap items-center justify-between gap-5">
           <div className="flex items-baseline gap-3">
             <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
-            {!loading && projects.length > 0 && (
+            {!shared && !loading && projects.length > 0 && (
               <span className="text-xs tabular-nums text-muted-foreground">共 {projects.length} 个项目</span>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {projects.length > 0 && (
+            <SharedStatusButton shares={ownShares} refresh={peers.refresh} />
+            {!shared && <>{projects.length > 0 && (
               <InputGroup className="w-56">
                 <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
                 <InputGroupInput
@@ -258,7 +279,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             </Button>
             <Button disabled={creating} onClick={() => void createProject()}>
               <AddIcon aria-hidden="true" />新建项目
-            </Button>
+            </Button></>}
           </div>
           <FileInput
             ref={importRef}
@@ -273,6 +294,13 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           />
         </header>
 
+        <Segmented aria-label="画布列表" className="mb-5 w-fit grid-cols-2">
+          <SegmentedItem value="mine" className="px-4" selected={!shared} onSelect={() => setShared(false)}>我的画布</SegmentedItem>
+          <SegmentedItem value="shared" className="px-4" selected={shared} onSelect={() => setShared(true)}>
+            共享画布{peers.cards.length > 0 && <span className="ml-1 text-xs tabular-nums">{peers.cards.length}</span>}
+          </SegmentedItem>
+        </Segmented>
+        {shared ? <SharedCanvasList {...peers} onOpen={openShared} /> : <>
         {/* 错误条从 0 高度展开、收回；外边距改成内层 padding，展开到底高度不跳。 */}
         <Collapse open={Boolean(bannerError)}>
           <div className="pb-6">
@@ -325,6 +353,9 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 <CanvasProjectCard
                   project={project}
                   hiddenOnHome={hiddenOnHomeIds.has(project.project_id)}
+                  share={ownShares.find(card => card.project_id === project.project_id)}
+                  onShare={() => setSettings(project)}
+                  onStop={() => void stopSharing(project.project_id)}
                   onOpen={() => onOpenProject(project.project_id)}
                   onInlineRename={name => renameProjectInline(project, name)}
                   onToggleHiddenOnHome={() => void toggleHiddenOnHome(project)}
@@ -337,6 +368,10 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             ))}
           </AnimatePresence>
         </div>
+        </>}
+        {settings && <SharedCanvasSettingsDialog key={settings.project_id} projectId={settings.project_id} name={settings.name}
+          share={ownShares.find(card => card.project_id === settings.project_id)} onClose={() => setSettings(null)}
+          onSaved={() => { setSettings(null); void peers.refresh(); }} />}
       </div>
 
     </section>
@@ -355,7 +390,7 @@ const CARD_VARIANTS = {
 
 
 function CanvasProjectCard({
-  project,
+  project, share, onShare, onStop,
   hiddenOnHome,
   onOpen,
   onInlineRename,
@@ -366,6 +401,9 @@ function CanvasProjectCard({
   highlighted,
 }: {
   project: CanvasProjectSummary;
+  share?: CollabCard;
+  onShare: () => void;
+  onStop: () => void;
   hiddenOnHome: boolean;
   onOpen: () => void;
   onInlineRename: (name: string) => Promise<void>;
@@ -420,6 +458,7 @@ function CanvasProjectCard({
         />
         <p className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
           <span>{project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}</span>
+          {share && <span>共享中 · {share.online_count} 人在线</span>}
           {hiddenOnHome && <span className="inline-flex items-center gap-1 text-subtle-foreground"><HideIcon size="sm" aria-hidden="true" />首页隐藏</span>}
         </p>
       </div>
@@ -431,6 +470,8 @@ function CanvasProjectCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => window.setTimeout(beginInlineRename, 0)}><EditIcon aria-hidden="true" />重命名</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onShare}><ShareIcon aria-hidden="true" />{share ? '共享设置' : '共享画布…'}</DropdownMenuItem>
+          {share && <DropdownMenuItem onSelect={onStop}>停止共享</DropdownMenuItem>}
           <DropdownMenuItem onSelect={onToggleHiddenOnHome}>
             {hiddenOnHome ? <><ShowIcon aria-hidden="true" />在首页展示作品</> : <><HideIcon aria-hidden="true" />在首页隐藏作品</>}
           </DropdownMenuItem>
