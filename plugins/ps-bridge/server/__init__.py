@@ -144,7 +144,7 @@ def _place(ctx, node_id: str) -> dict:
     origin = origins.find_origin(ctx.read_state(), read_canvas_document(ctx.project_id), node_id, image.version_id)
     document = (origin or {}).get("document") or {}
     params = {
-        "layer_name": image.title[:100] or "Atelier",
+        "layer_name": image.title[:100] or "Cobrush",
         "bounds": origin.get("bounds") if origin else None,
         "target": {"doc_id": document.get("id"), "name": document.get("name"), "path": document.get("path"),
                    "strict": True} if origin else None,

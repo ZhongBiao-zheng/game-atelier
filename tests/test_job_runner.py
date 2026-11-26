@@ -577,7 +577,7 @@ def test_friendly_error_provider_cors_points_to_server_api_url_not_browser():
 def test_friendly_error_generic_network_error_names_server_to_provider_hop():
     err = Exception("ERR_NETWORK Network Error")
     msg = job_runner._friendly_error(err)
-    assert "Atelier 服务" in msg
+    assert "Cobrush 服务" in msg
     assert "供应商接口" in msg
 
 

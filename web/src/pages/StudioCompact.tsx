@@ -244,7 +244,7 @@ export function StudioCompact() {
       setLocation('/studio');
     } catch (e: any) {
       setCompactError(unconfirmedRequest.current
-        ? '没有收到 Atelier 的确认，生成可能已提交；再次生成会先核对'
+        ? '没有收到 Cobrush 的确认，生成可能已提交；再次生成会先核对'
         : errorText(e));
     } finally {
       setPending(false);

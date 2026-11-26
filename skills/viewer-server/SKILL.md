@@ -1,6 +1,6 @@
 ---
 name: viewer-server
-description: 用户要打开 Atelier Web 画廊、首次安装初始化，或 Web 打不开需要重启本地服务时用。用于本机服务管理；画布创作由 canvas Skill 处理。
+description: 用户要打开 Cobrush Web 画廊、首次安装初始化，或 Web 打不开需要重启本地服务时用。用于本机服务管理；画布创作由 canvas Skill 处理。
 disable-model-invocation: true
 ---
 

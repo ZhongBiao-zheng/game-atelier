@@ -22,7 +22,7 @@ import { UNDO_DURATION_MS } from '@/lib/notify';
 
 const VALIDATE_DELAY_MS = 400;
 const COPIED_MS = 2000;
-const MANUAL_FILENAME = 'Atelier 自定义接口接入说明.md';
+const MANUAL_FILENAME = 'Cobrush 自定义接口接入说明.md';
 
 /** 新建时可以从示例开始（同一份 JSON 由 pytest 逐条校验，示例本身必定合法）。 */
 const EXAMPLES = examples as { id: string; label: string; document: HttpProtocolDocument }[];

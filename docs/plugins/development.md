@@ -16,7 +16,7 @@ make install
 cd web && node scripts/build-plugins.mjs
 ```
 
-然后刷新 Atelier 页面（宿主按包摘要缓存界面，摘要变了会重新取）。宿主前端用 `pnpm dev` 跑在 5173 端口时，插件包仍由本机服务从 `plugins/<id>/package/` 提供。
+然后刷新 Cobrush 页面（宿主按包摘要缓存界面，摘要变了会重新取）。宿主前端用 `pnpm dev` 跑在 5173 端口时，插件包仍由本机服务从 `plugins/<id>/package/` 提供。
 
 构建脚本把 `ui/src/main.tsx` 打成一个 HTML（脚本与样式内联），资源不能有外部文件：图片、字体要么内联，要么在运行时从宿主取。
 

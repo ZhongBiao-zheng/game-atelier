@@ -114,11 +114,11 @@ def check_base_url(url: str | None) -> SplitResult:
                 or (ip is not None and ip.is_loopback))
     port = origin(parts)[2]
     if loopback and port == _viewer_port():
-        raise OutboundError("服务地址不能指向 Atelier 自己")
+        raise OutboundError("服务地址不能指向 Cobrush 自己")
     # 局域网网关只挂在本机的局域网地址上：本机 / 私有地址 + 网关端口一律拒绝。
     local_or_private = loopback or (ip is not None and ip.is_private)
     if local_or_private and port == _gateway_port():
-        raise OutboundError("服务地址不能指向 Atelier 的局域网网关")
+        raise OutboundError("服务地址不能指向 Cobrush 的局域网网关")
     return parts
 
 

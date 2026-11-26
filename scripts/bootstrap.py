@@ -594,7 +594,7 @@ def check() -> dict:
             "uv_path": uv_path,
             "venv_python": str(venv_py),
             "platform": sys.platform,
-            "next_action": "打开 Atelier 检查供应商配置",
+            "next_action": "打开 Cobrush 检查供应商配置",
         }
 
     if not keys:

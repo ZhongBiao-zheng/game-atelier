@@ -59,7 +59,7 @@ def _same_admin_api(request: Request) -> None:
     from character_workflow.lib.callers import atelier_gateway
 
     if request.headers.get(atelier_gateway.ADMIN_API_HEADER) != str(atelier_gateway.ADMIN_API_VERSION):
-        raise HTTPException(426, "远程管理需要本机与主机是同一版本的 Atelier：请把两边都更新到最新版本后再管理成员")
+        raise HTTPException(426, "远程管理需要本机与主机是同一版本的 Cobrush：请把两边都更新到最新版本后再管理成员")
 
 
 def create_router(require_key):

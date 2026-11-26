@@ -73,16 +73,16 @@ def app_version() -> str:
 def _incompatibility(lock: PluginPackageLock, current_app: str) -> str | None:
     current = parse_semver(current_app)
     if current < parse_semver(lock.app_version.min):
-        return f"需要 Atelier {lock.app_version.min} 以上"
+        return f"需要 Cobrush {lock.app_version.min} 以上"
     if lock.app_version.max is not None and current > parse_semver(lock.app_version.max):
-        return f"仅支持到 Atelier {lock.app_version.max}"
+        return f"仅支持到 Cobrush {lock.app_version.max}"
     if lock.sdk_version not in SUPPORTED_SDK_VERSIONS:
-        return "需要更高版本的 Atelier"
+        return "需要更高版本的 Cobrush"
     if not set(lock.capabilities) <= SUPPORTED_CAPABILITIES:
-        return "需要更高版本的 Atelier"
+        return "需要更高版本的 Cobrush"
     if any(asset.required for asset in lock.assets):
         # 资产下载器随第一个带大文件的插件交付（方案 C3）。
-        return "需要更高版本的 Atelier"
+        return "需要更高版本的 Cobrush"
     return None
 
 

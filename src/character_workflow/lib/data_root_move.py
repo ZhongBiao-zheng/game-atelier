@@ -391,7 +391,7 @@ def _hand_over_records(source_runtime: Path, target_runtime: Path, written: list
     cleanup_stale_pid(target_runtime)
     other = read_pid(target_runtime)
     if other is not None and other != os.getpid():
-        raise MoveRejected("这个数据目录正被另一个 Atelier 服务使用，请先停止它")
+        raise MoveRejected("这个数据目录正被另一个 Cobrush 服务使用，请先停止它")
     for name in _RUN_RECORDS:
         src, dst = source_runtime / name, target_runtime / name
         if not src.is_file():
@@ -417,7 +417,7 @@ def _start_locks(source_runtime: Path, target_runtime: Path) -> Iterator[None]:
                 attempt.close()
                 time.sleep(_START_LOCK_DELAY)
             else:
-                raise MoveRejected("Atelier 服务正在启动或停止，请稍后再试")
+                raise MoveRejected("Cobrush 服务正在启动或停止，请稍后再试")
         yield
 
 

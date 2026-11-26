@@ -56,7 +56,7 @@ def test_enable_unknown_and_incompatible(client, root):
     assert missing.status_code == 404 and missing.json()["detail"]["code"] == "PLUGIN_NOT_FOUND"
     blocked = client.post("/api/plugins/demo/enable", json={})
     assert blocked.status_code == 409
-    assert blocked.json()["detail"] == {"message": "需要 Atelier 9.0.0 以上", "code": "PLUGIN_UNAVAILABLE"}
+    assert blocked.json()["detail"] == {"message": "需要 Cobrush 9.0.0 以上", "code": "PLUGIN_UNAVAILABLE"}
 
 
 def test_package_file_is_served_only_when_enabled(client, root):

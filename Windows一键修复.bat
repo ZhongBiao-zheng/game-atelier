@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================
-echo    Game Atelier 一键修复
+echo    Cobrush 一键修复
 echo ============================================
 echo.
 

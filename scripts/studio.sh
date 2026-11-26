@@ -33,7 +33,7 @@ sync_local_skills() {
   fi
 }
 
-echo "Atelier"
+echo "Cobrush"
 echo
 SECONDS=0
 
@@ -83,7 +83,7 @@ if [ ! -f "web/dist/index.html" ]; then
   # 前端文件缺失：直接从当前版本还原（只动 web/dist），不再让用户另去双击修复脚本。
   warn "前端文件缺失，正在自动修复…"
   if ! bash "$SCRIPT_DIR/repair-update.sh" --repair-only || [ ! -f "web/dist/index.html" ]; then
-    err "自动修复失败，请重新下载 Atelier"
+    err "自动修复失败，请重新下载 Cobrush"
     pause_exit 1
   fi
 fi
@@ -94,5 +94,5 @@ if ! "$UV" run --no-project python scripts/bootstrap.py --launch; then
   pause_exit 1
 fi
 echo
-echo "Atelier 已启动，本窗口可关闭。"
+echo "Cobrush 已启动，本窗口可关闭。"
 sleep 2

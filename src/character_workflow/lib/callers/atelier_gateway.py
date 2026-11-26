@@ -123,7 +123,7 @@ def _raise_for_status(response: requests.Response) -> None:
 
 
 # 测试连接时按状态码给出能照着做的提示；生成请求仍走 _raise_for_status 的「gateway api <码>」供路由判断切换。
-_CHECK_HEALTH_ERRORS = {404: "网关机器的 Atelier 版本过旧，请先把网关机器更新到最新版"}
+_CHECK_HEALTH_ERRORS = {404: "网关机器的 Cobrush 版本过旧，请先把网关机器更新到最新版"}
 _CHECK_AUTH_ERRORS = {401: "网关密钥无效或已被撤销，请向网关管理员重新获取",
                       403: "这把网关密钥没有使用权限，请联系网关管理员"}
 
@@ -177,7 +177,7 @@ def sync_gateway_key(alias: str) -> list[_keys.ModelSpec]:
 
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
-        raise GatewayError(f"{alias} 不是 Remote Atelier 供应商")
+        raise GatewayError(f"{alias} 不是 Remote Cobrush 供应商")
     models = gateway_models(check_gateway(key.base_url, key.access_key)["models"])
     _keys.patch_key(alias, {"models": models})
     model_routes.put_alias_first(alias, only_unordered=True)
@@ -236,7 +236,7 @@ def _run_task(
 
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
-        raise GatewayError(f"{alias} 不是 Remote Atelier 供应商")
+        raise GatewayError(f"{alias} 不是 Remote Cobrush 供应商")
     if not key.enabled:
         raise GatewayError("供应商已停用")
     params = params if params is not None else {}

@@ -16,12 +16,12 @@ Schema 定义：`src/character_workflow/lib/plugin_manifest.py`（Pydantic）与
 | `icon` | 图标名 | 设置页图标，见下方「图标」 |
 | `publisher` | `{id, name}` | 发布者 |
 | `sdk_version` | 字符串 | 界面协议主版本，目前只有 `"1"` |
-| `app_version` | `{min, max?}` | 兼容的 Atelier 版本范围，闭区间 |
+| `app_version` | `{min, max?}` | 兼容的 Cobrush 版本范围，闭区间 |
 | `runtime` | `"sandbox"`（缺省）或 `"host"` | `host` 只给宿主白名单里的官方插件（ADR-0039），其余包声明了会被拒绝加载 |
 | `ui` | `{entry: "ui/index.html"}` 或省略 | 沙箱插件有节点或工具栏动作时必填；宿主插件不能声明 |
 | `capabilities` | 字符串数组 | 插件界面要用的能力，见 [界面与 SDK](sdk.md#能力)；宿主插件不声明 |
 | `contributes` | 对象 | 贡献点，见 [贡献点](contributions.md) |
-| `assets` | 数组 | 依赖的大文件（地址、字节数、SHA-256）。下载器尚未实现：声明了必需的大文件的插件显示为「需要更高版本的 Atelier」 |
+| `assets` | 数组 | 依赖的大文件（地址、字节数、SHA-256）。下载器尚未实现：声明了必需的大文件的插件显示为「需要更高版本的 Cobrush」 |
 | `state_schema_version` | 整数 | 项目级插件状态的版本，默认 1 |
 
 ## 锁文件追加的字段

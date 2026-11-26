@@ -77,9 +77,9 @@ def pending(main: dict, backfill: dict | None) -> bool:
 
 
 def stop_server() -> None:
-    print("停止 Atelier 服务…", flush=True)
+    print("停止 Cobrush 服务…", flush=True)
     if bootstrap.run_in_venv(["-m", "viewer_server.server", "stop"]):
-        raise MigrationStop("停止服务失败，请关闭 Atelier 后重试")
+        raise MigrationStop("停止服务失败，请关闭 Cobrush 后重试")
 
 
 def migrate(data: Path, tree: Path, log_dir: Path) -> bool:
@@ -135,7 +135,7 @@ def main() -> int:
         print("没有找到工坊数据（.runtime/projects.json），无需迁移。")
         return 0
     if shutil.which("uv") is None or git("--version").returncode != 0:
-        print("需要 uv 和 git。请先用一键启动器启动一次 Atelier。")
+        print("需要 uv 和 git。请先用一键启动器启动一次 Cobrush。")
         return 1
     if git("cat-file", "-e", f"{LEGACY_COMMIT}^{{commit}}").returncode != 0:
         git("fetch", "--quiet", "origin")
@@ -167,7 +167,7 @@ def main() -> int:
     if not migrated:
         return 0
     print(f"报告与备份在：{log_dir}")
-    print("\n启动 Atelier…", flush=True)
+    print("\n启动 Cobrush…", flush=True)
     return bootstrap.launch()
 
 

@@ -172,7 +172,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           python -c 'import json, os; assert os.environ["RELEASE_TAG"] == "v" + json.load(open(".claude-plugin/plugin.json"))["version"]'
-          gh release create "$RELEASE_TAG" bundles/* --verify-tag --title "Game Atelier $RELEASE_TAG" --notes-file docs/release-notes.md
+          gh release create "$RELEASE_TAG" bundles/* --verify-tag --title "Cobrush $RELEASE_TAG" --notes-file docs/release-notes.md
   publish-desktop:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [publish, desktop]

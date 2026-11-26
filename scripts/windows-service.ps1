@@ -80,7 +80,7 @@ $bootTrigger = New-ScheduledTaskTrigger -AtStartup
 $watchTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($bootTrigger, $watchTrigger) -Settings $settings -Principal $taskPrincipal -Description 'Game Atelier 本机服务与局域网中转。请在任务属性中保存未登录运行的凭据。' | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($bootTrigger, $watchTrigger) -Settings $settings -Principal $taskPrincipal -Description 'Cobrush 本机服务与局域网中转。请在任务属性中保存未登录运行的凭据。' | Out-Null
 Write-Host '任务已创建，尚需完成凭据设置：任务计划程序库 → GameAtelier → 属性 → 不管用户是否登录都要运行 → 确定。密码仅在系统弹窗输入。'
 Write-Host '完成后运行 status 确认 installed，再右键任务选择运行。'
 Start-Process taskschd.msc

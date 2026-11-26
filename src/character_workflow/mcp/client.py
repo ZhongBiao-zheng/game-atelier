@@ -26,8 +26,8 @@ OPERATIONS: dict[str, str] = {
     "atelier-protocol-validate": "/api/canvas-agent/protocol-validate",
 }
 _ERROR_MESSAGES = {
-    "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
-    "SESSION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
+    "CONNECTION_REQUIRED": "请在本机 Cobrush 管理页重新授权 Agent。",
+    "SESSION_REQUIRED": "请在本机 Cobrush 管理页重新授权 Agent。",
     "SESSION_EXPIRED": "画布连接已过期，请重新授权后连接。",
     "SESSION_REVOKED": "画布授权已撤销，请在本机管理页重新授权。",
     "CAPABILITY_DENIED": "当前 Agent 没有此操作的授权。",
@@ -41,12 +41,12 @@ _ERROR_MESSAGES = {
     "DOCUMENT_NOT_ALLOWED": "当前目标不支持此文档类型，请核对文档与目标归属。",
     "CONTENT_TOO_LARGE": "内容超过本次操作的大小限制，请缩小范围。",
     "QUEUE_FULL": "执行队列已满，请在本机页面核对已保存请求，不要重新创建付费任务。",
-    "APPROVAL_REQUIRED": "请在 Atelier 页面人工批准本次生成。",
+    "APPROVAL_REQUIRED": "请在 Cobrush 页面人工批准本次生成。",
     "REQUEST_EXPIRED": "生成请求已过期，需要重新准备并批准。",
     "IDEMPOTENCY_CONFLICT": "幂等键已用于不同内容，请检查本次操作。",
-    "EXECUTION_NEEDS_REVIEW": "生成执行状态不明，请在 Atelier 人工核对，不要自动重试。",
+    "EXECUTION_NEEDS_REVIEW": "生成执行状态不明，请在 Cobrush 人工核对，不要自动重试。",
     "INSTANCE_CHANGED": "本机服务实例已变化，请重新连接。",
-    "PROTOCOL_MISMATCH": "本机服务协议不匹配，请更新 Atelier 后连接。",
+    "PROTOCOL_MISMATCH": "本机服务协议不匹配，请更新 Cobrush 后连接。",
     "CONNECTION_RATE_LIMITED": "调用过于频繁，请稍后重试。",
     "REVISION_CONFLICT": "内容修订已变化，请重新读取后再操作。",
 }
@@ -288,7 +288,7 @@ class CanvasClient:
             # No retry after an ambiguous write: the server may already have committed it.
             raise AdapterError(
                 "LOCAL_SERVICE_UNAVAILABLE",
-                f"无法连接本机 Atelier（{base_url}）。请先启动本机服务；"
+                f"无法连接本机 Cobrush（{base_url}）。请先启动本机服务；"
                 "若操作已提交，请查询状态而非重复生成。",
             ) from None
 

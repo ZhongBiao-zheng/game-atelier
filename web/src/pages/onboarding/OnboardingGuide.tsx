@@ -152,7 +152,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
             onClick={() => openPreset('chatgpt', 'chatgpt')} />
           <PathCard provider={{ provider: 'comfyui' }} title="本机 ComfyUI" status={comfyLine}
             onClick={() => openPreset('comfyui', 'comfyui')} />
-          <PathCard provider={{ provider: 'atelier' }} title="加入团队" status="同事的 Atelier"
+          <PathCard provider={{ provider: 'atelier' }} title="加入团队" status="同事的 Cobrush"
             onClick={() => openPreset('gateway', 'atelier')} />
         </ul>
         <div>

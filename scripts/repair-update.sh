@@ -17,7 +17,7 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
   fail "当前目录不是 git 仓库。ZIP 下载版不能自动更新，请重新下载最新版。"
 
 echo "============================================"
-echo "   Game Atelier 一键修复"
+echo "   Cobrush 一键修复"
 echo "============================================"
 echo
 

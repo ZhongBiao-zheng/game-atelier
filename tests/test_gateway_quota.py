@@ -421,7 +421,7 @@ def test_v1_gateway_is_rejected(monkeypatch):
 
 
 @pytest.mark.parametrize(("health", "info", "message"), [
-    (404, 200, "网关机器的 Atelier 版本过旧"),
+    (404, 200, "网关机器的 Cobrush 版本过旧"),
     (200, 401, "网关密钥无效或已被撤销"),
     (200, 403, "这把网关密钥没有使用权限"),
 ])

@@ -49,7 +49,7 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
       const operation = pendingRef.current;
       let reachable = false;
       if (operation && updateRecoveryExpired(operation)) {
-        finish('Atelier 没有自动恢复，请重新打开 Atelier');
+        finish('Cobrush 没有自动恢复，请重新打开 Cobrush');
       } else {
         try {
           if (operation) {

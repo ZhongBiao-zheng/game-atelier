@@ -797,7 +797,7 @@ def _bootstrap_check(*extra: str) -> dict:
     )
     if proc.returncode != 0:
         raise HTTPException(500, detail={
-            "message": "无法读取 Atelier 运行环境", "recovery": "重新打开 Atelier 后再试",
+            "message": "无法读取 Cobrush 运行环境", "recovery": "重新打开 Cobrush 后再试",
             "raw": proc.stderr[-2000:],
         })
     return json.loads(proc.stdout)
@@ -4107,7 +4107,7 @@ def get_studio_job_by_request(request_id: str) -> dict:
         raise HTTPException(422, detail="请求 ID 格式不对")
     job = _studio_job_for_request(request_id)
     if job is None:
-        raise HTTPException(404, detail="Atelier 没有收到这次提交")
+        raise HTTPException(404, detail="Cobrush 没有收到这次提交")
     return job.model_dump(mode="json")
 
 

@@ -134,12 +134,12 @@ def test_id_must_match_directory(root):
 
 
 @pytest.mark.parametrize("overrides, reason", [
-    ({"app_version": {"min": "9.0.0"}}, "需要 Atelier 9.0.0 以上"),
-    ({"app_version": {"min": "1.0.0", "max": "2.0.0"}}, "仅支持到 Atelier 2.0.0"),
-    ({"sdk_version": "2"}, "需要更高版本的 Atelier"),
-    ({"capabilities": ["generation.image"]}, "需要更高版本的 Atelier"),
+    ({"app_version": {"min": "9.0.0"}}, "需要 Cobrush 9.0.0 以上"),
+    ({"app_version": {"min": "1.0.0", "max": "2.0.0"}}, "仅支持到 Cobrush 2.0.0"),
+    ({"sdk_version": "2"}, "需要更高版本的 Cobrush"),
+    ({"capabilities": ["generation.image"]}, "需要更高版本的 Cobrush"),
     ({"assets": [{"id": "model", "title": "模型", "urls": ["https://example.com/m.bin"],
-                  "bytes": 10, "sha256": "a" * 64}]}, "需要更高版本的 Atelier"),
+                  "bytes": 10, "sha256": "a" * 64}]}, "需要更高版本的 Cobrush"),
 ])
 def test_incompatible_plugin_cannot_be_enabled(root, overrides, reason):
     write_plugin(root, **overrides)

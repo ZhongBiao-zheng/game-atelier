@@ -1288,7 +1288,7 @@ function StudioFull() {
     const failure: RoundFailure = files
       ? { message: `参考素材上传失败：${message}`, action: { label: '重试', kind: 'retry' } }
       : unknown
-        ? { message: '没有收到 Atelier 的确认，这次生成可能已经提交', action: { label: '重新查询', kind: 'requery' } }
+        ? { message: '没有收到 Cobrush 的确认，这次生成可能已经提交', action: { label: '重新查询', kind: 'requery' } }
         : { message };
     setRounds(rs => rs.map(r => r === round ? {
       kind: 'failed' as const, sessionId: round.sessionId, clientKey, submittedAt: new Date().toISOString(),
@@ -1325,7 +1325,7 @@ function StudioFull() {
     if (await reconcileLocalSubmission(clientKey) !== false) return;
     // 服务端确认没收到：这时再提交不会重复下单（仍沿用同一请求 ID）。
     setRounds(rs => rs.map(r => r.clientKey === clientKey && r.kind === 'failed' ? {
-      ...r, failure: { message: 'Atelier 没有收到这次提交', action: { label: '重试', kind: 'retry' } },
+      ...r, failure: { message: 'Cobrush 没有收到这次提交', action: { label: '重试', kind: 'retry' } },
     } : r));
   }
 

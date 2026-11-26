@@ -13,7 +13,7 @@ import { probeUpdateInstance, readPendingUpdate, savePendingUpdate, updateNaviga
 
 /** 首屏状态读取失败先静默重试几次（服务刚起、磁盘慢时常见），仍失败才露错误。 */
 const STATUS_RETRY_DELAYS_MS = [1000, 3000];
-const NOT_RECOVERED = 'Atelier 没有自动恢复，请重新打开 Atelier';
+const NOT_RECOVERED = 'Cobrush 没有自动恢复，请重新打开 Cobrush';
 
 export function App() {
   return <LocalConnectionGate><ConnectedApp /></LocalConnectionGate>;
@@ -61,7 +61,7 @@ function ConnectedApp() {
           } else if (attempt < STATUS_RETRY_DELAYS_MS.length) {
             retryTimer.current = setTimeout(() => load(attempt + 1), STATUS_RETRY_DELAYS_MS[attempt]);
           } else setError({
-            message: errorText(e, '暂时读不到 Atelier 的状态'),
+            message: errorText(e, '暂时读不到 Cobrush 的状态'),
             canExport: e instanceof ApiError && e.status > 0,
           });
         });
@@ -87,7 +87,7 @@ function ConnectedApp() {
 
 function StartupError({ message, canExport, onRetry }: { message: string; canExport: boolean; onRetry: () => void }) {
   const openLog = shellLogOpener();
-  return <StartupScreen label="暂时打不开 Atelier">
+  return <StartupScreen label="暂时打不开 Cobrush">
     <p role="alert" className="break-words text-sm text-pretty text-muted-foreground">{message}</p>
     <div className="flex flex-wrap items-center justify-center gap-2">
       {openLog && <Button variant="outline" onClick={openLog}>查看日志</Button>}

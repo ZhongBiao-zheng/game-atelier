@@ -2,8 +2,8 @@
 
 | 版本 | 写在 | 不满足时 |
 |---|---|---|
-| `app_version.min` / `max` | 清单 | 设置页显示「需要 Atelier x.y.z 以上」或「仅支持到 Atelier x.y.z」，不能启用 |
-| `sdk_version` | 清单 | 显示「需要更高版本的 Atelier」 |
+| `app_version.min` / `max` | 清单 | 设置页显示「需要 Cobrush x.y.z 以上」或「仅支持到 Cobrush x.y.z」，不能启用 |
+| `sdk_version` | 清单 | 显示「需要更高版本的 Cobrush」 |
 | 能力 | 清单 `capabilities` | 有宿主不认识的能力时同上 |
 | 必需的大文件 | 清单 `assets` | 下载器尚未实现，同上 |
 | `payload_schema_version` | 节点类型 → 节点数据的 `data_schema_version` | 由插件界面自己兼容读取 |

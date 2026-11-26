@@ -108,7 +108,7 @@ describe('local connection gate', () => {
     const network = server(); network.mockRejectedValue(new TypeError('Failed to fetch'));
     render(<LocalConnectionGate><Draft onMount={vi.fn()} /></LocalConnectionGate>);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(screen.getByText('暂时无法连接 Atelier 服务')).toBeInTheDocument();
+    expect(screen.getByText('暂时无法连接 Cobrush 服务')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();

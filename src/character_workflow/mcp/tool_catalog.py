@@ -66,7 +66,7 @@ PS_TOOLS = {
     "preview": (PsPreviewInput, True, "Export a preview image (long edge <= 1600) of a Photoshop document; never "
                 "modifies it. Use to check edits."),
     "execute": (PsExecuteInput, False, "Run an ExtendScript (ES3) function body in local Photoshop and return plain "
-                "JSON. Only listed when the user turned on Agent scripts in Atelier settings; every run is logged. "
+                "JSON. Only listed when the user turned on Agent scripts in Cobrush settings; every run is logged. "
                 "Inspect first; save copies instead of overwriting; failures do not roll back."),
 }
 
@@ -82,14 +82,14 @@ class ProtocolValidateInput(StrictInput):
 
 
 PROTOCOL_TOOLS = {
-    "manual": (ProtocolManualInput, "Read the Atelier custom interface manual (Markdown): when a template is "
+    "manual": (ProtocolManualInput, "Read the Cobrush custom interface manual (Markdown): when a template is "
                "needed, the template spec (version 1), submit/failure/billing rules, self-test and safety. "
                "Read it before writing a template for a model vendor."),
     "validate": (ProtocolValidateInput, "Dry-run a custom interface template (JSON object, <= 200 KB): returns "
                  "{valid, issues, declared, preview}. Never saves, never sends requests, never reads stored "
                  "templates or keys. Fields whose names look like credentials (Authorization, api_key, ...) are left "
                  "out of the preview and listed in hidden_fields. Fix issues until valid, then give the JSON to "
-                 "the user to paste and save in Atelier settings."),
+                 "the user to paste and save in Cobrush settings."),
 }
 
 

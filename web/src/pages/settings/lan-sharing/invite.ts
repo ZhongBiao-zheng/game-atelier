@@ -4,7 +4,7 @@ const ADDRESS = /https?:\/\/[^\s"'<>，。]+/i;
 const TOKEN = /\batg_[A-Za-z0-9_-]+/;
 
 export function formatGatewayInvite(address: string, token: string): string {
-  return `Atelier 团队网关邀请\n地址：${address}\n密钥：${token}`;
+  return `Cobrush 团队网关邀请\n地址：${address}\n密钥：${token}`;
 }
 
 /** 文字里同时有网关地址和 atg_ 密钥才算邀请；只有其一时返回 null，按普通粘贴处理。 */

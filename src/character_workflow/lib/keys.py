@@ -265,7 +265,7 @@ def read_keys_db() -> KeysDB:
     except FileNotFoundError:
         return KeysDB()
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise _UnreadableKeysJSON("供应商配置内容损坏，请重新打开 Atelier 以备份原文件。") from None
+        raise _UnreadableKeysJSON("供应商配置内容损坏，请重新打开 Cobrush 以备份原文件。") from None
     invalid_structure = "供应商配置格式无法识别，原文件已保留。请检查数据目录中的 .config/keys.json。"
     if not isinstance(raw, dict) or "keys" not in raw:
         raise KeysConfigError(invalid_structure)

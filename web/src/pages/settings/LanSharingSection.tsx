@@ -35,7 +35,7 @@ import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { errorText } from '@/lib/errorText';
 
 export const GATEWAY_HINT =
-  '在成员行点「复制邀请」发给同事，同事在「添加供应商 → 团队网关」任一框里粘贴即可连接。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
+  '在成员行点「复制邀请」发给同事，同事在「添加供应商 → 团队网关」任一框里粘贴即可连接。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Cobrush（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);

@@ -2,7 +2,7 @@
 name: canvas
 version: 1.0.0
 description: |
-  用户要在本机 Atelier 画布上摆节点、连线、导入素材，或从画布发起生成时用（需 canvas_* 工具已授权）。角色、美宣、三视图、UI、视频创作均在项目画布中完成。
+  用户要在本机 Cobrush 画布上摆节点、连线、导入素材，或从画布发起生成时用（需 canvas_* 工具已授权）。角色、美宣、三视图、UI、视频创作均在项目画布中完成。
 allowed-tools:
   - Read
   - AskUserQuestion
@@ -16,10 +16,10 @@ triggers:
 
 ## 定位
 
-画布是 server 持有、带 revision 的活文档，本 Skill 通过 Atelier MCP 工具操作画布
+画布是 server 持有、带 revision 的活文档，本 Skill 通过 Cobrush MCP 工具操作画布
 （契约见 `docs/contracts/canvas-mcp.md`）。没有 CLI 路径，不读写画布文件，不改 Job。
 工具不可见时，让用户新开一个会话（插件自带的 MCP 只在会话启动时加载，`/reload-plugins` 不生效）；工具返回 `CREDENTIALS_INVALID`
-时，指用户去本机 Atelier「设置 → Agent 连接」打开开关（含全部画布与画布操作），
+时，指用户去本机 Cobrush「设置 → Agent 连接」打开开关（含全部画布与画布操作），
 配置方法见 `docs/mcp-local-client.md`；停在授权环节，不改走 shell。
 
 ## 先读再改

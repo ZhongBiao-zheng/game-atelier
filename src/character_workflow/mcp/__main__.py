@@ -10,7 +10,7 @@ from character_workflow.mcp.server import create_server
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Atelier Canvas stdio MCP adapter")
+    parser = argparse.ArgumentParser(description="Cobrush Canvas stdio MCP adapter")
     # 省略时读默认授权的固定凭据（<data_root>/.config/connections/agent.json），插件自带的配置就这么写。
     parser.add_argument("--credentials", type=Path)
     # 与 viewer_server.agent_clients.CLIENT_IDS 一致（适配器不导入服务端模块）。

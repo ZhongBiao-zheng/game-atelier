@@ -79,9 +79,9 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   });
-  it('renders Atelier logo on every route', () => {
+  it('renders Cobrush logo on every route', () => {
     renderAt('/studio');
-    expect(screen.getByText('Atelier')).toBeInTheDocument();
+    expect(screen.getByText('Cobrush')).toBeInTheDocument();
   });
 
   it('highlights 创作台 tab on /studio', () => {
@@ -343,7 +343,7 @@ describe('in-app update controls', () => {
     await renderUpdater();
     expect(screen.getByRole('dialog')).toHaveTextContent('重启中');
     await act(async () => { await vi.advanceTimersByTimeAsync(62_000); });
-    expect(screen.getByRole('alert')).toHaveTextContent('Atelier 没有自动恢复，请重新打开 Atelier');
+    expect(screen.getByRole('alert')).toHaveTextContent('Cobrush 没有自动恢复，请重新打开 Cobrush');
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
   });
   it('clears successful results silently after page reload', async () => {

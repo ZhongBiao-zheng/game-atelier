@@ -1,4 +1,4 @@
-# Game Atelier
+# Cobrush
 
 **本地创作画布、项目参考库与 AI 生成工具。**
 
@@ -72,12 +72,12 @@ claude --plugin-dir .
 
 | 命令 | 用途 |
 |---|---|
-| `/game-atelier:viewer-server` | 启动本地 Atelier |
+| `/game-atelier:viewer-server` | 启动本地 Cobrush |
 | `/game-atelier:canvas` | 通过已授权工具编辑项目画布 |
 
 ## 典型工作循环
 
-1. 打开 Atelier，在画布入口创建项目。
+1. 打开 Cobrush，在画布入口创建项目。
 2. 添加项目规范、参考素材和生成节点。
 3. 在画布或创作台确认生成，查看结果并将合适的作品定稿到参考库。
 4. 通过内置 Agent 或已授权的外部 Agent 继续编辑。

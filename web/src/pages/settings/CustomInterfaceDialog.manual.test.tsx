@@ -58,7 +58,7 @@ describe('复制接入说明', () => {
       revokeObjectURL: () => {},
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-      expect(this.download).toBe('Atelier 自定义接口接入说明.md');
+      expect(this.download).toBe('Cobrush 自定义接口接入说明.md');
     });
     render(<CustomInterfaceDialog identifier={null} kind="image" onSaved={() => {}} onClose={() => {}} />);
 

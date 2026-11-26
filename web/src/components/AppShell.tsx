@@ -148,7 +148,7 @@ function AppShellContent() {
         <div className="app-titlebar mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
           <Link href="/" className="flex shrink-0 items-center gap-2 justify-self-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <AtelierMark />
-            <span className="brand-wordmark font-display text-2xl">Atelier</span>
+            <span className="brand-wordmark font-display text-2xl">Cobrush</span>
           </Link>
           <LayoutGroup>
             <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">

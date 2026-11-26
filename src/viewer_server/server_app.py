@@ -420,7 +420,7 @@ def _revalidated_file(path: Path) -> FileResponse:
 
 def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -> FastAPI:
     _install_secret_filter()
-    app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
+    app = FastAPI(title="Cobrush viewer-server", lifespan=lifespan)
     connection_status = create_connection_status(instance_id)
     connection_store = ConnectionStore(connection_status.instance_id)
     app.state.connection_store = connection_store

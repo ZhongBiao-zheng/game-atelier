@@ -36,7 +36,7 @@ const FIXED: Record<Exclude<JobErrorCode, 'insufficient_balance' | 'timeout' | '
   // 结局不明的提交不给「重试」：再发一次可能重复下单、重复计费。
   submission_unconfirmed: { message: '提交结果未确认，供应商可能已收到并计费' },
   bad_endpoint: { message: '请求地址无效，未找到对应接口', action: { label: '修改地址', kind: 'edit_endpoint' } },
-  service_unavailable: { message: 'Atelier 服务无响应', action: { label: '重新连接', kind: 'reconnect' } },
+  service_unavailable: { message: 'Cobrush 服务无响应', action: { label: '重新连接', kind: 'reconnect' } },
 };
 
 /** 失败任务 → 一句原因 + 至多一个修复动作（规格 2.3）。按后端落盘的 `error_code` 选，不再从报错原文猜。

@@ -222,7 +222,7 @@ class GatewayCheck(BaseModel):
 
 def _gateway_failure(error: Exception) -> HTTPException:
     if isinstance(error, requests.RequestException):
-        return HTTPException(502, "连不上网关：请确认网关机器已开机、Atelier 已启动并开启局域网共享，地址和端口正确")
+        return HTTPException(502, "连不上网关：请确认网关机器已开机、Cobrush 已启动并开启局域网共享，地址和端口正确")
     return HTTPException(502, str(error))
 
 

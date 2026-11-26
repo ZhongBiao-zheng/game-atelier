@@ -333,7 +333,7 @@ def test_outbound_guard_rules(monkeypatch):
         outbound_guard.check_base_url("https://user:pw@api.example.com")
     outbound_guard.check_base_url("http://127.0.0.1:11434/v1")
     (outbound_guard.data_root.runtime_dir() / "server.port").write_text("5174")
-    with pytest.raises(outbound_guard.OutboundError, match="Atelier"):
+    with pytest.raises(outbound_guard.OutboundError, match="Cobrush"):
         outbound_guard.check_base_url("http://localhost:5174")
     for url in ("http://localhost/x", "http://2130706433/x", "http://0x7f.1/x",
                 "http://10.1.2.3/x", "http://printer.local/x", "ftp://example.com/x"):

@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 ## What this project is
 
-本仓库是 **Atelier**（原名 `game-atelier`）的源码：一个独立的本机 AI 创作画布产品，通过安装包和一键启动器分发。讲定位、写文案、起名时把它当独立产品，不当作某个 Agent 的附属插件。产品内的可选功能包叫「插件」，路线见 `.scratch/catch-up/ROADMAP.md`（本地文件）。用户数据在独立的 `<data_root>/`（默认 `~/game-atelier/`，由 `GAME_ATELIER_DATA_ROOT` 环境变量覆盖）。
+本仓库是 **Cobrush**（原名 Atelier，仓库与内部标识仍用 `game-atelier`）的源码：一个独立的本机 AI 创作画布产品，通过安装包和一键启动器分发。讲定位、写文案、起名时把它当独立产品，不当作某个 Agent 的附属插件。产品内的可选功能包叫「插件」，路线见 `.scratch/catch-up/ROADMAP.md`（本地文件）。用户数据在独立的 `<data_root>/`（默认 `~/game-atelier/`，由 `GAME_ATELIER_DATA_ROOT` 环境变量覆盖）。
 
 仓库仍保留一条 Claude Code Plugin 接入渠道（`.claude-plugin/`、`skills/`），用于让 Agent 连接本机画布；`.claude-plugin/plugin.json` 同时是版本号来源。改动这部分时的约束：Plugin 通过 `claude plugin install` 安装后，实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`（**不是** `~/.claude/plugins/game-atelier/`——后者不存在）；Skill 内引用自带文件一律走 CC 注入的 `${CLAUDE_PLUGIN_ROOT}`，绝不硬编码 `~/.claude/plugins/<name>/`。详见 `docs/superpowers/specs/2026-05-22-skill-distribution-design.md` 和 `docs/superpowers/plans/2026-05-22-skill-distribution-impl.md`。
 

@@ -34,7 +34,7 @@ describe('App onboarding gate', () => {
     vi.stubGlobal('fetch', network);
     await act(async () => { render(<App />); });
     await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-    expect(screen.getByRole('alert')).toHaveTextContent(online ? '供应商配置版本无法识别' : '连不上 Atelier 服务');
+    expect(screen.getByRole('alert')).toHaveTextContent(online ? '供应商配置版本无法识别' : '连不上 Cobrush 服务');
     const download = screen.queryByRole('link', { name: '导出诊断日志' });
     if (online) {
       expect(download).toHaveAttribute('href', '/api/diagnostics/export');
@@ -75,7 +75,7 @@ describe('App onboarding gate', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: '正在准备新版' }), { status: 503 })));
     const { act } = await import('@testing-library/react');
     await act(async () => { render(<App />); });
-    expect(screen.getByText('Atelier 没有自动恢复，请重新打开 Atelier')).toBeInTheDocument();
+    expect(screen.getByText('Cobrush 没有自动恢复，请重新打开 Cobrush')).toBeInTheDocument();
     expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
   });
   it('retries onboarding while a newly started update instance is still initializing', async () => {
@@ -169,7 +169,7 @@ describe('App onboarding gate', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('作品集首页')).toBeInTheDocument();
     });
-    expect(screen.getByText('Atelier')).toBeInTheDocument();
+    expect(screen.getByText('Cobrush')).toBeInTheDocument();
     expect(screen.queryByText(/请在桌面浏览器打开/)).not.toBeInTheDocument();
   });
 });

@@ -79,7 +79,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   useEffect(() => { if (ready) setActivated(true); }, [ready]);
   // 服务换了实例且自动接上：轻提示一次，不打断。
   const reconnects = connection.reconnects ?? 0;
-  useEffect(() => { if (reconnects > 0) notify.info('Atelier 服务已重连'); }, [reconnects]);
+  useEffect(() => { if (reconnects > 0) notify.info('Cobrush 服务已重连'); }, [reconnects]);
   useEffect(() => {
     // 页面回到前台、网络恢复时不等退避计时，立刻再试一次。
     const retry = () => { if (window.document.visibilityState === 'visible') localConnection.retryNow(); };
@@ -166,7 +166,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         onBeforeInputCapture={preventEditing} onDropCapture={preventEditing} onSubmitCapture={preventEditing}>
         {activated && children}
       </fieldset>
-      {!activated && <StartupScreen label={startupFailed ? '暂时无法连接 Atelier 服务' : '启动中…'}>
+      {!activated && <StartupScreen label={startupFailed ? '暂时无法连接 Cobrush 服务' : '启动中…'}>
         {startupFailed && <>
           <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
           <div className="flex justify-center gap-2">
@@ -236,7 +236,7 @@ function OutageCapsule({ level, connection, onRetry }: { level: OutageLevel; con
   }
   const paused = level === 'paused';
   return <StatusCapsule tone="warning">
-    <p role="status" className="text-pretty">{paused ? connection.message ?? 'Atelier 服务连接已暂停' : 'Atelier 服务无响应'}</p>
+    <p role="status" className="text-pretty">{paused ? connection.message ?? 'Cobrush 服务连接已暂停' : 'Cobrush 服务无响应'}</p>
     <Button variant="outline" size="sm" className="h-7 rounded-full" onClick={onRetry}>{paused ? '重新连接' : '立即重试'}</Button>
   </StatusCapsule>;
 }

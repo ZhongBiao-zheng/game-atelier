@@ -8,11 +8,11 @@ set "VIRTUAL_ENV="
 set "UV_PROJECT_ENVIRONMENT="
 if not defined UV_PYTHON_INSTALL_MIRROR set "UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone"
 cd /d "%~dp0"
-title Atelier 迁移旧工坊
+title Cobrush 迁移旧工坊
 set "PATH=%USERPROFILE%\.local\bin;%PATH%"
 where uv >nul 2>nul
 if errorlevel 1 (
-    echo 没有找到 uv，请先双击「Windows一键启动.bat」启动一次 Atelier。
+    echo 没有找到 uv，请先双击「Windows一键启动.bat」启动一次 Cobrush。
     pause
     exit /b 1
 )

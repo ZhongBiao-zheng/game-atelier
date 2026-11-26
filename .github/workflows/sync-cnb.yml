@@ -68,7 +68,7 @@ jobs:
           except urllib.error.HTTPError as error:
               if error.code != 404:
                   raise RuntimeError(f'CNB release lookup failed: HTTP {error.code}') from None
-              body = json.dumps({'tag_name': tag, 'name': 'Game Atelier ' + tag,
+              body = json.dumps({'tag_name': tag, 'name': 'Cobrush ' + tag,
                                  'body': Path('docs/release-notes.md').read_text(), 'make_latest': 'true'}).encode()
               urllib.request.urlopen(urllib.request.Request(base, data=body, headers=headers), timeout=30).close()
           PY

@@ -19,7 +19,7 @@ from . import bridge
 RPC_E_CALL_REJECTED = -2147418111          # 0x80010001
 RPC_E_SERVERCALL_RETRYLATER = -2147417846  # 0x8001010A
 _BUSY_HRESULTS = {RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER}
-SERVICE_SESSION = "常驻模式下不能连接 Photoshop，请用桌面应用或启动器运行 Atelier"
+SERVICE_SESSION = "常驻模式下不能连接 Photoshop，请用桌面应用或启动器运行 Cobrush"
 BUSY = "Photoshop 没有响应，已取消这次操作；请关闭 Photoshop 里的对话框后重试"
 
 

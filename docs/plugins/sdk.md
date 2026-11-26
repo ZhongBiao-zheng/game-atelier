@@ -68,7 +68,7 @@ const off = client.on('node.changed', () => {});  // 也有 'inputs.changed'、'
 | `server.call` | `server.call` |
 | `generation.draft` | 服务端模块用 `ctx.create_generation_draft` 在画布上新建生成节点并填好草稿（不运行，用户点生成才计费） |
 
-清单声明了宿主不认识的能力，插件显示为「需要更高版本的 Atelier」。
+清单声明了宿主不认识的能力，插件显示为「需要更高版本的 Cobrush」。
 
 ## 限制与错误码
 

@@ -36,7 +36,7 @@ const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/AppShell.tsx',
     pattern: 'brand-wordmark font-display text-2xl',
-    reason: '品牌字标 "Atelier" 固定 24px serif —— 唯一介于 base 与 display 之间的例外',
+    reason: '品牌字标 "Cobrush" 固定 24px serif —— 唯一介于 base 与 display 之间的例外',
   },
   {
     file: 'components/HomeDottedBackground.tsx',

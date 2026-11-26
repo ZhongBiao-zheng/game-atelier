@@ -87,7 +87,7 @@ def create_collab_app() -> FastAPI:
         # Browsers always enter through their own authenticated loopback proxy.
         if ("origin" in request.headers or "cookie" in request.headers
                 or any(name.startswith("sec-fetch-") for name in request.headers)):
-            return JSONResponse({"detail": "请通过本机 Atelier 进入"}, status_code=403)
+            return JSONResponse({"detail": "请通过本机 Cobrush 进入"}, status_code=403)
         if not is_lan_ip(request.url.hostname or ""):
             return JSONResponse({"detail": "共享服务地址无效"}, status_code=421)
         if not request.client or not is_lan_ip(request.client.host):

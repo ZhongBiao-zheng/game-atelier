@@ -1,6 +1,6 @@
 # Windows 中转常驻
 
-先启动一次 Atelier，配置数据目录、供应商和局域网共享。以**当前使用 Atelier 的 Windows 用户**打开管理员 PowerShell，在源码目录（安装包的 `app/` 目录）运行：
+先启动一次 Cobrush，配置数据目录、供应商和局域网共享。以**当前使用 Cobrush 的 Windows 用户**打开管理员 PowerShell，在源码目录（安装包的 `app/` 目录）运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-service.ps1 install

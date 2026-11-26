@@ -430,21 +430,21 @@ def _error_hint(low: str) -> str | None:
         or "nodename nor servname" in low
     ):
         return (
-            "Atelier 服务无法解析供应商接口域名：请检查请求地址拼写、DNS 与网络连接后重试。"
+            "Cobrush 服务无法解析供应商接口域名：请检查请求地址拼写、DNS 与网络连接后重试。"
         )
     if "certificate_verify_failed" in low or "certificate verify failed" in low:
         return (
-            "Atelier 服务校验供应商接口的 TLS 证书失败：请确认请求地址是官方 HTTPS API 地址，"
+            "Cobrush 服务校验供应商接口的 TLS 证书失败：请确认请求地址是官方 HTTPS API 地址，"
             "并检查系统时间或代理是否替换了证书后重试。"
         )
     if "tls" in low or "sslerror" in low or "[ssl:" in low or "ssl handshake" in low:
         return (
-            "Atelier 服务与供应商接口的 TLS / SSL 握手失败：通常是请求地址协议或端口不匹配，"
+            "Cobrush 服务与供应商接口的 TLS / SSL 握手失败：通常是请求地址协议或端口不匹配，"
             "也可能是代理中途改写连接。请核对官方 HTTPS API 地址、端口和代理直连规则后重试。"
         )
     if "err_network" in low or "network error" in low:
         return (
-            "Atelier 服务到供应商接口的网络请求失败：这不是浏览器跨域问题。"
+            "Cobrush 服务到供应商接口的网络请求失败：这不是浏览器跨域问题。"
             "请检查供应商请求地址、网络和代理直连规则后重试。"
         )
     # 画布内部不变式被打破（事务、Run 上下文、归属、版本冲突）。canvas_runs 里这些断言是给开发者
@@ -460,7 +460,7 @@ def _error_hint(low: str) -> str | None:
     ):
         return (
             "画布内部状态校验未通过：这不是网络或供应商的问题，产物没有挂到画布上。"
-            "请重新打开 Atelier 后重试；如果反复出现，把下面的原始报错一起发出来。"
+            "请重新打开 Cobrush 后重试；如果反复出现，把下面的原始报错一起发出来。"
         )
     # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
     if "write operation timed out" in low or ("aborted" in low and "write" in low):

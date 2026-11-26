@@ -161,7 +161,7 @@ export class LocalConnection {
           } catch (error) {
             release();
             if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-              this.interrupt(timedOut ? 'Atelier 服务响应超时。' : 'Atelier 服务连接中断。', undefined, true);
+              this.interrupt(timedOut ? 'Cobrush 服务响应超时。' : 'Cobrush 服务连接中断。', undefined, true);
             }
             output.error(error);
           }
@@ -172,7 +172,7 @@ export class LocalConnection {
     } catch (error) {
       release();
       if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-        this.interrupt(timedOut ? 'Atelier 服务响应超时。' : 'Atelier 服务无响应。', undefined, true);
+        this.interrupt(timedOut ? 'Cobrush 服务响应超时。' : 'Cobrush 服务无响应。', undefined, true);
       }
       throw error;
     }
@@ -244,10 +244,10 @@ export class LocalConnection {
         const retryAfterMs = retryAfter === null ? 0 : /^\d+$/.test(retryAfter)
           ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) || 0;
         this.interrupt(response.status === 404
-          ? 'Atelier 服务版本不匹配，请重新打开 Atelier。'
-          : 'Atelier 服务暂时无法连接。', undefined, retryable, retryAfterMs);
+          ? 'Cobrush 服务版本不匹配，请重新打开 Cobrush。'
+          : 'Cobrush 服务暂时无法连接。', undefined, retryable, retryAfterMs);
       }
-      throw new ConnectionInterrupted(this.snapshot.message ?? 'Atelier 服务暂时无法连接。');
+      throw new ConnectionInterrupted(this.snapshot.message ?? 'Cobrush 服务暂时无法连接。');
     }
     if (response.status === 204) return null;
     return response.json();
@@ -280,7 +280,7 @@ export class LocalConnection {
         if (wasEditing && !editing) await this.control('/api/connection/editor-lease', { client_id: this.clientId }, 'DELETE');
         const status = await this.control('/api/connection/status', undefined, 'GET');
         if (status.service !== 'game-atelier' || typeof status.instance_id !== 'string' || status.protocol !== PROTOCOL) {
-          throw new Error('Atelier 服务版本不匹配，请重新打开 Atelier。');
+          throw new Error('Cobrush 服务版本不匹配，请重新打开 Cobrush。');
         }
         const restarted = Boolean(options.recoveryAttempt && this.instanceId && status.instance_id !== this.instanceId);
         const version = typeof status.app_version === 'string' ? status.app_version : null;
@@ -291,7 +291,7 @@ export class LocalConnection {
             this.invalidate();
             this.publish({
               phase: 'interrupted', recovering: false, versionConflict: true,
-              message: 'Atelier 已更新到新版本，页面里还有未保存的修改。',
+              message: 'Cobrush 已更新到新版本，页面里还有未保存的修改。',
             });
           }
           return;
