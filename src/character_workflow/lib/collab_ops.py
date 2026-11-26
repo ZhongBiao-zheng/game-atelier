@@ -223,6 +223,8 @@ def _apply(document: CanvasDocument, op, client_id: str, actor_name: str, owner:
         if op.node.id in nodes:
             raise CollabOpError(409, "节点已存在")
         node = op.node.model_copy(update={"created_by_client": client_id, "created_by": actor_name})
+        if node.collab_run is not None:
+            raise CollabOpError(403, "共享生成任务只能由房主服务创建")
         if node.type == "plugin" and node.data.plugin_id not in HOST_PLUGIN_IDS:
             raise CollabOpError(403, "这个插件节点仅可查看")
         if getattr(node.data, "active_run_id", None) or getattr(node.data, "error", None):

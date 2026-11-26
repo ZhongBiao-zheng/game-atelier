@@ -29,7 +29,7 @@ def public_params(params: dict) -> dict:
 
 
 _NODE_FIELDS = frozenset("""
-    id type title position size z_index hidden created_by created_by_client
+    id type title position size z_index hidden created_by created_by_client collab_run
 """.split())
 _NODE_DATA_FIELDS = frozenset("""
     current_version_id display annotation result_stack source_node_id source_version_id

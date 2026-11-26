@@ -9,6 +9,8 @@ import json
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
@@ -380,7 +382,23 @@ def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
     return channel_key, channel_model
 
 
+_bound_key: ContextVar[KeySpec | None] = ContextVar("bound_provider_key", default=None)
+
+
+@contextmanager
+def pin_provider_key(key: KeySpec):
+    """Use one validated key across dispatch and all adapter lookups for this execution."""
+    token = _bound_key.set(key)
+    try:
+        yield
+    finally:
+        _bound_key.reset(token)
+
+
 def find_by_alias(alias: str) -> KeySpec | None:
+    bound = _bound_key.get()
+    if bound is not None and bound.alias == alias:
+        return bound
     for k in read_keys_db().keys:
         if k.alias == alias:
             return k

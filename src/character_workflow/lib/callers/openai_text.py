@@ -342,6 +342,7 @@ def generate(
         base_url = "https://api.openai.com/v1"
     if not base_url:
         raise OpenAITextError("text provider requires base_url")
+    on_usage = _kwargs.get("on_text_usage")
     options = params or {}
     image_references = [str(value) for value in options.get("reference_images") or []]
     video_references = [str(value) for value in options.get("reference_videos") or []]
@@ -415,6 +416,8 @@ def generate(
                 gateway_alias=alias if key.provider == "atelier" else None,
                 gateway_wait=_kwargs.get("gateway_wait"),
             )
+            if on_usage and isinstance(body, dict):
+                on_usage(key, body.get("usage"))
             text = _response_text(body)
             if not text:
                 raise OpenAITextError(f"text api returned no text: {body!r}")
@@ -442,6 +445,8 @@ def generate(
             gateway_alias=alias if key.provider == "atelier" else None,
             gateway_wait=_kwargs.get("gateway_wait"),
         )
+        if on_usage and isinstance(body, dict):
+            on_usage(key, body.get("usage"))
         choices = body.get("choices") if isinstance(body, dict) else None
         outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []
         generated.extend(item for item in outputs if item)

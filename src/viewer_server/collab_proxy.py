@@ -88,6 +88,10 @@ def _upstream(request, peer_key, project_id, suffix, method="GET", *, anonymous=
                     if status == 401:
                         with _lock:
                             _tokens.pop(_key(request, peer_key, project_id), None)
+                    if status == 422 and suffix == "runs/borrowed":
+                        detail = _borrowed_operation_error(response)
+                        if detail:
+                            raise HTTPException(422, detail)
                     detail = {401: "请重新输入访问口令", 403: "共享画布拒绝了这项操作",
                               404: "画布或媒体已下线", 409: "画布已更新，请刷新",
                               413: "共享内容过大", 416: "媒体读取范围无效", 422: "共享请求格式有误"}
@@ -109,6 +113,21 @@ def _chunks(response, limit):
         if size > limit:
             raise HTTPException(413, "共享内容过大")
         yield chunk
+
+
+def _borrowed_operation_error(response) -> dict | None:
+    from character_workflow.lib.collab_borrow import OPERATION_ERRORS
+
+    try:
+        payload = json.loads(b"".join(_chunks(response, 8192)))
+    except (UnicodeError, ValueError, HTTPException):
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict):
+        for code, message in OPERATION_ERRORS.values():
+            if detail.get("code") == code:
+                return {"code": code, "message": message}
+    return None
 
 
 def remote_json(request: Request, peer_key: str, project_id: str, suffix: str,

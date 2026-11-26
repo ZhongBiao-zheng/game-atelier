@@ -1689,3 +1689,11 @@ Auto 确认金额按最近一条用户消息之后已提交的生成估价累计
 离线另存复用 `copy-to-local`。媒体的可选 `pending_shared_original` 保存房主、源项目和版本标识。缺原件时仍可显示已获取的缩略图，重新取得读取权限并验证 MIME、字节数和 SHA-256 后会清除标记。
 
 插件清单 `contributes.nodes[].shared_fields` 可列出路径，例如 `["title", "shots.caption"]`。只复制命中的标量或标量数组。第三方插件在共享画布中只读。缺少匹配声明的投影带有 `shared_placeholder: true`，复制到本地后仍显示占位。
+
+### 共享画布生成
+
+访客在本机项目代理调用 `POST runs/local`。请求携带 `surface_node_id`、`expected_revision`、访客本机模型与供应商别名，以及可选提示词、参数和候选数量。访客服务先在房主端 `POST runs/reserve`，之后每 10 秒向 `runs/{run_id}/heartbeat` 续期。房主端 `commit` 接受 multipart 成片、冻结快照、输入素材和图层，按事务落盘。`fail` 记录失败，超过 90 秒未续期则标记中断。
+
+启用借用后，同一代理通过 `GET borrowable-models` 获取房主开放的直连模型与价格。房主仅公布渠道的不透明标识、模型、品牌和公开能力。访客通过 `POST runs/borrowed` 提交选中的 `channel_id` 与模型。房主在受理和实际调度前核对共享权限、渠道与模型。普通节点、局部修改、扩图和图层拆分复用房主现有 Canvas Run。
+
+节点可选的 `collab_run` 存放任务编号、来源节点、执行渠道、发起人和状态。状态含 `pending`、`done`、`failed`、`interrupted`。用量按实际执行方记录。房主的画布任务记录 `JobParams.collab_guest_name` 和 `collab_guest_client`，访客本机执行的任务记录 `collab_source_canvas`。

@@ -13,29 +13,18 @@ from character_workflow.lib.generation_recipe import _clean_canvas_prompt, _job_
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.keys import KeysDB, read_keys_db
 from character_workflow.lib.local_paths import data_root_file
-from character_workflow.lib.provider_icons import brand_icon
+from character_workflow.lib.provider_presets import PRESET_DOMAINS, PRESET_LABELS
 from character_workflow.lib.schemas import (
     JOB_PARAM_PATH_FIELDS, CanvasDocument, CanvasFrozenGeneration, CanvasFrozenInput, Job,
 )
 
-_DOMAINS = {
-    "tu-zi.com": "tuzi", "openai-hk.com": "openai-hk", "api.anthropic.com": "anthropic",
-    "generativelanguage.googleapis.com": "gemini", "api.deepseek.com": "deepseek",
-    "api.moonshot.cn": "kimi", "api.moonshot.ai": "kimi", "open.bigmodel.cn": "zhipu",
-    "dashscope.aliyuncs.com": "qwen", "api.siliconflow.cn": "siliconflow",
-}
-_LABELS = {
-    "tuzi": "Tuzi", "openai-hk": "OpenAI-HK", "seedream": "Volcengine Ark",
-    "openrouter": "OpenRouter", "tokendance": "TokenDance", "evolink": "EvoLink",
-    "comfyui": "ComfyUI", "openai": "OpenAI", "chatgpt": "ChatGPT", "atelier": "团队网关",
-    "anthropic": "Anthropic", "gemini": "Gemini", "deepseek": "DeepSeek", "kimi": "Kimi",
-    "zhipu": "智谱", "qwen": "通义", "siliconflow": "硅基流动", "custom": "自定义",
-}
 _ROLES = {"mask_image": "mask", "markup_image": "markup", "mj_sref": "mj_sref",
           "mj_cref": "mj_cref", "mj_oref": "mj_oref"}
 
 
 def _provider(job: Job, database: KeysDB) -> dict:
+    from character_workflow.lib.provider_icons import brand_icon
+
     key = next((key for key in database.keys if key.alias == job.alias and
                 (not job.provider or key.provider == job.provider)), None)
     provider = job.provider or (key.provider if key else "custom")
@@ -47,10 +36,10 @@ def _provider(job: Job, database: KeysDB) -> dict:
             host = urlsplit(key.base_url or "").hostname or ""
         except ValueError:
             host = ""
-        provider = next((preset for domain, preset in _DOMAINS.items()
+        provider = next((preset for domain, preset in PRESET_DOMAINS.items()
                          if host == domain or host.endswith("." + domain)), provider)
     return {
-        "provider": provider, "provider_label": _LABELS.get(provider, provider),
+        "provider": provider, "provider_label": PRESET_LABELS.get(provider, provider),
         "provider_icon": brand_icon(key.icon) if key else None,
         "model_id": job.model, "model_name": model.name if model else None,
     }

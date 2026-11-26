@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Background, Handle, Position, ReactFlow, useReactFlow, type Node, type NodeProps } from '@xyflow/react';
 import { authenticateCollab, listCollabPeers } from '@/api/collab';
 import { AnnotationLayer } from '@/components/canvas/annotation/AnnotationLayer';
+import { ResultStackChrome } from '@/components/canvas/CanvasEditorViews';
+import { resultStackMembers, resultStackOwners } from '@/lib/canvasResultStacks';
 import { CanvasCompareSurface } from '@/components/canvas/CanvasCompareSurface';
 import { SharedPluginNodeBody } from '@/components/canvas/SharedPluginNodeBody';
 import { orderedLayerStackParts } from '@/components/canvas/canvasLayerOrder';
@@ -21,6 +23,8 @@ import { Lightbox } from '@/components/Lightbox';
 import { ApiError } from '@/api/http';
 import { fetchProfile } from '@/api/teamLibraries';
 import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
+import { SharedCanvasGenerate } from '@/components/canvas/SharedCanvasGenerate';
+import { SharedGenerationStatus } from '@/components/canvas/SharedGenerationStatus';
 import { SharedCanvasActions } from '@/components/canvas/SharedCanvasActions';
 import { SharedCanvasPasscodeDialog } from '@/components/canvas/SharedCanvasPasscodeDialog';
 import { Button } from '@/components/ui/button';
@@ -36,6 +40,7 @@ import type { remoteCanvasTransport } from './canvasTransport';
 type Transport = ReturnType<typeof remoteCanvasTransport>;
 type SharedNode = Node<{
   node: CanvasNode; version?: CanvasContentVersion; url?: string; member?: RoomMember; editable:boolean;
+  stackTotal:number; stackExpanded:boolean; toggleStack:(id:string)=>void;
   doc:CanvasDocument; projectId:string; mediaUrl:(id:string)=>string; onPayloadChange:(payload:JsonValue)=>void;
 }, 'shared'>;
 const nodeTypes = { shared: SharedNodeCard };
@@ -62,6 +67,7 @@ function SharedNodeCard({data, selected}: NodeProps<SharedNode>) {
     node.type === 'group' && 'border-dashed bg-transparent')} style={member ? {outline:'2px solid '+memberColor(member)} : undefined}>
     {member && <span className="absolute bottom-full right-0 z-10 rounded bg-card px-1 text-xs" style={{color:memberColor(member)}}>{member.display_name}</span>}
     <div className="absolute inset-x-0 bottom-full truncate pb-1 text-sm font-medium">{node.title}</div>
+    <SharedGenerationStatus run={node.collab_run} />
     {node.hidden ? <p className="p-3 text-sm text-muted-foreground">内容已遮盖</p>
       : node.type === 'compare' ? <CanvasCompareSurface projectId={projectId} title={node.title} beforeVersionId={inputs.before ?? null}
         afterVersionId={inputs.after ?? null} frame={null} afterSize={null} bitmapWidth={400} resolveMediaUrl={mediaUrl} />
@@ -74,6 +80,8 @@ function SharedNodeCard({data, selected}: NodeProps<SharedNode>) {
       : version?.kind === 'text' ? <p className="h-full overflow-hidden whitespace-pre-wrap break-words p-3 text-sm">{version.text}</p>
       : version ? <p className="p-3 text-sm text-muted-foreground">{version.kind === 'audio' ? '音频' : '视频'}</p>
       : null}
+    {data.stackTotal > 1 && <ResultStackChrome total={data.stackTotal} expanded={data.stackExpanded}
+      onToggle={() => data.toggleStack(node.id)} />}
     {annotation && version?.kind === 'image' && <AnnotationLayer elements={annotation.elements} imageWidth={version.width ?? 1024}
       imageHeight={version.height ?? 1024} className="pointer-events-none absolute inset-0 size-full" />}
     {node.type === 'compare' ? (['before','after'] as const).map((slot,i) =>
@@ -164,6 +172,23 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   }, [transport, peerKey, projectId, attempt]);
 
   const doc = room ? liveRoom.document ?? room.document : undefined;
+  const [expandedStacks, setExpandedStacks] = useState<Set<string>>(() => new Set());
+  const owners = useMemo(() => resultStackOwners(doc?.nodes ?? []), [doc?.nodes]);
+  const collapsedMembers = useMemo(() => new Map(
+    [...owners].filter(([,cover]) => !expandedStacks.has(cover)),
+  ), [owners, expandedStacks]);
+  const toggleStack = useCallback((id:string) => {
+    setExpandedStacks(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    setSelectedIds(previous => previous.some(id => collapsedMembers.has(id))
+      ? previous.filter(id => !collapsedMembers.has(id)) : previous);
+  }, [collapsedMembers]);
   const selectedNode = selectedIds.length === 1 ? doc?.nodes.find(node=>node.id === selectedIds[0]) : undefined;
   const selectedVersion = doc && selectedNode ? nodeVersion(selectedNode,doc) : undefined;
   const deletable = editable && selectedIds.length > 0 && selectedIds.every(id =>
@@ -172,18 +197,24 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     const version = nodeVersion(node, doc);
     const others = members.filter(member=>member.client_id !== clientId);
     const position = dragging[node.id] ?? others.find(member=>member.positions?.[node.id])?.positions[node.id] ?? node.position;
-    return { id: node.id, type: 'shared', position, zIndex: node.type === 'group' ? -1 : node.z_index,
+    return { id: node.id, type: 'shared', position, hidden:collapsedMembers.has(node.id),
+      draggable:editable && !owners.has(node.id), zIndex: node.type === 'group' ? -1 : node.z_index,
       style: canvasNodeRenderedSize(node, doc.content_versions), selected: selectedIds.includes(node.id),
-      data: {node,version,editable,doc,projectId,member:others.find(member=>member.selected_node_ids.includes(node.id)),
+      data: {node,version,editable,doc,projectId,
+        stackTotal:node.type === 'image' && node.data.result_stack ? 1 + resultStackMembers(doc,node).length : 0,
+        stackExpanded:expandedStacks.has(node.id), toggleStack, member:others.find(member=>member.selected_node_ids.includes(node.id)),
         url:version?.kind === 'image' ? transport.mediaUrl(projectId, version.version_id,400) : undefined,
         mediaUrl:id=>transport.mediaUrl(projectId,id,400),
         onPayloadChange:payload=>submit({kind:'plugin_payload_update',node_id:node.id,patch:{data:{payload}}})},
     };
-  }) ?? [], [doc, projectId, transport, selectedIds, dragging, editable, members, clientId, submit]);
-  const edges = useMemo(() => doc?.connections.map(edge => ({
-    id: edge.id, source: edge.source_node_id, target: edge.target_node_id, selected:edge.id === selectedEdge,
-    targetHandle:edge.role === 'input' && isCanvasCompareSlot(edge.slot) ? edge.slot : undefined,
-  })) ?? [], [doc,selectedEdge]);
+  }) ?? [], [doc, projectId, transport, selectedIds, dragging, editable, members, clientId, submit, owners, collapsedMembers, expandedStacks, toggleStack]);
+  const edges = useMemo(() => doc?.connections.flatMap(edge => {
+    const source = collapsedMembers.get(edge.source_node_id) ?? edge.source_node_id;
+    const target = collapsedMembers.get(edge.target_node_id) ?? edge.target_node_id;
+    if (source === target) return [];
+    return [{id:edge.id, source, target, selected:edge.id === selectedEdge,
+      targetHandle:edge.role === 'input' && isCanvasCompareSlot(edge.slot) ? edge.slot : undefined}];
+  }) ?? [], [doc,selectedEdge,collapsedMembers]);
   const detailNode = doc?.nodes.find(node => node.id === detailId);
   const detail = doc && detailNode && nodeVersion(detailNode, doc);
 
@@ -352,6 +383,9 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     {!doc && !error && !challenge && <p role="status" className="absolute top-1/2 w-full text-center text-sm text-muted-foreground">读取共享画布中…</p>}
     {doc && zoomDock}
     {doc && selectedIds.length > 0 && !detailId && <div className="absolute bottom-3 left-3 max-w-full rounded-lg border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+      {editable && selectedNode && room && <SharedCanvasGenerate key={selectedNode.id}
+        peerKey={peerKey} projectId={projectId} node={selectedNode} revision={doc.revision}
+        frozen={selectedVersion?.frozen_generation} owner={room.owner_display_name} allowBorrow={liveRoom.allowBorrow} />}
       <SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} />
       {editable && <>
         {selectedNode && <Button size="sm" variant="ghost" onClick={()=>setTool('edit')}>编辑节点</Button>}

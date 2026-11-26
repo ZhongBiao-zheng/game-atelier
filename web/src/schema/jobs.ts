@@ -22,6 +22,10 @@ export type JobKind = 'text' | 'image' | 'video' | 'audio';
 export type Namespace = 'studio' | 'canvas' | 'assist';
 
 export interface JobParams {
+  collab_guest_name?: string | null;
+  collab_guest_client?: string | null;
+  collab_borrow_channel?: string | null;
+  collab_source_canvas?: string | null;
   workflow_inputs?: Record<string, string | number | boolean | null>;
   size_mode?: 'auto' | 'ratio' | 'custom';
   custom_size?: string;
@@ -227,6 +231,8 @@ export interface CanvasJobContext {
     status: 'pending' | 'succeeded' | 'failed' | 'canceled';
     version_id: string | null;
     error: string | null;
+    actual_cost_cny?: number | null;
+    estimated_cost_cny?: number | null;
     dismissed_at?: string | null;
   }>;
 }

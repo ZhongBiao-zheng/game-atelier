@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 
@@ -25,6 +26,7 @@ class _Entry:
     job_id: str
     alias: str
     project_id: str
+    before_run: Callable[[], None] | None = None
     future: Future[Job] = field(default_factory=Future)
 
 
@@ -34,10 +36,10 @@ _running_keys: Counter[str] = Counter()
 _running_projects: Counter[str] = Counter()
 
 
-def submit(job_id: str) -> Future[Job]:
+def submit(job_id: str, *, before_run: Callable[[], None] | None = None) -> Future[Job]:
     """排进队列并立即返回；Future 在任务执行完时给出 run_canvas_job 的结果或异常。"""
     job = canvas_runs.read_job(job_id)
-    entry = _Entry(job_id, job.alias or job.character_id, job.canvas_project_id)
+    entry = _Entry(job_id, job.alias or job.character_id, job.canvas_project_id, before_run)
     with _lock:
         _waiting.append(entry)
         _pump_locked()
@@ -60,6 +62,8 @@ def _pump_locked() -> None:
 
 def _execute(entry: _Entry) -> None:
     try:
+        if entry.before_run is not None:
+            entry.before_run()
         entry.future.set_result(canvas_runs.run_canvas_job(entry.job_id))
     except BaseException as error:  # noqa: BLE001 — 交给等待方处理
         entry.future.set_exception(error)

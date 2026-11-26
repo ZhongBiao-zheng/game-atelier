@@ -219,6 +219,7 @@ def _strings(value: Any):
 
 def _detached(node: dict[str, Any], pasted_ids: set[str]) -> dict[str, Any]:
     """运行态留在源画布：进行中的 run 在目标画布里没有对应的 job。"""
+    node = {key: value for key, value in node.items() if key != "collab_run"}
     data = node.get("data")
     if isinstance(data, dict):
         node = {**node, "data": {

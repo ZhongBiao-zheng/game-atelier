@@ -53,6 +53,7 @@ RECIPE_PARAM_EXCLUDE = frozenset({
     "warnings", "requested_size", "actual_size", "provider_task_protocol",
     "provider_task_ids", "video_submission_attempts", "layer_decomposition_result", "mj_flags",
     "comfyui_resume", "evolink_state", "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of", "gateway_cancel_pending", "gateway_settlement", "gateway_charged_on",
+    "collab_guest_name", "collab_guest_client", "collab_borrow_channel", "collab_source_canvas",
     # 本机来源记录
     "creation_asset_source_title", "prompt_asset_id", "archived_from_job_id",
 })

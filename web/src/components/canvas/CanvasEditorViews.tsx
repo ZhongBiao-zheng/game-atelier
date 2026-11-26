@@ -2,6 +2,7 @@ import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { CanvasNodeFlash, playCanvasNodeEntrance } from './canvasNodeAttention';
 import { fadePresenceClass, useFadePresence } from './useFadePresence';
 import { useAnnotationToolbarSwap } from './annotation/useAnnotationToolbarSwap';
+import { SharedGenerationStatus } from './SharedGenerationStatus';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import {
@@ -928,6 +929,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           </span>,
           document.body,
         )}
+        <SharedGenerationStatus run={node.collab_run} />
         {context.mediaReplaceError?.nodeId === node.id && (
           <p
             role="alert"
@@ -1524,7 +1526,7 @@ function useStackBordersFadeIn(ref: RefObject<HTMLElement | null>, expanded: boo
 
 /** 已拆成节点的结果组挂在封面上的外观：收起时身后叠几层边框，右上角是展开按钮。
  *  不加 nowheel：这一层没有自己的滚动内容，滚轮 / 双指要照常平移画布。 */
-function ResultStackChrome({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
+export function ResultStackChrome({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useStackBordersFadeIn(ref, expanded);
   return (

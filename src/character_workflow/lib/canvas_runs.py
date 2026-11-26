@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 from character_workflow.lib import data_root
+from character_workflow.lib.collab_borrow import (
+    BorrowedGeneration, candidate_costs, is_borrowed, mark_borrowed_result, staged_canvas_name,
+)
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.callers.declarative import DeclarativePendingError
 from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
@@ -222,6 +225,8 @@ def _commit_transaction_unlocked(
     job_locked: bool = False,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
+    mark_borrowed_result(job, document)
+
     def commit() -> None:
         path = _prepare_transaction(
             project_id,
@@ -1654,6 +1659,7 @@ def submit_canvas_run(
     surface_node_id: str,
     expected_revision: int | None,
     requested_count: int = 1,
+    *, borrow: BorrowedGeneration | None = None,
 ) -> tuple[Job, CanvasDocument]:
     """Atomically freeze one persisted draft into a Job and visible result surface."""
     with file_lock(canvas_project_lock_path(project_id)):
@@ -1664,9 +1670,13 @@ def submit_canvas_run(
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
         if surface is None:
             raise KeyError(surface_node_id)
+        if borrow:
+            surface = borrow.surface(surface)
         prepared = prepare_canvas_generation(
             project_id, current, surface, requested_count, consume_route=True,
         )
+        if borrow:
+            borrow.attribute(prepared.key, prepared.model, prepared.job_params)
         return commit_canvas_generation_under_lock(project_id, current, surface, prepared)
 
 
@@ -1738,6 +1748,7 @@ def submit_layer_decomposition_run(
     expected_revision: int,
     alias: str,
     model_id: str,
+    *, borrow: BorrowedGeneration | None = None,
 ) -> tuple[Job, CanvasDocument]:
     """Freeze one configured layer-stack node into a Seedream decomposition Run."""
     with file_lock(canvas_project_lock_path(project_id)):
@@ -1751,6 +1762,8 @@ def submit_layer_decomposition_run(
                 "canvas_layer_decomposition_source_missing",
                 "拆分图层节点已不存在。",
             )
+        if borrow:
+            surface = borrow.surface(surface)
         if surface.data.base_version_id is not None:
             raise CanvasRunCommandError(
                 "canvas_layer_decomposition_already_completed",
@@ -1858,6 +1871,8 @@ def submit_layer_decomposition_run(
         if key.provider == "atelier":
             job_params = job_params.model_copy(
                 update=_gateway_reattach(project_id, surface.id, key.alias))
+        if borrow:
+            borrow.attribute(key, model, job_params)
         job = Job(
             job_id=job_id,
             character_id=key.alias,
@@ -1906,6 +1921,7 @@ def submit_image_edit_run(
     surface_node_id: str,
     expected_revision: int,
     requested_count: int,
+    *, borrow: BorrowedGeneration | None = None,
 ) -> tuple[Job, CanvasDocument]:
     """Freeze only a saved edit configuration into a fresh, recoverable result Run."""
     import io
@@ -1938,6 +1954,8 @@ def submit_image_edit_run(
                     "canvas_mask_source_missing",
                     "请先保存图片编辑节点再生成。",
                 )
+            if borrow:
+                surface = borrow.surface(surface)
             if surface.data.active_run_id:
                 raise CanvasRunCommandError("canvas_image_edit_busy", "这个编辑节点正在生成，请稍后再试。")
             options = CanvasImageEditOptions(
@@ -2110,6 +2128,8 @@ def submit_image_edit_run(
             job_params.reference_videos = None
             job_params.reference_audios = None
             job_params.mask_image = str(final_path.resolve())
+            if borrow:
+                borrow.attribute(key, model, job_params)
             return _commit_frozen_run(
                 project_id,
                 current,
@@ -2948,6 +2968,12 @@ def _commit_canvas_candidate_attempt(
                     "status": "failed",
                     "error": attempt_error or "厂商没有返回这个候选结果",
                 })
+            shared = is_borrowed(job) or staged_canvas_name(job)
+            if shared:
+                completed = completed.model_copy(update={
+                    "actual_cost_cny": job.params.actual_cost_cny,
+                    "estimated_cost_cny": job.params.estimated_cost_cny if version else None,
+                })
             had_success = any(candidate.status == "succeeded" for candidate in context.candidates)
             candidates = [
                 completed if candidate.candidate_id == candidate_id else candidate
@@ -2958,6 +2984,7 @@ def _commit_canvas_candidate_attempt(
             if version is not None and output_path is not None and output_path not in output_paths:
                 output_paths.append(output_path)
             restored_params = original_params.model_copy(update={
+                **(candidate_costs(candidates) if shared else {}),
                 **({"comfyui_resume": None, "provider_task_ids": None}
                    if job.params.comfyui_resume else {}),
                 "actual_size": job.params.actual_size or original_params.actual_size,
@@ -3103,7 +3130,10 @@ def _run_canvas_candidates_incrementally(job: Job) -> Job:
             cancel_requested = latest.cancel_requested_at is not None
             accumulated_paths = list(latest.output_paths)
             if not cancel_requested:
-                attempt_params = original_params.model_copy(update={"n": 1})
+                attempt_values = {"n": 1}
+                if is_borrowed(job) or staged_canvas_name(job):
+                    attempt_values.update(actual_cost_cny=None, estimated_cost_cny=None)
+                attempt_params = original_params.model_copy(update=attempt_values)
                 write_job_under_lock(latest.model_copy(update={
                     "status": JobStatus.PENDING,
                     "error": None,
@@ -3701,6 +3731,10 @@ def reconcile_canvas_jobs(
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
                 reconciled.append(job.job_id)
                 continue
+            elif re.fullmatch(r"canvas-collab-[a-f0-9]{24}", job.canvas_project_id):
+                # Staged guest jobs only have a live lease while their originating process runs.
+                _fail_pending_canvas_candidates(job.canvas_project_id, job.job_id,
+                                                "共享画布连接已中断，请回到画布重新生成")
             elif (has_resumable_comfyui_task(job) or has_resumable_mj_task(job) or has_resumable_gateway_task(job)
                   or has_resumable_music_task(job)):
                 # Only resume a known order. The caller reuses its durable task ID.

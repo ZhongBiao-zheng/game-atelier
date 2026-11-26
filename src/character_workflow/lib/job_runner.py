@@ -806,6 +806,8 @@ def _run_job_claimed(
     should_cancel_external: Callable[[], bool] | None = None,
     park_gateway_wait: bool = False,
 ) -> Job:
+    from character_workflow.lib.collab_borrow import BorrowUnavailable, borrowed_execution
+
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
@@ -826,9 +828,13 @@ def _run_job_claimed(
             update_job_phase(job.job_id, phase)
 
         try:
-            return _run_once(job, defer_terminal=defer_terminal, should_cancel=should_cancel,
-                             park_gateway_wait=park_gateway_wait, studio_stop=studio_stop,
-                             on_phase=on_phase)
+            with borrowed_execution(job):
+                return _run_once(job, defer_terminal=defer_terminal, should_cancel=should_cancel,
+                                 park_gateway_wait=park_gateway_wait, studio_stop=studio_stop,
+                                 on_phase=on_phase)
+        except BorrowUnavailable as error:
+            _fail(job_id, error)
+            raise JobRunnerError(str(error)) from error
         except _RouteSwitched:
             job = read_job(job_id)
 
@@ -1056,7 +1062,12 @@ def _run_text_job(job: Job, *, should_cancel: Callable[[], bool] | None = None,
                   on_phase: Callable[[str], None] | None = None) -> Job:
     from character_workflow.lib.gateway_text_wait import Waiting
 
+    from character_workflow.lib.collab_borrow import is_borrowed, record_text_cost, staged_canvas_name
+
     params = _params(job)
+    usage_options = {}
+    if is_borrowed(job) or staged_canvas_name(job):
+        usage_options["on_text_usage"] = lambda key, usage: record_text_cost(job, params, key, usage)
     # 画布文本节点能显示「等待网关」：经局域网 Atelier 时主机更新期间等待重发（第 5 批 5-4）。
     gateway_wait = (Waiting(on_phase=on_phase, should_cancel=should_cancel, resume_phase="sent")
                     if job.provider == "atelier" and job.namespace == "canvas" else None)
@@ -1069,7 +1080,7 @@ def _run_text_job(job: Job, *, should_cancel: Callable[[], bool] | None = None,
             alias=job.alias,
             n=max(1, int(params.get("n") or 1)),
             params=params,
-            gateway_wait=gateway_wait,
+            gateway_wait=gateway_wait, **usage_options,
         )
         texts = [text for text in outputs if text and len(text) <= 40_000]
         if not texts:

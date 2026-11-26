@@ -1,4 +1,5 @@
 import type { CanvasDocument, CanvasNode, CanvasPoint } from '@/schema/canvas';
+import { resultStackMembers } from '@/lib/canvasResultStacks';
 import { canvasNodeRenderedSize, placeCanvasNodeWithoutOverlap } from '../canvasEditorModel';
 
 export const sharedNodeNames = {text:'文本',image:'图片',audio:'音频',video:'视频',compare:'对比'} as const;
@@ -36,6 +37,14 @@ export function dragPositions(doc:CanvasDocument, moved:{id:string;position:Canv
     for (const id of group.data.member_node_ids) {
       const member = doc.nodes.find(node => node.id === id);
       if (member && !positions[id]) positions[id] = {x:member.position.x+end.x-group.position.x,y:member.position.y+end.y-group.position.y};
+    }
+  }
+  for (const cover of doc.nodes) {
+    if (cover.type !== 'image' || !cover.data.result_stack || !positions[cover.id]) continue;
+    const dx = positions[cover.id].x - cover.position.x;
+    const dy = positions[cover.id].y - cover.position.y;
+    for (const member of resultStackMembers(doc,cover)) {
+      positions[member.id] = {x:member.position.x + dx, y:member.position.y + dy};
     }
   }
   return positions;

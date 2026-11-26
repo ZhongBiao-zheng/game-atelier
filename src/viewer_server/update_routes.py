@@ -76,6 +76,10 @@ def work_request(path: str, method: str) -> bool:
         return True
     if re.fullmatch(r"/api/studio/agent/sessions(?:/[^/]+/messages)?", path):
         return True
+    if re.fullmatch(r"/collab/v1/projects/[^/]+/runs/(?:reserve|borrowed)", path):
+        return True
+    if re.fullmatch(r"/api/collab/remote/[^/]+/projects/[^/]+/runs/(?:local|borrowed)", path):
+        return True
     if path.startswith("/api/canvas/projects/"):
         return bool(re.search(
             r"/(runs(?:/[^/]+)?|agent/sessions(?:/[^/]+/messages)?|"

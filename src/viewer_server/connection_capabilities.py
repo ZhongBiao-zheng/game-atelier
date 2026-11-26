@@ -127,6 +127,9 @@ GET /api/collab/remote/{peer_key}/projects/{project_id}/cover
 GET /api/collab/remote/{peer_key}/projects/{project_id}/versions/{version_id}/media
 POST /api/collab/remote/{peer_key}/projects/{project_id}/copy-to-local
 POST /api/collab/remote/{peer_key}/projects/{project_id}/send-to-studio
+GET /api/collab/remote/{peer_key}/projects/{project_id}/borrowable-models
+POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/local
+POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/borrowed
 POST /api/studio/jobs/{job_id}/shared-canvas
 GET /api/gallery/recent
 GET /api/gallery/hidden

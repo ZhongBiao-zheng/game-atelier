@@ -145,6 +145,10 @@ def _sniff_media_mime(body: bytes) -> str | None:
         return "audio/mpeg"
     if len(body) >= 2 and body[0] == 0xFF and body[1] & 0xF6 == 0xF0:
         return "audio/aac"
+    if body.startswith(b"OggS"):
+        return "audio/ogg"
+    if body.startswith(b"fLaC"):
+        return "audio/flac"
     major_brand = _iso_bmff_major_brand(body)
     if major_brand is not None:
         has_video_track = b"vide" in body
@@ -178,7 +182,10 @@ def canvas_projects_root() -> Path:
 def _project_dir_unchecked(project_id: str) -> Path:
     if not _PROJECT_ID.fullmatch(project_id):
         raise KeyError(project_id)
-    root = canvas_projects_root().resolve()
+    if re.fullmatch(r"canvas-collab-[a-f0-9]{24}", project_id):
+        root = (data_root.runtime_dir() / "collab-staging").resolve()
+    else:
+        root = canvas_projects_root().resolve()
     target = (root / project_id).resolve()
     if target.parent != root:
         raise KeyError(project_id)

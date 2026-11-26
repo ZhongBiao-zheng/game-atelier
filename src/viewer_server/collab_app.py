@@ -76,6 +76,10 @@ def create_collab_app() -> FastAPI:
     from viewer_server.collab_uploads import lan_uploads
     app.include_router(lan_ws)
     app.include_router(lan_uploads)
+    from viewer_server.collab_borrow_routes import lan_router as borrow_router
+    app.include_router(borrow_router)
+    from viewer_server.collab_guest_run_routes import collab_guest_lan_router
+    app.include_router(collab_guest_lan_router)
     app.include_router(collab_transfer_lan_router)
 
     @app.middleware("http")
@@ -195,7 +199,7 @@ class CollabServer:
                 sock.listen(128)
                 server = uvicorn.Server(uvicorn.Config(
                     app, host=self.host, port=port, access_log=False, log_level="warning",
-                    lifespan="off", ws="websockets", proxy_headers=False, timeout_graceful_shutdown=2,
+                    lifespan="on", ws="websockets", proxy_headers=False, timeout_graceful_shutdown=2,
                 ))
                 def run():
                     async def serve():

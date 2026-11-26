@@ -519,7 +519,7 @@ export function CanvasEditor(props: {
   const transport = props.transport ?? localCanvasTransport;
   return <ReactFlowProvider>{transport.kind === 'remote'
     ? <SharedCanvasView transport={transport} projectId={props.projectId} onBack={props.onBack} zoomDock={<ReadOnlyZoomDock />} />
-    : <CanvasEditorInner {...props} />}</ReactFlowProvider>;
+    : <CanvasEditorInner key={props.projectId} {...props} />}</ReactFlowProvider>;
 }
 
 function ReadOnlyZoomDock() {
@@ -729,6 +729,7 @@ function CanvasEditorInner({
   const serverRevision = useRef(0);
   const saveInFlight = useRef<Promise<void> | null>(null);
   const saveQueued = useRef<CanvasDocument | null>(null);
+  const editorMounted = useRef(false);
   const runSubmissionInFlight = useRef(false);
   const libraryInsertInFlight = useRef(false);
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
@@ -1350,6 +1351,8 @@ function CanvasEditorInner({
         setSaveErrorDetail(null);
         clearSaveRetry();
       } catch (saveError) {
+        // 卸载时仍冲刷最后一笔，但失败回调可能晚于清理，不能再启动旧画布的重试或冲突重载。
+        if (!editorMounted.current) throw saveError;
         if (!saveQueued.current && failedSnapshot) saveQueued.current = failedSnapshot;
         setSaveState('error');
         // 自动保存的失败在这里是唯一能被观察到的地方：调用方基本都 .catch(() => undefined)，
@@ -1375,9 +1378,13 @@ function CanvasEditorInner({
   }, [projectId]);
   const flushSaveRef = useRef(flushSave);
   flushSaveRef.current = flushSave;
-  useEffect(() => () => {
-    if (saveRetryTimer.current !== null) window.clearTimeout(saveRetryTimer.current);
-    if (saveRetryPhaseTimer.current !== null) window.clearTimeout(saveRetryPhaseTimer.current);
+  useEffect(() => {
+    editorMounted.current = true;
+    return () => {
+      editorMounted.current = false;
+      if (saveRetryTimer.current !== null) window.clearTimeout(saveRetryTimer.current);
+      if (saveRetryPhaseTimer.current !== null) window.clearTimeout(saveRetryPhaseTimer.current);
+    };
   }, [projectId]);
 
   // Agent 经 MCP 改画布（#92）：服务端 canvas.json 一落盘就广播 canvas-document-changed，

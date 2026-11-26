@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 
+from .collab_borrow import is_borrowed, staged_canvas_name
 from .canvas_runs import canvas_numbering_prefix
 from .schemas import Job
 
@@ -52,10 +53,12 @@ def mine_records(
     gone = {job.job_id for job in archived or [] if job.job_id not in live}
     records = []
     for job in [*jobs, *(job for job in archived or [] if job.job_id in gone)]:
+        guest_name = job.params.collab_guest_name if is_borrowed(job) else None
+        stage_name = staged_canvas_name(job)
         assist = job.namespace == "assist"
         # 已停止的任务一般不计；但停止后主机仍跑完并扣了费、回写到这条上的（第 6 批 6-2a）按实际扣费计入。
         settled_charge = job.status == "canceled" and (job.params.actual_cost_cny or 0) > 0
-        if (job.kind not in {"image", "video", "audio"} and not assist) \
+        if (job.kind not in {"image", "video", "audio"} and not (assist or guest_name or stage_name)) \
                 or job.status == "pending_confirm" or (job.status == "canceled" and not settled_charge):
             continue
         cost = job.params.actual_cost_cny
@@ -67,7 +70,7 @@ def mine_records(
         project_id = job.canvas_project_id or (assist_project_id(job) if assist else None)
         if project_id:
             project_key = f"canvas:{project_id}"
-            label = canvas_names.get(project_id, "已删除的项目")
+            label = stage_name or canvas_names.get(project_id, "已删除的项目")
         elif assist:
             project_key, label = "assist", "接口配置"
         else:
@@ -79,7 +82,7 @@ def mine_records(
             "duration_s": max(0, (datetime.fromisoformat(job.completed_at)
                 - datetime.fromisoformat(job.submitted_at)).total_seconds())
             if job.completed_at and job.status in {"done", "failed"} else None,
-            "project_label": label, "member_label": None,
+            "project_label": label, "member_label": f"共享画布 · {guest_name}" if guest_name else None,
             "kind": job.kind.value, "model": job.model, "label": label,
             "project": project_key, "source": "lan" if job.provider == "atelier" else "local",
             "failed": job.status == "failed", "prompt": user_prompt(job)[:120],

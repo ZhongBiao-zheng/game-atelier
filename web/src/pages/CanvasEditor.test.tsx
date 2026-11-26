@@ -2358,6 +2358,63 @@ it('groups the selection with ⌘G / Ctrl+G', async () => {
   expect(saved.nodes.filter(node => node.type === 'group')).toHaveLength(1);
 });
 
+it.each([
+  { changeProject: false, lateResult: 'failure' },
+  { changeProject: true, lateResult: 'conflict' },
+  { changeProject: true, lateResult: 'success' },
+])('keeps a late $lateResult from an editor that left (switch project: $changeProject)', async ({ changeProject, lateResult }) => {
+  const oldId = 'canvas-one';
+  const nextId = changeProject ? 'canvas-two' : oldId;
+  const store = new Map([oldId, nextId].map(id => [id, documentWith({
+    project_id: id, revision: id === 'canvas-one' ? 17 : 3,
+    nodes: [textNode('first', '甲'), textNode('second', '乙')],
+  })]));
+  vi.mocked(getCanvasDocument).mockImplementation(async id => structuredClone(store.get(id)!));
+  let finishOldSave!: () => void;
+  const save = vi.mocked(saveCanvasDocument);
+  save.mockImplementationOnce((id, payload) => new Promise((resolve, reject) => {
+    const accepted = { ...payload, revision: payload.revision + 1 };
+    if (lateResult === 'success') store.set(id, structuredClone(accepted));
+    finishOldSave = () => {
+      if (lateResult === 'success') resolve(accepted);
+      else reject(lateResult === 'conflict' ? new ApiError('conflict', { status: 409 }) : new Error('offline'));
+    };
+  }));
+  save.mockImplementation(async (id, payload) => {
+    const current = store.get(id)!;
+    if (id !== payload.project_id || current.revision !== payload.revision) throw new ApiError('conflict', { status: 409 });
+    const saved = structuredClone({ ...payload, revision: current.revision + 1 });
+    store.set(id, saved);
+    return saved;
+  });
+
+  const view = (id: string) => <CanvasEditor projectId={id} onBack={vi.fn()} onSwitchProject={vi.fn()} />;
+  const first = render(view(oldId));
+  await screen.findByRole('button', { name: 'flow-node-first' });
+  // 首屏为无版本的文本补内容。离开时这一笔仍要立即发出。
+  if (changeProject) first.rerender(view(nextId));
+  else { first.unmount(); render(view(nextId)); }
+  expect(save).toHaveBeenCalledOnce();
+  expect(save.mock.calls[0][0]).toBe(oldId);
+  await screen.findByRole('button', { name: 'flow-node-first' });
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  fireEvent.keyDown(window, { key: 'g', ctrlKey: true });
+  const groups = () => store.get(nextId)!.nodes.filter(node => node.type === 'group');
+  await waitFor(() => expect(groups()).toHaveLength(1));
+  const reads = vi.mocked(getCanvasDocument).mock.calls.length;
+  const writes = save.mock.calls.length;
+  await act(async () => {
+    finishOldSave();
+    // 跨过第一次自动重试的 1 秒，确保旧回调没有再次写盘。
+    await new Promise(resolve => setTimeout(resolve, 1150));
+  });
+  expect(getCanvasDocument).toHaveBeenCalledTimes(reads);
+  expect(save).toHaveBeenCalledTimes(writes);
+  fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
+  await waitFor(() => expect(store.get(nextId)!.viewport).toEqual({ x: 120, y: -40, zoom: 0.7 }));
+  expect(groups()).toHaveLength(1);
+});
+
 it('connects every selected source when a connection is dragged out of a multi-selection', async () => {
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
     nodes: [textNode('source-one', '甲', 'version-one'), textNode('source-two', '乙', 'version-two')],

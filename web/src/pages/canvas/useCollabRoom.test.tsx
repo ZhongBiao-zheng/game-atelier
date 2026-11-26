@@ -1,6 +1,6 @@
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { CanvasDocument } from '@/schema/canvas';
+import type { CanvasDocument, CanvasImageNode } from '@/schema/canvas';
 import { ReactFlowProvider } from '@xyflow/react';
 import { SharedCanvasView } from './SharedCanvasView';
 import { remoteCanvasTransport } from './canvasTransport';
@@ -57,11 +57,18 @@ it('lists all online members while limiting the visible avatar row to four',()=>
 });
 
 it('shows editing controls only while the host authorizes edits and stays connected',async()=>{
+  const image = (id:string):CanvasImageNode => ({
+    id,type:'image',title:id,position:{x:0,y:0},z_index:0,
+    data:{current_version_id:null,active_run_id:null,generation_draft:null,display:{fit:'contain',free_resize:false}},
+  });
+  const cover = image('cover');
+  cover.data.result_stack = {run_id:'run',member_node_ids:['candidate']};
+  const graph = {...doc,nodes:[cover,image('candidate')]};
   vi.stubGlobal('WebSocket',TestSocket);
   vi.stubGlobal('fetch',vi.fn(async(url:string)=>{
     const result = url === '/api/profile' ? {display_name:'访客'} : url === '/api/collab/peers'
       ? {shares:[{peer_key:'host',project_id:'p',protocol_version:1,authenticated:true}]}
-      : url.endsWith('/document') ? {document:doc,name:'项目',owner_display_name:'房主',mode:'edit',protocol_version:1}
+      : url.endsWith('/document') ? {document:graph,name:'项目',owner_display_name:'房主',mode:'edit',protocol_version:1}
       : {plugins:[]};
     return new Response(JSON.stringify(result));
   }));
@@ -69,8 +76,14 @@ it('shows editing controls only while the host authorizes edits and stays connec
     onBack={()=>{}} zoomDock={null}/></ReactFlowProvider>);
   await waitFor(()=>expect(TestSocket.sockets).toHaveLength(1));
   const ws=TestSocket.sockets[0];
-  act(()=>{ws.onopen?.();ws.message({type:'hello_snapshot',document:doc,members:[],mode:'view',client_id:'me'});});
+  act(()=>{ws.onopen?.();ws.message({type:'hello_snapshot',document:graph,members:[],mode:'view',client_id:'me'});});
   expect(screen.getByText('房主 · 仅查看')).toBeInTheDocument();
+  expect(screen.queryByTestId('rf__node-candidate')).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByLabelText('展开 2 张结果'));
+  await waitFor(()=>expect(screen.getByTestId('rf__node-candidate')).toBeInTheDocument());
+  fireEvent.click(screen.getByLabelText('收起 2 张结果'));
+  await waitFor(()=>expect(screen.queryByTestId('rf__node-candidate')).not.toBeInTheDocument());
+  expect(ws.send.mock.calls.map(([message])=>JSON.parse(message).type)).not.toContain('submit_op');
   expect(screen.queryByRole('button',{name:'上传素材'})).not.toBeInTheDocument();
   act(()=>ws.message({type:'room_policy_changed',mode:'edit',allow_borrow_provider:false}));
   expect(screen.getByRole('button',{name:'上传素材'})).toBeEnabled();

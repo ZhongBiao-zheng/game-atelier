@@ -158,6 +158,17 @@ export interface CanvasMediaDisplay {
 interface CanvasNodeBase {
   created_by?: string | null;
   created_by_client?: string | null;
+  collab_run?: {
+    run_id: string;
+    source_node_id: string;
+    status: 'pending' | 'done' | 'failed' | 'interrupted';
+    execution_mode: 'guest' | 'borrowed';
+    initiated_by: string;
+    model: string;
+    mode: 'image' | 'video' | 'audio' | 'text';
+    started_at: string;
+    error?: string | null;
+  } | null;
   id: string;
   title: string;
   position: CanvasPoint;

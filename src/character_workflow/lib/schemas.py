@@ -22,6 +22,9 @@ from pydantic import (
 )
 
 
+from character_workflow.lib.collab_run_state import CanvasCollabRun
+
+
 class JobStatus(str, Enum):
     # PENDING_CONFIRM = Skill 已组装好调用参数、等画师在终端或 Web 点确认。
     # PENDING = 已确认 & in-flight（Skill 同步调图像服务期间停在此状态）。
@@ -299,6 +302,10 @@ class JobParams(BaseModel):
     mj_stylize: int | None = None     # --stylize 0-1000
     mj_chaos: int | None = None       # --chaos 0-100
     mj_weird: int | None = None       # --weird 0-3000
+    collab_guest_name: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
+    collab_guest_client: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
+    collab_borrow_channel: str | None = Field(default=None, pattern="^[a-f0-9]{32}$", exclude_if=lambda v: v is None)
+    collab_source_canvas: str | None = Field(default=None, max_length=160, exclude_if=lambda v: v is None)
     mj_seed: int | None = None        # --seed
     mj_no: str | None = None          # --no 排除词，逗号分隔
     mj_tile: bool | None = None       # --tile 无缝平铺
@@ -375,6 +382,8 @@ class CanvasResultCandidate(BaseModel):
     status: Literal["pending", "succeeded", "failed", "canceled"]
     version_id: str | None = None
     error: str | None = None
+    actual_cost_cny: float | None = Field(default=None, ge=0, exclude_if=lambda v: v is None)
+    estimated_cost_cny: float | None = Field(default=None, ge=0, exclude_if=lambda v: v is None)
     # UI dismissal is a tombstone: Job/Snapshot/Version provenance remains auditable.
     dismissed_at: str | None = None
 
@@ -1145,6 +1154,7 @@ class CanvasNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     created_by: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
     created_by_client: str | None = Field(default=None, max_length=120, exclude_if=lambda v: v is None)
+    collab_run: CanvasCollabRun | None = Field(default=None, exclude_if=lambda v: v is None)
     id: str = Field(min_length=1, max_length=120)
     title: str = Field(min_length=1, max_length=120)
     position: CanvasPoint

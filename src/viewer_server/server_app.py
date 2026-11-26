@@ -299,6 +299,8 @@ async def normal_lifespan(app: FastAPI):
                  or has_resumable_comfyui_task(job))
         )
     ]
+    from character_workflow.lib.collab_guest_runs import recover_staged_results
+    recover_staged_results()
     if reconciled:
         logging.getLogger(__name__).warning(
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
@@ -466,6 +468,10 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(local_ws)
     app.include_router(local_uploads)
     app.include_router(collab_router)
+    from viewer_server.collab_borrow_routes import local_router as borrow_router
+    app.include_router(borrow_router)
+    from viewer_server.collab_guest_run_routes import collab_guest_local_router
+    app.include_router(collab_guest_local_router)
     app.include_router(collab_transfer_local_router)
     app.include_router(router)
     from viewer_server.comfyui_routes import router as comfyui_router
