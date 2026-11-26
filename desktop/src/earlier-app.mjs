@@ -16,13 +16,13 @@ export function bundleOf(exe) {
   return at < 0 ? null : exe.slice(0, at + 4);
 }
 
-/** Earlier app bundles in an Applications folder, the running one excepted. */
+/** Earlier app bundles in an Applications folder, the running one excepted (macOS paths: POSIX). */
 export function earlierBundles({ name, exe, home, exists = fs.existsSync }) {
   const running = bundleOf(exe);
-  const folders = ['/Applications', home ? path.join(home, 'Applications') : null].filter(Boolean);
+  const folders = ['/Applications', home ? path.posix.join(home, 'Applications') : null].filter(Boolean);
   return EARLIER_NAMES
     .filter((earlier) => earlier !== name)
-    .flatMap((earlier) => folders.map((folder) => path.join(folder, `${earlier}.app`)))
+    .flatMap((earlier) => folders.map((folder) => path.posix.join(folder, `${earlier}.app`)))
     .filter((bundle) => bundle !== running && exists(bundle));
 }
 
