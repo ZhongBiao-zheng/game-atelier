@@ -29,6 +29,7 @@ from character_workflow.lib.keys import find_by_alias
 from character_workflow.lib.schemas import CanvasDocument, JobErrorCode, JobStatus
 from viewer_server.collab_access import require_guest
 from viewer_server.collab_proxy import remote_bytes, remote_json
+from viewer_server.collab_submissions import RequestId, submission
 
 _LAN = "/collab/v1/projects/{project_id}/runs"
 _LOCAL = "/api/collab/remote/{peer_key}/projects/{project_id}/runs"
@@ -250,9 +251,30 @@ def _worker(request, peer_key, pid, run_id, source, project_name, body, kind):
             _slots.release()
 
 
+class LocalSubmission(runs.GuestRequest):
+    request_id: RequestId
+
+
 @collab_guest_local_router.post(_LOCAL + "/local", status_code=202)
-def run_local(project_id: str, peer_key: str, body: runs.GuestRequest, request: Request):
-    payload = remote_json(request, peer_key, project_id, "document")
+def run_local(project_id: str, peer_key: str, body: LocalSubmission, request: Request):
+    with submission(("local", peer_key, project_id), body) as entry:
+        if "receipt" in entry.state:
+            # Recheck share access without reserving again, even if the result was since removed.
+            current = remote_json(request, peer_key, project_id, "document")
+            if current["mode"] != "edit":
+                raise HTTPException(403, "这张画布仅可查看")
+            return entry.state["receipt"]
+        if entry.state:
+            payload = entry.state["source"]
+            body = body.model_copy(update={"expected_revision": payload["document"]["revision"]})
+            run_id = entry.state["run_id"]
+        else:
+            payload = remote_json(request, peer_key, project_id, "document")
+            run_id = f"run-{secrets.token_hex(12)}"
+        return _start_local(project_id, peer_key, body, request, entry, payload, run_id)
+
+
+def _start_local(project_id, peer_key, body, request, entry, payload, run_id):
     try:
         source = CanvasDocument.model_validate(payload["document"])
         name = str(payload["name"])
@@ -270,7 +292,6 @@ def run_local(project_id: str, peer_key: str, body: runs.GuestRequest, request: 
             raise HTTPException(422, detail={"code": error.code, "message": error.message}) from error
     draft = getattr(surface.data, "generation_draft", None)
     mode = "image" if surface.type in {"image_edit", "layer_stack"} else (draft.mode if draft else surface.type)
-    run_id = f"run-{secrets.token_hex(12)}"
     reservation = runs.Reservation(
         run_id=run_id, expected_revision=source.revision, source_node_id=surface.id,
         model=public_text(body.model) if "://" not in body.model else "custom", mode=mode,
@@ -282,12 +303,31 @@ def run_local(project_id: str, peer_key: str, body: runs.GuestRequest, request: 
         _slots.release()
         raise HTTPException(503, "正在迁移数据目录，请稍后重试")
     try:
-        result = remote_json(request, peer_key, project_id, "runs/reserve", method="POST",
-                             json=reservation.model_dump(mode="json"))
-        if result.get("collab_run_id") != run_id or result.get("status") != "pending":
+        # The host can reserve and lose its response. Freeze the original inputs before sending.
+        if not entry.state:
+            entry.save(run_id=run_id, source=payload)
+        prepared = entry.state
+        reservation_body = reservation.model_dump(mode="json")
+        try:
+            result = remote_json(request, peer_key, project_id, "runs/reserve", method="POST",
+                                 json=reservation_body)
+        except HTTPException as error:
+            if 400 <= error.status_code < 500 and error.status_code != 408:
+                entry.path.unlink(missing_ok=True)
+            raise
+        if result.get("collab_run_id") != run_id or result.get("status") not in {"pending", "done", "failed", "interrupted"}:
             raise HTTPException(502, "房主返回的任务与请求不一致")
-        threading.Thread(target=_worker, daemon=True, name=f"collab-guest-{run_id}",
-                         args=(request, peer_key, project_id, run_id, source, name, body, surface.type)).start()
+        entry.save(receipt=result)
+        if result["status"] != "pending":
+            data_root_move.leave_write()
+            _slots.release()
+            return result
+        try:
+            threading.Thread(target=_worker, daemon=True, name=f"collab-guest-{run_id}",
+                             args=(request, peer_key, project_id, run_id, source, name, body, surface.type)).start()
+        except RuntimeError:
+            entry.save(**prepared)
+            raise
         return result
     except BaseException:
         data_root_move.leave_write()

@@ -15,18 +15,21 @@ import type { CanvasDocument, CanvasImageNode, CanvasLayerStackNode, CanvasMedia
 import type { CollabRoom } from './useCollabRoom';
 
 export function SharedNodeEdit({node, doc, room, close}: {
-  node: CanvasNode; doc: CanvasDocument; room: CollabRoom; close: () => void;
+  node: CanvasNode; doc: CanvasDocument; room: Pick<CollabRoom, 'submit' | 'connected'>; close: () => void;
 }) {
-  const [baseRevision] = useState(doc.revision);
-  const [title, setTitle] = useState(node.title);
-  const current = node.type === 'text' && node.data.current_version_id ? doc.content_versions[node.data.current_version_id] : undefined;
-  const [content, setContent] = useState(current?.kind === 'text' ? current.text : '');
+  const [initial] = useState(() => {
+    const version = node.type === 'text' && node.data.current_version_id
+      ? doc.content_versions[node.data.current_version_id] : undefined;
+    return {revision: doc.revision, title: node.title, content: version?.kind === 'text' ? version.text : ''};
+  });
+  const [title, setTitle] = useState(initial.title);
+  const [content, setContent] = useState(initial.content);
   async function save(event:React.FormEvent) {
     event.preventDefault();
     const patch: Record<string, unknown> = {};
     const versions: CanvasTextVersion[] = [];
-    if (title.trim() !== node.title) patch.title = title.trim();
-    if (node.type === 'text' && content !== (current?.kind === 'text' ? current.text : '')) {
+    if (title !== initial.title && title.trim() !== initial.title) patch.title = title.trim();
+    if (node.type === 'text' && content !== initial.content) {
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
       const version: CanvasTextVersion = {
         version_id: 'version-' + crypto.randomUUID(), created_at: new Date().toISOString(),
@@ -36,7 +39,7 @@ export function SharedNodeEdit({node, doc, room, close}: {
       versions.push(version);
       patch.data = {current_version_id:version.version_id};
     }
-    if (Object.keys(patch).length) room.submit({kind:'node_update',node_id:node.id, patch,text_versions:versions},baseRevision);
+    if (Object.keys(patch).length) room.submit({kind:'node_update',node_id:node.id, patch,text_versions:versions},initial.revision);
     close();
   }
   return <Dialog open onOpenChange={open => {if (!open) close();}}>

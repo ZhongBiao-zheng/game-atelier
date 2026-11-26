@@ -149,3 +149,14 @@ describe('VideoControls（五合一汇总按钮）', () => {
     expect(screen.queryByLabelText('生成音频开关')).not.toBeInTheDocument();
   });
 });
+
+it('明确标示未声明种子支持的视频接口，并允许清除复刻带来的固定种子', () => {
+  const onClearSeed = vi.fn();
+  setup({ caps: videoControlCaps('kling-v1', 'kling'), seed: 0, onClearSeed });
+  const settings = screen.getByRole('button', { name: '视频设置' });
+  expect(settings).toHaveTextContent('种子支持未确认');
+  fireEvent.click(settings);
+  expect(screen.getByText(/当前接口未声明支持固定种子/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '清除种子' }));
+  expect(onClearSeed).toHaveBeenCalledOnce();
+});

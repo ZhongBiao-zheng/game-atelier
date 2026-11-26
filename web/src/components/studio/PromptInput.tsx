@@ -1,6 +1,6 @@
 import { ControlButton } from './ControlButton';
 import { WorkflowParameters } from './WorkflowParameters';
-import { workflowReferenceError } from '@/lib/workflowInputs';
+import { compatibleWorkflowValues, workflowReferenceError } from '@/lib/workflowInputs';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type KeyboardEvent, type ReactNode, type RefObject, useImperativeHandle, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -115,6 +115,8 @@ interface Props {
   onVideoRatioChange?: (ratio: string) => void;
   onVideoQualityChange?: (quality: VideoQuality) => void;
   onVideoCountChange?: (count: number) => void;
+  videoSeed?: number;
+  onClearVideoSeed?: () => void;
   onGenerateAudioChange?: (generateAudio: boolean) => void;
   referenceVideos?: File[];
   referenceAudios?: File[];
@@ -302,6 +304,8 @@ export function PromptInput({
   onVideoQualityChange,
   onVideoCountChange,
   onGenerateAudioChange,
+  videoSeed,
+  onClearVideoSeed,
   referenceVideos = [],
   referenceAudios = [],
   onReferenceVideosChange,
@@ -677,14 +681,19 @@ export function PromptInput({
   const caps = size.caps;
   const sizeModelRef = useRef<string | null>(null);
   useEffect(() => {
-    if (isVideo || !selectedModel || !provider) return;
+    if (isVideo || !selectedModel || !provider) {
+      sizeModelRef.current = null;
+      return;
+    }
     const identity = `${provider.alias}:${selectedModel.id}:${provider.base_url ?? ''}`;
     const changedModel = sizeModelRef.current !== null && sizeModelRef.current !== identity;
     const initialize = sizeModelRef.current === null;
     sizeModelRef.current = identity;
     const context = sizeContext(providers, provider, selectedModel.id);
     const normalized = normalizeImageSizeParams(context.modelId, context.provider, context.baseUrl, sizeParams, context.caps);
-    if (changedModel) normalized.workflow_inputs = undefined;
+    if (changedModel || initialize) {
+      normalized.workflow_inputs = compatibleWorkflowValues(selectedModel.workflow_inputs, sizeParams.workflow_inputs);
+    }
     const modeChanged = hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams);
     if (!modeChanged && (changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, context.modelId)) {
       const pixels = normalizeImagePixelSize(normalized.size!, context.modelId, context.baseUrl);
@@ -1663,6 +1672,8 @@ export function PromptInput({
           {isVideo && videoCaps && (
             <>
               <VideoControls
+                seed={videoSeed}
+                onClearSeed={onClearVideoSeed}
                 caps={videoCaps}
                 mode={videoMode}
                 duration={duration}

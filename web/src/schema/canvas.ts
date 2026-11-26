@@ -338,6 +338,7 @@ export interface CanvasInputConnection {
   role: 'input';
   source_node_id: string;
   target_node_id: string;
+  mj_role?: 'mj_sref' | 'mj_cref' | 'mj_oref' | null;
   slot?: CanvasVideoFrameSlot | CanvasCompareSlot | null;
   annotated?: boolean;
   /** 带标注连线的发送形式：缺省 = 目标支持时发原图 + 标注层，否则合成图；'composite' 固定合成图。 */
@@ -392,7 +393,7 @@ export interface CanvasFrozenGeneration {
   provider: string;
   provider_label?: string | null;
   provider_icon?: string | null;
-  params: Record<string, string | number | boolean>;
+  params: Record<string, string | number | boolean | Record<string, string | number | boolean | null>>;
   inputs: CanvasFrozenInput[];
   duration_s?: number | null;
   cost_cny?: number | null;

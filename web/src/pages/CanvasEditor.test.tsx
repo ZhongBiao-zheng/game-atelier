@@ -1695,6 +1695,29 @@ it('imports every chosen file as separate non-overlapping material nodes', async
   expect(input).toHaveValue('');
 });
 
+it('keeps the newest shared edit when document reads arrive out of order', async () => {
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn(async () => events.open()));
+  try {
+    render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+    await screen.findByLabelText('画布编辑器 列车短片');
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
+    let finishFirst!: (doc: CanvasDocument) => void;
+    vi.mocked(getCanvasDocument)
+      .mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }))
+      .mockResolvedValueOnce(documentWith({ revision: 9, nodes: [imageNode('newer', '房主与访客均已保存')] }));
+    await act(async () => events.emit('canvas-document-changed', { project_id: 'canvas-one', revision: 8 }));
+    await act(async () => events.emit('canvas-document-changed', { project_id: 'canvas-one', revision: 9 }));
+    await screen.findByRole('button', { name: 'flow-node-newer' });
+    await act(async () => finishFirst(documentWith({ revision: 8, nodes: [imageNode('older', '访客保存前')] })));
+    expect(screen.queryByRole('button', { name: 'flow-node-older' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'flow-node-newer' })).toBeVisible();
+  } finally {
+    state.mockRestore();
+  }
+});
+
 it('keeps the uploaded node when the server broadcast lands before the upload response', async () => {
   // Windows 实测：上传落盘触发的 canvas-document-changed 比 HTTP 201 先到浏览器。
   // 此时 serverRevision 还是旧值，若把这条事件当成别人的改动去重载，服务端文档

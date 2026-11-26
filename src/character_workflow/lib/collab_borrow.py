@@ -187,6 +187,7 @@ class BorrowedGeneration:
     guest_name: str
     client_id: str
     authorize: Callable[[], None]
+    job_id: str | None = None
 
     def surface(self, node):
         self.authorize()
@@ -201,9 +202,9 @@ class BorrowedGeneration:
                 raise ValueError("这个节点无法生成")
             existing = node.data.generation_draft
             mode = existing.mode if existing else ("image" if node.type == "image_edit" else node.type)
-            params = public_params(existing.params.model_dump(exclude_none=True)) if existing else {}
+            params = public_params(existing.params.model_dump(exclude_none=True), model.workflow_inputs) if existing else {}
             if self.params is not None:
-                params.update(public_params(self.params))
+                params.update(public_params(self.params, model.workflow_inputs))
             draft = CanvasGenerationDraft(mode=mode, model=model.id, alias=key.alias,
                     prompt=self.prompt if self.prompt is not None else (existing.prompt if existing else ""),
                     params=JobParams(**{k: v for k, v in params.items() if k in CANVAS_DRAFT_PARAM_FIELDS[mode]}),
@@ -232,7 +233,7 @@ def mark_borrowed_result(job, document):
     if not result:
         return
     if status == "done" and result.type == "image":
-        _materialize_image_candidates(document, result, job)
+        materialize_image_candidates(document, result, job)
     # Keep the original author when a previously populated surface is reused.
     if result.created_by_client is None and context.result_node_id != context.snapshot.surface_node_id:
         result.created_by = job.params.collab_guest_name
@@ -245,7 +246,7 @@ def mark_borrowed_result(job, document):
     )
 
 
-def _materialize_image_candidates(document, cover, job):
+def materialize_image_candidates(document, cover, job):
     from character_workflow.lib.canvas_library import _content_node
     from character_workflow.lib.schemas import CanvasPoint, CanvasResultStack
 

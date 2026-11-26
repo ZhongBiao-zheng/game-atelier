@@ -6,9 +6,12 @@ from character_workflow.lib.canvas_projects import read_canvas_document
 from character_workflow.lib.canvas_runs import (
     CanvasRunCommandError, submit_canvas_run, submit_image_edit_run, submit_layer_decomposition_run,
 )
+from character_workflow.lib.jobs import new_job_id, read_job
 from character_workflow.lib.collab_borrow import BorrowedGeneration, borrowable_models, resolve_channel
+from character_workflow.lib.schemas import PublicGenerationParams
 from viewer_server.collab_access import require_guest, share_entry
 from viewer_server.collab_proxy import remote_json
+from viewer_server.collab_submissions import RequestId, submission
 
 lan_router = APIRouter(prefix="/collab/v1/projects/{project_id}")
 local_router = APIRouter(prefix="/api/collab/remote/{peer_key}/projects/{project_id}")
@@ -16,13 +19,14 @@ local_router = APIRouter(prefix="/api/collab/remote/{peer_key}/projects/{project
 
 class BorrowSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    request_id: RequestId
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
     requested_count: int = Field(default=1, ge=1, le=4)
     channel_id: str = Field(pattern="^[a-f0-9]{32}$")
     model: str = Field(min_length=1, max_length=200)
     prompt: str | None = Field(default=None, max_length=40000)
-    params: dict[str, str | float | int | bool] | None = None
+    params: PublicGenerationParams | None = None
 
 
 def _authorize(request, project_id):
@@ -44,12 +48,44 @@ def models(request: Request, project_id: str):
 def borrowed_run(project_id: str, request: Request, body: BorrowSubmission, background: BackgroundTasks):
     from viewer_server.routes import _run_canvas_job_safely
     guest = _authorize(request, project_id)
+    with submission(("borrowed", project_id, guest.client_id), body) as entry:
+        if "receipt" in entry.state:
+            return entry.state["receipt"]
+        # Reading the document also finishes interrupted canvas transactions before job lookup.
+        doc = read_canvas_document(project_id)
+        job = None
+        if entry.state:
+            job_id = entry.state["job_id"]
+            try:
+                job = read_job(job_id)
+            except FileNotFoundError:
+                pass
+        else:
+            job_id = new_job_id()
+        if job is None:
+            if not entry.state:
+                entry.save(job_id=job_id)
+            try:
+                job = _submit_borrowed(project_id, request, body, guest, doc, job_id)
+            except HTTPException as error:
+                if 400 <= error.status_code < 500:
+                    entry.path.unlink(missing_ok=True)
+                raise
+        status = {"done": "done", "partial": "done", "failed": "failed", "canceled": "interrupted"}
+        receipt = {"collab_run_id": job.canvas_run.run_id, "node_id": job.canvas_run.result_node_id,
+                   "status": status.get(job.status.value, "pending")}
+        entry.save(receipt=receipt)
+        if job.status == "pending":
+            background.add_task(_run_canvas_job_safely, job.job_id)
+        return receipt
+
+
+def _submit_borrowed(project_id, request, body, guest, doc, job_id):
     try:
         key, _model = resolve_channel(body.channel_id, body.model)
         selection = BorrowedGeneration(channel=body.channel_id, model=body.model, prompt=body.prompt,
                                       params=body.params, guest_name=guest.display_name, client_id=guest.client_id,
-                                      authorize=lambda: _authorize(request, project_id))
-        doc = read_canvas_document(project_id)
+                                      authorize=lambda: _authorize(request, project_id), job_id=job_id)
         node = next((node for node in doc.nodes if node.id == body.surface_node_id), None)
         if node is None:
             raise HTTPException(404, "生成节点不存在")
@@ -70,8 +106,7 @@ def borrowed_run(project_id: str, request: Request, body: BorrowSubmission, back
         if str(error).startswith("revision_conflict:"):
             raise HTTPException(409, "画布已更新，请重试") from None
         raise
-    background.add_task(_run_canvas_job_safely, job.job_id)
-    return {"collab_run_id": job.canvas_run.run_id, "node_id": job.canvas_run.result_node_id, "status": "pending"}
+    return job
 
 
 @local_router.get("/borrowable-models")

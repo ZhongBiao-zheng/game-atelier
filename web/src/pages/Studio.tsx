@@ -351,6 +351,7 @@ function StudioFull() {
   const [videoRatio, setVideoRatio] = useState<string>(draft?.videoRatio ?? saved.videoRatio ?? '16:9');
   const [videoQuality, setVideoQuality] = useState<VideoQuality>(draft?.videoQuality ?? (saved.videoQuality === 'pro' ? 'pro' : 'std'));
   const [videoCount, setVideoCount] = useState<number>(draft?.videoCount ?? clampImageCount(saved.videoCount ?? 1));
+  const [videoSeed, setVideoSeed] = useState<number | undefined>(draft?.videoSeed);
   const [generateAudio, setGenerateAudio] = useState<boolean>(draft?.generateAudio ?? saved.generateAudio ?? false);
   const [referenceVideos, setReferenceVideos] = useState<File[]>(draft?.referenceVideos ?? []);
   const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
@@ -387,20 +388,20 @@ function StudioFull() {
       providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
       sizeParams, count, quality,
-      videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+      videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, videoSeed,
     }, draftKey);
   }, [
     providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
     sizeParams, count, quality,
-    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, draftKey,
+    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, videoSeed, draftKey,
   ]);
 
   // ---- 草稿按对话存：切走时留在原对话，切回来原样恢复；新对话发出第一条建了会话时，输入跟着走。 ----
   const { setText: setAgentText, setFiles: setAgentFilesRaw } = composer;
   const sessionInput: StudioSessionInput = {
     promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
-    videoFrames, mjRefs, agentText: composer.text, agentFiles: composer.files,
+    videoFrames, mjRefs, videoSeed, agentText: composer.text, agentFiles: composer.files,
   };
   const editor: EditorSnapshot = {
     mode: composer.mode, providerAlias, model, sizeParams, count, quality, mjParams,
@@ -419,6 +420,7 @@ function StudioFull() {
     setReferenceVideos(input.referenceVideos);
     setReferenceAudios(input.referenceAudios);
     setVideoFrames(input.videoFrames);
+    setVideoSeed(input.videoSeed);
     setMjRefs(input.mjRefs);
     setAgentText(input.agentText);
     setAgentFilesRaw(input.agentFiles);
@@ -445,7 +447,7 @@ function StudioFull() {
     // sessionInput 每次渲染都是新对象：按它的各字段写。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
-    videoFrames, mjRefs, composer.text, composer.files]);
+    videoFrames, mjRefs, videoSeed, composer.text, composer.files]);
 
   // ---- 覆盖输入：直接覆盖，输入壳上方给 8 秒「已替换当前输入 · 撤销」（悬停暂停）。 ----
   function snapshotIfFilled(): EditorSnapshot | null {
@@ -1150,6 +1152,7 @@ function StudioFull() {
       modelName: selectedModel?.name ?? overrideConfig?.modelName,
       ratio: overrideConfig?.ratio ?? videoRatio, n: clampImageCount(overrideConfig?.n ?? videoCount),
       duration: overrideConfig?.duration ?? duration,
+      videoSeed: overrideConfig ? overrideConfig.videoSeed : videoSeed,
       referenceImages: uploadsFiles ? [] : overrideConfig?.referenceImages ?? [],
     };
     const startedAt = Date.now();
@@ -1201,6 +1204,7 @@ function StudioFull() {
 
     // duration / ratio 仅在该族确有此参数时写入（happyhorse video-edit 随输入、i2v 比例随首帧）。
     const videoParams: JobParams = {
+      ...(baseConfig.videoSeed != null ? { seed: baseConfig.videoSeed } : {}),
       ...(effectiveCaps.durations.length > 0 ? { duration: effectiveDuration } : {}),
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       ...(effectiveCaps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
@@ -1239,6 +1243,7 @@ function StudioFull() {
       videoQuality: effectiveQuality,
       frameMode: effectiveFrameMode,
       generateAudio: effectiveGenerateAudio,
+      videoSeed: baseConfig.videoSeed,
       referenceImages: imgPaths,
       referenceVideos: vidPaths,
       referenceAudios: audPaths,
@@ -1581,6 +1586,8 @@ function StudioFull() {
           videoRatio={videoRatio}
           videoQuality={videoQuality}
           videoCount={videoCount}
+          videoSeed={videoSeed}
+          onClearVideoSeed={() => setVideoSeed(undefined)}
           generateAudio={generateAudio}
           onVideoModeChange={setVideoMode}
           onDurationChange={setDuration}
@@ -1883,6 +1890,7 @@ function StudioFull() {
   // 用户当前编辑内容原样保留。全能参考按实际取回的素材判：复刻时 config 的路径字段是空的。
   function applyRoundConfig(config: RoundConfig, refs: RoundReferenceFiles) {
     const targetKind = config.kind ?? 'image';
+    setVideoSeed(targetKind === 'video' ? config.videoSeed : undefined);
     const omni = isOmniVideoConfig(config.frameMode, {
       images: refs.images.length,
       videos: refs.videos.length,

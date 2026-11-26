@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { localConnection } from '@/api/connection';
 import { notify } from '@/lib/notify';
-import type { CanvasConnection, CanvasDocument, CanvasNode, CanvasPoint } from '@/schema/canvas';
+import type { CanvasConnection, CanvasDocument, CanvasNode, CanvasPoint, JsonValue } from '@/schema/canvas';
 import type { CollabMode } from '@/schema/collab';
 
 export interface RoomMember {
@@ -33,7 +33,8 @@ export function applyCollabDelta(doc: CanvasDocument, delta: DocumentDelta, revi
 
 type OpAction =
   | {kind:'node_add'; node: CanvasNode; text_versions?: CanvasDocument['content_versions'][string][]}
-  | {kind:'node_update' | 'annotation_update' | 'image_edit_update' | 'layer_order_update' | 'plugin_payload_update'; node_id:string; patch:Record<string, unknown>; text_versions?: CanvasDocument['content_versions'][string][]}
+  | {kind:'node_update' | 'annotation_update' | 'image_edit_update' | 'layer_order_update'; node_id:string; patch:Record<string, unknown>; text_versions?: CanvasDocument['content_versions'][string][]}
+  | {kind:'plugin_payload_update'; node_id:string; base_payload:JsonValue; patch:Record<string, unknown>}
   | {kind:'node_move_batch'; positions:Record<string,CanvasPoint>}
   | {kind:'node_delete'; node_ids:string[]}
   | {kind:'connection_add'; connection:CanvasConnection}

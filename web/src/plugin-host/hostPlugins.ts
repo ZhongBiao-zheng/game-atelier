@@ -54,7 +54,7 @@ export interface SharedPluginNodeProps {
   projectId: string;
   mediaUrl: (versionId: string) => string;
   editable: boolean;
-  onPayloadChange: (payload: JsonValue) => void;
+  onPayloadChange: (payload: JsonValue, basePayload: JsonValue) => void;
 }
 
 export interface HostPluginNodeProps {

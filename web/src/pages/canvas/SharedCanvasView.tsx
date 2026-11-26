@@ -41,7 +41,7 @@ type Transport = ReturnType<typeof remoteCanvasTransport>;
 type SharedNode = Node<{
   node: CanvasNode; version?: CanvasContentVersion; url?: string; member?: RoomMember; editable:boolean;
   stackTotal:number; stackExpanded:boolean; toggleStack:(id:string)=>void;
-  doc:CanvasDocument; projectId:string; mediaUrl:(id:string)=>string; onPayloadChange:(payload:JsonValue)=>void;
+  doc:CanvasDocument; projectId:string; mediaUrl:(id:string)=>string; onPayloadChange:(payload:JsonValue,basePayload:JsonValue)=>void;
 }, 'shared'>;
 const nodeTypes = { shared: SharedNodeCard };
 const proOptions = { hideAttribution: true };
@@ -205,7 +205,7 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
         stackExpanded:expandedStacks.has(node.id), toggleStack, member:others.find(member=>member.selected_node_ids.includes(node.id)),
         url:version?.kind === 'image' ? transport.mediaUrl(projectId, version.version_id,400) : undefined,
         mediaUrl:id=>transport.mediaUrl(projectId,id,400),
-        onPayloadChange:payload=>submit({kind:'plugin_payload_update',node_id:node.id,patch:{data:{payload}}})},
+        onPayloadChange:(payload,basePayload)=>submit({kind:'plugin_payload_update',node_id:node.id,base_payload:basePayload,patch:{data:{payload}}})},
     };
   }) ?? [], [doc, projectId, transport, selectedIds, dragging, editable, members, clientId, submit, owners, collapsedMembers, expandedStacks, toggleStack]);
   const edges = useMemo(() => doc?.connections.flatMap(edge => {
@@ -367,7 +367,7 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     </header>
     {room && liveRoom.closed && !error && <p role="status" className="absolute left-3 top-16 rounded-lg border bg-card p-2 text-sm">{liveRoom.closed}</p>}
     {selectedEdge && editable && <Button className="absolute bottom-3 left-3" size="sm" onClick={removeSelection}>删除连线</Button>}
-    {editable && selectedNode && tool === 'edit' && doc && <SharedNodeEdit node={selectedNode} doc={doc} room={liveRoom} close={()=>setTool(null)}/>}
+    {editable && selectedNode && tool === 'edit' && doc && <SharedNodeEdit key={selectedNode.id} node={selectedNode} doc={doc} room={liveRoom} close={()=>setTool(null)}/>}
     {editable && selectedNode?.type === 'image' && selectedVersion?.kind === 'image' && tool === 'annotation' &&
       <SharedAnnotation node={selectedNode} version={selectedVersion} url={transport.mediaUrl(projectId,selectedVersion.version_id)}
         room={liveRoom} close={()=>setTool(null)}/>}

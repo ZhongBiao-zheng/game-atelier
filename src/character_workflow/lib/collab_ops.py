@@ -46,6 +46,7 @@ class NodeUpdate(_Operation):
     kind: Literal["node_update", "annotation_update", "image_edit_update", "layer_order_update", "plugin_payload_update"]
     node_id: str
     patch: dict[str, Any]
+    base_payload: dict | None = None
     text_versions: list[CanvasTextVersion] = Field(default_factory=list, max_length=1)
 
 
@@ -169,7 +170,7 @@ def _text_versions(doc, op, node):
         doc.content_versions[version.version_id] = version
 
 
-def _update_node(node, patch):
+def _update_node(node, patch, base_payload=None):
     if not patch or patch.keys() - {"title", "position", "size", "hidden", "z_index", "data"}:
         raise CollabOpError(422, "节点变更字段无效")
     raw = node.model_dump(mode="json")
@@ -180,6 +181,15 @@ def _update_node(node, patch):
         if (node.type == "plugin" and (node.data.plugin_id not in HOST_PLUGIN_IDS
                 or data.keys() - {"payload", "generation_draft"})):
             raise CollabOpError(403, "这个插件节点仅可查看")
+        if node.type == "plugin" and "payload" in data:
+            if (node.data.plugin_id, node.data.node_type) != ("storyboard", "board"):
+                raise CollabOpError(403, "这个插件节点仅可查看")
+            from character_workflow.lib.collab_sanitize import merge_storyboard_edit
+            try:
+                payload = merge_storyboard_edit(node.data.payload, base_payload, data["payload"])
+            except ValueError as error:
+                raise CollabOpError(409, str(error)) from error
+            data = {**data, "payload": payload}
         for key in ("active_run_id", "error"):
             if key in data and data[key] != raw["data"].get(key):
                 raise CollabOpError(403, "运行状态只能由房主服务更新")
@@ -232,7 +242,7 @@ def _apply(document: CanvasDocument, op, client_id: str, actor_name: str, owner:
         _text_versions(document, op, node)
         nodes[node.id] = node
     elif isinstance(op, NodeUpdate):
-        node = _update_node(_checked_node(nodes, op.node_id), op.patch)
+        node = _update_node(_checked_node(nodes, op.node_id), op.patch, op.base_payload)
         _text_versions(document, op, node)
         nodes[node.id] = node
     elif isinstance(op, NodeMoves):

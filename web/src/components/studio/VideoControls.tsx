@@ -28,6 +28,8 @@ interface Props extends ToolbarPopoverMenuProps {
   quality?: VideoQuality;
   generateAudio: boolean;
   watermark?: boolean;
+  seed?: number | null;
+  onClearSeed?: () => void;
   onModeChange: (mode: VideoMode) => void;
   onDurationChange: (duration: number) => void;
   onResolutionChange: (resolution: string) => void;
@@ -53,6 +55,8 @@ export function VideoControls({
   quality,
   generateAudio,
   watermark = false,
+  seed,
+  onClearSeed,
   onModeChange,
   onDurationChange,
   onResolutionChange,
@@ -69,7 +73,10 @@ export function VideoControls({
   const wrapRef = useRef<HTMLDivElement>(null);
   const effectiveQuality = quality ?? caps.qualities?.[0];
   const durationRange = durationRangeOf(caps.durations);
+  const fixedSeed = seed != null && seed >= 0;
+  const canRestoreSeed = ['seedance', 'happyhorse', 'openrouter'].includes(caps.family);
   const summary = [
+    fixedSeed && !canRestoreSeed ? '种子支持未确认' : null,
     caps.ratios.length > 0 ? ratioLabel(ratio) : null,
     caps.resolutions.length > 0 ? resolution : null,
     caps.qualities && effectiveQuality ? VIDEO_QUALITY_LABELS[effectiveQuality] : null,
@@ -206,6 +213,16 @@ export function VideoControls({
                     ))}
                   </Segmented>
                 )}
+              </Section>
+            )}
+
+            {fixedSeed && (
+              <Section title="随机种子">
+                <div className="flex items-center justify-between">
+                  <span>{seed}</span>
+                  <Button variant="ghost" size="sm" onClick={onClearSeed}>清除种子</Button>
+                </div>
+                {!canRestoreSeed && <p className="text-xs text-muted-foreground">当前接口未声明支持固定种子，可清除种子或更换模型。</p>}
               </Section>
             )}
 

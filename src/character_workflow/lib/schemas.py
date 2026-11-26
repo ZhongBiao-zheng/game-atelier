@@ -144,9 +144,13 @@ class LayerDecompositionResult(BaseModel):
 # 浏览器参考路径闸门、生成快照三处共用这一份，新增路径字段只改这里；各调用点的差异
 # （mask_image 只由服务端写、extra 字段 source_image）在调用点显式加减。
 # 只是 Python 常量，不是模型字段，TS 端无对应。
+CanvasMjReferenceRole = Literal["mj_sref", "mj_cref", "mj_oref"]
+MJ_REFERENCE_ROLES = ("mj_sref", "mj_cref", "mj_oref")
+
+
 JOB_PARAM_PATH_FIELDS: tuple[str, ...] = (
     "reference_images", "reference_videos", "reference_audios", "mask_image", "markup_image",
-    "mj_sref", "mj_cref", "mj_oref",
+    *MJ_REFERENCE_ROLES,
 )
 
 
@@ -264,6 +268,7 @@ class JobParams(BaseModel):
     layer_max_images: int | None = Field(default=None, ge=2, le=LAYER_DECOMPOSITION_MAX_OUTPUTS)
     layer_decomposition_result: LayerDecompositionResult | None = None
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
+    seed: int | None = None
     duration: int | None = None            # 秒，1-60
     resolution: str | None = None          # 480p | 720p | 1080p
     mode: str | None = None                # kling 生成档位 std | pro（≠ frame_mode）
@@ -345,7 +350,7 @@ class CanvasSnapshotInput(BaseModel):
         "implicit_self", "explicit_source", "input_connection",
         # 由分组展开而来的成员：与直连素材一样参与编号和能力校验，但超出模型参考图上限时
         # 先从它们里截断（整包是顺手连上的，逐条直连是画师一笔一笔连的，优先保留后者）。
-        "group_member",
+        "group_member", "mj_sref", "mj_cref", "mj_oref",
         "first_frame", "last_frame",
     ]
     node_id: str
@@ -863,11 +868,11 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
         # mj_flags 不在其中。
         "mode", "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird",
-        "mj_profile",
+        "mj_profile", "mj_sref_code",
         "mj_seed", "mj_no", "mj_tile", "mj_iw", "mj_sw", "mj_cw", "mj_ow",
     }),
     "video": frozenset({
-        "duration", "resolution", "ratio", "mode", "frame_mode",
+        "duration", "resolution", "ratio", "mode", "frame_mode", "seed",
         "generate_audio", "watermark", "creation_asset_source_title", "prompt_asset_id",
     }),
     "text": frozenset({
@@ -1226,6 +1231,7 @@ class CanvasInputConnection(BaseModel):
     target_node_id: str = Field(min_length=1)
     # first_frame / last_frame：视频首尾帧；before / after：对比节点的两侧。
     slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
+    mj_role: CanvasMjReferenceRole | None = None
     annotated: bool = False
     # 带标注连线发给模型的形式：缺省 = 目标模型与渠道支持时发「原图 + markup 标注层」，否则发合成图；
     # "composite" 固定发合成图。只在 annotated 连线上有意义。
@@ -1372,6 +1378,9 @@ class CanvasFrozenInput(BaseModel):
         return self
 
 
+PublicGenerationParams = dict[str, str | int | float | bool | dict[str, str | int | float | bool | None]]
+
+
 class CanvasFrozenGeneration(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[1] = 1
@@ -1383,7 +1392,7 @@ class CanvasFrozenGeneration(BaseModel):
     provider: str
     provider_label: str | None = None
     provider_icon: str | None = Field(default=None, pattern=r"^brand:[a-z0-9-]+$")
-    params: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    params: PublicGenerationParams = Field(default_factory=dict)
     inputs: list[CanvasFrozenInput] = Field(default_factory=list)
     duration_s: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     cost_cny: float | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -1393,8 +1402,8 @@ class CanvasFrozenGeneration(BaseModel):
     @field_validator("params", mode="before")
     @classmethod
     def public_creation_params(cls, value):
-        from character_workflow.lib.collab_sanitize import public_params
-        return public_params(value)
+        from character_workflow.lib.collab_sanitize import frozen_params
+        return frozen_params(value)
 
 
 class CanvasContentVersionBase(BaseModel):
@@ -1791,6 +1800,10 @@ class CanvasDocument(BaseModel):
             # 分组可以作为「素材包」整包供参考，所以它是合法的 input 源；但它永远不是终点
             # （分组不接收内容，也不改变资产归属），也不承担首尾帧这类语义槽位——槽位要的是
             # 一张确定的图，一个包给不出这个承诺。
+            if edge.role == "input" and edge.mj_role is not None:
+                if (source.type != "image" or target.type != "image" or edge.slot is not None
+                        or edge.annotated):
+                    raise ValueError("Midjourney reference roles require an unslotted image connection")
             if target.type == "group":
                 raise ValueError("canvas group nodes cannot receive connections")
             if source.type == "compare":

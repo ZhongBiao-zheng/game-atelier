@@ -135,6 +135,7 @@ export interface JobParams {
     } | null;
   };
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
+  seed?: number | null;
   duration?: number;
   resolution?: string;
   mode?: string; // kling 生成档位 std|pro（≠ frame_mode）
@@ -202,7 +203,7 @@ export interface CanvasGenerationSnapshot {
   inputs: Array<{
     order: number;
     annotated?: boolean;
-    source: 'implicit_self' | 'explicit_source' | 'input_connection' | 'first_frame' | 'last_frame';
+    source: 'implicit_self' | 'explicit_source' | 'input_connection' | 'group_member' | 'mj_sref' | 'mj_cref' | 'mj_oref' | 'first_frame' | 'last_frame';
     node_id: string;
     version_id: string;
     kind: 'text' | 'image' | 'video' | 'audio';

@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from copy import deepcopy
+
+import pytest
 
 from character_workflow.lib import plugin_registry
 from character_workflow.lib.collab_sanitize import _node_view, _public_values
@@ -25,3 +28,25 @@ def test_copy_uses_installed_manifest_scalar_fields_without_replacing_original_p
     contribution.shared_fields = []
     data = _node_view(node)["data"]
     assert data["shared_placeholder"] and data["payload"] == {}
+
+
+def test_storyboard_guest_edits_and_reorder_preserve_original_fields():
+    from character_workflow.lib.collab_ops import CollabOpError, _update_node
+    raw = {"entities": [{"id": "a", "name": "原名", "description": "设定 /Users/artist/reference.png",
+                          "local_notes": "手记"}, {"id": "b", "name": "第二人"}],
+           "shots": [{"id": "s1", "visual": "开场"}], "extra": "房主原文"}
+    node = CanvasPluginNode(id="storyboard", type="plugin", title="分镜", position={"x": 0, "y": 0},
+        data={"plugin_id": "storyboard", "node_type": "board", "plugin_version": "1.0.0",
+              "data_schema_version": 1, "payload": raw})
+    base = _public_values(_node_view(node))["data"]["payload"]
+    assert base["entities"][0]["description"] == "设定 <local-path>"
+    edited = deepcopy(base)
+    edited["entities"][0]["name"] = "访客改名"
+    edited["entities"].reverse()
+    node.data.payload["shots"][0]["visual"] = "房主同时修改的开场"
+    updated = _update_node(node, {"data": {"payload": edited}}, base).data.payload
+    assert updated == {**raw, "shots": [{"id": "s1", "visual": "房主同时修改的开场"}],
+                       "entities": [raw["entities"][1], {**raw["entities"][0], "name": "访客改名"}]}
+    edited["entities"][1]["description"] += "!"
+    with pytest.raises(CollabOpError, match="私有内容"):
+        _update_node(node, {"data": {"payload": edited}}, base)

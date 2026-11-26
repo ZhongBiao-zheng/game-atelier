@@ -38,6 +38,7 @@ from character_workflow.lib.schemas import (
     CanvasDocument,
     CanvasGenerationDraft,
     CanvasInputConnection,
+    MJ_REFERENCE_ROLES,
     CanvasImageNode,
     CanvasMediaNodeData,
     CanvasMediaVersion,
@@ -313,10 +314,11 @@ def reproduce_frozen_version(project_id: str, version_id: str, position: CanvasP
             width, height = _rendered_size(getattr(content, "width", None), getattr(content, "height", None))
             y += height + _NODE_GAP
             column_width = max(column_width, width)
-            if row.role in {"reference", "source", "first_frame", "last_frame"}:
+            if row.role in {"reference", "source", "first_frame", "last_frame", *MJ_REFERENCE_ROLES}:
                 links.append(CanvasInputConnection(
                     id=f"connection-{secrets.token_hex(10)}", role="input", source_node_id=node.id,
                     target_node_id=config_id, slot=row.role if row.role.endswith("_frame") else None,
+                    mj_role=row.role if row.role in MJ_REFERENCE_ROLES else None,
                 ))
         node_type = {"image": CanvasImageNode, "video": CanvasVideoNode,
                      "audio": CanvasAudioNode, "text": CanvasTextNode}[frozen.mode]

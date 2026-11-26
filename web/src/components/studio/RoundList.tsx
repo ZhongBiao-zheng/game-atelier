@@ -97,6 +97,7 @@ export interface RoundConfig {
   videoQuality?: 'std' | 'pro';
   frameMode?: VideoFrameMode;
   generateAudio?: boolean;
+  videoSeed?: number;
   referenceVideos?: string[];
   referenceAudios?: string[];
 }

@@ -3175,3 +3175,23 @@ it('三种生成模式共享顶部会话与筛选，切换后保留查询条件'
     expect(screen.getByLabelText('筛选：视频')).toBeVisible();
   }
 });
+
+it('共享视频复刻后在设置显示零种子，并随实际提交发送', async () => {
+  const { setSharedStudioInput } = await import('./sharedStudioInput');
+  const fetchMock = mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
+  setSharedStudioInput({ kind: 'prompt', generation: {
+    schema_version: 1, source_kind: 'shared_canvas', mode: 'video', prompt: '固定种子的海浪',
+    model_id: 'doubao-seedance-2-0-260128', provider: 'tokendance',
+    params: { seed: 0, duration: 5 }, inputs: [],
+  }, inputs: [] });
+  renderStudio();
+  await waitFor(() => expect(readStudioDraft()?.promptText).toBe('固定种子的海浪'));
+  fireEvent.click(screen.getByRole('button', { name: '视频设置' }));
+  expect(screen.getByText('随机种子')).toBeInTheDocument();
+  expect(screen.getByText('0', { exact: true })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '视频设置' }));
+  fireEvent.click(screen.getByLabelText('生成'));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+  const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')!;
+  expect(JSON.parse(String(call[1]!.body)).params).toMatchObject({ seed: 0, duration: 5 });
+});

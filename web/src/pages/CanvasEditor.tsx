@@ -1429,10 +1429,13 @@ function CanvasEditorInner({
     externalRound.current = next;
   }, []);
 
-  const reloadDocumentFromServer = useCallback(async () => {
+  const reloadDocumentFromServer = useCallback(async (fromNotification = false) => {
     const remote = await localCanvasTransport.read(projectId);
     const before = latestDocument.current;
     const base = serverBaseDocument.current;
+    // SSE and the room socket can announce the same edit. A later GET can also finish first.
+    if (!editorMounted.current || projectIdRef.current !== projectId || remote.revision < serverRevision.current
+      || (fromNotification && base?.revision === remote.revision)) return;
     const hydrated = materializeEmptyTextContent(remote);
     const remoteDocument = normalizeCanvasGroups(hydrated.document);
     serverBaseDocument.current = remoteDocument;
@@ -1460,6 +1463,7 @@ function CanvasEditorInner({
         history.current = rebaseOwnerHistory(history.current,blockedHistory.current,before,base,remoteDocument);
       } else recordExternalRound(before, reloaded);
     }
+    latestDocument.current = reloaded;
     setDocument(reloaded);
     // 与首屏加载相同：补出来的空文本版本、合并留下的本地改动都还没落盘，要再保存一次。
     dirtyVersion.current = hydrated.versionIds.size || merge.keptLocal ? dirtyVersion.current + 1 : 0;
@@ -1496,7 +1500,7 @@ function CanvasEditorInner({
       return;
     }
     // 其余情况收下服务端文档：本页没落盘的改动按节点三方合并保留，不弹横幅让人做选择。
-    void reloadDocumentFromServer().catch(reloadError => setError(errorText(reloadError)));
+    void reloadDocumentFromServer(true).catch(reloadError => setError(errorText(reloadError)));
   };
 
   // 中文 / 日文输入法在候选未确认前一直处于 composition 状态，而自动保存的去抖只有 350ms，

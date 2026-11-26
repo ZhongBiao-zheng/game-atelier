@@ -79,6 +79,19 @@ describe('ComfyUI generation controls', () => {
     expect(providers[0].models[0].workflow_inputs).toEqual([]);
   });
 
+  it('retains matching controls after selecting a local model for a shared Studio recipe', async () => {
+    const provider = { ...key, models: [{ ...key.models[0], workflow_inputs: [input,
+      { ...input, id: 'steps', type: 'int' as const }, { ...input, id: 'enabled', type: 'boolean' as const },
+      { ...input, id: 'source', type: 'image' as const }] }] };
+    const patch = vi.fn();
+    const props = { providers: [provider], providerAlias: 'local', onSubmit: vi.fn(), onSizeParamsChange: patch,
+      sizeParams: { workflow_inputs: { seed: 0, steps: 18.5, enabled: false, source: 'asset', removed: 23 } } };
+    const { rerender } = render(<PromptInput {...props} model="comfyui-on-owner" />);
+    rerender(<PromptInput {...props} model={provider.models[0].id} />);
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.lastCall?.[0].workflow_inputs).toEqual({ seed: 0, enabled: false });
+  });
+
   it('keeps a disabled one-image toolbar button when the workflow seed is fixed', () => {
     const provider = { ...key, models: [{ ...key.models[0], workflow_inputs: [input] }] };
     render(<PromptInput providers={[provider]} providerAlias="local" model="comfyui-upscale"

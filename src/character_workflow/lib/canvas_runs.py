@@ -75,6 +75,7 @@ from character_workflow.lib.schemas import (
     CanvasResultCandidate,
     CanvasSize,
     CanvasSnapshotInput,
+    MJ_REFERENCE_ROLES,
     CANVAS_UPSCALE_LONG_EDGES,
     CanvasTextNode,
     CanvasTextNodeData,
@@ -785,7 +786,7 @@ def canvas_input_sources(
                         roles.setdefault(member_id, "group_member")
                 continue
             # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。
-            roles[edge.source_node_id] = "input_connection"
+            roles[edge.source_node_id] = edge.mj_role or "input_connection"
             if edge.annotated:
                 annotated_ids.add(edge.source_node_id)
         connected_ids = list(roles)
@@ -972,7 +973,8 @@ def _input_paths(
         target = (root / version.path).resolve()
         if not target.is_relative_to(root) or not target.is_file():
             raise ValueError("生成输入媒体不存在或不属于当前画布")
-        paths[version.kind].append(str(target))
+        role = item.source if item.source in MJ_REFERENCE_ROLES else version.kind
+        paths.setdefault(role, []).append(str(target))
     return paths
 
 
@@ -1012,7 +1014,7 @@ def _trim_group_images_to_limit(
 
     limit = (sum(item.type == "image" for item in model.workflow_inputs)
              if model.workflow_inputs is not None else max_reference_images(model.id))
-    images = [item for item in inputs if item.kind == "image"]
+    images = [item for item in inputs if item.kind == "image" and item.source not in MJ_REFERENCE_ROLES]
     if len(images) <= limit:
         return inputs
     droppable = [item for item in reversed(images) if item.source == "group_member"]
@@ -1037,9 +1039,14 @@ def _validate_input_capabilities(
     provider: str | None = None,
 ) -> None:
     counts = {
-        media_kind: sum(item.kind == media_kind for item in inputs)
+        media_kind: sum(item.kind == media_kind and item.source not in MJ_REFERENCE_ROLES for item in inputs)
         for media_kind in ("image", "video", "audio")
     }
+    if any(item.source in MJ_REFERENCE_ROLES for item in inputs):
+        from character_workflow.lib.callers.openai_image import image_family
+
+        if kind != JobKind.IMAGE or image_family(model.id) != "midjourney":
+            raise ValueError("当前模型不支持 Midjourney 参考，请更换模型或断开该参考连接")
     if kind == JobKind.TEXT:
         unsupported = [
             media_kind
@@ -1499,6 +1506,7 @@ def _commit_frozen_run(
             connections.append(CanvasInputConnection(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=item.node_id, target_node_id=result_id, slot=slot,
+                mj_role=item.source if item.source in MJ_REFERENCE_ROLES else None,
                 annotated=item.annotated,
                 annotation_delivery=next((
                     edge.annotation_delivery for edge in current.connections
@@ -1565,7 +1573,8 @@ def prepare_canvas_generation(
     selection_params = {**draft.params.model_dump(exclude_none=True), "n": requested_count}
     for modality, field in (("image", "reference_images"), ("video", "reference_videos"),
                             ("audio", "reference_audios")):
-        selection_params[field] = [item.version_id for item in pricing_inputs if item.kind == modality]
+        selection_params[field] = [item.version_id for item in pricing_inputs if item.kind == modality
+                                   and item.source not in MJ_REFERENCE_ROLES]
     route_order: list[str] = []
     key, model, kind = _resolve_key_and_model(
         draft, selection_params=selection_params, route_order=route_order, consume_route=consume_route,
@@ -1615,6 +1624,9 @@ def prepare_canvas_generation(
     final_prompt = "" if no_workflow_prompt else _render_final_prompt(document, draft, inputs)
     if resolve_media_paths:
         media_paths = _input_paths(project_id, document, inputs)
+        for role in MJ_REFERENCE_ROLES:
+            if role in media_paths:
+                setattr(job_params, role, media_paths[role])
         job_params.reference_images = media_paths["image"] or None
         job_params.reference_videos = media_paths["video"] or None
         job_params.reference_audios = media_paths["audio"] or None
@@ -1677,7 +1689,8 @@ def submit_canvas_run(
         )
         if borrow:
             borrow.attribute(prepared.key, prepared.model, prepared.job_params)
-        return commit_canvas_generation_under_lock(project_id, current, surface, prepared)
+        return commit_canvas_generation_under_lock(project_id, current, surface, prepared,
+                                                   job_id=borrow.job_id if borrow else None)
 
 
 def submit_reverse_prompt_run(
@@ -1811,7 +1824,7 @@ def submit_layer_decomposition_run(
 
         max_images = surface.data.max_images if supports_layer_max_images(model.id) else None
         timestamp = _now()
-        job_id = new_job_id()
+        job_id = (borrow.job_id if borrow else None) or new_job_id()
         run_id = f"run-{secrets.token_hex(12)}"
         candidate = CanvasResultCandidate(
             candidate_id=f"candidate-{secrets.token_hex(10)}",
@@ -2148,6 +2161,7 @@ def submit_image_edit_run(
                 result_draft=draft,
                 allow_surface_reuse=False,
                 transaction_kind="mask_edit",
+                job_id=borrow.job_id if borrow else None,
                 mask_version_id=version_id,
                 run_id=run_id,
                 additional_versions=additional_versions,

@@ -1682,6 +1682,10 @@ Auto 确认金额按最近一条用户消息之后已提交的生成估价累计
 
 画布内容版本支持可选的 `frozen_generation`，表示来源生成快照 v1，含模态、提示词、模型 ID、平台名称和品牌图标、公开参数、按顺序存放的参考输入、费用与耗时。参考输入通过当前项目中的版本 ID 引用媒体，文本可内联。节点的可选 `created_by` 和 `created_by_client` 分别记录显示名与协作客户端身份。
 
+ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保存可公开的标量值。提示词和文件输入沿用各自的快照字段，私有配置与本机路径不进入控件映射。目标机器可以在尚未安装该工作流时保留映射，执行时按选中模型的控件声明校验。
+
+复刻视频时，草稿保留 `params.seed`，0 是有效的固定种子。复刻 Midjourney 媒体时，风格、角色及全能参考的输入连线分别带有 `mj_role: "mj_sref" | "mj_cref" | "mj_oref"`，按原角色进入生成请求。普通垫图无需此字段。
+
 `POST /api/collab/remote/{peer_key}/projects/{project_id}/copy-to-local` 接收 `node_ids`、`target_project_id` 和可选的 `document_revision`，返回更新后的本地画布。相同前缀的 `send-to-studio` 接收 `version_id`，返回本地上传路径及快照。`POST /api/studio/jobs/{job_id}/shared-canvas` 接收 `peer_key`、`project_id` 与 `output_index`，将结果与参考媒体作为一笔操作写入房主画布。
 
 局域网和本机代理的项目端点均提供 `ws`、`uploads`、`image-edits`。本机房主使用项目的 owner WebSocket。房间通过 `hello_snapshot` 确认身份和初始版本，`presence_state` 更新成员与选区。`submit_op` 带 `op_id` 和 `base_revision`，服务端按会话确定作者。节点级增量按 `op_applied` 的基准版本应用，失配时重新读取完整文档。恢复操作通过 `undo_of` 引用本人已确认的操作。房主改权限即时通知，改口令或停止共享则关闭旧连接。
@@ -1690,10 +1694,18 @@ Auto 确认金额按最近一条用户消息之后已提交的生成估价累计
 
 插件清单 `contributes.nodes[].shared_fields` 可列出路径，例如 `["title", "shots.caption"]`。只复制命中的标量或标量数组。第三方插件在共享画布中只读。缺少匹配声明的投影带有 `shared_placeholder: true`，复制到本地后仍显示占位。
 
+官方分镜的 `plugin_payload_update` 同时传入编辑前的公开 `base_payload` 与修改后的载荷。房主按条目 ID 和改动字段合并，保留原有私有字段。同一列表的结构变更发生冲突时，房主通过 `op_rejected` 提示重新编辑。
+
+官方分镜的 `plugin_payload_update` 同时发送编辑前的公开 `base_payload` 与编辑后的 `patch.data.payload`。房主按条目和镜头的稳定 ID 合并发生变化的字段，保留本机原文与私有字段。直接改动含脱敏原文的字段、并发修改相同列表结构时返回 409。
+
 ### 共享画布生成
 
 访客在本机项目代理调用 `POST runs/local`。请求携带 `surface_node_id`、`expected_revision`、访客本机模型与供应商别名，以及可选提示词、参数和候选数量。访客服务先在房主端 `POST runs/reserve`，之后每 10 秒向 `runs/{run_id}/heartbeat` 续期。房主端 `commit` 接受 multipart 成片、冻结快照、输入素材和图层，按事务落盘。`fail` 记录失败，超过 90 秒未续期则标记中断。
 
+两条生成提交接口都要求 `request_id`（32 位小写十六进制）。同一次生成重试时沿用原始请求体及画布版本。并发提交或回执丢失后，服务返回已受理的同一任务；同一个标识换用不同生成参数返回 409。版本冲突后再次提交可更新预期版本，并沿用同一标识。用户确认发起下一次生成时分配新标识。
+
 启用借用后，同一代理通过 `GET borrowable-models` 获取房主开放的直连模型与价格。房主仅公布渠道的不透明标识、模型、品牌和公开能力。访客通过 `POST runs/borrowed` 提交选中的 `channel_id` 与模型。房主在受理和实际调度前核对共享权限、渠道与模型。普通节点、局部修改、扩图和图层拆分复用房主现有 Canvas Run。
 
 节点可选的 `collab_run` 存放任务编号、来源节点、执行渠道、发起人和状态。状态含 `pending`、`done`、`failed`、`interrupted`。用量按实际执行方记录。房主的画布任务记录 `JobParams.collab_guest_name` 和 `collab_guest_client`，访客本机执行的任务记录 `collab_source_canvas`。
+
+访客生成完成但回传未获确认时，本机把成功的候选原件和冻结参数保存至「未回传的生成结果」画布。多张候选按原顺序组成可展开的结果组，任务部分成功时保留其中已生成的图片。

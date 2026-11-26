@@ -384,6 +384,40 @@ def test_canvas_preserves_workflow_values_and_runs(host):
     assert graph[strength.node_id]["inputs"][strength.field] == 0.45
 
 
+def test_studio_snapshot_reproduces_declared_workflow_controls_at_caller(host):
+    from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
+    from character_workflow.lib.canvas_reproduce import reproduce_frozen_version
+    from character_workflow.lib.canvas_runs import run_canvas_job, submit_canvas_run
+    from character_workflow.lib.collab_sanitize import public_document
+    from character_workflow.lib.jobs import save_job
+    from character_workflow.lib.schemas import CanvasDocument, CanvasPoint
+    from character_workflow.lib.studio_jobs import add_job_output_to_canvas
+    from tests.test_generation_recipe import _studio_job
+
+    workflow = imported()
+    strength = next(item for item in workflow.inputs if item.type == "float")
+    seed = next(item for item in workflow.inputs if item.type == "seed")
+    values = {strength.id: 0.36, seed.id: 0}
+    job = _studio_job(host.png, {"workflow_inputs": {**values, "internal_path": "/private/recipe"}})
+    save_job(job.model_copy(update={"provider": "comfyui", "alias": "local", "model": workflow.id}))
+    pid = create_canvas_project("工作流快照").project_id
+    add_job_output_to_canvas(job.job_id, 0, pid)
+    public = CanvasDocument.model_validate(public_document(pid))
+    vid = public.nodes[0].data.current_version_id
+    assert public.content_versions[vid].frozen_generation.params["workflow_inputs"] == values
+
+    expanded = reproduce_frozen_version(pid, vid, CanvasPoint(x=500, y=0), "local", workflow.id, public.revision)
+    draft_node = expanded.nodes[-1]
+    shared = CanvasDocument.model_validate(public_document(pid))
+    assert shared.nodes[-1].data.generation_draft.params.workflow_inputs == values
+    run, _ = submit_canvas_run(pid, draft_node.id, expanded.revision)
+    assert run_canvas_job(run.job_id).status.value == "done"
+    graph = next(iter(host.prompts.values()))["prompt"]
+    for item in (strength, seed):
+        assert graph[item.node_id]["inputs"][item.field] == values[item.id]
+    assert read_canvas_document(pid).content_versions[vid].frozen_generation.params["workflow_inputs"] == values
+
+
 def test_canvas_without_prompt_ignores_previous_prompt(host):
     from character_workflow.lib.canvas_projects import create_canvas_project
     from character_workflow.lib.canvas_runs import submit_canvas_run

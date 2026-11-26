@@ -196,6 +196,7 @@ def test_local_submit_through_host_http_with_mock_text_caller(monkeypatch, host_
     write_keys_db(KeysDB(keys=[KeySpec(alias="local", provider="openai", created_at=NOW,
         access_key="test", models=[ModelSpec(id="test", name="文本", modality="text")])]))
     calls = []
+    reservations = []
     def fake_text(**kwargs):
         calls.append(kwargs["model"])
         return ["成品文本"]
@@ -203,21 +204,37 @@ def test_local_submit_through_host_http_with_mock_text_caller(monkeypatch, host_
     with TestClient(host) as owner, TestClient(guest) as member:
         def remote(request, peer, project_id, suffix, *, method="GET", **opts):
             if suffix == "document":
-                return {"document": public_document(pid), "name": "共享"}
+                return {"document": public_document(pid), "name": "共享", "mode": "edit"}
             if not host_acknowledges and suffix.endswith("/commit"):
                 from fastapi import HTTPException
                 raise HTTPException(403, "房主已关闭共享")
             res = owner.request(method, f"/collab/v1/projects/{pid}/{suffix}", headers=headers, **opts)
             assert res.status_code < 300, res.text
+            if suffix == "runs/reserve":
+                reservations.append(res.json()["collab_run_id"])
+                if host_acknowledges and len(reservations) == 1:
+                    from fastapi import HTTPException
+                    raise HTTPException(502, "模拟房主预留成功后回执丢失")
             return res.json()
         monkeypatch.setattr(routes, "remote_json", remote)
-        result = member.post(f"/api/collab/remote/host/projects/{pid}/runs/local", json={
-            "surface_node_id": "n", "expected_revision": 1, "alias": "local", "model": "test", "prompt": "一条描述",
-        })
-        assert result.status_code == 202, result.text
+        from concurrent.futures import ThreadPoolExecutor
+        url = f"/api/collab/remote/host/projects/{pid}/runs/local"
+        body = {"request_id": "a" * 32, "surface_node_id": "n", "expected_revision": 1,
+                "alias": "local", "model": "test", "prompt": "一条描述"}
+        if host_acknowledges:
+            assert member.post(url, json=body).status_code == 502
+        with ThreadPoolExecutor(2) as pool:
+            first, second = [pool.submit(member.post, url, json=body) for _ in range(2)]
+            result, duplicate = first.result(), second.result()
+        assert result.status_code == duplicate.status_code == 202, result.text
+        assert result.json()["collab_run_id"] == duplicate.json()["collab_run_id"]
+        assert member.post(url, json={**body, "model": "changed"}).status_code == 409
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline and not jobs.list_usage_archive():
             time.sleep(.03)
+        replay = member.post(url, json={**body, "expected_revision": read_canvas_document(pid).revision})
+        assert replay.status_code == 202 and replay.json()["node_id"] == result.json()["node_id"]
+        assert len(set(reservations)) == 1
     assert calls == ["test"] and len(jobs.list_usage_archive()) == 1
     doc = read_canvas_document(pid)
     result_node = next(n for n in doc.nodes if n.id == result.json()["node_id"])
@@ -258,6 +275,62 @@ def test_restart_interrupts_unclaimed_guests_and_recovers_completed_results(monk
     assert len([c for c in list_canvas_projects() if c.name.endswith("未回传的生成结果")]) == 1
     assert len(jobs.list_usage_archive()) == 2
     assert not [j for j in jobs.list_jobs() if j.canvas_project_id and j.canvas_project_id.startswith("canvas-collab-")]
+
+
+@pytest.mark.parametrize("fail_last", [False, True])
+def test_recovery_keeps_every_successful_image_candidate_with_original_bytes(monkeypatch, fail_last):
+    from character_workflow.lib import job_runner
+    from character_workflow.lib.canvas_projects import list_canvas_projects
+    from character_workflow.lib.canvas_runs import run_canvas_job
+    from character_workflow.lib.keys import KeysDB, KeySpec, ModelSpec, write_keys_db
+
+    pid = make_canvas("image")
+    req = runs.GuestRequest(surface_node_id="n", expected_revision=1, alias="local",
+                            model="gpt-image-1", prompt="恢复候选", requested_count=3)
+    write_keys_db(KeysDB(keys=[KeySpec(alias="local", provider="openai", created_at=NOW, access_key="test",
+        models=[ModelSpec(id=req.model, name="测试", modality="image")])]))
+    originals = []
+
+    def render(**kwargs):
+        if fail_last and len(originals) == 2:
+            raise RuntimeError("本地模拟失败")
+        path = kwargs["output_dir"] / "candidate.png"
+        originals.append(png((len(originals) * 70, 42, 1)))
+        path.write_bytes(originals[-1])
+        return [str(path)]
+
+    monkeypatch.setattr(job_runner, "dispatch", render)
+    local, kind = runs.stage_generation("run-" + "f" * 24, read_canvas_document(pid), "共享", req, lambda *_: b"")
+    done = run_canvas_job(runs.submit_staged(local, kind, req).job_id)
+    assert done.status == ("partial" if fail_last else "done")
+    if fail_last:
+        from character_workflow.lib import canvas_paste
+        from character_workflow.lib.schemas import CanvasTextNode
+
+        def interrupted(**kwargs):
+            raise OSError("模拟首次复制中断")
+
+        with monkeypatch.context() as transient:
+            transient.setattr(canvas_paste, "paste_from_document", interrupted)
+            with pytest.raises(OSError, match="中断"):
+                runs.preserve_stage(done)
+        target, = [c.project_id for c in list_canvas_projects() if c.name.endswith("未回传的生成结果")]
+        current = read_canvas_document(target)
+        current.nodes.append(CanvasTextNode(type="text", id="note", title="访客笔记", position={"x": 0, "y": 500}, data={}))
+        save_canvas_document(target, current, current.revision)
+    target = runs.preserve_stage(done)
+    runs.recover_staged_results()
+    runs.recover_staged_results()
+    assert [c.project_id for c in list_canvas_projects() if c.name.endswith("未回传的生成结果")] == [target]
+    recovered = read_canvas_document(target)
+    if fail_last:
+        assert any(node.id == "note" for node in recovered.nodes)
+    cover, = [node for node in recovered.nodes if node.type == "image" and node.data.result_stack]
+    members = {node.id: node for node in recovered.nodes}
+    ids = [cover.id, *cover.data.result_stack.member_node_ids]
+    saved = [resolve_canvas_media(target, members[key].data.current_version_id) for key in ids]
+    assert [path.read_bytes() for path, _ in saved] == originals
+    assert all(version.frozen_generation.prompt == req.prompt for _, version in saved)
 
 
 def test_collab_audio_output_sniffs_flac_and_opus():

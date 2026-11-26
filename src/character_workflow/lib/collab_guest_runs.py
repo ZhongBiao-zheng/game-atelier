@@ -332,7 +332,7 @@ def stage_generation(run_id, remote, project_name, request, read_media):
 def _populate_stage(local_id, folder, remote, project_name, request, read_media):
     from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
     from character_workflow.lib.canvas_paste import _strings
-    from character_workflow.lib.collab_sanitize import public_params
+    from character_workflow.lib.collab_sanitize import draft_public_params
     from character_workflow.lib.schemas import (
         CanvasGenerationDraft, CanvasMediaVersion, CanvasProject, JobParams,
     )
@@ -364,8 +364,9 @@ def _populate_stage(local_id, folder, remote, project_name, request, read_media)
                 node.data.generation_draft = CanvasGenerationDraft(
                     mode=mode, model=request.model, alias=request.alias, updated_at=stamp,
                     prompt=request.prompt if request.prompt is not None else (draft.prompt if draft else ""),
-                    params=JobParams(**public_params(request.params if request.params is not None
-                                                     else (draft.params.model_dump() if draft else {}))),
+                    params=JobParams(**draft_public_params(
+                        request.params if request.params is not None else (draft.params.model_dump() if draft else {}),
+                        request.alias, request.model)),
                 )
     version_ids = {v for node in nodes for v in _strings(node.data.model_dump(mode="json"))
                    if v in remote.content_versions}
@@ -429,7 +430,10 @@ def remove_stage(run_id, job_id=None):
 
 def preserve_stage(job) -> str:
     """Save an unacknowledged result as an ordinary local canvas, without rerunning the job."""
+    from collections import Counter
+
     from character_workflow.lib.atomic_io import atomic_write_text
+    from character_workflow.lib.collab_borrow import materialize_image_candidates
     from character_workflow.lib.canvas_paste import paste_from_document
     from character_workflow.lib.canvas_projects import (
         canvas_project_dir, create_canvas_project, read_canvas_document, read_canvas_project, resolve_canvas_media,
@@ -446,16 +450,25 @@ def preserve_stage(job) -> str:
             target = target_file.read_text().strip()
             if not re.fullmatch(r"canvas-[a-f0-9]{12}", target):
                 raise ValueError("恢复画布标识无效")
-            current = read_canvas_document(target)
-            if current.nodes:
-                return target
         else:
             name = read_canvas_project(stage).name
             suffix = " · 未回传的生成结果"
             target = create_canvas_project(name[:80 - len(suffix)] + suffix).project_id
             atomic_write_text(target_file, target)
-            current = read_canvas_document(target)
+        current = read_canvas_document(target)
         source = hydrate_document_provenance(stage, read_canvas_document(stage))
+        if job.canvas_run:
+            cover = next((node for node in source.nodes if node.id == job.canvas_run.result_node_id), None)
+            if cover and any(node.id == cover.id for node in current.nodes):
+                # Paste preserves node IDs, remaps version IDs and commits all media together.
+                expected = Counter(version.sha256 for version in source.content_versions.values()
+                                   if getattr(version.origin, "job_id", None) == job.job_id)
+                copied = Counter(version.sha256 for version in current.content_versions.values()
+                                 if version.frozen_generation)
+                if expected and expected <= copied:
+                    return target
+            if cover and cover.type == "image":
+                materialize_image_candidates(source, cover, job)
         paste_from_document(project_id=target, source=source, nodes=source.nodes,
             connections=source.connections, document_revision=current.revision,
             media_reader=lambda version: resolve_canvas_media(stage, version.version_id)[0].read_bytes())

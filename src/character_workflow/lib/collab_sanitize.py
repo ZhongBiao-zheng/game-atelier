@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
+from functools import cache
+
+from character_workflow.lib.comfyui_schema import WorkflowInput
 
 
 _PUBLIC_FIELDS = frozenset("""
@@ -17,15 +21,62 @@ _PUBLIC_FIELDS = frozenset("""
 _PRIVATE_VALUE = re.compile(r"(?:^|\s)(?:/[^\s]|[A-Za-z]:[\\/]|\\\\|~/)|(?:file|https?)://", re.I)
 
 
-def public_params(params: dict) -> dict:
+def frozen_params(params: dict) -> dict:
+    """Validate a portable snapshot, including on machines without its source workflow."""
     if not isinstance(params, dict):
         raise ValueError("生成参数必须是对象")
-    return {
+    result = {
         key: value for key, value in params.items()
         if key in _PUBLIC_FIELDS and isinstance(value, (str, int, float))
         and not (isinstance(value, float) and not math.isfinite(value))
         and not (isinstance(value, str) and _PRIVATE_VALUE.search(value))
     }
+    controls = params.get("workflow_inputs")
+    if isinstance(controls, dict):
+        values = {
+            key: value for key, value in controls.items()
+            if isinstance(key, str) and re.fullmatch(r"[\w-]{1,80}", key)
+            and not _PRIVATE_FIELD.search(key.replace("-", "_"))
+            and (value is None or isinstance(value, (str, int, float)))
+            and not (isinstance(value, float) and not math.isfinite(value))
+            and not (isinstance(value, str) and _SENSITIVE_TEXT.search(value))
+        }
+        if values:
+            result["workflow_inputs"] = values
+    return result
+
+
+def public_params(params: dict, workflow_inputs: Iterable[WorkflowInput] | None = None) -> dict:
+    """Project raw job/draft controls against the source model's public declarations."""
+    values = params.get("workflow_inputs")
+    controls = {}
+    if workflow_inputs and isinstance(values, dict):
+        from character_workflow.lib.comfyui_workflows import validate_value
+
+        for item in workflow_inputs:
+            if (item.id not in values or item.type in {"image", "mask", "prompt"}
+                    or any(_PRIVATE_FIELD.search(name.replace("-", "_"))
+                           for name in (item.id, item.field, item.label))):
+                continue
+            value = values[item.id]
+            try:
+                controls[item.id] = None if item.type == "seed" and value is None else validate_value(item, value)
+            except ValueError:
+                continue
+    return frozen_params({**params, "workflow_inputs": controls})
+
+
+def _workflow_inputs(alias: str, model_id: str):
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(alias)
+    model = next((item for item in key.models if item.id == model_id), None) if key else None
+    return model.workflow_inputs if model else None
+
+
+def draft_public_params(params: dict, alias: str | None, model_id: str, lookup=_workflow_inputs) -> dict:
+    declarations = lookup(alias, model_id) if alias and params.get("workflow_inputs") else None
+    return public_params(params, declarations)
 
 
 _NODE_FIELDS = frozenset("""
@@ -90,12 +141,14 @@ def _plugin_projection(data, records):
     return {}, True
 
 
-def _node_view(node, records=None):
+def _node_view(node, records=None, workflow_lookup=_workflow_inputs):
     row = node.model_dump(mode="json")
     data = {key: value for key, value in row["data"].items() if key in _NODE_DATA_FIELDS}
     if draft := row["data"].get("generation_draft"):
         data["generation_draft"] = {key: draft[key] for key in ("mode", "prompt", "input_policy", "model", "updated_at")}
-        data["generation_draft"]["params"] = public_params(draft["params"])
+        data["generation_draft"]["params"] = draft_public_params(
+            draft["params"], draft.get("alias"), draft["model"], workflow_lookup,
+        )
     if node.type == "plugin":
         data["payload"], placeholder = _plugin_projection(node.data, records if records is not None else {})
         if placeholder:
@@ -144,6 +197,59 @@ def _public_values(value):
     return value
 
 
+def _merge_storyboard_fields(original, before, after):
+    result = dict(original)
+    for key, value in after.items():
+        if key not in _STORYBOARD_FIELDS or (key in before and before[key] == value):
+            continue
+        raw = original.get(key)
+        if raw != _public_values(raw):
+            raise ValueError("这个字段含房主的私有内容，请房主编辑")
+        result[key] = value
+    return result
+
+
+def _storyboard_rows(rows):
+    if (not isinstance(rows, list) or any(not isinstance(row, dict)
+            or not isinstance(row.get("id"), str) for row in rows)):
+        raise ValueError("分镜条目格式无效")
+    by_id = {row["id"]: row for row in rows}
+    if len(by_id) != len(rows):
+        raise ValueError("分镜条目标识重复")
+    return by_id
+
+
+def merge_storyboard_edit(original, before, after):
+    """Apply only the guest's edits to the host payload, matching shots and entities by ID."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        raise ValueError("请刷新分镜后再编辑")
+    if not isinstance(original, dict):
+        original = {}
+    result = _merge_storyboard_fields(original, before, {
+        key: value for key, value in after.items() if key not in {"entities", "shots"}
+    })
+    for key in ("entities", "shots"):
+        if after.get(key) == before.get(key):
+            continue
+        current = _storyboard_rows(original.get(key, []))
+        base = _storyboard_rows(before.get(key, []))
+        edited = _storyboard_rows(after.get(key, []))
+        # A reorder/add/delete may race another structural edit. Keep both authors' data
+        # on disk and ask the later editor to reapply against the new order.
+        reordered = list(base) != list(edited)
+        if reordered and list(current) != list(base):
+            raise ValueError("分镜条目已变化，请刷新后再编辑")
+        order = edited if reordered else current
+        for row_id, row in edited.items():
+            if row == base.get(row_id):
+                continue
+            if row_id in base and row_id not in current:
+                raise ValueError("分镜条目已删除，请刷新后再编辑")
+            current[row_id] = _merge_storyboard_fields(current.get(row_id, {}), base.get(row_id, {}), row)
+        result[key] = [current[row_id] for row_id in order]
+    return result
+
+
 def public_document(project_id: str) -> dict:
     from character_workflow.lib.canvas_projects import read_canvas_document
     from character_workflow.lib.collab_provenance import hydrate_document_provenance
@@ -151,11 +257,12 @@ def public_document(project_id: str) -> dict:
     if any(public_text(key) != key for key in document.content_versions):
         raise ValueError("内容版本编号无效")
     records = {}
+    workflow_lookup = cache(_workflow_inputs)
     return {
         "schema_version": document.schema_version, "project_id": document.project_id,
         "revision": document.revision, "updated_at": document.updated_at,
         "viewport": document.viewport.model_dump(), "settings": document.settings.model_dump(),
-        "nodes": [_public_values(_node_view(node, records)) for node in document.nodes],
+        "nodes": [_public_values(_node_view(node, records, workflow_lookup)) for node in document.nodes],
         "connections": [_public_values(row.model_dump()) for row in document.connections],
         "content_versions": {key: _public_values(_version_view(version)) for key, version in document.content_versions.items()},
     }

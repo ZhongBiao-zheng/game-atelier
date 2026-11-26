@@ -157,6 +157,9 @@ def dispatch_video(
     adapter = VIDEO_ADAPTERS.get(protocol)
     if adapter is None:
         raise WrongProviderError(f"未知视频协议 {protocol!r}（模型 {model!r}）")
+    seed = (params or {}).get("seed")
+    if seed is not None and int(seed) >= 0 and protocol not in {"seedance", "dashscope", "openrouter"}:
+        raise ValueError("当前视频接口不支持固定种子，请清除种子或更换模型")
     return adapter.render(
         prompt=prompt, model=model, alias=alias,
         output_dir=output_dir, params=params, **kwargs,

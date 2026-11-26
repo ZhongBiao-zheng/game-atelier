@@ -26,6 +26,7 @@ from character_workflow.lib.jobs import read_job
 from character_workflow.lib.local_paths import DataRootFileMissing, data_root_file
 from character_workflow.lib.schemas import (
     JOB_PARAM_PATH_FIELDS,
+    MJ_REFERENCE_ROLES,
     MEDIA_SUFFIXES,
     CanvasDocument,
     CanvasGenerationSnapshot,
@@ -306,7 +307,8 @@ def recipe_from_canvas_result(
     media = _canvas_media(canvas_project_id, version_id)
     media_mime(media)
     refs: list[tuple[RecipeInputRole, Path]] = [
-        ("reference", _canvas_media(canvas_project_id, row.version_id))
+        (row.source if row.source in MJ_REFERENCE_ROLES else "reference",
+         _canvas_media(canvas_project_id, row.version_id))
         for row in snapshot.inputs if row.kind != "text"
     ]
     if snapshot.mask_version_id is not None:

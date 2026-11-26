@@ -57,7 +57,7 @@ ALLOWED_PARAMS_BY_KIND = {
     "image": _IMAGE_PARAMS,
     "image_edit": _IMAGE_PARAMS | {"image_edit"},
     "layer_split": _IMAGE_PARAMS | {"layer_decomposition"},
-    "video": frozenset({"duration", "resolution", "ratio", "mode", "frame_mode",
+    "video": frozenset({"seed", "duration", "resolution", "ratio", "mode", "frame_mode",
                         "generate_audio", "watermark"}),
     "audio": frozenset({"voice", "speed", "response_format", "instructions", "lyrics", "instrumental"}),
 }

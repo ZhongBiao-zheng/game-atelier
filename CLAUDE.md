@@ -49,6 +49,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | 文件 | 谁写 | 谁读 |
 |---|---|---|
 | `.runtime/jobs/<job_id>.json` | Job Runner / Web 提交 | Canvas / Studio |
+| `.runtime/collab-submissions/<摘要>.json` | 共享生成提交接口在请求锁内记录受理状态与回执 | 访客自有、借用房主两条渠道在同一次提交重试时找回原任务 |
 | `canvases/<project_id>/` | Web / Canvas MCP | 项目画布、规范与经验 |
 | `.config/http-protocols/<id>.json` | Web (`/api/http-protocols`) | 自定义接口执行器（`callers/declarative.py`，ADR-0036） |
 | `.runtime/trash/<trash_id>/`（`items/` + `manifest.json`） | 各功能删除时经 `lib/trash.py` 移入（锁 `.runtime/locks/trash.lock`）；启动时清理超过 30 天的条目 | 控制台「回收站」（`/api/trash*`）还原 / 彻底删除 |

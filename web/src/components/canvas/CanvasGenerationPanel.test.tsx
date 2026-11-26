@@ -1,4 +1,5 @@
 import type { CanvasContentVersion } from '@/schema/canvas';
+import type { KeyView, WorkflowInput } from '@/api/keys';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState } from 'react';
@@ -367,6 +368,29 @@ it('defaults a blank image config to AUTO on first model selection without a dow
   expect(updateNode.mock.calls[0]?.[1](blank)).toMatchObject({
     data: { generation_draft: { params: { size_mode: 'auto', size: 'auto' } } },
   });
+});
+
+it('keeps compatible controls when a copied workflow needs a local model', () => {
+  const strength: WorkflowInput = { id: 'strength', type: 'float', field: 'denoise', label: '降噪',
+    node_id: '3', class_type: 'KSampler', min: 0, max: 1, default: 0.5, options: [], required: true };
+  const local: KeyView = {
+    alias: 'local', provider: 'comfyui', base_url: null, access_key: '', secret_key: null, notes: '',
+    capabilities: [], created_at: '', models: [{ id: 'comfyui-local', name: '本机工作流', modality: 'image',
+      workflow_inputs: [strength, { ...strength, id: 'steps', type: 'int', max: 30 },
+        { ...strength, id: 'mode', type: 'select', options: [{ value: 'fast', label: '快速' }] }] }],
+  };
+  const restored = { ...node, data: { ...node.data, generation_draft: { ...draft,
+    params: { workflow_inputs: { strength: 0.36, steps: 31, mode: 'retired', extra: 123 } },
+  } } } as CanvasNode;
+  const updateNode = vi.fn();
+  render(<CanvasNodeContext.Provider value={nodeContext({ keys: [local], updateNode })}>
+    <NodeCard data={{ domain: restored }} selected />
+  </CanvasNodeContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  fireEvent.click(screen.getByRole('option', { name: '本机工作流' }));
+  const changed = updateNode.mock.calls[0][1](restored).data.generation_draft;
+  expect(changed.model).toBe('comfyui-local');
+  expect(changed.params.workflow_inputs).toEqual({ strength: 0.36 });
 });
 
 it('shows a finished multi-image run as a collapsed result stack on the cover', () => {

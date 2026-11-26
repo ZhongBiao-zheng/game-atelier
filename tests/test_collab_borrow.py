@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,12 +34,33 @@ def test_borrowed_run_is_bound_to_current_policy_and_direct_model(monkeypatch, c
         assert models.status_code == 200, models.text
         assert all(value not in models.text for value in ("192.168.", "test-private-value", "gateway-only-model", "access_key"))
         choice = next(model for model in models.json()["models"] if model["model"] == "gpt-image-1")
-        request = {"expected_revision":document.revision, "surface_node_id":"config",
+        request = {"request_id": "a" * 32, "expected_revision":document.revision, "surface_node_id":"config",
                    "model":choice["model"], "channel_id":choice["channel_id"], "prompt":"下一张"}
-        response = client.post(root + "/runs/borrowed", headers=headers, json=request)
+        def submit():
+            return client.post(root + "/runs/borrowed", headers=headers, json=request)
+        if change == "gateway":
+            # Job and canvas were committed when writing the HTTP receipt failed. Reuse that job.
+            from viewer_server.collab_submissions import Submission
+            save = Submission.save
+            def fail_before_receipt(entry, **state):
+                if "receipt" in state:
+                    raise OSError("模拟回执未落盘")
+                return save(entry, **state)
+            with monkeypatch.context() as interrupted:
+                interrupted.setattr(Submission, "save", fail_before_receipt)
+                with pytest.raises(OSError, match="回执未落盘"):
+                    submit()
+            assert jobs == []
+        with ThreadPoolExecutor(2) as pool:
+            first, second = [pool.submit(submit) for _ in range(2)]
+            response, duplicate = first.result(), second.result()
         assert response.status_code == 202, response.text
-        duplicate = client.post(root + "/runs/borrowed", headers=headers, json=request)
-        assert duplicate.status_code == 409
+        assert duplicate.status_code == 202 and duplicate.json() == response.json()
+        refreshed = client.post(root + "/runs/borrowed", headers=headers,
+                                json={**request, "expected_revision": read_canvas_document(pid).revision})
+        assert refreshed.json() == response.json()
+        changed = client.post(root + "/runs/borrowed", headers=headers, json={**request, "prompt": "另一条提示"})
+        assert changed.status_code == 409
         assert len(jobs) == 1
         submitted = read_job(jobs[0])
         assert submitted.params.collab_guest_name == "访客"
@@ -216,7 +239,7 @@ def test_shared_operation_rejected_before_guest_reservation_or_host_job(monkeypa
                                         document.revision)
     collab_config.enable_share(pid, collab_config.ShareSettings(allow_borrow_provider=True))
     token = authenticate(pid, "", "访客")["collab_token"]
-    submitted = {"surface_node_id": target, "expected_revision": document.revision, "model": model.id}
+    submitted = {"request_id": "b" * 32, "surface_node_id": target, "expected_revision": document.revision, "model": model.id}
     with TestClient(create_collab_app(), base_url="http://127.0.0.1",
                     client=("127.0.0.1", 50001)) as owner:
         borrowed = owner.post(f"/collab/v1/projects/{pid}/runs/borrowed",

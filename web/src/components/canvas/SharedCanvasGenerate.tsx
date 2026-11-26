@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { listKeys, modelModality } from '@/api/keys';
 import { remoteProjectPath } from '@/api/collab';
-import { requestJson } from '@/api/http';
+import { ApiError, requestJson } from '@/api/http';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -22,6 +22,23 @@ interface Choice {
   cost_unit?: string; unit_cost_cny?: number | null;
   supported_operations?: ('inpaint' | 'outpaint' | 'layer_decomposition')[];
   input_cny_per_m?: number | null; output_cny_per_m?: number | null;
+}
+
+type Source = 'local' | 'borrowed';
+
+interface SubmissionAttempt {
+  source: Source;
+  body: {
+    request_id: string; expected_revision: number; surface_node_id: string;
+    model: string; prompt: string; requested_count: number; params: Record<string, unknown>;
+    channel_id?: string; alias?: string;
+  };
+  refreshRevision?: boolean;
+}
+
+function pendingAttempt(key: string): SubmissionAttempt | null {
+  const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null');
+  return saved?.body ? saved : null;
 }
 
 function priceLabel(model: Choice) {
@@ -46,7 +63,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
     : node.type === 'layer_stack' ? 'layer_decomposition' : null;
   const [mine, setMine] = useState<Choice[]>([]);
   const [host, setHost] = useState<Choice[]>([]);
-  const [source, setSource] = useState<'local' | 'borrowed'>('local');
+  const [source, setSource] = useState<Source>('local');
   const [chosen, setChosen] = useState('');
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
@@ -55,6 +72,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const [prompt, setPrompt] = useState('');
   const [count, setCount] = useState(1);
   const base = remoteProjectPath(peerKey, projectId);
+  const storageKey = 'shared-generation:' + JSON.stringify([peerKey, projectId, node.id]);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -79,46 +97,65 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       const failure = [mineResult, hostResult].find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') setError(errorText(failure.reason));
       setMine(local); setHost(remote);
-      setSource(!local.length && remote.length ? 'borrowed' : 'local');
-      setChosen('');
+      const saved = pendingAttempt(storageKey);
+      setSource(saved?.source ?? (!local.length && remote.length ? 'borrowed' : 'local'));
+      setChosen(saved ? JSON.stringify([saved.body.channel_id ?? saved.body.alias, saved.body.model]) : '');
     }).catch(reason => { if (active) setError(errorText(reason)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [open, base, mode, allowBorrow, operation]);
+  }, [open, base, mode, allowBorrow, operation, storageKey]);
   if (!['image','video','text','audio','image_edit','layer_stack'].includes(node.type)) return null;
-  const choices = source === 'borrowed' && allowBorrow ? host : mine;
+  const choices = source === 'borrowed' ? host : mine;
   const value = (model: Choice) => JSON.stringify([model.channel_id, model.model]);
   const original = draft?.model || frozen?.model_id || (node.type === 'layer_stack' ? node.data.model : null);
-  const choice = choices.find(item => value(item) === chosen) ?? choices.find(item => item.model === original)
-    ?? (!original ? choices[0] : undefined);
+  const choice = chosen ? choices.find(item => value(item) === chosen)
+    : choices.find(item => item.model === original) ?? (!original ? choices[0] : undefined);
   async function submit() {
     if (!choice || submitting.current) return;
     submitting.current = true;
     setPending(true); setError('');
+    let attempt: SubmissionAttempt | null = null;
     try {
-      const params = {...(frozen?.params ?? {}), ...(draft?.params ?? {})};
-      const body = {
-        expected_revision: revision, surface_node_id: node.id, model: choice.model,
-        requested_count: count, prompt, params,
+      const previous = pendingAttempt(storageKey);
+      const originalBody = previous?.body;
+      // Only the form controls express a new intent. Live results can change every other default.
+      const retry = previous?.source === source && originalBody?.model === choice.model
+        && (originalBody.channel_id ?? originalBody.alias) === choice.channel_id
+        && originalBody.prompt === prompt && originalBody.requested_count === count;
+      const body = retry ? {...originalBody, expected_revision: previous.refreshRevision ? revision : originalBody.expected_revision} : {
+        request_id: crypto.randomUUID().replaceAll('-', ''), expected_revision: revision,
+        surface_node_id: node.id, model: choice.model, requested_count: count, prompt,
+        params: {...(frozen?.params ?? {}), ...(draft?.params ?? {})},
         ...(source === 'borrowed' ? {channel_id: choice.channel_id} : {alias: choice.channel_id}),
       };
+      attempt = {source, body};
+      sessionStorage.setItem(storageKey, JSON.stringify(attempt));
+      setChosen(value(choice));
       await requestJson(base + '/runs/' + source, '提交共享生成', {
         method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body),
       });
+      sessionStorage.removeItem(storageKey);
       setOpen(false);
-    } catch (reason) { setError(errorText(reason)); }
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409 && attempt) {
+        // The next click can accept a newer revision while keeping the same billing intent.
+        sessionStorage.setItem(storageKey, JSON.stringify({...attempt, refreshRevision: true}));
+      }
+      setError(errorText(reason));
+    }
     finally { setPending(false); submitting.current = false; }
   }
   return <>
     <Button size="sm" onClick={() => {
-      setPrompt(draft?.prompt || frozen?.prompt || (node.type === 'layer_stack' ? node.data.prompt : ''));
-      setCount(Math.max(1, Math.min(4, Number(draft?.params.n ?? frozen?.params.n) || 1)));
+      const saved = pendingAttempt(storageKey)?.body;
+      setPrompt(saved?.prompt ?? (draft?.prompt || frozen?.prompt || (node.type === 'layer_stack' ? node.data.prompt : '')));
+      setCount(saved?.requested_count ?? Math.max(1, Math.min(4, Number(draft?.params.n ?? frozen?.params.n) || 1)));
       setOpen(true);
     }}>生成…</Button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent aria-describedby={undefined}>
       <DialogHeader><DialogTitle>{node.type === 'layer_stack' ? '拆分图层' : node.type === 'image_edit' ? '图片编辑' : '生成'}</DialogTitle></DialogHeader>
-      {allowBorrow && <Tabs value={source} onValueChange={next => { setSource(next === 'borrowed' ? 'borrowed' : 'local'); setChosen(''); }}>
-        <TabsList><TabsTrigger value="local">我的供应商</TabsTrigger><TabsTrigger value="borrowed">房主供应商</TabsTrigger></TabsList>
+      {(allowBorrow || source === 'borrowed') && <Tabs value={source} onValueChange={next => { setSource(next === 'borrowed' ? 'borrowed' : 'local'); setChosen(''); }}>
+        <TabsList><TabsTrigger value="local">我的供应商</TabsTrigger><TabsTrigger value="borrowed" disabled={!allowBorrow}>房主供应商</TabsTrigger></TabsList>
       </Tabs>}
       <Select value={choice ? value(choice) : ''} onValueChange={setChosen} disabled={loading || pending}>
         <SelectTrigger aria-label="生成模型"><SelectValue placeholder={loading ? '读取模型中…' : '选择可用模型'} /></SelectTrigger>

@@ -89,7 +89,7 @@ import {
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import { CanvasPromptInput } from '@/components/canvas/CanvasPromptInput';
-import { workflowReferenceError } from '@/lib/workflowInputs';
+import { compatibleWorkflowValues, workflowReferenceError } from '@/lib/workflowInputs';
 import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
@@ -2786,7 +2786,7 @@ export function CanvasGenerationComposer({
                 ) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
-              if (draft.model !== chosenModel.id) delete next.workflow_inputs;
+              next.workflow_inputs = compatibleWorkflowValues(chosenModel.workflow_inputs, draft.params.workflow_inputs);
               const modeChanged = hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params);
               if (!modeChanged && imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
                 const normalized = normalizeImagePixelSize(next.size!, model.id, key.base_url);
@@ -2874,6 +2874,10 @@ export function CanvasGenerationComposer({
         )}
           {draft.mode === 'video' && videoCaps && (
           <VideoControls
+            seed={draft.params.seed}
+            onClearSeed={() => updateDraftWithHistory(current => ({
+              ...current, params: { ...current.params, seed: undefined },
+            }))}
             fit="fill"
             caps={videoCaps}
             mode={videoMode}

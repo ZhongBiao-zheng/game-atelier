@@ -17,7 +17,8 @@
 ## 新增生成参数必须验证从界面保存到真实 caller 的完整链路
 - 原因：创作台重新组装 JobParams，Canvas 另有 CANVAS_DRAFT_PARAM_FIELDS 白名单；单测 caller 无法发现中途丢参数。
 - 证据：2026-11-02 ComfyUI A 批补齐 workflow_inputs 两处传递，并用 Studio / Canvas 的真实 Job 验证落盘值。
-- 出现：1
+- 补充证据：2026-11-26 共享快照能显示视频种子与 MJ 参考，但复刻提交会丢失；ComfyUI 控件在冻结快照时即被过滤。回归需核对模拟供应商实际收到的参数和文件。
+- 出现：2
 
 ## 异常翻译只作用于所属业务边界
 - 原因：requests.ConnectionError 也是 OSError；全局捕获会把网络故障误报为磁盘故障并吞掉 traceback。

@@ -37,6 +37,7 @@ export interface StudioDraft {
   videoQuality: VideoQuality;
   videoCount: number;
   generateAudio: boolean;
+  videoSeed?: number;
 }
 
 let draft: StudioDraft | null = null;
@@ -61,6 +62,7 @@ export function clearStudioDraft(): void {
 
 /** 每段对话各自的未提交输入：切到别的对话再切回来，提示词和参考素材原样回来。同样只活在内存里。 */
 export interface StudioSessionInput {
+  videoSeed?: number;
   promptText: string;
   promptAssetSourceTitle: string | null;
   promptAssetId: string | null;

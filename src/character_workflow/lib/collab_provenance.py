@@ -11,7 +11,7 @@ from character_workflow.lib.canvas_projects import read_canvas_document
 from character_workflow.lib.collab_sanitize import public_params
 from character_workflow.lib.generation_recipe import _clean_canvas_prompt, _job_output, media_mime
 from character_workflow.lib.jobs import read_job
-from character_workflow.lib.keys import KeysDB, read_keys_db
+from character_workflow.lib.keys import KeysDB, ModelSpec, read_keys_db
 from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.provider_presets import PRESET_DOMAINS, PRESET_LABELS
 from character_workflow.lib.schemas import (
@@ -22,7 +22,7 @@ _ROLES = {"mask_image": "mask", "markup_image": "markup", "mj_sref": "mj_sref",
           "mj_cref": "mj_cref", "mj_oref": "mj_oref"}
 
 
-def _provider(job: Job, database: KeysDB) -> dict:
+def _source_model(job: Job, database: KeysDB) -> tuple[dict, ModelSpec | None]:
     from character_workflow.lib.provider_icons import brand_icon
 
     key = next((key for key in database.keys if key.alias == job.alias and
@@ -42,7 +42,7 @@ def _provider(job: Job, database: KeysDB) -> dict:
         "provider": provider, "provider_label": PRESET_LABELS.get(provider, provider),
         "provider_icon": brand_icon(key.icon) if key else None,
         "model_id": job.model, "model_name": model.name if model else None,
-    }
+    }, model
 
 
 def _canvas_inputs(job: Job, document: CanvasDocument) -> list[CanvasFrozenInput]:
@@ -57,7 +57,7 @@ def _canvas_inputs(job: Job, document: CanvasDocument) -> list[CanvasFrozenInput
 
     snapshot = job.canvas_run.snapshot
     for row in sorted(snapshot.inputs, key=lambda item: item.order):
-        role = row.source if row.source in {"first_frame", "last_frame"} else (
+        role = row.source if row.source in {"first_frame", "last_frame", "mj_sref", "mj_cref", "mj_oref"} else (
             "source" if row.source in {"explicit_source", "implicit_self"} else "reference")
         add(row.version_id, role)
         if row.markup_version_id:
@@ -88,15 +88,16 @@ def build_frozen_from_job(
                                - datetime.fromisoformat(job.submitted_at)).total_seconds())
         except (ValueError, TypeError):
             pass
+    provider, model = _source_model(job, database or read_keys_db())
     return CanvasFrozenGeneration(
         source_kind=job.namespace, mode=snapshot.mode if snapshot else job.kind.value,
         prompt=(snapshot.draft_prompt if snapshot.draft_prompt is not None else _clean_canvas_prompt(snapshot))
         if snapshot else job.prompt,
-        params=public_params(params), inputs=inputs or [], duration_s=duration,
+        params=public_params(params, model.workflow_inputs if model else ()), inputs=inputs or [], duration_s=duration,
         cost_cny=job.params.actual_cost_cny if job.params.actual_cost_cny is not None
         else job.params.estimated_cost_cny,
         created_by=snapshot.submitted_by.actor_id if snapshot else None,
-        submitted_at=job.submitted_at, **_provider(job, database or read_keys_db()),
+        submitted_at=job.submitted_at, **provider,
     )
 
 

@@ -110,6 +110,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
       ? {
+          videoSeed: typeof p.seed === 'number' && p.seed >= 0 ? p.seed : undefined,
           duration: typeof p.duration === 'number' ? p.duration : undefined,
           videoResolution: typeof p.resolution === 'string' ? p.resolution : undefined,
           videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,

@@ -94,7 +94,7 @@ function SharedBody({ node, document, projectId, mediaUrl, editable, onPayloadCh
     updateNode: (id, update) => {
       if (!editable || id !== node.id) return;
       const next = update(node);
-      if (isStoryboardNode(next)) onPayloadChange(next.data.payload);
+      if (isStoryboardNode(next)) onPayloadChange(next.data.payload, normalizeStoryboardPayload(node.data.payload) as unknown as JsonValue);
     },
   };
   return <StoryboardNodeBody node={node} host={host} />;
