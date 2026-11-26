@@ -344,13 +344,6 @@ export async function uploadPromptPreviews(assetId: string, files: File[], repla
   return response.json() as Promise<CreationAsset>;
 }
 
-export function setPromptPreviewFromJob(assetId: string, jobId: string, outputIndex: number): Promise<CreationAsset> {
-  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/from-job`, '设为效果图', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ job_id: jobId, output_index: outputIndex }),
-  });
-}
-
 export function deletePromptPreview(assetId: string, file: string): Promise<CreationAsset> {
   return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/${encodeURIComponent(file)}`, '删除效果图', { method: 'DELETE' });
 }

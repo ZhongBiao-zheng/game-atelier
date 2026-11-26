@@ -431,8 +431,7 @@ def _preview_path(asset_id: str, file: str) -> Path:
     return path
 
 
-def _preview_image(body: bytes, mime_type: str, source_job_id: str | None,
-                   source_model: str | None) -> PromptPreviewImage:
+def _preview_image(body: bytes, mime_type: str) -> PromptPreviewImage:
     from PIL import Image
     if not body or len(body) > PROMPT_PREVIEW_MAX_BYTES:
         raise ValueError("效果图不能为空，且单张不能超过 20MB")
@@ -448,7 +447,7 @@ def _preview_image(body: bytes, mime_type: str, source_job_id: str | None,
     return PromptPreviewImage(
         file=hashlib.sha256(body).hexdigest()[:16] + MEDIA_SUFFIXES[mime_type],
         mime_type=mime_type, width=width, height=height,
-        source_job_id=source_job_id, source_model=source_model, added_at=_now(),
+        added_at=_now(),
     )
 
 
@@ -462,11 +461,10 @@ def _replace_previews(catalog: CreationAssetCatalog, asset: CreationAsset,
 
 
 def add_prompt_previews(asset_id: str, uploads: list[tuple[bytes, str]], *,
-                        replace_file: str | None = None, source_job_id: str | None = None,
-                        source_model: str | None = None) -> CreationAsset:
+                        replace_file: str | None = None) -> CreationAsset:
     if not uploads or len(uploads) > PROMPT_PREVIEW_LIMIT:
         raise ValueError("请选择 1–8 张效果图")
-    prepared = [(_preview_image(body, mime, source_job_id, source_model), body)
+    prepared = [(_preview_image(body, mime), body)
                 for body, mime in uploads]
     with file_lock(_catalog_lock_path()):
         catalog = _read_catalog_unlocked()
@@ -511,29 +509,6 @@ def add_prompt_previews(asset_id: str, uploads: list[tuple[bytes, str]], *,
             if preview.file not in retained:
                 _preview_path(asset_id, preview.file).unlink(missing_ok=True)
         return updated
-
-
-def add_prompt_preview_from_job(asset_id: str, job_id: str, output_index: int) -> CreationAsset:
-    from PIL import Image
-    from character_workflow.lib.jobs import read_job
-    job = read_job(job_id)
-    if job.kind != "image" or not 0 <= output_index < len(job.output_paths):
-        raise ValueError("这条记录没有可用的图片结果")
-    output = job.output_paths[output_index]
-    if output.startswith(("http://", "https://")):
-        raise ValueError("效果图需要本机图片结果")
-    path = Path(output)
-    path = (path if path.is_absolute() else data_root.resolve_data_root() / path).resolve()
-    # 唯一来源是服务端 Job.output_paths；不接受浏览器传本机路径。
-    with path.open("rb") as source:
-        body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
-    try:
-        with Image.open(BytesIO(body)) as opened:
-            mime = _PREVIEW_FORMATS.get(opened.format or "", "")
-    except (OSError, Image.DecompressionBombError) as error:
-        raise ValueError("这张结果不是有效图片") from error
-    return add_prompt_previews(asset_id, [(body, mime)], source_job_id=job.job_id,
-                               source_model=job.model)
 
 
 def delete_prompt_preview(asset_id: str, file: str) -> CreationAsset:
@@ -585,7 +560,7 @@ def prompt_preview_bytes(asset_id: str, file: str, width: int | None = None) -> 
 
 
 def validate_prompt_preview(preview: PromptPreviewImage, body: bytes) -> None:
-    checked = _preview_image(body, preview.mime_type, preview.source_job_id, preview.source_model)
+    checked = _preview_image(body, preview.mime_type)
     if (checked.file, checked.width, checked.height) != (preview.file, preview.width, preview.height):
         raise ValueError("效果图内容与记录不一致，可能还没同步完")
 
@@ -1344,7 +1319,6 @@ def insert_creation_asset_into_canvas(
         origin = CanvasCreationAssetSnapshotOrigin(
             kind="creation_asset_snapshot",
             title=asset.title,
-            asset_id=asset.asset_id,
         )
         write_target: Path | None = None
         if content.kind == "prompt":

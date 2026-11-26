@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -7,7 +8,6 @@ from PIL import Image
 from character_workflow.lib import creation_assets as assets
 from character_workflow.lib.schemas import CreationPromptAssetContent, JobParams
 from tests.local_client import LocalTestClient
-from tests.test_generation_recipe import _studio_job
 from viewer_server.server_app import build_app
 
 
@@ -31,7 +31,7 @@ def test_empty_metadata_is_omitted_and_old_content_reads():
     content = {'kind': 'prompt', 'segments': [{'kind': 'text', 'text': '角色'}]}
     assert CreationPromptAssetContent.model_validate(content).model_dump() == content
     assert 'prompt_asset_id' not in JobParams().model_dump()
-    assert JobParams(prompt_asset_id='deleted-asset').model_dump()['prompt_asset_id'] == 'deleted-asset'
+    assert 'prompt_asset_id' not in JobParams.model_validate({'prompt_asset_id': 'old-preview-target'}).model_dump()
 
 
 def test_upload_deduplicates_and_keeps_previews_when_prompt_is_edited(prompt, isolated_data_root):
@@ -118,15 +118,23 @@ def test_routes_upload_read_cache_order_and_delete(prompt, client):
     assert client.get(f'{base}/{file}/thumb').status_code == 404
 
 
-def test_from_job_uses_only_registered_output_and_records_source(prompt, client):
-    job = _studio_job(png(), {})
-    base = f'/api/creation-assets/{prompt.asset_id}/previews/from-job'
-    assert client.post(base, json={'job_id': job.job_id, 'output_index': 99}).status_code == 422
-    response = client.post(base, json={'job_id': job.job_id, 'output_index': 0})
-    assert response.status_code == 200, response.text
-    preview, = response.json()['content']['preview_images']
-    assert preview['source_job_id'] == job.job_id and preview['source_model'] == job.model
-    assert client.post(base, json={'job_id': 'missing', 'output_index': 0}).status_code == 404
+def test_existing_result_preview_remains_readable_and_editable_without_the_job_action(prompt, client):
+    base = f'/api/creation-assets/{prompt.asset_id}/previews'
+    saved = assets.add_prompt_previews(prompt.asset_id, [(png(), 'image/png')])
+    original, = saved.content.preview_images
+    catalog_file = assets._catalog_path()
+    historical = json.loads(catalog_file.read_bytes())
+    record, = historical['assets'][0]['content']['preview_images']
+    record.update(source_job_id='old-job', source_model='gpt-image-2')
+    catalog_file.write_text(json.dumps(historical), encoding='utf-8')
+
+    assert not any(route.path.endswith('/previews/from-job') for route in client.app.routes)
+    assert client.get(f'{base}/{original.file}').content == png()
+    uploaded = client.post(base, files={'files': ('new.png', png(2), 'image/png')})
+    assert uploaded.status_code == 200
+    previous, new = uploaded.json()['content']['preview_images']
+    assert previous['source_job_id'] == 'old-job' and previous['source_model'] == 'gpt-image-2'
+    assert new['source_job_id'] is None and new['source_model'] is None
 
 
 def test_preview_path_cannot_escape_or_follow_symlink(prompt, tmp_path):

@@ -2970,11 +2970,6 @@ async def put_creation_media_asset(
         _raise_creation_asset_error(error)
 
 
-class PromptPreviewFromJob(BaseModel):
-    job_id: str = Field(min_length=1)
-    output_index: int = Field(ge=0)
-
-
 class PromptPreviewOrder(BaseModel):
     files: list[str] = Field(max_length=8)
 
@@ -2995,15 +2990,6 @@ async def post_prompt_previews(asset_id: str, files: list[UploadFile] = File(...
                 raise ValueError("单张效果图不能超过 20MB")
             uploads.append((body, file.content_type or ""))
         return await asyncio.to_thread(add_prompt_previews, asset_id, uploads, replace_file=replace_file)
-    except (KeyError, FileNotFoundError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post("/creation-assets/{asset_id}/previews/from-job", response_model=CreationAsset)
-def post_prompt_preview_from_job(asset_id: str, payload: PromptPreviewFromJob):
-    from character_workflow.lib.creation_assets import add_prompt_preview_from_job
-    try:
-        return add_prompt_preview_from_job(asset_id, payload.job_id, payload.output_index)
     except (KeyError, FileNotFoundError, ValueError) as error:
         _raise_creation_asset_error(error)
 

@@ -194,7 +194,6 @@ POST /api/creation-assets/{asset_id}/use
 POST /api/creation-assets/{asset_id}/archive
 POST /api/creation-assets/{asset_id}/restore
 POST /api/creation-assets/{asset_id}/previews
-POST /api/creation-assets/{asset_id}/previews/from-job
 PUT /api/creation-assets/{asset_id}/previews/order
 DELETE /api/creation-assets/{asset_id}/previews/{file}
 GET /api/creation-assets/{asset_id}/previews/{file}

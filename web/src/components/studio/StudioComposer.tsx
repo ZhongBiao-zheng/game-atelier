@@ -109,7 +109,7 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
     <CanvasAgentModelPicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
             disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
     <CanvasAgentPreferencePicker triggerClassName={triggerClassName} direction={menuDirection} label="出图模型" models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
-            preferred={settings.preferred_models ?? []} disabled={busy} onChange={agent.updateSettings} />
+            preferred={settings.preferred_models ?? []} disabled={busy || agent.loading} onChange={agent.updateSettings} />
     <CanvasAgentSkillPicker triggerClassName={triggerClassName} direction={menuDirection} label={skill ?? '技能'} skills={agent.skills} selected={skill}
             onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
   </> : <>
@@ -117,7 +117,7 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
             disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
     <CanvasAgentModeMenu triggerClassName={triggerClassName} direction={menuDirection} mode={creation} disabled={busy} onSelect={creation_mode => void agent.updateSettings({ creation_mode })} />
     <CanvasAgentPreferencePicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
-            preferred={settings.preferred_models ?? []} disabled={busy} onChange={agent.updateSettings} />
+            preferred={settings.preferred_models ?? []} disabled={busy || agent.loading} onChange={agent.updateSettings} />
     <CanvasAgentPermissionMenu triggerClassName={triggerClassName} direction={menuDirection} showLabel auto={(settings.permission_mode ?? 'auto') === 'auto'} disabled={busy}
             confirmAbove={agent.confirmAbove} onModeChange={permission_mode => void agent.updateSettings({ permission_mode })}
             onConfirmAboveChange={agent.updateConfirmAbove} />
@@ -147,6 +147,7 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
         <ErrorIcon size="sm" className="shrink-0 text-primary" />
         <span className="min-w-0 flex-1 break-words">{notice.text}</span>
         <Button variant="link" size="sm" type="button"
+          disabled={notice.action === 'auto' && (busy || agent.loading)}
           onClick={() => notice.action === 'settings' ? onOpenProviders?.() : void agent.updateSettings({ auto_models: true })}
           className="h-auto shrink-0 p-0 text-xs text-primary"
         >{notice.action === 'settings' ? '去设置' : '改为自动'}</Button>

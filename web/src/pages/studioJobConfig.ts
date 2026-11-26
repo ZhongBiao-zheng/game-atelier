@@ -88,7 +88,6 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     } : {}),
     ...(p.background === 'transparent' ? { background: 'transparent' as const } : {}),
     referenceImages: referenceImagesFor(job),
-    promptAssetId: typeof p.prompt_asset_id === 'string' ? p.prompt_asset_id : undefined,
     sourceAssetTitle: typeof p.creation_asset_source_title === 'string'
       ? p.creation_asset_source_title
       : undefined,

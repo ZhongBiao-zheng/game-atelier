@@ -250,8 +250,7 @@ def apply_asset_changes(payload) -> dict:
             relative = f"uploads/creation-asset-{secrets.token_hex(12)}{MEDIA_SUFFIXES[media.mime_type]}"
             version = CanvasMediaVersion(
                 version_id=version_id, created_at=timestamp, sha256=media.sha256,
-                origin=CanvasCreationAssetSnapshotOrigin(kind="creation_asset_snapshot", title=asset.title,
-                                                         asset_id=asset.asset_id),
+                origin=CanvasCreationAssetSnapshotOrigin(kind="creation_asset_snapshot", title=asset.title),
                 kind=kind, path=relative, mime_type=media.mime_type, bytes=len(body), width=width, height=height,
             )
             versions[version_id] = version

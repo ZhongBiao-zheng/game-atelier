@@ -19,6 +19,7 @@ import {
   updateCanvasAgentSettings,
 } from '@/api/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
+import { ApiError } from '@/api/http';
 import { OUTGOING_MESSAGE_PREFIX } from './canvasAgentTimeline';
 import { DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
@@ -70,6 +71,13 @@ function rememberedCreation(): RememberedCreation {
       ...(Array.isArray(value?.preferred_models) ? { preferred_models: value.preferred_models } : {}),
     };
   } catch { return {}; }
+}
+
+// 首页和创作台切换会重挂输入框。新页面读取同一会话前，先等上一个页面发出的偏好修改落盘。
+const studioPreferenceWrites = new Map<string, Promise<StudioAgentSession>>();
+async function readWorkspaceSession(projectId: string | null, id: string) {
+  if (projectId === null) await studioPreferenceWrites.get(id)?.catch(() => undefined);
+  return getCanvasAgentSession(projectId, id);
 }
 
 interface OutgoingMessage {
@@ -147,7 +155,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [selecting, setSelecting] = useState(false);
   // 「加载中」与「为空」是两个状态：打开面板时先读上次停留的会话，读完之前不显示空对话。
   const [restoring, setRestoring] = useState(() => projectId === null
-    ? !home && Boolean(readStudioView().activeSessionId)
+    ? (!home || open) && Boolean(readStudioView().activeSessionId)
     : open);
   const [session, setSession] = useState<CanvasAgentSession | StudioAgentSession | null>(null);
   const [outgoing, setOutgoing] = useState<OutgoingMessage | null>(null);
@@ -171,6 +179,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   // 「当前会话」以这个 ref 为准，只由选择 / 新建会话改写：不能每次 render 从 state 同步，
   // 否则读取途中任何一次重渲染都会把它冲回 null，读到的会话被当成过期结果丢掉。
   const explicitDraft = useRef(false);
+  const homePreferenceSession = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   // 实际显示的会话：切会话失败时退回到它，目标与它不一致期间不发送、不审批。
   const shownSessionIdRef = useRef<string | null>(null);
@@ -196,7 +205,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   }, [projectId]);
 
   const loadSession = useCallback(async (sessionId: string) => {
-    const loaded = await getCanvasAgentSession(projectId, sessionId);
+    const loaded = await readWorkspaceSession(projectId, sessionId);
     if (sessionIdRef.current !== sessionId) return;  // 期间切到了别的会话
     acceptSession(loaded);
     if (loaded.status !== 'running') { setStreaming(''); setTool(null); }
@@ -240,14 +249,34 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    if (home) setRestoring(true);
     void (async () => {
       try {
         const list = await refreshList();
         if (cancelled || sessionIdRef.current || explicitDraft.current) return;
+        if (projectId === null) {
+          const pending = studioPreferenceWrites.get(readStudioView().activeSessionId ?? '');
+          if (pending) await pending.catch(() => undefined);
+          if (cancelled || sessionIdRef.current || explicitDraft.current) return;
+        }
         const last = projectId === null ? readStudioView().activeSessionId : readStorage(sessionStorageKey(projectId));
-        if (projectId === null && (home || last === null)) return;
+        if (projectId === null && last === null) {
+          homePreferenceSession.current = null;
+          setDraft(current => ({ ...current, ...rememberedCreation() }));
+          setRestoring(false);
+          return;
+        }
         const target = list.find(item => item.session_id === last) ?? list[0];
-        if (target) await selectSession(target.session_id);
+        if (home) {
+          // 首页发送仍然新建对话，只与创作台当前对话共用出图模型偏好。
+          if (target) {
+            const active = await readWorkspaceSession(null, target.session_id);
+            if (cancelled) return;
+            homePreferenceSession.current = target.session_id;
+            setDraft(current => ({ ...current, auto_models: active.auto_models, preferred_models: active.preferred_models }));
+          } else homePreferenceSession.current = null;
+          setRestoring(false);
+        } else if (target) await selectSession(target.session_id);
         else {
           if (projectId === null) updateStudioView({ activeSessionId: null });
           setRestoring(false);
@@ -414,9 +443,36 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       ...(update.auto_models !== undefined ? { auto_models: update.auto_models } : {}),
       ...(update.preferred_models ? { preferred_models: update.preferred_models } : {}),
     };
-    if (Object.keys(creation).length) {
-      writeStorage(CREATION_STORAGE_KEY, JSON.stringify({ ...rememberedCreation(), ...creation }));
-    }
+    const remember = (values: RememberedCreation) => {
+      if (Object.keys(values).length) writeStorage(CREATION_STORAGE_KEY, JSON.stringify({ ...rememberedCreation(), ...values }));
+    };
+    const changesModels = update.auto_models !== undefined || update.preferred_models !== undefined;
+    const preferenceTarget = projectId === null && changesModels
+      ? session?.session_id ?? (home ? homePreferenceSession.current : null) : null;
+    if (preferenceTarget) return run(async () => {
+      const request = updateCanvasAgentSession(null, preferenceTarget, update);
+      studioPreferenceWrites.set(preferenceTarget, request);
+      try {
+        const updated = await request;
+        const preferences = { auto_models: updated.auto_models, preferred_models: updated.preferred_models };
+        remember({ ...creation, ...preferences });
+        if (session) acceptSession(updated);
+        else setDraft(current => ({ ...current, ...preferences }));
+        return updated;
+      } catch (error) {
+        if (!home || !(error instanceof ApiError) || error.status !== 409 || error.code !== 'SESSION_BUSY') throw error;
+        // 旧对话运行中或待审批时，首页可独立开始新对话，保留另一对话正在执行的模型范围。
+        const preferences = { auto_models: draft.auto_models ?? true, preferred_models: draft.preferred_models ?? [], ...creation };
+        remember(preferences);
+        setDraft(current => ({ ...current, ...preferences }));
+        homePreferenceSession.current = null;
+        if (readStudioView().activeSessionId === preferenceTarget) updateStudioView({ activeSessionId: null });
+        return undefined;
+      } finally {
+        if (studioPreferenceWrites.get(preferenceTarget) === request) studioPreferenceWrites.delete(preferenceTarget);
+      }
+    });
+    remember(creation);
     if (!session) {
       setDraft(current => ({ ...current, ...update }));
       return Promise.resolve(undefined);
@@ -426,7 +482,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       acceptSession(updated);
       return updated;
     });
-  }, [acceptSession, projectId, run, session]);
+  }, [acceptSession, draft, home, projectId, run, session]);
 
   // 切会话期间显示的还是旧会话：这时发出去会发进旧会话，等新会话读到再发。
   // 目标会话与显示的会话不一致（读取中或读取失败尚未退回）时同样拦住发送与审批。

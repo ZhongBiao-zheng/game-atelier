@@ -2929,7 +2929,7 @@ it('停用供应商退出画布模型列表，刷新后仍不可选', async () =
   expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
 });
 
-it('retains the prompt asset default after editing an inserted text node', async () => {
+it('edits an inserted prompt text node without creating a generation draft', async () => {
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
     nodes: [textNode('prompt-source', '资产正文', 'prompt-version')],
     content_versions: { 'prompt-version': {
@@ -2946,9 +2946,7 @@ it('retains the prompt asset default after editing an inserted text node', async
   fireEvent.change(editor, { target: { value: '再次修改提示词' } });
   fireEvent.keyDown(editor, { key: 'Tab' });
   await waitFor(() => expect(savedText(lastSavedDocument())).toBe('再次修改提示词'));
-  expect(lastSavedDocument()?.nodes[0].data).toMatchObject({
-    generation_draft: { params: { prompt_asset_id: 'ca-prompt' } },
-  });
+  expect(lastSavedDocument()?.nodes[0].data).toMatchObject({ generation_draft: null });
 });
 
 it('lists a plugin node in the add menu only while the plugin is enabled', async () => {

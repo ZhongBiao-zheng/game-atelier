@@ -72,7 +72,6 @@ class Generation(BaseModel):
         allowed = CANVAS_DRAFT_PARAM_FIELDS[self.kind] - {
             "workflow_inputs",
             "creation_asset_source_title",
-            "prompt_asset_id",
             "n",
         }
         if self.params.keys() - allowed:

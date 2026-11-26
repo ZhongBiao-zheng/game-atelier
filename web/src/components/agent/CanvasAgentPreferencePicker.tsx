@@ -102,6 +102,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
               role="switch"
               aria-checked={auto}
               aria-label="自动选择模型"
+              disabled={disabled}
               onClick={() => onChange({ auto_models: !auto })}
               className={cn('relative h-5 w-9 rounded-full transition-colors', auto ? 'bg-primary' : 'bg-secondary')}
             >
@@ -141,8 +142,8 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
                       type="button"
                       role="option"
                       aria-selected={checked}
-                      aria-disabled={auto}
-                      disabled={auto}
+                      aria-disabled={auto || disabled}
+                      disabled={auto || disabled}
                       onClick={() => toggle(item)}
                       className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
                     >

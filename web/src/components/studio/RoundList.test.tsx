@@ -1000,14 +1000,3 @@ describe('history parameter buttons', () => {
     expect(specChips('round-spec-meta')).toHaveLength(1);
   });
 });
-
-it('sets the second image as a preview through its menu and retains the originating prompt', () => {
-  const onSetPromptPreview = vi.fn();
-  const round: RoundState = { kind: 'done', mode: 'image', jobId: 'job-preview', submittedAt: '',
-    imagePaths: ['/a.png', '/b.png'], config: { prompt: '白犬', model: 'gpt-image-2', kind: 'image', referenceImages: [], promptAssetId: 'prompt-dog' } };
-  render(<RoundList rounds={[round]} onSetPromptPreview={onSetPromptPreview} />);
-  fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
-  fireEvent.click(screen.getByRole('menuitem', { name: '设为效果图' }));
-  expect(onSetPromptPreview).toHaveBeenCalledWith({ jobId: 'job-preview', outputIndex: 1, promptAssetId: 'prompt-dog' });
-  expect(screen.queryByAltText('大图')).toBeNull();
-});

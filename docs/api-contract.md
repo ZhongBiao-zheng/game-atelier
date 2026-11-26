@@ -857,7 +857,6 @@ EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加
 | 方法 | 路径（均带 `/api` 前缀） | 契约 |
 |---|---|---|
 | POST | `/creation-assets/{id}/previews` | multipart `files`，可多选；可选 `replace_file` 原子更换一张，满 8 张也可更换 |
-| POST | `/creation-assets/{id}/previews/from-job` | `{job_id, output_index}`，只复制该图片 Job 登记的 `output_paths[index]`，记录 Job 与模型 |
 | PUT | `/creation-assets/{id}/previews/order` | `{files: [...]}`，必须恰好包含全部现有文件、无重复 |
 | DELETE | `/creation-assets/{id}/previews/{file}` | 删除元数据与文件 |
 | GET | `/creation-assets/{id}/previews/{file}` | 读取当前 catalog 登记的独立原图 |
@@ -867,10 +866,6 @@ EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加
 不存在返回 404，不合规返回 422；这些接口要求本机会话，写操作要求编辑权限。图片响应为
 `Cache-Control: private, max-age=31536000, immutable`，不扩展 `/api/raw` 白名单。
 提示词文字编辑保留效果图；文件夹团队库分享和采用均复制独立效果图文件，见下文团队库契约。
-
-`JobParams.prompt_asset_id` 是可选的效果图选择默认值，空值不序列化。Studio / Canvas 使用提示词资产
-后提交时带上，编辑正文仍保留；画布连接提示词文本节点时也从输入来源继承。资产被删除时默认项失效，
-用户可手动选另一条。它不授权读取资产、不回写正文，也不进入生成资产的冻结配方。
 
 生成资产 = 成片 + 自包含冻结快照：`content = {kind: "generation", media: CreationMediaAssetContent,
 snapshot: GenerationRecipe}`。`GenerationRecipe = {mode, model, provider, alias, final_prompt, draft_prompt,
@@ -889,7 +884,7 @@ Canvas 的“本项目”是 CreationAsset 上的项目关系过滤，不是项�
 `library/assets.json` 与 `library/prompts.json` 在首次读取时幂等迁移，旧 HTTP library 端点已删除。
 
 `POST .../creation-assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match`、目标坐标和可选变量值，
-把资产当前内容复制为新的 Canvas Content Version；内容 origin 保存当时的资产标题快照与用于效果图默认项的可选 `asset_id`，不保存可回写引用。Studio Job 的 `params.creation_asset_source_title` 同样只保存只读标题快照。
+把资产当前内容复制为新的 Canvas Content Version；内容 origin 保存当时的资产标题快照，不保存可回写引用。Studio Job 的 `params.creation_asset_source_title` 同样只保存只读标题快照。
 后续编辑或删除资产都不会改变既有节点、草稿或生成记录，也不存在更新引用 API。画布项目包只携带已复制
 内容和来源标题，不携带个人资产库。
 

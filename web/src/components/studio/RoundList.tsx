@@ -1,8 +1,7 @@
-import type { PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AddImageIcon, AudioIcon, BookmarkIcon, CanvasIcon, CheckIcon, CopyIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
+import { AudioIcon, BookmarkIcon, CanvasIcon, CheckIcon, CopyIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
 import type { JobErrorAction } from '@/lib/errorPresentation';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
 
@@ -79,7 +78,6 @@ export interface RoundConfig {
   referenceImages: string[];
   /** 使用创作资产时冻结的只读来源名称；不提供回跳或更新关系。 */
   sourceAssetTitle?: string;
-  promptAssetId?: string;
   /** MJ 专属参数（family=midjourney）——「编辑导入 / 再次生成」靠它还原画师当时的选择，
    *  否则会拿默认值静默重出一张不一样的图。 */
   mjParams?: MjParams;
@@ -330,7 +328,6 @@ export function RoundList({
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
-  onSetPromptPreview,
   canvasTargets,
   onAddToCanvas,
 }: {
@@ -365,7 +362,6 @@ export function RoundList({
   onSaveResultAsset?: SaveResultAssetHandler;
   /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
   onShareResult?: ShareResultHandler;
-  onSetPromptPreview?: (request: PromptPreviewRequest) => void;
   canvasTargets?: CanvasTarget[];
   onAddToCanvas?: (jobId: string, index: number, projectId: string) => void | Promise<void>;
 }) {
@@ -571,7 +567,6 @@ export function RoundList({
         onSavePromptAsset={onSavePromptAsset}
         onSaveResultAsset={onSaveResultAsset}
         onShareResult={onShareResult}
-        onSetPromptPreview={onSetPromptPreview}
         mediaActive={mediaActive}
       />
     )}
@@ -1265,10 +1260,9 @@ function ShareResultButton({ index, onClick }: { index: number; onClick: () => v
 
 /** 单张结果的「更多」菜单。没有可做的事就不渲染；删除排在最后，分隔线隔开，destructive 色。 */
 function ResultMoreMenu({
-  index, onSetPromptPreview, onSave, onShare, canvasTargets, onAddToCanvas, onReEdit, onDelete, deleteLabel,
+  index, onSave, onShare, canvasTargets, onAddToCanvas, onReEdit, onDelete, deleteLabel,
 }: {
   index: number;
-  onSetPromptPreview?: () => void;
   onSave?: () => void;
   onShare?: () => void;
   canvasTargets?: CanvasTarget[];
@@ -1278,7 +1272,7 @@ function ResultMoreMenu({
   deleteLabel: string;
 }) {
   const canvasMenu = onAddToCanvas && canvasTargets && canvasTargets.length > 0;
-  const hasActions = Boolean(onSetPromptPreview || onSave || onShare || canvasMenu || onReEdit);
+  const hasActions = Boolean(onSave || onShare || canvasMenu || onReEdit);
   if (!hasActions && !onDelete) return null;
   return (
     <DropdownMenu>
@@ -1288,7 +1282,6 @@ function ResultMoreMenu({
         onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
         {onReEdit && <DropdownMenuItem onSelect={onReEdit}><EditIcon />重新编辑</DropdownMenuItem>}
-        {onSetPromptPreview && <DropdownMenuItem onSelect={onSetPromptPreview}><AddImageIcon />设为效果图</DropdownMenuItem>}
         {onSave && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 到资产`} onSelect={onSave}><SaveAssetIcon />保存到资产</DropdownMenuItem>}
         {onShare && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={onShare}><ShareIcon />分享到团队库</DropdownMenuItem>}
         {canvasMenu && (
@@ -1338,7 +1331,6 @@ function DoneBatch({
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
-  onSetPromptPreview,
   mediaActive,
   justCompleted,
 }: {
@@ -1368,7 +1360,6 @@ function DoneBatch({
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveResultAsset?: SaveResultAssetHandler;
   onShareResult?: ShareResultHandler;
-  onSetPromptPreview?: (request: PromptPreviewRequest) => void;
   mediaActive: boolean;
 }) {
   const elapsedSec =
@@ -1401,9 +1392,6 @@ function DoneBatch({
   const resultMenu = (index: number, path: string, mediaKind: 'image' | 'video') => (
     <ResultMoreMenu
       index={index}
-      onSetPromptPreview={mediaKind === 'image' && onSetPromptPreview
-        ? () => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })
-        : undefined}
       onSave={mediaKind === 'image' && saveResult ? () => saveResult(index, path, mediaKind) : undefined}
       onShare={mediaKind === 'image' && share ? () => share(round.jobId, index, path, round.config) : undefined}
       canvasTargets={round.shareable ? canvasTargets : undefined}

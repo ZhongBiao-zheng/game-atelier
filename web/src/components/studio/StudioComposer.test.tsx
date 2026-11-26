@@ -48,11 +48,13 @@ it('首页只在发送时新建会话，收件后跳到创作台并恢复同一�
   localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
   const created = { session_id: 'new', revision: 1, status: 'idle', model: 'chat', model_alias: 'fake',
     title: '新对话', pending_approvals: [], turns: [], messages: [] };
+  const preferences = { auto_models: true, preferred_models: [{ alias: 'art', model: 'image-model' }] };
   const calls = vi.fn(async (path: string, init?: RequestInit) => {
     let result: unknown = {};
     if (path.endsWith('/models')) result = { models: [{ alias: 'fake', model: 'chat', name: 'Chat' }], errors: [] };
     if (path.endsWith('/skills')) result = { skills: [] };
     if (path.endsWith('/sessions')) result = init?.method === 'POST' ? created : { sessions: [{ session_id: 'old' }] };
+    if (path.endsWith('/sessions/old')) result = { ...created, session_id: 'old', ...preferences };
     if (path.endsWith('/messages')) result = { ...created, status: 'running', revision: 2 };
     return new Response(JSON.stringify(result));
   });
@@ -67,6 +69,9 @@ it('首页只在发送时新建会话，收件后跳到创作台并恢复同一�
   const messages = calls.mock.calls.filter(([path]) => path.endsWith('/messages'));
   expect(messages).toHaveLength(1);
   expect(messages[0][0]).toBe('/api/studio/agent/sessions/new/messages');
+  const creates = calls.mock.calls.filter(([path, init]) => path.endsWith('/sessions') && init?.method === 'POST');
+  expect(creates).toHaveLength(1);
+  expect(JSON.parse(String(creates[0][1]?.body))).toMatchObject(preferences);
 });
 
 it('能力探测结束后在当前页面移除不能调用工具的对话模型', async () => {
@@ -136,4 +141,118 @@ it('首页 Agent 输入栏只保留模式、对话模型、出图模型和技能
     .toEqual(['选择生成模式', '选择模型', '模型偏好', '选择 Skill', '打开创作资产']);
   expect(screen.queryByLabelText('创作模式')).toBeNull();
   expect(screen.queryByLabelText(/权限模式/)).toBeNull();
+});
+
+it('首页与创作台共用当前对话的生成偏好，切页或刷新保留自动与手选名单', async () => {
+  const target = '/api/studio/agent/sessions/current';
+  const manual = { alias: 'fake', model: 'art' };
+  let active = { session_id: 'current', revision: 1, title: '当前对话', status: 'idle',
+    model_alias: 'fake', model: 'chat', auto_models: false, preferred_models: [manual],
+    creation_mode: 'all', permission_mode: 'auto', pending_approvals: [], turns: [], messages: [] };
+  updateStudioView({ inputMode: 'agent', activeSessionId: 'current' });
+  localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
+  let release!: () => void;
+  const firstSave = new Promise<void>(resolve => { release = resolve; });
+  const writes: unknown[] = [];
+  const requests = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === target && init?.method === 'PATCH') {
+      const patch = JSON.parse(String(init.body));
+      writes.push(patch);
+      if (writes.length === 1) await firstSave;
+      active = { ...active, ...patch, revision: active.revision + 1 };
+      return Response.json(active);
+    }
+    if (path === target) return Response.json(active);
+    if (path.endsWith('/sessions')) return Response.json({ sessions: [active, { session_id: 'other' }] });
+    if (path.endsWith('/generation-models')) return Response.json({ models: [
+      { ...manual, kind: 'image', name: '手选模型', provider: 'openai' },
+      { alias: 'fake', model: 'other-art', kind: 'image', name: '另一模型', provider: 'openai' },
+    ] });
+    if (path.endsWith('/agent/models')) return Response.json({ models: [{ alias: 'fake', model: 'chat', name: 'Chat' }], errors: [] });
+    return Response.json({ skills: [], models: [] });
+  });
+  vi.stubGlobal('fetch', requests);
+  async function openPreferences() {
+    const button = screen.getByRole('button', { name: '模型偏好' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    return screen.getByRole('switch', { name: '自动选择模型' });
+  }
+  const home = render(<Page home />);
+  expect(await openPreferences()).not.toBeChecked();
+  expect(screen.getByRole('option', { name: /手选模型/ })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('switch'));
+  await waitFor(() => expect(writes).toEqual([{ auto_models: true }]));
+  expect(screen.getByRole('switch')).toBeDisabled();
+  expect(screen.getByRole('option', { name: /另一模型/ })).toBeDisabled();
+  home.unmount();
+  const studio = render(<Page />);
+  await act(async () => { release(); });
+  expect(await openPreferences()).toBeChecked();
+  expect(screen.queryByText(/模型偏好里没选/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('switch'));
+  await waitFor(() => expect(screen.getByRole('switch')).not.toBeChecked());
+  expect(screen.getByRole('option', { name: /手选模型/ })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('option', { name: /另一模型/ }));
+  await waitFor(() => expect(active.preferred_models).toEqual([manual, { alias: 'fake', model: 'other-art' }]));
+  studio.unmount();
+  const refreshed = render(<Page home />);
+  expect(await openPreferences()).not.toBeChecked();
+  expect(screen.getByRole('option', { name: /另一模型/ })).toHaveAttribute('aria-selected', 'true');
+  refreshed.unmount();
+  render(<Page />);
+  expect(await openPreferences()).not.toBeChecked();
+  expect(screen.getByRole('option', { name: /手选模型/ })).toHaveAttribute('aria-selected', 'true');
+  expect(requests.mock.calls.filter(([, init]) => init?.method === 'PATCH').every(([path]) => path === target)).toBe(true);
+  expect(requests.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it.each([
+  { status: 'running', errorCode: 'SESSION_BUSY', httpStatus: 409, usesDraft: true },
+  { status: 'awaiting_approval', errorCode: 'SESSION_BUSY', httpStatus: 409, usesDraft: true },
+  { status: 'idle', errorCode: 'UNAVAILABLE', httpStatus: 503, usesDraft: false },
+])('首页修改偏好时处理 $status 的 $errorCode', async ({ status, errorCode, httpStatus, usesDraft }) => {
+  updateStudioView({ inputMode: 'agent', activeSessionId: 'old' });
+  localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
+  const old = { session_id: 'old', revision: 4, status, title: '旧对话', model_alias: 'fake', model: 'chat',
+    auto_models: false, preferred_models: [{ alias: 'images', model: 'art' }], turns: [], messages: [], pending_approvals: [] };
+  let respond!: () => void;
+  const reply = new Promise<void>(resolve => { respond = resolve; });
+  const calls = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/old') && init?.method === 'PATCH') {
+      await reply;
+      return Response.json({ error: { code: errorCode, message: '测试错误' } }, { status: httpStatus });
+    }
+    if (path.endsWith('/old')) return Response.json(old);
+    if (path.endsWith('/sessions')) return Response.json({ sessions: [old] });
+    if (path.endsWith('/agent/models')) return Response.json({ models: [{ alias: 'fake', model: 'chat', name: 'Chat' }], errors: [] });
+    return Response.json({ skills: [], models: [] });
+  });
+  vi.stubGlobal('fetch', calls);
+  const home = render(<Page home />);
+  const picker = () => screen.getByRole('button', { name: '模型偏好' });
+  await waitFor(() => expect(picker()).toBeEnabled());
+  fireEvent.click(picker());
+  const toggle = screen.getByRole('switch', { name: '自动选择模型' });
+  expect(toggle).not.toBeChecked();
+  fireEvent.click(toggle);
+  await waitFor(() => expect(calls.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+  if (usesDraft) {
+    home.unmount();
+    render(<Page />);
+    await act(async () => { respond(); });
+    await waitFor(() => expect(readStudioView().activeSessionId).toBeNull());
+    await waitFor(() => expect(picker()).toBeEnabled());
+    fireEvent.click(picker());
+    expect(screen.getByRole('switch')).toBeChecked();
+    expect(JSON.parse(localStorage.getItem('canvas-agent-creation')!)).toMatchObject({
+      auto_models: true, preferred_models: old.preferred_models,
+    });
+  } else {
+    await act(async () => { respond(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('测试错误');
+    expect(readStudioView().activeSessionId).toBe('old');
+    expect(toggle).not.toBeChecked();
+  }
+  expect(calls.mock.calls.some(([,init]) => init?.method === 'POST')).toBe(false);
 });

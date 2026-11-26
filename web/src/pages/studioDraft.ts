@@ -20,7 +20,6 @@ export interface StudioDraft {
   kind: JobKind;
   promptText: string;
   promptAssetSourceTitle: string | null;
-  promptAssetId?: string | null;
   referenceImages: File[];
   referenceVideos: File[];
   referenceAudios: File[];
@@ -65,7 +64,6 @@ export interface StudioSessionInput {
   videoSeed?: number;
   promptText: string;
   promptAssetSourceTitle: string | null;
-  promptAssetId: string | null;
   referenceImages: File[];
   referenceVideos: File[];
   referenceAudios: File[];

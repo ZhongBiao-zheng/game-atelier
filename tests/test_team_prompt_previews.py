@@ -34,7 +34,7 @@ def shared(tmp_path):
     project = create_canvas_project('分享者')
     mount = mount_library(project_id=project.project_id, path=str(folder), name='参考', created_by='林晓')
     asset = assets.create_prompt_asset('山谷', [{'kind': 'text', 'text': '夕照'}], ['场景'])
-    asset = assets.add_prompt_previews(asset.asset_id, [(png('red'), 'image/png'), (png('blue'), 'image/png')], source_job_id='job-source', source_model='gpt-image-2')
+    asset = assets.add_prompt_previews(asset.asset_id, [(png('red'), 'image/png'), (png('blue'), 'image/png')])
     team = share_creation_asset(mount, asset_id=asset.asset_id, title=asset.title, tags=asset.tags, author='林晓')
     entry = scan_and_cache(mount).entries[0]
     return mount, asset, team, entry

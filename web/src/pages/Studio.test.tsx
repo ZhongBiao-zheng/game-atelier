@@ -190,7 +190,6 @@ function mockCompletedBatchAndKeys() {
             estimated_cost_cny: 0.5,
             actual_cost_cny: 0.63,
             creation_asset_source_title: '雨夜电影感',
-        prompt_asset_id: 'prompt-rain',
             reference_images: ['/tmp/ref.png'],
           },
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
@@ -1332,7 +1331,6 @@ describe('Studio', () => {
         resolution: '2K',
         size: '2304x1728',
         creation_asset_source_title: '雨夜电影感',
-        prompt_asset_id: 'prompt-rain',
       },
     });
   });
@@ -3085,51 +3083,6 @@ describe('历史参数不可用原因', () => {
     await waitFor(() => expect(screen.getAllByRole('tooltip').map(tip => tip.textContent))
       .toEqual(['切换到图片模式后可用', '切换到图片模式后可用']));
   });
-});
-
-it('keeps the prompt asset default when used text is edited before submission', async () => {
-  const fetchMock = mockPanelEndpoints();
-  renderStudio();
-  await screen.findByText('Volcengine Ark');
-  fireEvent.click(screen.getByLabelText('打开创作资产'));
-  await waitFor(() => expect(assetPanelProps.current?.onUsePrompt).toBeTypeOf('function'));
-  act(() => assetPanelProps.current!.onUsePrompt({ asset_id: 'prompt-used', title: '角色提示词' }, '原始提示词'));
-  typePrompt(screen.getByLabelText('生图 prompt'), '修改后的提示词');
-  fireEvent.click(screen.getByLabelText('生成'));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
-  const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/studio/jobs' && init?.method === 'POST');
-  expect(JSON.parse(String(call![1]!.body))).toMatchObject({
-    prompt: '修改后的提示词', params: { prompt_asset_id: 'prompt-used' },
-  });
-});
-
-it('refreshes an open asset panel after setting a generated result as preview', async () => {
-  mockCompletedBatchAndKeys();
-  const fetchMock = mockPanelEndpoints();
-  const fallback = fetchMock.getMockImplementation()!;
-  const prompt: CreationAsset = { asset_id: 'prompt-rain', kind: 'prompt', title: '雨夜电影感',
-    tags: [], project_ids: [], category: null, created_at: '', updated_at: '', last_used_at: null,
-    content: { kind: 'prompt', segments: [{ kind: 'text', text: '雨夜' }] } };
-  let saved = false;
-  fetchMock.mockImplementation((url, init) => {
-    const href = String(url);
-    if (href.endsWith('/previews/from-job')) {
-      saved = true;
-      return Promise.resolve({ ok: true, json: async () => prompt });
-    }
-    if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [{ ...prompt,
-      content: { ...prompt.content, ...(saved ? { preview_images: [{ file: 'eeeeeeeeeeeeeeee.png', mime_type: 'image/png', width: 20, height: 20, added_at: '' }] } : {}) },
-    }] }) });
-    return fallback(url, init);
-  });
-  renderStudio();
-  fireEvent.click(screen.getByLabelText('打开创作资产'));
-  await screen.findByRole('button', { name: /雨夜电影感 未使用/ });
-  fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitem', { name: '设为效果图' }));
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '提示词资产' })).toHaveTextContent('雨夜电影感'));
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-  await waitFor(() => expect(document.querySelector('img[src*="eeeeeeeeeeeeeeee.png/thumb"]')).not.toBeNull());
 });
 
 it('团队使用连续追加并按来源复用 File，满额不覆盖，也不写个人资产', async () => {

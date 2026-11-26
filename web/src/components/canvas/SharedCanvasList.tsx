@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { connectCollabPeer, listCollabPeers, remoteProjectPath, stopCollabShare } from '@/api/collab';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LockIcon, ShareIcon } from '@/components/ui/icons';
@@ -98,11 +98,11 @@ export function SharedCanvasList({cards, error, loading, refresh, onOpen}: {
           {[...hosts].map(([key, name]) => <SelectItem key={key} value={key}>{name}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Button variant="outline" onClick={() => { setConnectError(''); setConnectOpen(true); }}>手动连接</Button>
+      <Button variant="outline" onClick={() => { setConnectError(''); setConnectOpen(true); }}>通过地址查找</Button>
     </div>
     {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
     {!loading && !error && filtered.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">
-      {query || owner ? '没有匹配的共享画布' : '局域网中暂无共享画布'}
+      {query || owner ? '没有匹配的共享画布' : '尚未发现局域网内的共享画布'}
     </p>}
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
       {filtered.map(card => {
@@ -127,13 +127,16 @@ export function SharedCanvasList({cards, error, loading, refresh, onOpen}: {
       })}
     </div>
     <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
-      <DialogContent aria-describedby={undefined}>
-        <DialogHeader><DialogTitle>手动连接</DialogTitle></DialogHeader>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>通过地址查找画布</DialogTitle>
+          <DialogDescription>同一局域网内没看到对方的画布时，请房主发来「共享设置」里的连接地址。</DialogDescription>
+        </DialogHeader>
         <form className="grid gap-3" autoComplete="off" onSubmit={connect}>
           <Label htmlFor="collab-address">房主的局域网地址</Label>
           <Input id="collab-address" placeholder="192.168.1.20:5181" value={address} required onChange={e => setAddress(e.target.value)} />
           {connectError && <p role="alert" className="text-sm text-destructive">{connectError}</p>}
-          <DialogFooter><Button type="submit" disabled={busy || !address.trim()}>{busy ? '连接中…' : '连接'}</Button></DialogFooter>
+          <DialogFooter><Button type="submit" disabled={busy || !address.trim()}>{busy ? '查找中…' : '查找画布'}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

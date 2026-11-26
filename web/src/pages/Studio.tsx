@@ -1,4 +1,3 @@
-import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -146,7 +145,7 @@ interface EditorSnapshot {
 }
 
 const EMPTY_SESSION_INPUT: StudioSessionInput = {
-  promptText: '', promptAssetSourceTitle: null, promptAssetId: null,
+  promptText: '', promptAssetSourceTitle: null,
   referenceImages: [], referenceVideos: [], referenceAudios: [],
   videoFrames: { first: null, last: null }, mjRefs: EMPTY_MJ_REFS, agentText: '', agentFiles: [],
 };
@@ -337,9 +336,6 @@ function StudioFull() {
     const timer = window.setInterval(refresh, 10000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
-  const [assetsRevision, setAssetsRevision] = useState(0);
-  const [promptPreviewRequest, setPromptPreviewRequest] = useState<PromptPreviewRequest | null>(null);
-  const [promptAssetId, setPromptAssetId] = useState<string | null>(draft?.promptAssetId ?? null);
   const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(draft?.promptAssetSourceTitle ?? null);
   const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
   const kind = composer.mode === 'video' ? 'video' : 'image';
@@ -385,13 +381,13 @@ function StudioFull() {
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {
     writeStudioDraft({
-      providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
+      providerAlias, model, kind, promptText, promptAssetSourceTitle,
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
       sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, videoSeed,
     }, draftKey);
   }, [
-    providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
+    providerAlias, model, kind, promptText, promptAssetSourceTitle,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
     sizeParams, count, quality,
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio, videoSeed, draftKey,
@@ -400,7 +396,7 @@ function StudioFull() {
   // ---- 草稿按对话存：切走时留在原对话，切回来原样恢复；新对话发出第一条建了会话时，输入跟着走。 ----
   const { setText: setAgentText, setFiles: setAgentFilesRaw } = composer;
   const sessionInput: StudioSessionInput = {
-    promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
+    promptText, promptAssetSourceTitle, referenceImages, referenceVideos, referenceAudios,
     videoFrames, mjRefs, videoSeed, agentText: composer.text, agentFiles: composer.files,
   };
   const editor: EditorSnapshot = {
@@ -415,7 +411,6 @@ function StudioFull() {
     sourceTitleFile.current = null;
     setPromptText(input.promptText);
     setPromptAssetSourceTitle(input.promptAssetSourceTitle);
-    setPromptAssetId(input.promptAssetId);
     setReferenceImages(input.referenceImages);
     setReferenceVideos(input.referenceVideos);
     setReferenceAudios(input.referenceAudios);
@@ -446,7 +441,7 @@ function StudioFull() {
     writeSessionInput(draftKeyRef.current, sessionInput);
     // sessionInput 每次渲染都是新对象：按它的各字段写。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [promptText, promptAssetSourceTitle, promptAssetId, referenceImages, referenceVideos, referenceAudios,
+  }, [promptText, promptAssetSourceTitle, referenceImages, referenceVideos, referenceAudios,
     videoFrames, mjRefs, videoSeed, composer.text, composer.files]);
 
   // ---- 覆盖输入：直接覆盖，输入壳上方给 8 秒「已替换当前输入 · 撤销」（悬停暂停）。 ----
@@ -953,7 +948,6 @@ function StudioFull() {
     const evoMj = isEvolinkMidjourney(channel.modelId, effectiveProvider);
     const rawMjParams = overrideConfig?.mjParams ?? mjParams;
     const effectiveMjParams = evoMj ? evolinkMjParams(rawMjParams) : rawMjParams;
-    const effectivePromptAssetId = overrideConfig ? overrideConfig.promptAssetId : promptAssetId;
     const effectiveSourceAssetTitle = overrideConfig
       ? overrideConfig.sourceAssetTitle
       : promptAssetSourceTitle ?? undefined;
@@ -1027,7 +1021,6 @@ function StudioFull() {
       referenceImages: refPaths,
       workflowInputs: effectiveSizeParams.workflow_inputs,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
-      ...(effectivePromptAssetId ? { promptAssetId: effectivePromptAssetId } : {}),
       ...(caps.family === 'midjourney'
         ? { mjParams: effectiveMjParams, mjRefPaths }
         : {}),
@@ -1044,7 +1037,6 @@ function StudioFull() {
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...gptImage26JobParams(caps, overrideConfig ?? effectiveSizeParams, refPaths.length > 0),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
-      ...(effectivePromptAssetId ? { prompt_asset_id: effectivePromptAssetId } : {}),
       ...(effectiveSourceAssetTitle
         ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
@@ -1186,7 +1178,6 @@ function StudioFull() {
       ? overrideConfig.videoQuality
       : (effectiveCaps.qualities ? videoQuality : undefined);
     const effectiveCount = clampImageCount(overrideConfig?.n ?? videoCount);
-    const effectivePromptAssetId = overrideConfig ? overrideConfig.promptAssetId : promptAssetId;
     const effectiveSourceAssetTitle = overrideConfig
       ? overrideConfig.sourceAssetTitle
       : promptAssetSourceTitle ?? undefined;
@@ -1216,7 +1207,6 @@ function StudioFull() {
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
-      ...(effectivePromptAssetId ? { prompt_asset_id: effectivePromptAssetId } : {}),
       ...(effectiveSourceAssetTitle
         ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
@@ -1248,7 +1238,6 @@ function StudioFull() {
       referenceVideos: vidPaths,
       referenceAudios: audPaths,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
-      ...(effectivePromptAssetId ? { promptAssetId: effectivePromptAssetId } : {}),
     };
 
     const myRound = { kind: 'pending' as const, sessionId, startedAt, config, clientKey };
@@ -1402,7 +1391,6 @@ function StudioFull() {
             });
           }}
           onSaveResultAsset={saveResultAsset}
-          onSetPromptPreview={setPromptPreviewRequest}
         />
   );
 
@@ -1608,7 +1596,6 @@ function StudioFull() {
       </div>
       {assetPanelOpen && (
         <CreationAssetPanel
-          refreshKey={assetsRevision}
           key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}
@@ -1628,7 +1615,6 @@ function StudioFull() {
             setPromptText(renderedPrompt);
             sourceTitleFile.current = null;
             setPromptAssetSourceTitle(asset.title);
-            setPromptAssetId(asset.asset_id);
             setClickPinned(true);
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
@@ -1640,11 +1626,10 @@ function StudioFull() {
           }}
           onUseTeamPrompt={(text, entry) => {
             if (composer.mode === 'agent') { composer.setText(text); return; }
-            setPromptText(text); setPromptAssetId(null); sourceTitleFile.current = null; setPromptAssetSourceTitle(entry.title); setClickPinned(true);
+            setPromptText(text); sourceTitleFile.current = null; setPromptAssetSourceTitle(entry.title); setClickPinned(true);
           }}
         />
       )}
-      <SetPromptPreviewDialog request={promptPreviewRequest} onClose={() => setPromptPreviewRequest(null)} onSaved={() => { setAssetsRevision(value => value + 1); setAssetNotice('已设为效果图'); }} />
       <TeamShareDialog
         request={shareRequest}
         onClose={() => setShareRequest(null)}
@@ -1816,7 +1801,7 @@ function StudioFull() {
     } else if (route.target === 'videos') { slots.referenceVideos = [...slots.referenceVideos, file]; setReferenceVideos(slots.referenceVideos); }
     else if (route.target === 'audios') { slots.referenceAudios = [...slots.referenceAudios, file]; setReferenceAudios(slots.referenceAudios); }
     else { slots.referenceImages = [...slots.referenceImages, file]; setReferenceImages(slots.referenceImages); }
-    sourceTitleFile.current = file; setPromptAssetSourceTitle(title); setPromptAssetId(null); setClickPinned(true); setAssetNotice('已加入参考图');
+    sourceTitleFile.current = file; setPromptAssetSourceTitle(title); setClickPinned(true); setAssetNotice('已加入参考图');
   }
 
   async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
@@ -1881,7 +1866,6 @@ function StudioFull() {
     setPromptText(config.prompt);
     sourceTitleFile.current = null;
     setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
-    setPromptAssetId(config.promptAssetId ?? null);
     flashInput('prompt');
     offerUndo(before);
   }
@@ -1945,7 +1929,6 @@ function StudioFull() {
     setPromptText(config.prompt);
     sourceTitleFile.current = null;
     setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
-    setPromptAssetId(config.promptAssetId ?? null);
   }
 
   // 「再次生成」按旧配置直接提交，不改输入壳（D6）。本地失败卡带着当时的文件重新上传，旧卡换成新的一轮。

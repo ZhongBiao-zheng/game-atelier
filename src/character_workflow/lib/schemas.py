@@ -195,10 +195,8 @@ class JobParams(BaseModel):
     # 按字符计费的语音：上游回报的计费字符数。预计按朗读文本字数估；上游若按别的口径计
     # （例如一个汉字算两个字符），两者在记录里并排可见，不在估价里静默取一个。
     billed_characters: int | None = Field(default=None, ge=0)
-    # 从创作资产复制提示词时冻结的只读来源名称。正文与变量值已经展开进 prompt，
-    # 不保留任何可回写引用；prompt_asset_id 仅供效果图选择默认项。
+    # 从创作资产复制提示词时冻结的只读来源名称，正文与变量值已经展开进 prompt。
     creation_asset_source_title: str | None = Field(default=None, max_length=120)
-    prompt_asset_id: str | None = None
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
@@ -328,12 +326,12 @@ class JobParams(BaseModel):
     # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
     mj_flags: str | None = None
 
-    @model_serializer(mode="wrap")
-    def _omit_empty_prompt_asset(self, handler):
-        data = handler(self)
-        if self.prompt_asset_id is None:
-            data.pop("prompt_asset_id", None)
-        return data
+    @model_validator(mode="before")
+    @classmethod
+    def drop_retired_prompt_preview_target(cls, value):
+        if isinstance(value, dict) and "prompt_asset_id" in value:
+            return {key: item for key, item in value.items() if key != "prompt_asset_id"}
+        return value
 
 
 class CanvasActor(BaseModel):
@@ -862,7 +860,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
         "complexity", "output_format", "frame_count", "frame_duration_ms", "background",
-        "creation_asset_source_title", "prompt_asset_id",
+        "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
@@ -873,15 +871,15 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     }),
     "video": frozenset({
         "duration", "resolution", "ratio", "mode", "frame_mode", "seed",
-        "generate_audio", "watermark", "creation_asset_source_title", "prompt_asset_id",
+        "generate_audio", "watermark", "creation_asset_source_title",
     }),
     "text": frozenset({
         "n", "temperature", "max_tokens", "reasoning_effort",
-        "creation_asset_source_title", "prompt_asset_id",
+        "creation_asset_source_title",
     }),
     "audio": frozenset({
         "voice", "response_format", "speed", "instructions", "lyrics", "instrumental", "n",
-        "creation_asset_source_title", "prompt_asset_id",
+        "creation_asset_source_title",
     }),
 }
 
@@ -1295,7 +1293,8 @@ class CanvasCreationAssetSnapshotOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["creation_asset_snapshot"]
     title: str = Field(min_length=1, max_length=120)
-    asset_id: str | None = Field(default=None, min_length=1, max_length=160)
+    # 早期资产快照带有来源 ID，保留已有记录。
+    asset_id: str | None = Field(default=None, min_length=1, max_length=160, exclude_if=lambda v: v is None)
 
 
 class CanvasNormalizedRect(BaseModel):

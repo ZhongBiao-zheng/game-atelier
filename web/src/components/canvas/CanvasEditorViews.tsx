@@ -30,7 +30,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { AddIcon, AddImageIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -287,7 +287,6 @@ export interface CanvasNodeContextValue {
   createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
-  setPromptPreview?: (node: CanvasContentNode) => void;
   /** 分享生成结果到团队库；不传就不显示「分享」。 */
   shareResult?: (node: CanvasContentNode) => void;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
@@ -2352,9 +2351,6 @@ function ImageNodeToolbar({
               className="gap-2" onSelect={onToggleHidden}>
               {node.hidden ? <ShowIcon /> : <HideIcon />}{node.hidden ? '显示内容' : '遮盖内容'}
             </DropdownMenuItem>
-          )}
-          {context.setPromptPreview && content?.kind === 'image' && (content.origin.kind === 'job_output' || content.origin.kind === 'layer_decomposition') && (
-            <DropdownMenuItem onSelect={() => context.setPromptPreview?.(node)}><AddImageIcon />设为效果图</DropdownMenuItem>
           )}
           {onShare && (
             <DropdownMenuItem aria-label={`分享 ${node.title}`} className="gap-2" onSelect={onShare}>
