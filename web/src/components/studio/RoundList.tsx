@@ -1153,8 +1153,12 @@ function UseAsReferenceButton({ paths, onPick }: { paths: string[]; onPick: (pat
         <ActionButton>用作参考</ActionButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="start" className="rounded-xl">
+        {/* 带缩略图：多张结果按图认比按序号认快（Krea / Higgsfield 同类菜单的做法）。 */}
         {paths.map((path, index) => (
-          <DropdownMenuItem key={path} onSelect={() => onPick(path)}>第 {index + 1} 张</DropdownMenuItem>
+          <DropdownMenuItem key={path} onSelect={() => onPick(path)}>
+            <img src={imageSrc(path)} alt="" draggable={false} className="pointer-events-none size-8 shrink-0 select-none rounded-sm object-cover" />
+            第 {index + 1} 张
+          </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
