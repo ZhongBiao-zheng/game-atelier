@@ -14,7 +14,8 @@ it('tells the user where the desktop shell saved a download', async () => {
   act(() => {
     window.dispatchEvent(new CustomEvent(DESKTOP_DOWNLOAD_EVENT, { detail: { name: 'canvas.zip' } }));
   });
-  expect(await screen.findByText('已保存到「下载」：canvas.zip')).toBeInTheDocument();
+  expect(await screen.findByText('已保存到「下载」')).toBeInTheDocument();
+  expect(screen.getByText('canvas.zip')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '打开所在文件夹' })).not.toBeInTheDocument();
 });
 

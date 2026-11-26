@@ -38,8 +38,9 @@ function undo(message: string, onUndo: () => void, options: { actionLabel?: stri
   });
 }
 
-function info(message: string): string | number {
-  return toast(message);
+/** 没有原位锚点的后台完成；`detail` 放副文本（如文件名），`action` 放右侧动作。 */
+function info(message: string, options: { action?: NotifyAction; detail?: string } = {}): string | number {
+  return toast(message, { description: options.detail, action: options.action });
 }
 
 function dismiss(id?: string | number): void {

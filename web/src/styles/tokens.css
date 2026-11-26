@@ -408,6 +408,9 @@
   @media (prefers-reduced-motion: reduce) {
     [data-sonner-toaster] [data-sonner-toast] { transition-duration: var(--motion-fast); }
   }
+  /* 副文本（文件名、一句补充说明）：sonner 默认色在石墨底上对比度不够，改走次级文字色。
+     必须 !important：本文件的规则在 @layer 里，sonner 的样式不分层，不分层的普通声明总压过分层规则。 */
+  [data-sonner-toaster] [data-sonner-toast] [data-description] { color: var(--muted-foreground) !important; }
 
   /* 桌面版窗口失焦：顶栏整体降对比度，像原生窗口一样表明「不是当前窗口」；150ms 淡变。
      data-window-inactive 由 AppShell 监听 window blur / focus 写在 <html> 上，只在桌面壳里写。 */

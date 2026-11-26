@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { chooseFolder } from '@/api/folders';
 import { confirmDataRoot, fetchDataRoot, type DataRootMove } from '@/api/onboarding';
 import { SwapLabel } from '@/components/ui/swap-label';
@@ -21,6 +21,12 @@ export function DataRootPage({ initialPath, onComplete }: { initialPath: string;
   const [choosing, setChoosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const shownError = useRetained(error);
+  // 长路径被截断时让末尾可见：最后一级文件夹才是用户要确认的部分。
+  const pathInput = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    const input = pathInput.current;
+    if (input) input.scrollLeft = input.scrollWidth;
+  }, [path]);
 
   const save = async () => {
     setSaving(true);
@@ -60,7 +66,7 @@ export function DataRootPage({ initialPath, onComplete }: { initialPath: string;
       <div className="flex flex-col gap-3">
         <div className="flex gap-2">
           <Label htmlFor="data-root-path" className="sr-only">存放位置</Label>
-          <Input id="data-root-path" value={path} readOnly className="min-w-0 flex-1 font-mono" />
+          <Input ref={pathInput} id="data-root-path" value={path} readOnly title={path} className="min-w-0 flex-1 font-mono" />
           <Button variant="outline" type="button" onClick={() => { void pickFolder(); }} disabled={saving || choosing}>
             <SwapLabel active={choosing} on="选择中…" off="更改" />
           </Button>
