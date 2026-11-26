@@ -20,6 +20,8 @@ function makeArchive(version, marker, { complete = true } = {}) {
   const payload = path.join(dir, 'GameAtelier', 'versions', version);
   fs.mkdirSync(path.join(payload, 'python', 'bin'), { recursive: true });
   fs.writeFileSync(path.join(payload, 'python', 'bin', 'python3'), '');
+  fs.mkdirSync(path.join(payload, 'app', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(payload, 'app', 'scripts', 'bootstrap.py'), '');
   if (complete) fs.writeFileSync(path.join(payload, 'VERSION'), `${version}\n`);
   fs.writeFileSync(path.join(payload, 'MARKER'), marker);
   fs.writeFileSync(path.join(dir, 'GameAtelier', 'last-good'), `${version}\n`);
@@ -79,7 +81,7 @@ function makeZipArchive(version, marker, extra = []) {
   writeZip(file, [
     ['GameAtelier/', null], ['GameAtelier/last-good', `${version}\n`],
     [`${base}VERSION`, `${version}\n`], [`${base}MARKER`, marker], [`${base}数据.txt`, '中文路径'],
-    [`${base}python/bin/python3`, ''], [`${base}python/python.exe`, ''],
+    [`${base}app/scripts/bootstrap.py`, ''], [`${base}python/bin/python3`, ''], [`${base}python/python.exe`, ''],
     ...Array.from({ length: 40 }, (_, i) => [`${base}app/src/m${i}.py`, `x = ${i}\n`.repeat(50)]),
     ...extra,
   ]);
@@ -94,7 +96,7 @@ test('zip archives unpack in parallel with entry-count progress', async () => {
   assert.equal(readTrim(path.join(root, 'versions', '5.139.0', '数据.txt')), '中文路径');
   assert.equal(readTrim(path.join(root, 'versions', '5.139.0', 'app', 'src', 'm39.py')).split('\n').length, 50);
   const [last, total] = reports.at(-1);
-  assert.equal(total, 47);
+  assert.equal(total, 48);
   assert.equal(last, total);
   assert.ok(reports.every(([done], i) => i === 0 || done >= reports[i - 1][0]));
 });

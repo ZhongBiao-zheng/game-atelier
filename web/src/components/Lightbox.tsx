@@ -255,7 +255,7 @@ export function Lightbox({
         >
           {/* 左侧（窄屏上方）：纯媒体舞台，绝无文字或参数遮挡 */}
           <div className="relative flex h-[58%] min-h-0 flex-1 items-center justify-center overflow-hidden bg-background p-4 md:h-full md:p-6">
-            <div ref={stageRef} className="grid h-full w-full place-items-center">
+            <div ref={stageRef} className="grid h-full w-full grid-cols-1 grid-rows-1 place-items-center">
               {layers.map(layer => (
                 <RevealImage
                   key={layer.src}

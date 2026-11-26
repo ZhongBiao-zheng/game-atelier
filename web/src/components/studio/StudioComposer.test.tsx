@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { StudioComposer, useStudioComposer } from './StudioComposer';
@@ -67,6 +67,27 @@ it('首页只在发送时新建会话，收件后跳到创作台并恢复同一�
   const messages = calls.mock.calls.filter(([path]) => path.endsWith('/messages'));
   expect(messages).toHaveLength(1);
   expect(messages[0][0]).toBe('/api/studio/agent/sessions/new/messages');
+});
+
+it('能力探测结束后在当前页面移除不能调用工具的对话模型', async () => {
+  updateStudioView({ inputMode: 'agent' });
+  localStorage.setItem('canvas-agent-model', JSON.stringify({ alias: 'fake', model: 'chat' }));
+  let finish!: (response: Response) => void;
+  const verified = new Promise<Response>(resolve => { finish = resolve; });
+  const requests = vi.fn(async (path: string) => {
+    if (path.endsWith('/models?wait=true')) return verified;
+    if (path.endsWith('/agent/models')) return Response.json({ refresh_pending: true,
+      models: [{ alias: 'fake', model: 'chat', name: 'Chat' }], errors: [] });
+    return Response.json({ skills: [], sessions: [], models: [] });
+  });
+  vi.stubGlobal('fetch', requests);
+  render(<Page home />);
+  typeAgent('试一下');
+  await waitFor(() => expect(screen.getByLabelText('发送')).toBeEnabled());
+  await act(async () => { finish(Response.json({ models: [], errors: [], refresh_pending: false })); });
+  await waitFor(() => expect(screen.getByLabelText('发送')).toBeDisabled());
+  expect(screen.queryByText('Chat')).toBeNull();
+  expect(requests.mock.calls.filter(([path]) => path.includes('/agent/models'))).toHaveLength(2);
 });
 
 it('恢复目标会话时等待列表，即使已拿到模型也不会向新会话发送', async () => {

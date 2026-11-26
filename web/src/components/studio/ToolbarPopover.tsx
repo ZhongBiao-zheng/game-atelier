@@ -12,6 +12,7 @@ export interface ToolbarPopoverMenuProps {
 interface Props {
   open: boolean;
   onClose: () => void;
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   /** 触发器（控件 chip 外壳），用于定位；点它不算点到外面。 */
   anchorRef: RefObject<HTMLElement | null>;
   /** 优先向上弹还是向下弹；空间不够时自动翻面。 */
@@ -44,6 +45,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
 export function ToolbarPopover({
   open,
   onClose,
+  onEscapeKeyDown,
   anchorRef,
   direction = 'up',
   align = 'start',
@@ -101,7 +103,9 @@ export function ToolbarPopover({
           }}
           // 关闭后焦点去哪由调用方决定（Esc 回触发器，点外面留在被点处）
           onCloseAutoFocus={event => event.preventDefault()}
-          onEscapeKeyDown={() => {
+          onEscapeKeyDown={event => {
+            onEscapeKeyDown?.(event);
+            if (event.defaultPrevented) return;
             const anchor = anchorRef.current;
             const trigger = anchor?.matches(FOCUSABLE) ? anchor : anchor?.querySelector<HTMLElement>(FOCUSABLE);
             trigger?.focus();

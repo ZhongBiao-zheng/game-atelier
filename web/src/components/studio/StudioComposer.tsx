@@ -93,7 +93,7 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
     preferred: settings.preferred_models ?? [],
   }) : null;
   // 存的对话模型失效、但还有别的可用模型：静默换成第一个，不让发送按钮莫名置灰。
-  const fallback = agentMode && agent.models && !ready && !busy ? agent.models.models[0] : undefined;
+  const fallback = agentMode && agent.models && !agent.models.refresh_pending && !ready && !busy ? agent.models.models[0] : undefined;
   const updateSettings = agent.updateSettings;
   const fallbackTried = useRef<string | null>(null);
   useEffect(() => {

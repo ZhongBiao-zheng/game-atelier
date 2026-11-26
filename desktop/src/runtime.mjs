@@ -1,6 +1,6 @@
 // The shell's side of docs/contracts/desktop-shell.md: it only touches the runtime bundle through
 // its fixed launcher, and the server through `.runtime` records and loopback HTTP.
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -89,10 +89,35 @@ function interpreter(payload) {
     : path.join(payload, 'python', 'bin', 'python3');
 }
 
+function containedFile(directory, file) {
+  const relative = path.relative(directory, fs.realpathSync(file));
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+    && fs.statSync(file).isFile();
+}
+
 export function isValidPayload(root, version) {
   if (!validVersion(version)) return false;
-  const payload = path.join(root, 'versions', version);
-  return readTrim(path.join(payload, 'VERSION')) === version && fs.existsSync(interpreter(payload));
+  try {
+    const versions = path.join(fs.realpathSync(root), 'versions');
+    const payload = path.join(versions, version);
+    if (fs.lstatSync(versions).isSymbolicLink() || fs.lstatSync(payload).isSymbolicLink()) return false;
+    const marker = path.join(payload, 'VERSION');
+    return [marker, interpreter(payload), path.join(payload, 'app', 'scripts', 'bootstrap.py')]
+      .every(file => containedFile(payload, file)) && readTrim(marker) === version;
+  } catch {
+    return false;
+  }
+}
+
+function canRecover(root, version) {
+  if (!isValidPayload(root, version)) return false;
+  try {
+    const payload = fs.realpathSync(path.join(root, 'versions', version));
+    const contract = path.join(payload, CONTRACT_FILE);
+    return containedFile(payload, contract) && contractLevel(readTrim(contract)) >= DESKTOP_CONTRACT;
+  } catch {
+    return false;
+  }
 }
 
 /** A bundle is usable when `last-good` names a complete version directory (ADR-0030). */
@@ -130,31 +155,41 @@ export function repairBundlePointers(root) {
   } catch (error) {
     log(`bundle pointer check failed: ${error.message}`);
   }
-  const candidates = [];
-  for (const name of ['current', 'previous']) {
-    const version = readTrim(path.join(root, name));
-    if (isValidPayload(root, version)) candidates.push(version);
-  }
-  try {
-    const entries = fs.readdirSync(path.join(root, 'versions'));
-    const valid = entries
-      .filter((entry) => isValidPayload(root, entry))
-      .sort((a, b) => compareVersions(b, a));
-    candidates.push(...valid);
-  } catch { /* versions dir missing */ }
-  const recovered = candidates[0] ?? null;
-  if (!recovered) return null;
-  try {
-    writePointerAtomically(path.join(root, 'last-good'), recovered);
-    if (!isValidPayload(root, readTrim(path.join(root, 'current')))) {
-      writePointerAtomically(path.join(root, 'current'), recovered);
+  const updates = path.join(root, 'updates');
+  const pendingFile = path.join(updates, 'pending.json');
+  if (fs.existsSync(pendingFile)) {
+    const pending = parseJson(readTrim(pendingFile));
+    if (!/^[0-9a-f]{32}$/.test(pending?.update_id) || !validVersion(pending?.to)
+        || pending.from === pending.to || !canRecover(root, pending.from)) {
+      throw new Error('更新事务或上一可用版本损坏，无法自动恢复运行包');
     }
-    log(`repaired bundle pointers to ${recovered}`);
-    return recovered;
-  } catch (error) {
-    log(`failed to repair bundle pointers: ${error.message}`);
-    return null;
+    // The executor can still be committing. Recheck the transaction and last-good under
+    // its own update.lock, using the confirmed source version's bundled interpreter.
+    const payload = path.join(root, 'versions', pending.from);
+    const script = fs.readFileSync(new URL('./repair-pending.py', import.meta.url), 'utf8');
+    execFileSync(interpreter(payload), ['-I', '-X', 'utf8', '-c', script, root, pending.from, pending.update_id], {
+      windowsHide: true, timeout: 10000,
+    });
+    return readTrim(path.join(root, 'last-good'));
   }
+
+  const current = readTrim(path.join(root, 'current'));
+  const previous = readTrim(path.join(root, 'previous'));
+  let recovered = [current, previous].find(version => canRecover(root, version));
+  if (!recovered) {
+    const versions = path.join(root, 'versions');
+    if (!fs.existsSync(versions)) return null;
+    const blocked = parseJson(readTrim(path.join(updates, 'blocked.json'))) ?? {};
+    const state = parseJson(readTrim(path.join(updates, 'state.json')));
+    recovered = fs.readdirSync(versions).filter(validVersion)
+      .sort((a, b) => compareVersions(b, a))
+      .find(version => !Object.hasOwn(blocked, version) && version !== state?.to && canRecover(root, version));
+  }
+  if (!recovered) return null;
+  if (current !== recovered) writePointerAtomically(path.join(root, 'current'), recovered);
+  writePointerAtomically(path.join(root, 'last-good'), recovered);
+  log(`repaired bundle pointers to ${recovered}`);
+  return recovered;
 }
 
 export function installed(root) {

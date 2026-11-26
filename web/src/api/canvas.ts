@@ -187,8 +187,8 @@ export function cancelCanvasAgentTurn<P extends string | null>(projectId: P, ses
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/cancel`, '停止 Agent', {});
 }
 
-export function listCanvasAgentChatModels(): Promise<CanvasAgentChatModelList> {
-  return requestJson<CanvasAgentChatModelList>('/api/canvas/agent/models', '读取对话模型');
+export function listCanvasAgentChatModels(wait = false): Promise<CanvasAgentChatModelList> {
+  return requestJson<CanvasAgentChatModelList>(wait ? '/api/canvas/agent/models?wait=true' : '/api/canvas/agent/models', '读取对话模型');
 }
 
 export function listCanvasAgentGenerationModels(): Promise<{ models: CanvasAgentGenerationModel[] }> {

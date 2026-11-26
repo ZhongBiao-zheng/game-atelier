@@ -606,6 +606,7 @@ export interface CanvasAgentGenerationModel extends CanvasAgentModelRef {
 }
 
 export interface CanvasAgentChatModelList {
+  refresh_pending: boolean;
   models: CanvasAgentChatModel[];
   errors: { alias: string; message: string }[];
 }

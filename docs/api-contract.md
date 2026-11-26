@@ -1468,6 +1468,7 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 - 一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、分类）按模型协议发请求；Anthropic 走 `POST {根}/v1/messages`，
   Gemini 走 `POST {根}/v1beta/models/{id}:generateContent`，
   响应转回 Chat 形状，用量按「含缓存的总输入」归一。协议选错时 `job.error` / 失败原因提示到供应商里改「对话接口」，不自动换协议重试。
+- `GET /api/canvas/agent/models` 先返回本地已启用的对话模型与已缓存的能力。若 `refresh_pending: true`，客户端继续读一次 `?wait=true`，等待同一次上游探测后更新列表。最终响应含 `refresh_pending: false`；供应商失败按别名列入 `errors`。
 - 内置 Agent 接全部四种协议（Anthropic、Gemini 在 HTTP 层转换）；`GET /api/canvas/agent/models` 里这两种模型的
   `reasoning` 为 false。Agent 会话接口（创建、读取、修改、发消息、确认、停止）返回的 `history` 去掉
   `provider_data.thought_signature`；项目导出包里的会话同样去掉，落盘文件保留。

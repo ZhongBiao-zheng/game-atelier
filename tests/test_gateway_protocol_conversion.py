@@ -308,7 +308,7 @@ def test_anthropic_stream_parallel_tools_and_image(gateway):
     assert first.received[0].json()["messages"][0]["content"][0]["source"]["data"] == "YQ=="
 
 
-def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_members(gateway, monkeypatch):
+def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_members(gateway):
     from character_workflow.lib import canvas_agent_models
     from tests.fake_http_vendor import FakeVendor
 
@@ -324,9 +324,8 @@ def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_membe
         assert [item.alias for item in model.via] == ["a-gem", "b-chat"]
         [catalog] = client.get("/gateway/v1/openai/models").json()["data"]
         assert catalog["supported_parameters"] == ["tools"] and not gemini.received
-        monkeypatch.setattr(canvas_agent_models, "_upstream_for", lambda *_: (
-            {"shared": {"agent": canvas_agent_models.is_chat_model(catalog), "reasoning": False}}, None))
-        assert [row["model"] for row in canvas_agent_models._models_for(hub, 0)[0]] == ["shared"]
+        upstream = {"shared": {"agent": canvas_agent_models.is_chat_model(catalog), "reasoning": False}}
+        assert [row["model"] for row in canvas_agent_models._models_for(hub, upstream)] == ["shared"]
         body = {"model": "shared", "messages": [{"role": "user", "content": "q"}]}
         tools = [{"type": "function", "function": {"name": "weather", "parameters": {"type": "object"}}}]
         chat.on("POST", "/v1/chat/completions", {"choices": [{"message": {"content": "chat"}}]})
@@ -339,7 +338,7 @@ def test_mixed_chat_route_advertises_and_dispatches_tools_only_to_verified_membe
 
         scoped, _ = gateway_keys.create_key("gem-only", scope=[{"alias": "a-gem"}])
         [limited] = gateway_models([_route_view(model_routes.find_route("text", "shared"), scoped)])
-        assert canvas_agent_models._models_for(hub.model_copy(update={"models": [limited]}), 0)[0] == []
+        assert canvas_agent_models._models_for(hub.model_copy(update={"models": [limited]}), upstream) == []
         with pytest.raises(gateway_tasks.GatewayRequestError):
             gateway_openai._pick(scoped, "shared", [], params={**body, "tools": tools})
 

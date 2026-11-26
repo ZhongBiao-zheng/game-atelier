@@ -2029,7 +2029,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = [], order: 'desc' | '
       : Date.parse(b.submitted_at) - Date.parse(a.submitted_at))
     .flatMap((job): RoundState[] => {
       const mode = deriveGenMode(job);
-      if (job.status === 'done') {
+      if (job.status === 'done' || job.status === 'partial') {
         if (job.output_paths.length === 0) return [];
         return [{
           kind: 'done' as const,

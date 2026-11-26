@@ -18,6 +18,7 @@ import {
   updateCanvasAgentSession,
   updateCanvasAgentSettings,
 } from '@/api/canvas';
+import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { OUTGOING_MESSAGE_PREFIX } from './canvasAgentTimeline';
 import { DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
@@ -152,7 +153,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [outgoing, setOutgoing] = useState<OutgoingMessage | null>(null);
   const [streaming, setStreaming] = useState('');
   const [tool, setTool] = useState<AgentToolStatus | null>(null);
-  const [models, setModels] = useState<CanvasAgentChatModelList | null>(() => CONTROLS_CACHE_ENABLED ? cachedChatModels : null);
+  const [models, setModels] = useState<CanvasAgentChatModelList | null>(() =>
+    CONTROLS_CACHE_ENABLED && cachedChatModels ? { ...cachedChatModels, refresh_pending: true } : null);
   const [generationModels, setGenerationModels] = useState<CanvasAgentGenerationModel[] | null>(() => CONTROLS_CACHE_ENABLED ? cachedGenerationModels : null);
   const [skills, setSkills] = useState<CanvasAgentSkill[]>(() => CONTROLS_CACHE_ENABLED ? (cachedSkills ?? []) : []);
   const [error, setError] = useState<string | null>(null);
@@ -260,23 +262,45 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return () => { cancelled = true; };
   }, [home, open, projectId, refreshList, selectSession]);
 
-  // SWR：已有跨页缓存时先秒显，每次打开控件仍静默刷新一次以同步 Key 改动。
-  const controlsFetched = useRef(false);
+  // 每次打开或修改供应商都重新读取。仅在快照尚未完成探测时等一次最终结果。
   useEffect(() => {
-    if (!loadControls || controlsFetched.current) return;
-    controlsFetched.current = true;
-    listCanvasAgentChatModels().then(result => {
-      cachedChatModels = result;
-      setModels(result);
-    }, loadError => setError(messageOf(loadError)));
-    listCanvasAgentGenerationModels().then(result => {
-      cachedGenerationModels = result.models;
-      setGenerationModels(result.models);
-    }, loadError => setError(messageOf(loadError)));
+    if (!loadControls) return;
+    let generation = 0;
+    function refresh() {
+      const request = ++generation;
+      const onError = (error: unknown) => { if (request === generation) setError(messageOf(error)); };
+      void (async () => {
+        let result = await listCanvasAgentChatModels();
+        if (request !== generation) return;
+        cachedChatModels = result;
+        setModels(result);
+        if (result.refresh_pending) {
+          result = await listCanvasAgentChatModels(true);
+          if (request !== generation) return;
+          cachedChatModels = result;
+          setModels(result);
+        }
+      })().catch(onError);
+      listCanvasAgentGenerationModels().then(result => {
+        if (request !== generation) return;
+        cachedGenerationModels = result.models;
+        setGenerationModels(result.models);
+      }, onError);
+    }
+    refresh();
+    window.addEventListener(KEYS_CHANGED_EVENT, refresh);
+    return () => { generation++; window.removeEventListener(KEYS_CHANGED_EVENT, refresh); };
+  }, [loadControls]);
+
+  useEffect(() => {
+    if (!loadControls) return;
+    let active = true;
     getCanvasAgentSettings().then(settings => {
+      if (!active) return;
       cachedConfirmAbove = settings.confirm_above_cny;
       setConfirmAbove(settings.confirm_above_cny);
-    }, loadError => setError(messageOf(loadError)));
+    }, loadError => { if (active) setError(messageOf(loadError)); });
+    return () => { active = false; };
   }, [loadControls]);
 
   const reloadSkills = useCallback(() => {

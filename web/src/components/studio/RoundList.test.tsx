@@ -45,6 +45,27 @@ afterEach(() => {
 const specChips = (testId: string) =>
   [...screen.getByTestId(testId).querySelectorAll('button.rounded-sm')].map(chip => chip.textContent);
 
+it('Agent 批次按计划编号，前序多图失败或取消后，后面的图片和视频仍可按原号找到', () => {
+  const config = { prompt: '两张图', model: 'gpt-image-2', referenceImages: [], n: 2 };
+  const pending: RoundState = { kind: 'pending', jobId: 'first', startedAt: 0, config };
+  const images: RoundState = { kind: 'done', jobId: 'second', submittedAt: videoDone.submittedAt,
+    config, imagePaths: ['/studio/a.png', '/studio/b.png'] };
+  const { rerender } = render(<RoundList embedded rounds={[pending, images, videoDone]} />);
+  const image = screen.getByTestId('studio-result-thumb-1');
+  const video = screen.getByTestId('studio-result-video-1');
+  expect(image).toHaveTextContent('#3');
+  expect(video).toHaveTextContent('#5');
+  for (const canceled of [false, true]) {
+    const failed: RoundState = { kind: 'failed', jobId: 'first', submittedAt: videoDone.submittedAt,
+      config, canceled, reason: canceled ? '已停止' : '生成失败' };
+    rerender(<RoundList embedded rounds={[failed, images, videoDone]} />);
+    expect(screen.getByText('#1–#2')).toBeVisible();
+    expect(image).toHaveTextContent('#3');
+    expect(video).toHaveTextContent('#5');
+    expect(screen.getByText('已产出 3 / 5')).toBeVisible();
+  }
+});
+
 describe('RoundList video', () => {
   it('renders a <video> element for a video round', () => {
     const { container } = render(<RoundList rounds={[videoDone]} />);

@@ -158,11 +158,11 @@ function groupSteps(steps: StudioAgentStep[]) {
 function GenerationPlanCard({ jobs }: { jobs: Job[] }) {
   if (jobs.length === 0) return null;
   const doneCount = jobs.filter(job => job.status === 'done').length;
-  const isVideo = jobs.every(job => job.kind === 'video');
-  const noun = isVideo ? '视频' : '图片';
-  const statusText = doneCount === jobs.length
-    ? `(${doneCount}/${jobs.length}) ${noun}生成完成`
-    : `(${doneCount}/${jobs.length}) ${noun}生成中`;
+  const noun = jobs.every(job => job.kind === 'video') ? '视频'
+    : jobs.some(job => job.kind === 'video') ? '作品' : '图片';
+  const pending = jobs.some(job => job.status === 'pending' || job.status === 'pending_confirm');
+  const status = pending ? '生成中' : doneCount === jobs.length ? '生成完成' : '已结束';
+  const statusText = `(${doneCount}/${jobs.length}) ${noun}${status}`;
   return (
     <div className="space-y-2 pt-1">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">

@@ -494,32 +494,31 @@ export function RoundList({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasEarlierHistory, historyAutoLoadArmed]);
-  // Agent 嵌入式批量出图自适应排版：单张舒展、2~4 张自然比例、5 张及以上（如 8~10 张）用 4 列规整画廊网格并带编号。
-  const embeddedMediaCount = embedded
-    ? rounds.reduce((total, r) => (
-      r.kind === 'done' ? total + r.imagePaths.length
-        : r.kind === 'pending' ? total + Math.max(1, r.config.n ?? 1)
-          : total
-    ), 0)
-    : 0;
-  const embeddedLayout: EmbeddedMediaLayout | undefined = embedded
-    ? (embeddedMediaCount >= 5 ? 'grid' : embeddedMediaCount === 1 ? 'single' : 'row')
-    : undefined;
-  const embeddedStartOffsets = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!embedded) return map;
-    let offset = 0;
-    for (const r of rounds) {
-      map.set(roundKey(r), offset);
-      if (r.kind === 'done') offset += r.imagePaths.length;
-      else if (r.kind === 'pending') offset += Math.max(1, r.config.n ?? 1);
+  // 计划中的失败、取消和未产出的名额仍占原位，后续作品沿用自己的编号。
+  const batch = useMemo(() => {
+    const starts = new Map<string, number>();
+    let planned = 0;
+    let completed = 0;
+    let includesVideo = false;
+    if (embedded) {
+      for (const round of rounds) {
+        if (round.kind === 'agent') continue;
+        const outputs = round.kind === 'done' ? round.imagePaths.length : 0;
+        starts.set(roundKey(round), planned + 1);
+        planned += Math.max(round.config?.n ?? 1, outputs);
+        completed += outputs;
+        includesVideo ||= round.config?.kind === 'video';
+      }
     }
-    return map;
+    return { starts, planned, completed, includesVideo };
   }, [embedded, rounds]);
+  const embeddedLayout: EmbeddedMediaLayout | undefined = embedded
+    ? (batch.planned >= 5 ? 'grid' : batch.planned === 1 ? 'single' : 'row')
+    : undefined;
 
   const renderMedia = (r: RoundState, mediaActive: boolean) => {
     const key = roundKey(r);
-    const batchOffset = embeddedStartOffsets.get(key) ?? 0;
+    const firstNumber = embeddedLayout === 'grid' ? batch.starts.get(key) : undefined;
     // 嵌在 Agent 回合里的结果没有单独的外层，删除不做整轮淡出。
     const fadeThen = <A extends unknown[]>(remove?: (...args: A) => void | Promise<void>) => (
       remove && !embedded ? (...args: A) => removeAfterFade(key, () => remove(...args)) : remove
@@ -531,6 +530,7 @@ export function RoundList({
         round={r}
         embedded={embedded}
         embeddedLayout={embeddedLayout}
+        firstNumber={firstNumber}
         showActions={!embedded || rounds.length === 1}
         onCancel={onCancel}
         onReEdit={onReEdit}
@@ -547,7 +547,7 @@ export function RoundList({
         round={r}
         embedded={embedded}
         embeddedLayout={embeddedLayout}
-        batchOffset={batchOffset}
+        firstNumber={firstNumber}
         showActions={!embedded || rounds.length === 1}
         favorites={favorites}
         onToggleFavorite={onToggleFavorite}
@@ -575,6 +575,7 @@ export function RoundList({
     )}
     {r.kind === 'failed' && (
       <FailedCard
+        firstNumber={firstNumber}
         round={r}
         embedded={embedded}
         showActions={!embedded || rounds.length === 1}
@@ -609,7 +610,9 @@ export function RoundList({
           />
         )}
         {embedded && embeddedLayout === 'grid' && (
-          <p className="text-xs tabular-nums text-muted-foreground">共 {embeddedMediaCount} 张作品</p>
+          <p className="text-xs tabular-nums text-muted-foreground">{batch.completed === batch.planned
+            ? `共 ${batch.completed} ${batch.includesVideo ? '件' : '张'}作品`
+            : `已产出 ${batch.completed} / ${batch.planned}`}</p>
         )}
         {embedded ? <MediaActivationBoundary>
           {active => <div className={embeddedLayout === 'grid' ? EMBEDDED_GRID_CLASS : ROUND_MEDIA_CLASS}>{rounds.map(r => r.kind !== 'agent' && (
@@ -661,7 +664,7 @@ export function RoundList({
 }
 
 function PendingBatch({
-  round, embedded, embeddedLayout, showActions,
+  round, embedded, embeddedLayout, firstNumber, showActions,
   onCancel,
   onReEdit,
   onUsePrompt,
@@ -673,6 +676,7 @@ function PendingBatch({
 }: {
   embedded: boolean;
   embeddedLayout?: EmbeddedMediaLayout;
+  firstNumber?: number;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'pending' }>;
   onCancel?: (jobId: string) => void | Promise<void>;
@@ -753,6 +757,7 @@ function PendingBatch({
                 data-testid="progress-badge"
                 className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white"
               >
+                {firstNumber !== undefined && `#${firstNumber + i} · `}
                 {round.uploading ? '上传参考中…' : stageLabel(round.progressPhase, isVideo)}
               </span>
               <div className={ROUND_SPINNER_CLASS} />
@@ -1304,7 +1309,7 @@ function ResultMoreMenu({
 }
 
 function DoneBatch({
-  round, embedded, embeddedLayout, batchOffset = 0, showActions,
+  round, embedded, embeddedLayout, firstNumber, showActions,
   favorites,
   onToggleFavorite,
   hiddenPaths,
@@ -1330,7 +1335,7 @@ function DoneBatch({
 }: {
   embedded: boolean;
   embeddedLayout?: EmbeddedMediaLayout;
-  batchOffset?: number;
+  firstNumber?: number;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'done' }>;
   /** 这一轮刚从「生成中」变成完成：结果在占位交接层上淡入。 */
@@ -1450,12 +1455,16 @@ function DoneBatch({
                 <ResultFrame
                   key={path}
                   config={round.config}
+                  batchNumber={firstNumber === undefined ? undefined : firstNumber + index}
+                  uniformSquare={embeddedLayout === 'grid'}
                   justCompleted={justCompleted}
                   startedAt={startedAt}
                   progressKey={roundKey(round)}
                   roundJob={embedded && index === 0 ? round.jobId : undefined}
                   testId={`studio-result-video-${index + 1}`}
-                  className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
+                  className={embeddedLayout === 'grid'
+                    ? 'group relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-card'
+                    : 'group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card'}
                   // 封面（图标占位）垫在底下，视频首帧可显示后在它上面淡入，换上去的过程不露黑帧也不露空白。
                   media={({ onSize, onReady }) => <>
                     <div
@@ -1513,6 +1522,7 @@ function DoneBatch({
                 <ResultFrame
                   key={path}
                   config={round.config}
+                  batchNumber={firstNumber === undefined ? undefined : firstNumber + index}
                   uniformSquare={isGrid}
                   justCompleted={justCompleted}
                   startedAt={startedAt}
@@ -1535,11 +1545,6 @@ function DoneBatch({
                     />
                   )}
                 >
-                  {isGrid && (
-                    <span className="pointer-events-none absolute left-2 top-2 rounded-sm bg-scrim px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">
-                      #{batchOffset + index + 1}
-                    </span>
-                  )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {resultMenu(index, path, 'image')}
 
@@ -1634,8 +1639,9 @@ function DoneBatch({
 
 /** 结果卡：与占位卡同一个按目标比例的框（读到真实尺寸后改用真实比例）。
  *  刚生成完的结果先垫着占位交接层，媒体解码后在它上面淡入；历史结果直接在卡片底色上淡入。 */
-function ResultFrame({ config, uniformSquare = false, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
+function ResultFrame({ config, batchNumber, uniformSquare = false, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
   config: RoundConfig;
+  batchNumber?: number;
   uniformSquare?: boolean;
   justCompleted: boolean;
   startedAt: number;
@@ -1661,6 +1667,11 @@ function ResultFrame({ config, uniformSquare = false, justCompleted, startedAt, 
         />
       )}
       {media({ onSize, onReady: () => setRevealed(true) })}
+      {batchNumber !== undefined && (
+        <span className="pointer-events-none absolute left-2 top-2 rounded-sm bg-scrim px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">
+          #{batchNumber}
+        </span>
+      )}
       {children}
     </figure>
   );
@@ -1684,7 +1695,7 @@ const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButt
 );
 
 function FailedCard({
-  round, embedded, showActions,
+  round, embedded, firstNumber, showActions,
   onDeleteFailed,
   onDismissLocal,
   onReEdit,
@@ -1699,6 +1710,7 @@ function FailedCard({
   embedded: boolean;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'failed' }>;
+  firstNumber?: number;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onDismissLocal?: (clientKey: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -1711,6 +1723,7 @@ function FailedCard({
   mediaActive: boolean;
 }) {
   const { config } = round;
+  const planned = config?.n ?? 1;
   const summary = round.canceled ? round.reason : round.failure?.message ?? failureSummary(round.reason);
   const [detailOpen, setDetailOpen] = useState(false);
   const [copyState, copy] = useCopyFeedback();
@@ -1766,7 +1779,12 @@ function FailedCard({
           ? <StopIcon size="sm" className="mt-1 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <WarningIcon className="mt-0.5 shrink-0 text-destructive/70" aria-hidden />}
         <div className="min-w-0 flex-1 text-muted-foreground">
-          <p className="[overflow-wrap:anywhere]">{summary}</p>
+          <p className="[overflow-wrap:anywhere]">
+            {firstNumber !== undefined && <span className="mr-1 tabular-nums">
+              #{firstNumber}{planned > 1 && `–#${firstNumber + planned - 1}`}
+            </span>}
+            {summary}
+          </p>
           {!round.canceled && summary !== round.reason && (
             <>
               {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}

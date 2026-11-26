@@ -9,10 +9,12 @@ architecture + supported_parameters、词元跳动的 supported_protocols），�
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -39,10 +41,24 @@ _NON_CHAT_ID_HINTS = (
 _NEW_API_CHAT_TYPES = frozenset({"openai", "openai-chat"})
 _NEW_API_MEDIA_TYPES = ("image", "video", "generate", "edit", "embedding", "audio", "veo", "sora")
 
-_cache: dict[str, tuple[float, dict[str, dict]]] = {}
-_fail_cache: dict[str, tuple[float, str]] = {}
-_refreshing: set[str] = set()
+
+@dataclass(frozen=True)
+class _Capabilities:
+    models: dict[str, dict]
+    error: str | None = None
+    expires_at: float = 0.0
+
+
+@dataclass(frozen=True)
+class _Probe:
+    signature: bytes
+    previous: _Capabilities
+    result: Future[_Capabilities]
+
+
+_cache: dict[str, _Probe] = {}
 _cache_lock = threading.Lock()
+_workers = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat-models")
 
 
 def chat_base_url(key: keys.KeySpec) -> str:
@@ -92,6 +108,14 @@ def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
             if model.modality == "text" or (model.modality is None and llm_only)]
 
 
+def _model_items(response: requests.Response, field: str) -> list:
+    response.raise_for_status()
+    body = response.json()
+    if not isinstance(body, dict) or not isinstance(body.get(field), list):
+        raise ValueError(f"模型列表缺少 {field} 数组")
+    return body[field]
+
+
 def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。
 
@@ -109,8 +133,7 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
             timeout=FETCH_TIMEOUT,
             **({"proxies": DIRECT_PROXIES} if key.provider == "atelier" else {}),
         )
-        response.raise_for_status()
-        data = response.json().get("data") or []
+        data = _model_items(response, "data")
         out.update({
             str(item["id"]): {"agent": is_chat_model(item), "reasoning": _supports_reasoning(item)}
             for item in data if isinstance(item, dict) and item.get("id")
@@ -120,8 +143,7 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
         response = requests.get(f"{anthropic.models_url(key.base_url)}?limit=1000",
                                 headers=anthropic.headers(key.base_url, key.access_key),
                                 timeout=FETCH_TIMEOUT, allow_redirects=False)
-        response.raise_for_status()
-        data = response.json().get("data") or []
+        data = _model_items(response, "data")
         out.update({str(item["id"]): {"agent": True, "reasoning": False}
                     for item in data if isinstance(item, dict) and item.get("id")})
     if key.base_url and any(model.protocol == GEMINI_GENERATE_CONTENT for model in models):
@@ -129,8 +151,7 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
         response = requests.get(f"{gemini.models_url(key.base_url)}?pageSize=1000",
                                 headers=gemini.headers(key.access_key),
                                 timeout=FETCH_TIMEOUT, allow_redirects=False)
-        response.raise_for_status()
-        for item in response.json().get("models") or []:
+        for item in _model_items(response, "models"):
             if not isinstance(item, dict) or not item.get("name"):
                 continue
             out[str(item["name"]).removeprefix("models/")] = {
@@ -138,56 +159,36 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     return out
 
 
-def _upstream_for(key: keys.KeySpec, now: float, *, wait: bool = True) -> tuple[dict[str, dict], str | None]:
-    with _cache_lock:
-        cached = _cache.get(key.alias)
-        failed = _fail_cache.get(key.alias)
-    if cached and now - cached[0] < CACHE_SECONDS:
-        return cached[1], None
-    if failed and now - failed[0] < FAIL_CACHE_SECONDS:
-        return (cached[1] if cached else {}), failed[1]
-    if not wait:
-        _schedule_refresh(key)
-        return (cached[1] if cached else {}), None
+def _refresh(key: keys.KeySpec, previous: _Capabilities) -> _Capabilities:
     try:
-        upstream = _fetch(key)
-    except (requests.RequestException, ValueError) as error:
+        models = _fetch(key)
+    except (requests.RequestException, ValueError, TypeError) as error:
         logger.warning("chat model list failed for %s: %s", key.alias, type(error).__name__)
-        with _cache_lock:
-            _fail_cache[key.alias] = (now, "模型能力获取失败")
-        return (cached[1] if cached else {}), "模型能力获取失败"
+        return _Capabilities(previous.models, "模型能力获取失败", time.monotonic() + FAIL_CACHE_SECONDS)
+    return _Capabilities(models, expires_at=time.monotonic() + CACHE_SECONDS)
+
+
+def _probe_for(key: keys.KeySpec) -> _Probe:
+    # 同一别名换地址、凭证或协议后，不能复用旧能力或仍在执行的旧请求。
+    protocols = sorted({model.protocol or "" for model in enabled_text_models(key)})
+    identity = "\0".join([key.provider, key.base_url or "", key.access_key, *protocols])
+    signature = hashlib.sha256(identity.encode()).digest()
     with _cache_lock:
-        _cache[key.alias] = (now, upstream)
-        _fail_cache.pop(key.alias, None)
-    return upstream, None
+        probe = _cache.get(key.alias)
+        previous = _Capabilities({})
+        if probe and probe.signature == signature:
+            if not probe.result.done():
+                return probe
+            if probe.result.exception() is None:
+                previous = probe.result.result()
+                if time.monotonic() < previous.expires_at:
+                    return probe
+        probe = _Probe(signature, previous, _workers.submit(_refresh, key, previous))
+        _cache[key.alias] = probe
+        return probe
 
 
-def _schedule_refresh(key: keys.KeySpec) -> None:
-    with _cache_lock:
-        if key.alias in _refreshing:
-            return
-        _refreshing.add(key.alias)
-
-    def _run() -> None:
-        now = time.monotonic()
-        try:
-            upstream = _fetch(key)
-        except (requests.RequestException, ValueError) as error:
-            logger.warning("background chat model refresh failed for %s: %s", key.alias, type(error).__name__)
-            with _cache_lock:
-                _fail_cache[key.alias] = (now, "模型能力获取失败")
-                _refreshing.discard(key.alias)
-            return
-        with _cache_lock:
-            _cache[key.alias] = (now, upstream)
-            _fail_cache.pop(key.alias, None)
-            _refreshing.discard(key.alias)
-
-    threading.Thread(target=_run, name=f"chat-models-{key.alias}", daemon=True).start()
-
-
-def _models_for(key: keys.KeySpec, now: float, *, wait: bool = True) -> tuple[list[dict], str | None]:
-    upstream, error = _upstream_for(key, now, wait=wait) if not wait else _upstream_for(key, now)
+def _models_for(key: keys.KeySpec, upstream: dict[str, dict]) -> list[dict]:
     rows = []
     from character_workflow.lib.llm_protocols import detect
 
@@ -209,7 +210,7 @@ def _models_for(key: keys.KeySpec, now: float, *, wait: bool = True) -> tuple[li
             "name": model.name or model.id,
             "reasoning": reasoning,
         })
-    return rows, error
+    return rows
 
 
 def list_chat_models(*, wait: bool = True) -> dict:
@@ -224,18 +225,18 @@ def list_chat_models(*, wait: bool = True) -> dict:
         if key.enabled and key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
         and any(agent_can_use(model) for model in enabled_text_models(key))
     ]
-    if not candidates:
-        return {"models": [], "errors": []}
-    now = time.monotonic()
-    if not wait:
-        results = [_models_for(key, now, wait=False) for key in candidates]
-    else:
-        with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-            results = list(pool.map(lambda key: _models_for(key, now), candidates))
+    # 先提交所有供应商，再按需等待。前端用 wait=True 跟进快照时，与后台共用同一次探测。
+    probes = [_probe_for(key) for key in candidates]
+    pending = False
     models: list[dict] = []
     errors: list[dict] = []
-    for key, (rows, error) in zip(candidates, results):
-        models.extend(rows)
-        if error:
-            errors.append({"alias": key.alias, "message": error})
-    return {"models": models, "errors": errors}
+    for key, probe in zip(candidates, probes):
+        if wait or probe.result.done():
+            capabilities = probe.result.result()
+        else:
+            capabilities = probe.previous
+            pending = True
+        models.extend(_models_for(key, capabilities.models))
+        if capabilities.error:
+            errors.append({"alias": key.alias, "message": capabilities.error})
+    return {"models": models, "errors": errors, "refresh_pending": pending}

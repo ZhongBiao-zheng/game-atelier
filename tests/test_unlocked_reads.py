@@ -220,7 +220,7 @@ _LIGHT = {
     "routes._read_config": ("viewer_server.routes", lambda dr: dr.runtime_dir() / "config.json",
                             _call("viewer_server.routes", "_read_config")),
     "gallery-hidden": ("viewer_server.routes", lambda dr: dr.runtime_dir() / "gallery-hidden.json",
-                       _call("viewer_server.routes", "_read_gallery_hidden")),
+                       _call("viewer_server.routes", "_read_gallery_hidden_state")),
     "gallery-favorites": ("viewer_server.routes", lambda dr: dr.runtime_dir() / "gallery-favorites.json",
                           _call("viewer_server.routes", "_read_gallery_favorites")),
     "gallery-ratings": ("viewer_server.routes", lambda dr: dr.runtime_dir() / "gallery-ratings.json",
@@ -286,7 +286,7 @@ def test_settings_read_modify_write_holds_its_lock(isolated_data_root, monkeypat
 
     files = {"hidden": routes._gallery_hidden_file(), "favorites": routes._gallery_favorites_file(),
              "ratings": routes._gallery_ratings_file(), "config": routes._runtime() / "config.json"}
-    readers = {"hidden": "_read_gallery_hidden", "favorites": "_read_gallery_favorites",
+    readers = {"hidden": "_read_gallery_hidden_state", "favorites": "_read_gallery_favorites",
                "ratings": "_read_gallery_ratings", "config": "_read_config"}
     held: list[bool] = []
     real = getattr(routes, readers[kind])
@@ -306,7 +306,7 @@ def test_settings_read_modify_write_holds_its_lock(isolated_data_root, monkeypat
     body = {"hidden": {"path": image, "hidden": True}, "favorites": {"path": image, "favorite": True},
             "ratings": {"path": image, "rating": 3}, "config": {"show_canvas_on_home": False}}[kind]
     url = "/api/config" if kind == "config" else f"/api/gallery/{kind}"
-    local.post(url, json=body)
+    assert local.post(url, json=body).status_code == 200
     assert held and held[0] is True
 
 

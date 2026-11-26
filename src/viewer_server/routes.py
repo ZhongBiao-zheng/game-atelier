@@ -1967,11 +1967,6 @@ def _read_gallery_hidden_state() -> tuple[list[str], list[str]]:
     return paths, canvases
 
 
-def _read_gallery_hidden() -> list[str]:
-    return _read_gallery_hidden_state()[0]
-
-
-
 def _normalize_gallery_path(raw: str) -> str:
     """归一为 data_root 相对路径——job.output_paths 是绝对路径、recent 项是相对路径，
     sidecar 统一存相对形态两边才能对上（与 _gallery_job_ids_by_path 同规）。"""

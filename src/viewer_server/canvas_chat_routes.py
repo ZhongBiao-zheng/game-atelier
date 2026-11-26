@@ -105,8 +105,8 @@ async def _call(function, *args):
 
 
 @router.get("/agent/models")
-async def get_chat_models() -> dict:
-    return await asyncio.to_thread(list_chat_models, wait=False)
+async def get_chat_models(wait: bool = False) -> dict:
+    return await asyncio.to_thread(list_chat_models, wait=wait)
 
 
 def _generation_models() -> dict:

@@ -110,7 +110,12 @@ export function StudioSessionControls({ agent, disabled = false }: {
         )}
       </div>
     )}
-    <ToolbarPopover open={open} onClose={() => { setOpen(false); if (editing?.scope === 'list') setEditing(null); }} anchorRef={anchor} direction="down" autoFocus
+    <ToolbarPopover open={open} onClose={() => { setOpen(false); if (editing?.scope === 'list') setEditing(null); }}
+      onEscapeKeyDown={event => {
+        // 行内编辑先处理 Escape，避免弹层移回焦点触发失焦保存。
+        if (editing?.scope === 'list') event.preventDefault();
+      }}
+      anchorRef={anchor} direction="down" autoFocus
       aria-label="对话列表" className="w-64 rounded-xl border border-border bg-card p-2" maxHeight={360}>
       <Button variant="ghost" size="sm" className="h-10 w-full justify-start" disabled={busy} onClick={newChat}>
         <NewChatIcon size="sm" />新对话

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from types import SimpleNamespace
 
@@ -240,14 +241,49 @@ def test_chat_models_are_enabled_text_models_that_can_use_tools(isolated_data_ro
                 keys.ModelSpec(name="未知", id="unknown", modality="text")],
     )]))
     monkeypatch.setattr(chat_models, "_cache", {})
-    monkeypatch.setattr(chat_models, "_fetch", lambda key: {
-        "claude-x": {"agent": True, "reasoning": True},
-        "no-tools": {"agent": False, "reasoning": None},
-        "doubao-lite-4k": {"agent": True, "reasoning": None},  # 上游有、用户没启用：不列
-    })
-    rows = chat_models.list_chat_models()["models"]
+    release = threading.Event()
+    calls = []
+
+    def fetch(key):
+        calls.append(key.alias)
+        assert release.wait(5)
+        return {
+            "claude-x": {"agent": True, "reasoning": True},
+            "no-tools": {"agent": False, "reasoning": None},
+            "doubao-lite-4k": {"agent": True, "reasoning": None},  # 上游有、用户没启用：不列
+        }
+
+    monkeypatch.setattr(chat_models, "_fetch", fetch)
+    try:
+        snapshot = chat_models.list_chat_models(wait=False)
+        assert snapshot["refresh_pending"]
+        assert [row["model"] for row in snapshot["models"]] == ["claude-x", "no-tools", "unknown"]
+    finally:
+        release.set()
+    verified = chat_models.list_chat_models(wait=True)
+    assert not verified["refresh_pending"] and calls == ["hub"]
+    rows = verified["models"]
     assert [(row["model"], row["name"], row["reasoning"]) for row in rows] == [
         ("claude-x", "Claude", True), ("unknown", "未知", None)]
+
+
+def test_chat_model_list_recovers_after_malformed_response(monkeypatch, isolated_data_root):
+    from character_workflow.lib import canvas_agent_models as chat_models
+    from tests.fake_http_vendor import FakeVendor
+
+    with FakeVendor() as vendor:
+        vendor.on("GET", "/v1/models", [], {"data": [{"id": "chat"}]})
+        keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+            alias="hub", provider="custom", base_url=vendor.url + "/v1", created_at="fixture",
+            models=[keys.ModelSpec(name="Chat", id="chat", modality="text")],
+        )]))
+        monkeypatch.setattr(chat_models, "_cache", {})
+        monkeypatch.setattr(chat_models, "FAIL_CACHE_SECONDS", 0)
+        failed = chat_models.list_chat_models()
+        assert failed["errors"] == [{"alias": "hub", "message": "模型能力获取失败"}]
+        recovered = chat_models.list_chat_models()
+        assert recovered["errors"] == [] and not recovered["refresh_pending"]
+        assert len(vendor.calls()) == 2
 
 
 def _rows(kind: str) -> list[dict]:
@@ -335,4 +371,4 @@ def test_disabled_chat_provider_is_not_fetched_or_listed(isolated_data_root, mon
     def unexpected_fetch(_key):
         raise AssertionError("disabled provider must not be contacted")
     monkeypatch.setattr(canvas_agent_models, "_fetch", unexpected_fetch)
-    assert canvas_agent_models.list_chat_models() == {"models": [], "errors": []}
+    assert canvas_agent_models.list_chat_models() == {"models": [], "errors": [], "refresh_pending": False}

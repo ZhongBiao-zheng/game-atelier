@@ -320,9 +320,17 @@ async function prepareRuntime() {
     const info = rt.readRuntimeInfo(RUNTIME_INFO);
     if (!info) throw failure('install');
     log(`runtime for this build: ${info.file} build=${info.build}`);
-    rt.repairBundlePointers(root);
+    try {
+      rt.repairBundlePointers(root);
+    } catch (error) {
+      log(`bundle pointer recovery stopped: ${error.message}`);
+      throw failure('start', '运行包指针未能恢复，请查看日志后重试');
+    }
     const reason = rt.replacementReason(root, info);
     if (reason) log(`runtime replacement: ${reason}`);
+    if (reason && fs.existsSync(path.join(root, 'updates', 'pending.json'))) {
+      throw failure('start', '运行包尚有更新事务，请稍后重试');
+    }
     if (reason === 'too-old') throw failure('install', '已有的运行环境比本安装包新，请安装新版 Atelier');
     if (reason === 'missing' || (reason && await releaseRuntime(root))) {
       root = await downloadAndUnpack(info);

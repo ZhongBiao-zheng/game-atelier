@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +22,8 @@ function bundle(versions, current, lastGood) {
     fs.mkdirSync(path.join(payload, 'python', 'bin'), { recursive: true });
     fs.writeFileSync(path.join(payload, 'python', 'bin', 'python3'), '');
     fs.writeFileSync(path.join(payload, 'python', 'python.exe'), '');
+    fs.mkdirSync(path.join(payload, 'app', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(payload, 'app', 'scripts', 'bootstrap.py'), '');
     fs.writeFileSync(path.join(payload, 'VERSION'), `${version}\n`);
     if (level !== null) fs.writeFileSync(path.join(payload, 'DESKTOP_CONTRACT'), `${level}\n`);
     if (build !== null) fs.writeFileSync(path.join(payload, 'BUILD_ID'), `${build}\n`);
@@ -136,6 +140,78 @@ test('repairBundlePointers recovers truncated last-good from current or highest 
   assert.equal(repairBundlePointers(root), '5.142.0');
   assert.equal(fs.readFileSync(path.join(root, 'last-good'), 'utf8').trim(), '5.142.0');
   assert.equal(fs.readFileSync(path.join(root, 'current'), 'utf8').trim(), '5.142.0');
+});
+
+test('recovery skips incomplete, incompatible, blocked and staged candidates', () => {
+  const root = bundle([
+    ['5.138.0', '2', 'old'], ['5.139.0', '2', 'blocked'], ['5.140.0', '2', 'ready'],
+    ['5.141.0', '1', 'incompatible'], ['5.142.0', '2', 'incomplete'],
+  ], '5.141.0', '');
+  fs.rmSync(path.join(root, 'versions', '5.142.0', 'app', 'scripts', 'bootstrap.py'));
+  fs.mkdirSync(path.join(root, 'updates'));
+  fs.writeFileSync(path.join(root, 'updates', 'state.json'), JSON.stringify({ status: 'ready', to: '5.140.0' }));
+  fs.writeFileSync(path.join(root, 'updates', 'blocked.json'), JSON.stringify({ '5.139.0': 'failed' }));
+  assert.equal(repairBundlePointers(root), '5.138.0');
+  assert.equal(fs.readFileSync(path.join(root, 'current'), 'utf8').trim(), '5.138.0');
+});
+
+test('recovery rejects a bootstrap outside its payload', { skip: process.platform === 'win32' }, () => {
+  const root = bundle([['5.138.0', '2', 'old'], ['5.142.0', '2', 'new']], '5.142.0', '');
+  const entry = (v) => path.join(root, 'versions', v, 'app', 'scripts', 'bootstrap.py');
+  fs.rmSync(entry('5.142.0'));
+  fs.symlinkSync(entry('5.138.0'), entry('5.142.0'));
+  assert.equal(repairBundlePointers(root), '5.138.0');
+});
+
+test('a damaged transaction cannot select a candidate or fall back to reinstalling', () => {
+  const root = bundle([['5.142.0', '2', 'new']], '5.142.0', '');
+  fs.mkdirSync(path.join(root, 'updates'));
+  const file = path.join(root, 'updates', 'pending.json');
+  for (const text of ['{', JSON.stringify({ from: '5.138.0', to: '5.142.0', update_id: 'a'.repeat(32) })]) {
+    fs.writeFileSync(file, text);
+    assert.throws(() => repairBundlePointers(root), /更新事务/);
+    assert.equal(fs.readFileSync(path.join(root, 'last-good'), 'utf8').trim(), '');
+  }
+});
+
+test('an interrupted transaction recovers its source only after the executor releases its lock', { skip: process.platform === 'win32' }, async () => {
+  const root = bundle([['5.138.0', '2', 'old'], ['5.142.0', '2', 'new']], '5.142.0', '');
+  fs.mkdirSync(path.join(root, 'updates'));
+  const transaction = { from: '5.138.0', to: '5.142.0', update_id: 'a'.repeat(32), phase: 'restarting' };
+  fs.writeFileSync(path.join(root, 'updates', 'pending.json'), JSON.stringify(transaction));
+  const payload = path.join(root, 'versions', transaction.from);
+  const app = path.join(payload, 'app');
+  fs.copyFileSync(new URL('../../scripts/bootstrap.py', import.meta.url), path.join(app, 'scripts/bootstrap.py'));
+  const lib = path.join(app, 'src', 'character_workflow', 'lib');
+  fs.mkdirSync(lib, { recursive: true });
+  for (const name of ['atomic_io.py', 'file_lock.py']) {
+    fs.copyFileSync(new URL(`../../src/character_workflow/lib/${name}`, import.meta.url), path.join(lib, name));
+  }
+  // Use the host Python for this fixture while the launcher's interpreter stays inside its payload.
+  const python = path.join(payload, 'python/bin/python3');
+  fs.writeFileSync(python, '#!/bin/sh\nexport GAME_ATELIER_DATA_ROOT="$(dirname "$0")/test-data"\nexec python3 "$@"\n');
+  fs.chmodSync(python, 0o755);
+  const runtime = path.join(path.dirname(python), 'test-data', '.runtime');
+  fs.mkdirSync(runtime, { recursive: true });
+  const executor = spawn('python3', ['-c', [
+    'import fcntl, sys',
+    'with open(sys.argv[1], "a+") as lock:',
+    '    fcntl.flock(lock, fcntl.LOCK_EX)',
+    '    print("locked", flush=True)',
+    '    sys.stdin.read()',
+  ].join('\n'), path.join(runtime, 'update.lock')]);
+  const exit = once(executor, 'exit');
+  try {
+    await once(executor.stdout, 'data');
+    assert.throws(() => repairBundlePointers(root));
+    assert.equal(fs.readFileSync(path.join(root, 'last-good'), 'utf8').trim(), '');
+  } finally {
+    executor.stdin.end();
+    await exit;
+  }
+  assert.equal(repairBundlePointers(root), '5.138.0');
+  assert.equal(fs.readFileSync(path.join(root, 'current'), 'utf8').trim(), '5.142.0');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'updates/pending.json'))), transaction);
 });
 
 test('downloads never overwrite', () => {
