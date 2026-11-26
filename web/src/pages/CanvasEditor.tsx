@@ -106,7 +106,10 @@ import {
   type CanvasGenerationPreferencesTab,
 } from '@/components/canvas/CanvasGenerationPreferencesDialog';
 import { ApiError } from '@/api/http';
-import { EditorSharedStatus } from '@/components/canvas/SharedCanvasList';
+import { rebaseOwnerHistory } from './canvas/sharedOwnerHistory';
+import { useCollabRoom } from './canvas/useCollabRoom';
+import { RoomPresence, RoomSelectionOverlay } from './canvas/RoomPresence';
+import { SharedStatusButton, useSharedCanvases } from '@/components/canvas/SharedCanvasList';
 import { SharedCanvasView } from './canvas/SharedCanvasView';
 import { localCanvasTransport, type CanvasTransport } from './canvas/canvasTransport';
 import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
@@ -746,11 +749,19 @@ function CanvasEditorInner({
   // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
   // 又不能把它塞进 flushSave 的依赖里让保存闭包每次重建。
   const reloadDocumentRef = useRef<() => Promise<void>>(async () => undefined);
+  const {cards:sharedCards, refresh:refreshShares} = useSharedCanvases();
+  const ownShares = sharedCards.filter(card=>card.is_self);
+  const sharedOwner = ownShares.some(card=>card.project_id === projectId);
+  const blockedHistory = useRef(new WeakSet<CanvasDocument>());
   const remoteDocumentChanged = useRef<(revision: number | null) => void>(() => undefined);
   const reversePromptConfigAttempts = useRef(new Set<string>());
   // 只有本会话提交过的反推 run 才会自动生成图片配置节点。原来的判据是「这个结果节点上还没挂配置」，
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
   const reversePromptConfigEligibleRuns = useRef(new Set<string>());
+  const ownerRoom = useCollabRoom(sharedOwner ? '/api/collab/shares/'+encodeURIComponent(projectId)+'/ws' : null,
+    revision=>remoteDocumentChanged.current(revision));
+  const {updatePresence:ownerPresence} = ownerRoom;
+  useEffect(()=>{ if (sharedOwner) ownerPresence([...selectedNodeIds]); },[sharedOwner,ownerPresence,selectedNodeIds]);
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
@@ -1438,7 +1449,9 @@ function CanvasEditorInner({
       const { added, changed } = canvasRemoteNodeChanges(before, reloaded);
       markCanvasNodesEntering(added, 0.96);
       flashCanvasNodes(changed);
-      recordExternalRound(before, reloaded);
+      if (sharedOwner && base) {
+        history.current = rebaseOwnerHistory(history.current,blockedHistory.current,before,base,remoteDocument);
+      } else recordExternalRound(before, reloaded);
     }
     setDocument(reloaded);
     // 与首屏加载相同：补出来的空文本版本、合并留下的本地改动都还没落盘，要再保存一次。
@@ -1448,7 +1461,7 @@ function CanvasEditorInner({
     setSaveErrorDetail(null);
     setError(null);
     setErrorAction(null);
-  }, [projectId, recordExternalRound]);
+  }, [projectId, recordExternalRound, sharedOwner]);
   reloadDocumentRef.current = reloadDocumentFromServer;
   remoteDocumentChanged.current = (revision: number | null) => {
     if (revision === null || revision <= serverRevision.current) return;
@@ -4044,6 +4057,9 @@ function CanvasEditorInner({
     const index = target ? past.lastIndexOf(target) : past.length - 1;
     if (index < 0 || !document) return;
     const previous = past[index];
+    if (blockedHistory.current.has(previous)) {
+      history.current.past.splice(index,1); notify.info('该节点已被他人修改，无法撤回'); return;
+    }
     if (document.nodes.some(node => node.type === 'image_edit' && node.data.active_run_id
       && !previous.nodes.some(item => item.id === node.id))) {
       setError('请先停止编辑节点的生成，再撤销创建。'); return;
@@ -4076,6 +4092,7 @@ function CanvasEditorInner({
   const redo = useCallback(() => {
     const next = history.current.future.pop();
     if (!next || !document) return;
+    if (blockedHistory.current.has(next)) {notify.info('该节点已被他人修改，无法重做');return;}
     history.current.past.push(document);
     const restored = syncDraftLayerStackSources({
       ...restoreImageEditRunState(next, document, jobsByRunId),
@@ -5989,6 +6006,11 @@ function CanvasEditorInner({
           onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
           onNodeMouseLeave={(_, node) => setHoveredNodeId(current => current === node.id ? null : current)}
           onNodeDragStart={recordHistorySnapshot}
+          onNodeDrag={(_,node,moved)=>{if (ownerRoom.connected) {
+            const positions = Object.fromEntries((moved.length ? moved : [node]).map(item=>[item.id,item.position]));
+            ownerPresence(Object.keys(positions),positions);
+          }}}
+          onNodeDragStop={()=>{if (ownerRoom.connected) ownerPresence([...selectedNodeIds]);}}
           onMoveStart={event => {
             if (!event) return;
             interruptViewportCommand();
@@ -6054,6 +6076,7 @@ function CanvasEditorInner({
           className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting', createMenu?.sourceId && 'canvas-flow-pending-connection')}
         >
           <CanvasZoomCssVars />
+          {ownerRoom.connected && document && <RoomSelectionOverlay members={ownerRoom.members.filter(member=>member.client_id !== ownerRoom.clientId)} document={document}/>}
           {background && <Background variant={background} gap={22} size={1} />}
           <AnimatePresence initial={false}>
           {document.settings.show_minimap && !materialPick && (
@@ -6213,7 +6236,8 @@ function CanvasEditorInner({
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => leaveCanvas(onBack)}><BackIcon /></Button>
             <div className="h-6 w-px bg-border" />
-            <EditorSharedStatus />
+            <SharedStatusButton shares={ownShares} refresh={refreshShares} />
+            <RoomPresence members={ownerRoom.members}/>
             <div className="flex min-w-0 items-center">
                 <EditableText
                   ref={projectNameEditorRef}

@@ -105,7 +105,10 @@ def peers(request: Request):
     for peer in discovery.online():
         for card in peer.cards():
             project_id = card["project_id"]
-            authenticated = has_token(request, peer.key, project_id)
+            authenticated = has_token(request, peer.key, project_id, access_epoch=card["access_epoch"])
+            if authenticated:
+                from viewer_server.collab_offline import schedule
+                schedule(request, peer.key, project_id)
             priority = (authenticated, peer.address in manual, peer.key)
             room = peer.manifest.host_id, project_id
             if room not in rooms or priority > rooms[room][0]:

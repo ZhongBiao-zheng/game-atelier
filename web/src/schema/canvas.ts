@@ -276,6 +276,7 @@ export interface CanvasPluginNode extends CanvasNodeBase {
     package_digest?: string | null;
     data_schema_version: number;
     payload: JsonValue;
+    shared_placeholder?: boolean;
     generation_draft: CanvasGenerationDraft | null;
   };
 }
@@ -402,6 +403,7 @@ export interface CanvasTextVersion extends CanvasContentVersionBase {
 }
 
 export interface CanvasMediaVersion extends CanvasContentVersionBase {
+  pending_shared_original?: { host_id: string; project_id: string; version_id: string } | null;
   kind: 'image' | 'video' | 'audio';
   path: string;
   mime_type: string;

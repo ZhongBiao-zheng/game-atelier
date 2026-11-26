@@ -1023,7 +1023,14 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               </p>
             )
           )}
-          {content && content.kind !== 'text' && (
+          {content && content.kind !== 'text' && content.pending_shared_original && (
+            <div className="relative grid size-full place-items-center">
+              {content.kind === 'image' && <img src={canvasMediaUrlAtWidth(context.projectId,content.version_id,512)}
+                alt="" className="absolute inset-0 size-full object-contain" onError={event=>{event.currentTarget.hidden=true;}} />}
+              <p role="status" className="relative rounded-md bg-card/90 px-2 py-1 text-sm text-muted-foreground">等待房主补齐原件</p>
+            </div>
+          )}
+          {content && content.kind !== 'text' && !content.pending_shared_original && (
             <MediaPreview
               kind={content.kind}
               // 节点卡上的图按屏幕上的显示宽度取缩略图。画布上一屏能有几十上百个节点，
@@ -1037,6 +1044,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               onReady={content.kind === 'image' ? () => revealImageVersion(content.version_id) : undefined}
             />
           )}
+          {content?.frozen_generation?.inputs.some(input => {
+            const reference = input.version_id ? context.resolveVersion(input.version_id) : undefined;
+            return reference && reference.kind !== 'text' && reference.pending_shared_original;
+          }) && <span role="status" className="pointer-events-none absolute left-2 top-2 rounded bg-card/90 px-2 py-1 text-xs text-muted-foreground">等待房主补齐参考原件</span>}
           {node.type === 'image' && content?.kind === 'image' && context.resolveFinalCategory?.(content.sha256) && (
             <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 max-w-[calc(100%-1.25rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs backdrop-blur-glass">
               定稿 · {context.resolveFinalCategory(content.sha256)}
@@ -1751,6 +1762,7 @@ function CandidateFailureActions({
 function PluginNodeContent({ node, context, selected }: {
   node: CanvasPluginNode; context: CanvasNodeContextValue; selected: boolean;
 }) {
+  if (node.data.shared_placeholder) return <p className="p-3 text-xs text-muted-foreground">插件未声明共享字段 · 仅查看</p>;
   const hostType = hostNodeType(context.hostPlugins ?? EMPTY_HOST_PLUGINS, node);
   if (hostType && context.hostPluginApi) return <hostType.Body node={node} api={context.hostPluginApi} />;
   return <PluginNodeBody node={node} projectId={context.projectId} selected={selected}

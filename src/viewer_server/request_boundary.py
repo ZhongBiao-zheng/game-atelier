@@ -77,8 +77,25 @@ class LocalRequestBoundary:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "websocket":
-            # No WebSocket route is part of the local connection contract.
-            await send({"type": "websocket.close", "code": 1008})
+            # Origin and the actual loopback socket pin the transport before the route
+            # authenticates the local cookie and editor lease.
+            import re
+            try:
+                authority = _authority(scope)
+                allowed = {f"http://{authority}"}
+                if self.dev_origin:
+                    allowed.add(self.dev_origin)
+                valid = (authority and _header(scope, b"host") == authority
+                         and _header(scope, b"origin") in allowed
+                         and not _header(scope, b"authorization")
+                         and re.fullmatch(r"/api/collab/(?:shares|remote/[0-9a-f]{32}/projects)/canvas-[a-z0-9-]{8,64}/ws",
+                                          scope["path"]))
+            except ValueError:
+                valid = False
+            if valid:
+                await self.app(scope, receive, send)
+            else:
+                await send({"type": "websocket.close", "code": 1008})
             return
         try:
             authority = _authority(scope)

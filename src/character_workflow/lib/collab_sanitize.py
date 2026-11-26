@@ -52,15 +52,54 @@ def _storyboard_value(value):
     return value
 
 
-def _node_view(node):
+_PRIVATE_FIELD = re.compile(
+    r"password|passcode|authorization|credential|secret|token|api_?key|access_?key|private_?key|"
+    r"base_?url|headers?|local_?path", re.I,
+)
+
+
+def _declared_payload(value, fields):
+    """Only explicitly named scalar leaves may cross the host boundary."""
+    if isinstance(value, list):
+        return [_declared_payload(item, fields) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _declared_payload(item, [path[1:] for path in fields if path and path[0] == key])
+            for key, item in value.items()
+            if not _PRIVATE_FIELD.search(key) and any(path and path[0] == key for path in fields)
+        }
+    return value if () in fields else None
+
+
+def _plugin_projection(data, records):
+    from character_workflow.lib import plugin_registry
+    if data.shared_placeholder:
+        return {}, True
+    if data.plugin_id == "storyboard" and data.node_type == "board":
+        return _storyboard_value(data.payload), False
+    if data.plugin_id not in records:
+        records[data.plugin_id] = plugin_registry.find(data.plugin_id)
+    record = records[data.plugin_id]
+    if record and record.lock and record.availability == "ok":
+        lock = record.lock
+        if lock.version == data.plugin_version and (not data.package_digest or lock.digest == data.package_digest):
+            contribution = next((item for item in lock.contributes.nodes if item.type == data.node_type
+                                 and item.payload_schema_version == data.data_schema_version), None)
+            if contribution and contribution.shared_fields:
+                return _declared_payload(data.payload, [tuple(path.split(".")) for path in contribution.shared_fields]), False
+    return {}, True
+
+
+def _node_view(node, records=None):
     row = node.model_dump(mode="json")
     data = {key: value for key, value in row["data"].items() if key in _NODE_DATA_FIELDS}
     if draft := row["data"].get("generation_draft"):
         data["generation_draft"] = {key: draft[key] for key in ("mode", "prompt", "input_policy", "model", "updated_at")}
         data["generation_draft"]["params"] = public_params(draft["params"])
     if node.type == "plugin":
-        # Third-party plugin JSON has no public schema. The host retains the original payload.
-        data["payload"] = _storyboard_value(node.data.payload) if node.data.plugin_id == "storyboard" else {}
+        data["payload"], placeholder = _plugin_projection(node.data, records if records is not None else {})
+        if placeholder:
+            data["shared_placeholder"] = True
     return {**{key: value for key, value in row.items() if key in _NODE_FIELDS}, "data": data}
 
 
@@ -111,11 +150,12 @@ def public_document(project_id: str) -> dict:
     document = hydrate_document_provenance(project_id, read_canvas_document(project_id))
     if any(public_text(key) != key for key in document.content_versions):
         raise ValueError("内容版本编号无效")
+    records = {}
     return {
         "schema_version": document.schema_version, "project_id": document.project_id,
         "revision": document.revision, "updated_at": document.updated_at,
         "viewport": document.viewport.model_dump(), "settings": document.settings.model_dump(),
-        "nodes": [_public_values(_node_view(node)) for node in document.nodes],
+        "nodes": [_public_values(_node_view(node, records)) for node in document.nodes],
         "connections": [_public_values(row.model_dump()) for row in document.connections],
         "content_versions": {key: _public_values(_version_view(version)) for key, version in document.content_versions.items()},
     }

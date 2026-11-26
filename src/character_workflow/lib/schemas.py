@@ -1122,6 +1122,7 @@ class CanvasPluginNodeData(BaseModel):
     package_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     data_schema_version: int = Field(ge=1)
     payload: JsonValue
+    shared_placeholder: bool = Field(default=False, exclude_if=lambda value: not value)
     generation_draft: CanvasGenerationDraft | None = None
 
     @model_validator(mode="after")
@@ -1400,7 +1401,15 @@ class CanvasTextVersion(CanvasContentVersionBase):
     text: str = Field(max_length=40_000)
 
 
+class CanvasPendingOriginal(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    host_id: str = Field(pattern=r"^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$")
+    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
+    version_id: str = Field(pattern=r"^[a-zA-Z0-9_-][a-zA-Z0-9._-]{0,159}$")
+
+
 class CanvasMediaVersion(CanvasContentVersionBase):
+    pending_shared_original: CanvasPendingOriginal | None = Field(default=None, exclude_if=lambda v: v is None)
     kind: Literal["image", "video", "audio"]
     path: str = Field(min_length=1)
     mime_type: str = Field(min_length=1, max_length=120)

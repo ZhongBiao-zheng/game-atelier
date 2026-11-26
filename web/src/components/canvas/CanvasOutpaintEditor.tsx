@@ -27,7 +27,7 @@ function RatioIcon({ ratio, width, height }: { ratio: ExpandRatio; width: number
 }
 
 /** 扩图：比例 + 倍数决定画框，原图可拖动定位；默认 Midjourney，可切换其它图片编辑模型。 */
-export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, initialData, busy: parentBusy, error,
+export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, initialData, saveOnly = false, busy: parentBusy, error,
   onOpenChange, onSave, onSubmit }: ImageEditorProps) {
   const initialDraft = initialData?.generation_draft ?? null;
   const source = { width: version.width || 1, height: version.height || 1 };
@@ -181,9 +181,9 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     </div>}
     composer={<EditorComposer prompt={prompt} onPrompt={setPrompt}
       placeholder={mj ? '描述扩出来的画面（必填）' : '留空自然延展；或描述新增画面'}
-      blocker={blocker} error={error || localError} cost={cost} busy={busy}
-      generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
-      chips={<EditGenerationControls choices={choices} choice={choice}
+      saveOnly={saveOnly} blocker={saveOnly ? ready ? null : '图片加载中…' : blocker} error={error || localError} cost={cost} busy={busy}
+      generateLabel={saveOnly ? '保存编辑' : `生成 ${candidates} 张`} onGenerate={() => void submit(!saveOnly)}
+      chips={!saveOnly && <EditGenerationControls choices={choices} choice={choice}
         onChoice={next => setSelected(choiceId(next.key.alias, next.model))} caps={caps}
         resolution={resolution} onResolution={setResolutionChoice} quality={quality} onQuality={setQualityChoice}
         count={count} onCount={setCount} />}>

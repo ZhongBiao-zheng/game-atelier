@@ -21,6 +21,7 @@ export interface CanvasMaskEditSubmission {
 export interface ImageEditorProps {
   open: boolean; title: string; version: CanvasMediaVersion; mediaUrl: string; keys: KeyView[];
   initialData?: CanvasImageEditNode['data'];
+  saveOnly?: boolean;
   busy: boolean; error: string | null;
   onOpenChange: (open: boolean) => void;
   onSave: (submission: CanvasMaskEditSubmission) => Promise<boolean>;
@@ -121,9 +122,9 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
 
 /** 提示词 + 操作行；blocker 非空时生成置灰，并在按钮左侧写出缺什么。 */
 export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, error, cost, busy, generateLabel,
-  onGenerate, children, promptDisabled = false }: {
+  onGenerate, children, promptDisabled = false, saveOnly = false }: {
   prompt: string; onPrompt: (value: string) => void; placeholder: string; chips: ReactNode;
-  blocker: string | null; error: string | null; cost: number | null; busy: boolean; generateLabel: string;
+  blocker: string | null; error: string | null; cost: number | null; busy: boolean; generateLabel: string; saveOnly?: boolean;
   onGenerate: () => void; children?: ReactNode; promptDisabled?: boolean;
 }) {
   return <fieldset disabled={busy} className="contents">
@@ -135,7 +136,7 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
     {error && <p role="alert" className="px-1 text-xs text-destructive">{error}</p>}
     <div className="flex flex-wrap items-center gap-2">
       {chips}
-      <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
+      <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (saveOnly ? '' : cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
       <Button variant="bare" type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
         {busy && <LoadingIcon className="animate-spin" aria-hidden />}<SwapLabel active={busy} on="提交中…" off={generateLabel} />

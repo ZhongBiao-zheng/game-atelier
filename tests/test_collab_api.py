@@ -50,13 +50,19 @@ def test_listener_uses_next_available_port_and_releases_it():
     project = create_canvas_project("监听测试").project_id
     config.enable_share(project, config.ShareSettings())
     with socket.socket() as occupied:
-        try:
-            occupied.bind(("127.0.0.1", 5181))
-        except OSError:
-            pass
+        for probe_port in range(5181, 5200):
+            try:
+                occupied.bind(("127.0.0.1", probe_port))
+                occupied.listen(1)
+                break
+            except OSError:
+                continue
+        else:
+            pytest.fail("没有可用的测试监听端口")
+        config._update(lambda saved: setattr(saved, "preferred_port", probe_port) or True)
         try:
             server.apply_saved()
-            assert server.port > 5181
+            assert server.port != probe_port
             port = server.port
             response = httpx.get(f"http://127.0.0.1:{port}/collab/v1/manifest", trust_env=False)
             assert response.json()["shares"][0]["project_id"] == project
@@ -138,7 +144,7 @@ def test_peer_list_deduplicates_manual_and_broadcast_addresses(monkeypatch):
         "connection_principal": SimpleNamespace(session_id="first"),
     }})
     assert [card["peer_key"] for card in peers(request)["shares"]] == [manual.key]
-    monkeypatch.setattr(collab_proxy, "_tokens", {collab_proxy._key(request, auto.key, project_id): "existing"})
+    monkeypatch.setattr(collab_proxy, "_tokens", {collab_proxy._key(request, auto.key, project_id): ("existing", 1)})
     assert [card["peer_key"] for card in peers(request)["shares"]] == [auto.key]
 
 
@@ -202,3 +208,24 @@ def test_guest_token_never_crosses_a_data_root_switch(isolated_data_root, monkey
     with pytest.raises(HTTPException) as revoked:
         require_guest(request, project)
     assert revoked.value.status_code == 401
+
+
+def test_restart_can_renew_only_same_share_epoch():
+    project = create_canvas_project("共享").project_id
+    config.enable_share(project, config.ShareSettings(passcode="same"))
+    base = f"/collab/v1/projects/{project}"
+    with TestClient(create_collab_app(), base_url="http://127.0.0.1", client=("127.0.0.1", 3000)) as client:
+        login = {"display_name": "Kim", "passcode": "same", "client_proof": "a" * 64}
+        result = client.post(base + "/auth", json=login)
+        assert result.status_code == 200
+        saved = {**login, "passcode": "", "resume_proof": result.json()["resume_proof"]}
+        assert client.post(base + "/auth", json=saved).status_code == 200
+        assert client.post(base + "/auth", json={**saved, "client_proof": "b" * 64}).status_code == 403
+        assert client.post(base + "/auth", json={**saved, "display_name": "Other"}).status_code == 403
+        config.disable_share(project)
+        assert client.post(base + "/auth", json=saved).status_code == 404
+        config.enable_share(project, config.ShareSettings(passcode="same"))
+        assert client.post(base + "/auth", json=saved).status_code == 403
+        config.enable_share(project, config.ShareSettings(passcode="new"))
+        assert client.post(base + "/auth", json=saved).status_code == 403
+        assert client.post(base + "/auth", json={"display_name": "Kim", "passcode": "new"}).status_code == 200

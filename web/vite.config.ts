@@ -46,7 +46,7 @@ export default defineConfig({
     fs: { allow: [__dirname, path.resolve(__dirname, '../src/character_workflow/data'), path.resolve(__dirname, '../plugins')] },
     port: 5173,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:5174', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:5174', changeOrigin: true, ws: true },
       '/events': { target: 'http://127.0.0.1:5174', changeOrigin: true, ws: false },
     },
   },

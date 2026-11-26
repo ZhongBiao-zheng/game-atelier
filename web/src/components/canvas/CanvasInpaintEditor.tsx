@@ -20,7 +20,7 @@ const BRUSH_MAX = 200;
 const choiceId = (alias: string, model: string) => `${alias}\u0000${model}`;
 
 /** 同一选区编辑器，按模型分流常规蒙版编辑与 MJ 原生重绘。 */
-export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, initialData, busy: parentBusy, error,
+export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, initialData, saveOnly = false, busy: parentBusy, error,
   onOpenChange, onSave, onSubmit }: ImageEditorProps) {
   const initialDraft = initialData?.generation_draft ?? null;
   const [serializing, setSerializing] = useState(false);
@@ -210,9 +210,9 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     </div>}
     composer={<EditorComposer prompt={noPrompt ? '' : prompt} onPrompt={setPrompt} promptDisabled={noPrompt}
       placeholder={noPrompt ? '此工作流无需提示词' : mj || requiredPrompt ? '描述选区要改成什么（必填）' : workflowInputs ? '描述选区要改成什么' : '描述选区要改成什么；留空自然修复'}
-      blocker={blocker} error={error || localError} cost={cost} busy={busy}
-      generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
-      chips={<EditGenerationControls choices={choices} choice={choice}
+      saveOnly={saveOnly} blocker={saveOnly ? ready ? null : '图片加载中…' : blocker} error={error || localError} cost={cost} busy={busy}
+      generateLabel={saveOnly ? '保存编辑' : `生成 ${candidates} 张`} onGenerate={() => void submit(!saveOnly)}
+      chips={!saveOnly && <EditGenerationControls choices={choices} choice={choice}
         onChoice={next => { setSelected(choiceId(next.key.alias, next.model)); setWorkflowValues({}); }} caps={caps}
         resolution={resolution} onResolution={setResolutionChoice} quality={quality} onQuality={setQualityChoice}
         count={candidates} onCount={setCount} workflowParams={params}

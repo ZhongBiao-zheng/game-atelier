@@ -21,7 +21,7 @@ def fixed_edit_source(document, node_id):
     return node, version
 
 
-def save_image_edit(project_id, payload, mask_body=None):
+def save_image_edit(project_id, payload, mask_body=None, *, authorize=None, creator=None, on_committed=None):
     """Save a local configuration and immutable mask; never resolve a provider or create a Job."""
     import hashlib
     import io
@@ -42,6 +42,8 @@ def save_image_edit(project_id, payload, mask_body=None):
     )
 
     with file_lock(canvas_project_lock_path(project_id)):
+        if authorize:
+            authorize()
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_canvas_document_unlocked(project_id)
         if current.revision != payload.expected_revision:
@@ -63,7 +65,9 @@ def save_image_edit(project_id, payload, mask_body=None):
                     or source.version_id != payload.source_version_id):
                 raise ValueError("源图版本已经变化，请重新打开编辑器")
             source_id, source_version_id = source_node.id, source.version_id
-        width, height = _source_display_size(canvas_project_dir(project_id) / source.path, source)
+        from .canvas_projects import _resolve_canvas_media_version
+        source_path, _ = _resolve_canvas_media_version(project_id, source)
+        width, height = _source_display_size(source_path, source)
         reference_id, reference_version_id = payload.reference_node_id, payload.reference_version_id
         if bool(reference_id) != bool(reference_version_id) and reference_id:
             raise ValueError("参考素材需要固定版本")
@@ -132,6 +136,8 @@ def save_image_edit(project_id, payload, mask_body=None):
                 title="扩图" if data.options.mode == "outpaint" else "局部修改",
                 position=position.model_copy(update={"y": position.y + shift}), size=size, data=data,
             )
+        if creator and not existing:
+            node.created_by, node.created_by_client = creator
         nodes = [node if n.id == node_id else n for n in current.nodes]
         if not existing:
             nodes.append(node)
@@ -149,6 +155,8 @@ def save_image_edit(project_id, payload, mask_body=None):
             "content_versions": versions,
         }).model_dump(mode="json"))
         project = read_canvas_project(project_id)
+        if authorize:
+            authorize()
         if target:
             _commit_canvas_upload(project_id, project, updated, target, normalized_body, timestamp)
         else:
@@ -156,6 +164,8 @@ def save_image_edit(project_id, payload, mask_body=None):
                 "updated_at": timestamp,
             }).model_dump(mode="json"))
             atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
+        if on_committed:
+            on_committed(current, updated)
         return updated, node_id
 
 

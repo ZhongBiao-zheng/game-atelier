@@ -61,6 +61,10 @@ class PluginNodeContribution(_Model):
     default_size: PluginSize
     min_size: PluginSize | None = None
     payload_schema_version: int = Field(ge=1)
+    # Dot paths select scalar leaves; arrays retain order and use the same leaf schema.
+    shared_fields: list[Annotated[str, StringConstraints(
+        pattern=r"^[a-zA-Z][a-zA-Z0-9_]{0,63}(\.[a-zA-Z][a-zA-Z0-9_]{0,63}){0,7}$",
+    )]] = Field(default_factory=list, max_length=96, exclude_if=lambda fields: not fields)
     input_modalities: list[Modality] = Field(default_factory=list, max_length=4)
     max_inputs: int | None = Field(default=None, ge=1, le=64)
     surfaces: list[Literal["node", "panel"]] = Field(min_length=1, max_length=2)

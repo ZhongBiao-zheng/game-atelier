@@ -119,6 +119,8 @@ POST /api/collab/shares/stop-all
 GET /api/collab/peers
 POST /api/collab/peers/manual
 DELETE /api/collab/peers/manual
+POST /api/collab/remote/{peer_key}/projects/{project_id}/image-edits
+POST /api/collab/remote/{peer_key}/projects/{project_id}/uploads
 POST /api/collab/remote/{peer_key}/projects/{project_id}/auth
 GET /api/collab/remote/{peer_key}/projects/{project_id}/document
 GET /api/collab/remote/{peer_key}/projects/{project_id}/cover

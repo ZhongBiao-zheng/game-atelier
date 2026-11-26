@@ -100,7 +100,7 @@ export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', tit
         <TabsList>
           <TabsTrigger value="shots">镜头</TabsTrigger>
           <TabsTrigger value="entities">角色与场景</TabsTrigger>
-          <TabsTrigger value="script">剧本</TabsTrigger>
+          {!host.sharedMediaUrl && <TabsTrigger value="script">剧本</TabsTrigger>}
         </TabsList>
         <TabsContent value="shots" className="flex min-h-0 flex-1 gap-3 data-[state=inactive]:hidden">
           <div className="flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-border">
@@ -172,7 +172,7 @@ export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', tit
           <EntitiesForm payload={payload} host={host} type={type} change={change} />
         </TabsContent>
         <TabsContent value="script" className="min-h-0 flex-1 overflow-y-auto pr-1 data-[state=inactive]:hidden">
-          <StoryboardScript payload={payload} host={host} change={change} onWritten={() => setTab('shots')} />
+          {!host.sharedMediaUrl && <StoryboardScript payload={payload} host={host} change={change} onWritten={() => setTab('shots')} />}
         </TabsContent>
       </Tabs>
       <div className="flex shrink-0 items-center gap-2">

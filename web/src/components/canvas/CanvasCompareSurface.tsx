@@ -9,7 +9,7 @@ const KEYBOARD_STEP = 5;
 /** 前后对比：左侧 Before、右侧 After，拖动分界查看。
  *  frame 只在扩图结果对比它自己的原图时给出，其余组合两张图各自完整放进画框。
  *  bitmapWidth 为 null 时取原图（全屏查看）。 */
-export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterVersionId, afterSize, frame, bitmapWidth }: {
+export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterVersionId, afterSize, frame, bitmapWidth, resolveMediaUrl }: {
   projectId: string;
   title: string;
   beforeVersionId: string | null;
@@ -18,6 +18,7 @@ export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterV
   afterSize: CanvasSize | null;
   frame: CanvasNormalizedFrame | null;
   bitmapWidth: number | null;
+  resolveMediaUrl?: (versionId:string)=>string;
 }) {
   const [split, setSplit] = useState(50);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -41,9 +42,9 @@ export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterV
     left: fitted.x + frame.x * fitted.width, top: fitted.y + frame.y * fitted.height,
     width: frame.width * fitted.width, height: frame.height * fitted.height,
   } : undefined;
-  const src = (versionId: string) => bitmapWidth === null
+  const src = resolveMediaUrl ?? ((versionId: string) => bitmapWidth === null
     ? canvasMediaUrl(projectId, versionId)
-    : canvasMediaUrlAtWidth(projectId, versionId, bitmapWidth);
+    : canvasMediaUrlAtWidth(projectId, versionId, bitmapWidth));
 
   function moveTo(event: ReactPointerEvent) {
     const rect = surfaceRef.current?.getBoundingClientRect();

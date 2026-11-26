@@ -461,6 +461,10 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     )
     from viewer_server.collab_routes import router as collab_router
     from viewer_server.collab_transfer_routes import collab_transfer_local_router
+    from viewer_server.collab_ws import local_ws
+    from viewer_server.collab_uploads import local_uploads
+    app.include_router(local_ws)
+    app.include_router(local_uploads)
     app.include_router(collab_router)
     app.include_router(collab_transfer_local_router)
     app.include_router(router)

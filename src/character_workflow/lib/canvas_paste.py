@@ -35,6 +35,7 @@ from character_workflow.lib.schemas import (
     CanvasDocument,
     CanvasMediaVersion,
     CanvasNode,
+    CanvasPendingOriginal,
     CanvasTextVersion,
     CanvasUploadOrigin,
     CanvasUserEditOrigin,
@@ -44,7 +45,7 @@ _NODES = TypeAdapter(list[CanvasNode])
 
 
 def _copied_version(
-    media_reader: Callable[[CanvasMediaVersion], bytes],
+    media_reader: Callable[[CanvasMediaVersion], bytes | CanvasPendingOriginal],
     version: CanvasContentVersion,
     target_project_id: str,
     timestamp: str,
@@ -60,11 +61,13 @@ def _copied_version(
     if suffix is None or not version.mime_type.startswith(f"{version.kind}/"):
         raise CanvasDocumentError("canvas_paste_media_type", "不支持这种媒体格式。")
     body = media_reader(version)
-    if len(body) != version.bytes or hashlib.sha256(body).hexdigest() != version.sha256:
-        raise CanvasDocumentError("canvas_paste_media_changed", "媒体内容与来源版本不一致。")
-    detected = _sniff_media_mime(body)
-    if detected and detected.split("/")[0] != version.kind:
-        raise CanvasDocumentError("canvas_paste_media_type", "媒体内容与类型不符。")
+    pending = body if isinstance(body, CanvasPendingOriginal) else None
+    if isinstance(body, bytes):
+        if len(body) != version.bytes or hashlib.sha256(body).hexdigest() != version.sha256:
+            raise CanvasDocumentError("canvas_paste_media_changed", "媒体内容与来源版本不一致。")
+        detected = _sniff_media_mime(body)
+        if detected and detected.split("/")[0] != version.kind:
+            raise CanvasDocumentError("canvas_paste_media_type", "媒体内容与类型不符。")
     upload_id = secrets.token_hex(16)
     target = canvas_project_dir(target_project_id) / "uploads" / f"{upload_id}{suffix}"
     copied = CanvasMediaVersion.model_validate({
@@ -73,8 +76,9 @@ def _copied_version(
         "created_at": timestamp,
         "origin": CanvasUploadOrigin(kind="upload", upload_id=upload_id).model_dump(),
         "path": target.relative_to(canvas_project_dir(target_project_id)).as_posix(),
+        "pending_shared_original": pending,
     })
-    return copied, (target, body)
+    return copied, (target, body) if isinstance(body, bytes) else None
 
 
 def _rewritten(value: Any, mapping: dict[str, str]) -> Any:
@@ -101,7 +105,9 @@ def paste_nodes_into_canvas(
         raise CanvasDocumentError("canvas_paste_same_project", "同一张画布内的粘贴不走复制。")
     source = hydrate_document_provenance(source_project_id, read_canvas_document(source_project_id))
 
-    def media_reader(version: CanvasMediaVersion) -> bytes:
+    def media_reader(version: CanvasMediaVersion) -> bytes | CanvasPendingOriginal:
+        if version.pending_shared_original:
+            return version.pending_shared_original
         path, _ = resolve_canvas_media(source_project_id, version.version_id)
         return path.read_bytes()
 
@@ -114,7 +120,7 @@ def paste_nodes_into_canvas(
 def paste_from_document(
     *, project_id: str, source: CanvasDocument, nodes: list[CanvasNode],
     connections: list[CanvasConnection], document_revision: int,
-    media_reader: Callable[[CanvasMediaVersion], bytes],
+    media_reader: Callable[[CanvasMediaVersion], bytes | CanvasPendingOriginal],
 ) -> CanvasDocument:
     if not nodes:
         raise CanvasDocumentError("canvas_paste_empty", "没有可粘贴的节点。")
@@ -194,6 +200,8 @@ def paste_from_document(
         })
         # model_copy 不跑校验：落盘前按 CanvasDocument 整体校验一次。
         document = CanvasDocument.model_validate(updated.model_dump(mode="json"))
+        from character_workflow.lib.collab_pending_media import pending_writes
+        writes.extend(pending_writes(project_id, copied_by_id.values()))
         _commit(project_id, document, writes, timestamp)
     return document
 

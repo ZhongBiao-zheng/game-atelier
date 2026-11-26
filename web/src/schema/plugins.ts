@@ -17,6 +17,7 @@ export interface PluginNodeContribution {
   default_size: PluginSize;
   min_size: PluginSize | null;
   payload_schema_version: number;
+  shared_fields?: string[];
   input_modalities: PluginModality[];
   max_inputs: number | null;
   surfaces: PluginSurfaceKind[];

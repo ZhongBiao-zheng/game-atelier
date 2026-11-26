@@ -72,6 +72,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/ps-bridge/execute-log.jsonl`（+ `.1.jsonl`） | PS 联动插件（Agent 执行脚本，1 MiB 轮转留一份） | 设置 → 插件 → PS 联动（最近 20 条）；只在本机，网关、用量统计、项目包都不读 |
 | `.config/ps-bridge.json` | 设置 → 插件 → PS 联动（「允许 Agent 执行脚本」，默认关） | PS 联动插件（关着时藏起 execute） |
 | `.config/collab-shares.json` | 本机协作设置（持锁原子写） | 局域网协作监听器与发现服务，保存房主标识、共享配置及手动连接地址 |
+| `.runtime/collab-cache/`、`.runtime/collab-repairs/<host_id>/<source_project_id>/` | 共享画布代理按摘要缓存已读取的媒体，离线另存登记待补目标 | 访客重连并通过鉴权后按摘要、长度和类型补齐目标画布 |
 | `.config/plugins.json` | Web (`POST /api/plugins/{id}/enable\|disable`) | viewer-server（`lib/plugin_registry.py`，决定加载哪些插件） |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
 

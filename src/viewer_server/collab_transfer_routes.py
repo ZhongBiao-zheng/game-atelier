@@ -110,7 +110,17 @@ def _selected_nodes(document, ids):
 @collab_transfer_local_router.post(_REMOTE + "/copy-to-local")
 def copy_to_local(peer_key: str, project_id: str, body: CopySelection, request: Request):
     from character_workflow.lib.canvas_paste import paste_from_document
-    source = _remote_document(request, peer_key, project_id)
+    from viewer_server import collab_offline
+    from character_workflow.lib.collab_discovery import discovery
+    offline = False
+    try:
+        source = _remote_document(request, peer_key, project_id)
+        host_id = None
+    except HTTPException as error:
+        if error.status_code != 503:
+            raise
+        host_id, source = collab_offline.snapshot(request, peer_key, project_id)
+        offline = True
     nodes, edges = _selected_nodes(source, body.node_ids)
     revision = body.document_revision
     if revision is None:
@@ -125,8 +135,28 @@ def copy_to_local(peer_key: str, project_id: str, body: CopySelection, request: 
     remaining = _MAX_TRANSFER
 
     def download(version):
-        nonlocal remaining
-        media = _download_media(request, peer_key, project_id, version, remaining)
+        nonlocal remaining, offline, host_id
+        if version.bytes > _MAX_TRANSFER or version.mime_type not in _SUFFIXES:
+            raise HTTPException(413, "媒体格式或大小超过复制范围")
+        if host_id is None:
+            try:
+                host_id = str(discovery.get(peer_key).manifest.host_id)
+            except KeyError:
+                pass
+        media = collab_offline.cached_bytes(version, host_id, project_id) if host_id else None
+        if media is None and not offline:
+            try:
+                media = _download_media(request, peer_key, project_id, version, remaining)
+            except HTTPException as error:
+                if error.status_code != 503:
+                    raise
+                offline = True
+        if media is None:
+            if host_id is None:
+                host_id, _ = collab_offline.snapshot(request, peer_key, project_id)
+            return collab_offline.pending_source(host_id, project_id, version.version_id)
+        if len(media) > remaining:
+            raise HTTPException(413, "所选媒体超过复制范围")
         remaining -= len(media)
         return media
 

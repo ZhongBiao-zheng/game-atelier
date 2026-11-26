@@ -46,12 +46,13 @@ def lan_endpoint(value: str) -> str:
 
 
 class Card(BaseModel):
-    project_id: str = Field(min_length=1, max_length=160, pattern=r"^[a-zA-Z0-9_-]+$")
+    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
     name: str = Field(min_length=1, max_length=160)
     cover_version_id: str | None = Field(default=None, max_length=160)
     node_count: int = Field(ge=0)
     mode: Literal["view", "edit"]
     requires_passcode: bool
+    access_epoch: int = Field(default=1, ge=1)
     allow_borrow_provider: bool
     online_count: int = Field(ge=0)
     updated_at: str = Field(max_length=64)
@@ -184,7 +185,7 @@ class Discovery:
     def active(self):
         return bool(self._threads)
 
-    def start(self, beacon_factory, addresses) -> None:
+    def start(self, beacon_factory, addresses, on_tick=None) -> None:
         if self._threads:
             return
         self._port = int(os.environ.get("GAME_ATELIER_COLLAB_DISCOVERY_PORT", "5182"))
@@ -202,6 +203,7 @@ class Discovery:
             sock.close()
             log.warning("共享画布 UDP 发现暂时不可用，手动连接仍然可用")
         self._addresses = addresses
+        self._on_tick = on_tick
         self._beacon_factory = beacon_factory
         host_id = config.read_config().host_id
         self._threads = [threading.Thread(target=self._maintain, daemon=True, name="collab-discovery"),
@@ -243,6 +245,8 @@ class Discovery:
         while not self._stop.is_set():
             try:
                 self.broadcast(self._beacon_factory())
+                if self._on_tick:
+                    self._on_tick()
                 if time.monotonic() >= next_poll:
                     for address in config.read_config().manual_peers:
                         self._enqueue(address, None)

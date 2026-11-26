@@ -48,6 +48,15 @@ export interface HostPluginApi {
   newId: (prefix: string) => string;
 }
 
+export interface SharedPluginNodeProps {
+  node: CanvasPluginNode;
+  document: CanvasDocument;
+  projectId: string;
+  mediaUrl: (versionId: string) => string;
+  editable: boolean;
+  onPayloadChange: (payload: JsonValue) => void;
+}
+
 export interface HostPluginNodeProps {
   node: CanvasPluginNode;
   api: HostPluginApi;
@@ -66,6 +75,7 @@ export interface HostPluginNodeType {
   /** 节点外壳由宿主按清单建好（id、标题、位置、尺寸），这里只填 payload；sourceNodeId 是工具栏动作的来源节点。 */
   create: (shell: CanvasPluginNode, sourceNodeId?: string) => CanvasPluginNode;
   Body: ComponentType<HostPluginNodeProps>;
+  SharedBody?: ComponentType<SharedPluginNodeProps>;
   toolbar: (node: CanvasPluginNode) => readonly HostPluginToolbarAction[];
   /** 工具栏动作声明 open_panel 时，新建节点后打开它的编辑界面。 */
   openPanel?: (nodeId: string) => void;

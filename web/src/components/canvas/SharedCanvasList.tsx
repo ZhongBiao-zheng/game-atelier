@@ -67,11 +67,6 @@ export function SharedStatusButton({shares, refresh}: {shares: CollabCard[]; ref
   </>;
 }
 
-export function EditorSharedStatus() {
-  const {cards, refresh} = useSharedCanvases();
-  return <SharedStatusButton shares={cards.filter(card => card.is_self)} refresh={refresh} />;
-}
-
 export function SharedCanvasList({cards, error, loading, refresh, onOpen}: {
   cards: CollabCard[]; error: string; loading: boolean; refresh: () => void; onOpen: (card: CollabCard) => void;
 }) {

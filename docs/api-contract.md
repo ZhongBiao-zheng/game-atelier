@@ -1683,3 +1683,9 @@ Auto 确认金额按最近一条用户消息之后已提交的生成估价累计
 画布内容版本支持可选的 `frozen_generation`，表示来源生成快照 v1，含模态、提示词、模型 ID、平台名称和品牌图标、公开参数、按顺序存放的参考输入、费用与耗时。参考输入通过当前项目中的版本 ID 引用媒体，文本可内联。节点的可选 `created_by` 和 `created_by_client` 分别记录显示名与协作客户端身份。
 
 `POST /api/collab/remote/{peer_key}/projects/{project_id}/copy-to-local` 接收 `node_ids`、`target_project_id` 和可选的 `document_revision`，返回更新后的本地画布。相同前缀的 `send-to-studio` 接收 `version_id`，返回本地上传路径及快照。`POST /api/studio/jobs/{job_id}/shared-canvas` 接收 `peer_key`、`project_id` 与 `output_index`，将结果与参考媒体作为一笔操作写入房主画布。
+
+局域网和本机代理的项目端点均提供 `ws`、`uploads`、`image-edits`。本机房主使用项目的 owner WebSocket。房间通过 `hello_snapshot` 确认身份和初始版本，`presence_state` 更新成员与选区。`submit_op` 带 `op_id` 和 `base_revision`，服务端按会话确定作者。节点级增量按 `op_applied` 的基准版本应用，失配时重新读取完整文档。恢复操作通过 `undo_of` 引用本人已确认的操作。房主改权限即时通知，改口令或停止共享则关闭旧连接。
+
+离线另存复用 `copy-to-local`。媒体的可选 `pending_shared_original` 保存房主、源项目和版本标识。缺原件时仍可显示已获取的缩略图，重新取得读取权限并验证 MIME、字节数和 SHA-256 后会清除标记。
+
+插件清单 `contributes.nodes[].shared_fields` 可列出路径，例如 `["title", "shots.caption"]`。只复制命中的标量或标量数组。第三方插件在共享画布中只读。缺少匹配声明的投影带有 `shared_placeholder: true`，复制到本地后仍显示占位。

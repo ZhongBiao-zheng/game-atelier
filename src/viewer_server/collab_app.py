@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import socket
 import threading
 import time
@@ -33,6 +34,8 @@ class GuestAuth(BaseModel):
     model_config = ConfigDict(extra="forbid")
     display_name: str = Field(min_length=1, max_length=40)
     passcode: str = Field(default="", max_length=200)
+    resume_proof: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    client_proof: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 def owner_name() -> str:
@@ -55,7 +58,8 @@ def manifest() -> Manifest:
         cards.append(Card(
             project_id=entry.project_id, name=public_text(project.name), node_count=len(document.nodes),
             cover_version_id=cover.version_id if cover else None, mode=entry.mode,
-            requires_passcode=bool(entry.passcode_hash), allow_borrow_provider=entry.allow_borrow_provider,
+            requires_passcode=bool(entry.passcode_hash), access_epoch=entry.passcode_version,
+            allow_borrow_provider=entry.allow_borrow_provider,
             online_count=collab_access.online_count(entry), updated_at=max(document.updated_at, entry.updated_at),
         ))
     return Manifest(protocol_version=config.COLLAB_PROTOCOL_VERSION, host_id=saved.host_id,
@@ -68,6 +72,10 @@ def create_collab_app() -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
     from viewer_server.update_routes import UpdateAdmissionMiddleware
     app.add_middleware(UpdateAdmissionMiddleware)
+    from viewer_server.collab_ws import lan_ws
+    from viewer_server.collab_uploads import lan_uploads
+    app.include_router(lan_ws)
+    app.include_router(lan_uploads)
     app.include_router(collab_transfer_lan_router)
 
     @app.middleware("http")
@@ -98,7 +106,7 @@ def create_collab_app() -> FastAPI:
         name = body.display_name.strip()
         if not name:
             raise HTTPException(422, "请填写团队显示名")
-        return collab_access.authenticate(project_id, body.passcode, name)
+        return collab_access.authenticate(project_id, body.passcode, name, body.client_proof, body.resume_proof)
 
     @app.get(PREFIX + "/document")
     def document(project_id: str, request: Request):
@@ -174,6 +182,8 @@ class CollabServer:
             app = create_collab_app()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
+                if os.name != "nt":
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 for port in list(range(saved.preferred_port, 5201)) + list(range(5181, saved.preferred_port)):
                     try:
                         sock.bind((self.host, port))
@@ -237,7 +247,8 @@ collab_server = CollabServer()
 def start_collab() -> None:
     try:
         collab_server.apply_saved()
-        discovery.start(collab_server.beacon, lan_addresses)
+        from viewer_server.collab_offline import repair_online
+        discovery.start(collab_server.beacon, lan_addresses, repair_online)
     except (ValueError, OSError):
         logger.exception("共享画布服务启动失败")
 

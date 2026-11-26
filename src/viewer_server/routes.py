@@ -3467,6 +3467,15 @@ def _canvas_media_file_response(
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except FileNotFoundError:
+        from character_workflow.lib.schemas import CanvasMediaVersion
+        from character_workflow.lib.collab_pending_media import preview_path
+        from character_workflow.lib.canvas_projects import read_canvas_document
+        version = read_canvas_document(project_id).content_versions.get(version_id)
+        if isinstance(version, CanvasMediaVersion) and version.pending_shared_original:
+            preview = preview_path(project_id, version) if display_width and not download else None
+            if preview:
+                return FileResponse(preview, media_type="image/webp", headers={"Cache-Control": "no-store"})
+            raise HTTPException(424, detail="等待房主补齐原件") from None
         raise HTTPException(404, detail="找不到这个画布媒体文件") from None
     except PermissionError as error:
         raise HTTPException(403, detail=str(error)) from error

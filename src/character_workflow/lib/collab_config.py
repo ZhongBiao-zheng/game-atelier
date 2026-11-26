@@ -40,6 +40,7 @@ class SharedCanvasEntry(BaseModel):
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    identity_secret: str | None = None
     host_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     preferred_port: int = Field(default=DEFAULT_PORT, ge=5181, le=5200)
     shares: dict[str, SharedCanvasEntry] = Field(default_factory=dict)
@@ -62,6 +63,16 @@ def _update(change=None) -> Config:
 
 def read_config() -> Config:
     return _update()
+
+
+def identity_hash(context: str) -> str:
+    def ensure(config):
+        if not config.identity_secret:
+            config.identity_secret = secrets.token_hex(32)
+            return True
+        return False
+    secret = _update(ensure).identity_secret
+    return hmac.digest(bytes.fromhex(secret), context.encode(), "sha256").hex()
 
 
 def _hash(salt: str, passcode: str) -> str:

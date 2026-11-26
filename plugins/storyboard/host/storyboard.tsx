@@ -5,7 +5,7 @@
  * 再一镜一镜调用与节点「生成」按钮相同的 Canvas Run；某一镜失败不影响后面的。
  */
 import { EditIcon } from '@/components/ui/icons';
-import type { HostPluginApi, HostPluginModule, HostPluginNodeProps } from '@/plugin-host/hostPlugins';
+import type { HostPluginApi, HostPluginModule, HostPluginNodeProps, SharedPluginNodeProps } from '@/plugin-host/hostPlugins';
 import type { CanvasContentNode, CanvasDocument, CanvasNode, JsonValue } from '@/schema/canvas';
 
 import {
@@ -82,6 +82,24 @@ function Body({ node, api }: HostPluginNodeProps) {
   return isStoryboardNode(node) ? <StoryboardNodeBody node={node} host={storyboardHost(api)} /> : null;
 }
 
+function SharedBody({ node, document, projectId, mediaUrl, editable, onPayloadChange }: SharedPluginNodeProps) {
+  if (!isStoryboardNode(node)) return null;
+  const host: StoryboardHost = {
+    projectId, sharedMediaUrl: mediaUrl, readOnly: !editable,
+    findNode: id => document.nodes.find(item => item.id === id),
+    listNodes: () => document.nodes,
+    resolveVersion: id => id ? document.content_versions[id] : undefined,
+    // Shared edits record their history when the host accepts the payload operation.
+    recordHistory: () => {},
+    updateNode: (id, update) => {
+      if (!editable || id !== node.id) return;
+      const next = update(node);
+      if (isStoryboardNode(next)) onPayloadChange(next.data.payload);
+    },
+  };
+  return <StoryboardNodeBody node={node} host={host} />;
+}
+
 export const plugin: HostPluginModule = {
   nodeTypes: {
     [STORYBOARD_NODE_TYPE]: {
@@ -92,7 +110,7 @@ export const plugin: HostPluginModule = {
           payload: normalizeStoryboardPayload({ script_node_ids: sourceNodeId ? [sourceNodeId] : [] }) as unknown as JsonValue,
         },
       }),
-      Body,
+      Body, SharedBody,
       toolbar: node => [{ id: 'edit', label: `编辑 ${node.title}`, text: '编辑', Icon: EditIcon, onClick: () => requestStoryboardEdit(node.id) }],
       openPanel: nodeId => requestStoryboardEdit(nodeId, 'script'),
       remapPayload: remapStoryboardPayload,
