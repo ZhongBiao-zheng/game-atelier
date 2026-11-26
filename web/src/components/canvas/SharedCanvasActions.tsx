@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { setSharedStudioInput } from '@/pages/sharedStudioInput';
 import { notify } from '@/lib/notify';
 import type { CanvasDocument, CanvasProject } from '@/schema/canvas';
+import { pathFileName } from '@/lib/pathName';
 
 export function SharedCanvasActions({ peerKey, projectId, document, nodeIds }: {
   peerKey: string; projectId: string; document: CanvasDocument; nodeIds: string[];
@@ -41,7 +42,7 @@ export function SharedCanvasActions({ peerKey, projectId, document, nodeIds }: {
       onClick={() => void run(async () => {
         const { path } = await sharedStudioReference(peerKey, projectId, version.version_id);
         const response = await request('/api/raw?path=' + encodeURIComponent(path), '读取本地参考');
-        const file = new File([await response.blob()], path.split(/[\\/]/).pop() || 'reference', { type: version.mime_type });
+        const file = new File([await response.blob()], pathFileName(path) || 'reference', { type: version.mime_type });
         setSharedStudioInput({ kind: 'reference', file, title: node?.title || '共享画布' });
         navigate('/studio');
       })}>发送到创作台作参考</Button>}

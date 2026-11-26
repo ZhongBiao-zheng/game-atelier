@@ -10,7 +10,7 @@ import { DEFAULT_STUDIO_SESSION_ID } from './studioDraft';
 const sessionJobsPath = '/api/studio/agent/sessions/' + DEFAULT_STUDIO_SESSION_ID + '/jobs';
 
 import { Studio } from './Studio';
-import { clearStudioDraft, readStudioDraft, writeStudioDraft, type StudioDraft } from './studioDraft';
+import { clearStudioDraft, readStudioDraft, updateStudioView, writeStudioDraft, type StudioDraft } from './studioDraft';
 import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
 import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
 
@@ -40,6 +40,8 @@ beforeEach(() => {
   clearStudioDraft();
   localStorage.clear();
   sessionStorage.clear();
+  // 这些用例覆盖手动生成；新用户默认 Agent 另有用例。
+  updateStudioView({ inputMode: 'image' });
   const session = { session_id: DEFAULT_STUDIO_SESSION_ID, title: '默认会话', revision: 1, status: 'idle', turns: [], messages: [] } as unknown as StudioAgentSession;
   vi.spyOn(canvasApi, 'listCanvasAgentSessions').mockResolvedValue({ sessions: [session] });
   vi.spyOn(canvasApi, 'getCanvasAgentSession').mockResolvedValue(session);
@@ -980,7 +982,32 @@ describe('Studio', () => {
       'href',
       '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png',
     );
-    expect(screen.queryByTestId('round-generation-cost')).toBeNull();
+    // 没有价格快照也不留空：写明「未计价」。
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('未计价');
+  });
+
+  it('Windows 反斜杠路径下载时只用文件名，不把整条路径（含系统用户名）带进下载名', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ default_alias: 'volc', keys: [{
+          alias: 'volc', provider: 'seedream', access_key: 'ark...key', secret_key: null, capabilities: ['portrait'],
+          models: [{ name: '图片 4.7', id: 'doubao-seedream-4-5-251128' }], notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+        }] }) } as any);
+      }
+      if (url === sessionJobsPath) {
+        return Promise.resolve({ ok: true, json: async () => ({ jobs: [{
+          job_id: 'job-studio-1', character_id: 'volc', prompt: '城市海报', submitted_at: '2026-05-27T01:00:00Z',
+          model: 'doubao-seedream-4-5-251128', params: {},
+          output_paths: ['C:\\Users\\someone\\game-atelier\\studio\\job-studio-1\\v1.png'],
+          status: 'done', error: null, kind: 'image', namespace: 'studio', alias: 'volc', provider: 'seedream',
+        }] }) } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+
+    expect(await screen.findByRole('link', { name: '下载生成结果 1' })).toHaveAttribute('download', 'v1.png');
   });
 
   it('restores a pending studio job after returning to the page', async () => {
@@ -2133,6 +2160,25 @@ describe('Studio 图卡编辑导入参考图', () => {
     });
     // 追加成功且无失败提示
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('操作行「用作参考」：多张结果先选第几张，再把那张导进输入框', async () => {
+    const inner = mockCompletedBatchAndKeys();
+    const fetchMock = vi.fn(((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('/api/gallery/image')) {
+        return Promise.resolve({ ok: true, blob: async () => new Blob(['fake-png'], { type: 'image/png' }) } as any);
+      }
+      return (inner as any)(url, init);
+    }) as any);
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    const button = await screen.findByRole('button', { name: '用作参考' });
+    expect(button.previousElementSibling?.textContent).toBe('再次生成');
+    fireEvent.keyDown(button, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: '第 2 张' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/api\/gallery\/image\?path=.*v2\.png/)));
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringMatching(/\/api\/gallery\/image\?path=.*v1\.png/));
   });
 
   it('取图失败（源文件不在）：不弹提示、也不留半张参考图（飙哥指定：这条链路全程静默）', async () => {

@@ -23,10 +23,10 @@ function typeAgent(text: string) {
   fireEvent.input(field);
 }
 
-it('三种模式共用输入壳，保留 Agent 草稿并在刷新时恢复生成模式', () => {
+it('新用户默认 Agent，三种模式共用输入壳，保留 Agent 草稿并在刷新时恢复手动切换的模式', () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sessions: [], skills: [], models: [] }))));
   const first = render(<Page />);
-  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('图片');
+  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('Agent');
   fireEvent.click(screen.getByLabelText('选择生成模式'));
   expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Agent', '图片', '视频']);
   fireEvent.click(screen.getByRole('option', { name: 'Agent' }));
@@ -38,9 +38,10 @@ it('三种模式共用输入壳，保留 Agent 草稿并在刷新时恢复生成
   pickMode('视频');
   pickMode('Agent');
   expect(screen.getByRole('textbox')).toHaveTextContent('未发送的草稿');
+  pickMode('图片');
   first.unmount();
   render(<Page />);
-  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('Agent');
+  expect(screen.getByLabelText('选择生成模式')).toHaveTextContent('图片');
 });
 
 it('首页只在发送时新建会话，收件后跳到创作台并恢复同一会话', async () => {

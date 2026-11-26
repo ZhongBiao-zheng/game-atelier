@@ -11,6 +11,7 @@ import type { PromptVariableRange } from '@/lib/promptAssetTemplate';
 import { FileInput } from '@/components/ui/file-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { pathFileName } from '@/lib/pathName';
 
 export type PromptEditorState = {
   assetId?: string;
@@ -106,5 +107,5 @@ export function defaultPromptTitle(text: string): string {
 }
 
 export function defaultMediaTitle(request: Extract<CreationAssetSaveRequest, { kind: 'media' }>): string {
-  return request.file?.name.replace(/\.[^.]+$/, '') || request.sourcePath?.split('/').pop()?.replace(/\.[^.]+$/, '') || '未命名媒体';
+  return request.file?.name.replace(/\.[^.]+$/, '') || (request.sourcePath ? pathFileName(request.sourcePath).replace(/\.[^.]+$/, '') : '') || '未命名媒体';
 }

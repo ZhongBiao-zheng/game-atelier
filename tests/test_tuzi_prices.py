@@ -76,3 +76,71 @@ def test_group_override_expression_is_already_final(monkeypatch):
     _sync(monkeypatch)
     # 账单：group_override 的 gpt-image-2.5-flare 表达式 0.3 即扣 $0.3。
     assert _estimate(FLARE, "1024x1024") == 0.21
+
+
+def _count_sync_requests(monkeypatch, configured):
+    calls = []
+    bodies = {
+        "pricing": _pricing_body(),
+        "status": {"success": True, "data": {"usd_exchange_rate": 0.7}},
+    }
+
+    def get(url, timeout):
+        calls.append(url)
+        return _Response(bodies[url.rsplit("/", 1)[-1]])
+
+    monkeypatch.setattr(tuzi_prices, "_configured_models", lambda: configured)
+    monkeypatch.setattr(tuzi_prices.requests, "get", get)
+    monkeypatch.setattr(tuzi_prices, "_next_stale_sync_at", 0.0)
+    return calls
+
+
+def test_stale_sync_pulls_once_when_a_model_or_group_is_not_in_the_snapshot(monkeypatch):
+    configured = {"default": {SEEDREAM_55}}
+    calls = _count_sync_requests(monkeypatch, configured)
+    # 还没有快照（新装、或刚把计费分组填上）：当场同步，这张图马上有价。
+    assert tuzi_prices.sync_if_stale()["configured"] == {"default": [SEEDREAM_55]}
+    assert _estimate(SEEDREAM_55, "1600x1600") == 0.091
+    assert len(calls) == 2
+    # 快照已覆盖：不再联网。
+    tuzi_prices.sync_if_stale()
+    assert len(calls) == 2
+    # 供应商里新加了模型：再补拉一次。
+    configured["default"].add(FLARE)
+    tuzi_prices.sync_if_stale()
+    assert len(calls) == 4
+    assert _estimate(FLARE, "1024x1024") == 0.21
+
+
+def test_failed_stale_sync_cools_down_instead_of_hitting_the_network_every_job(monkeypatch):
+    calls = []
+
+    def offline(url, timeout):
+        calls.append(url)
+        raise tuzi_prices.requests.ConnectionError("offline")
+
+    monkeypatch.setattr(tuzi_prices, "_configured_models", lambda: {"default": {SEEDREAM_55}})
+    monkeypatch.setattr(tuzi_prices.requests, "get", offline)
+    monkeypatch.setattr(tuzi_prices, "_next_stale_sync_at", 0.0)
+    tuzi_prices.sync_if_stale()
+    tuzi_prices.sync_if_stale()
+    assert len(calls) == 1
+
+
+def test_saving_tuzi_models_or_billing_group_starts_backfill(monkeypatch, isolated_data_root):
+    from tests.local_client import LocalTestClient as TestClient
+    from viewer_server.server_app import build_app
+
+    started = []
+    monkeypatch.setattr(tuzi_prices, "start_stale_sync", lambda: started.append(True))
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
+    assert client.post("/api/keys", json={
+        "alias": "Tuzi", "provider": "custom", "access_key": "sk-test",
+        "base_url": "https://api.tu-zi.com", "models": [],
+    }).status_code == 201
+    assert client.patch("/api/keys/Tuzi", json={"billing_group": "default"}).status_code == 200
+    assert client.post("/api/keys", json={
+        "alias": "other", "provider": "custom", "access_key": "sk-test",
+        "base_url": "https://example.com/v1", "models": [],
+    }).status_code == 201
+    assert started == [True, True]

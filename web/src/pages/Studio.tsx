@@ -75,6 +75,7 @@ import { reuseRoundParameter, type RoundParameter } from './studioParameterReuse
 import { agentUsageLabel } from '@/components/agent/canvasAgentUsage';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { pathFileName } from '@/lib/pathName';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 const ASSET_TITLE_LENGTH = 24;
@@ -632,7 +633,7 @@ function StudioFull() {
     if (already) return;
     const requestSequence = reEditSequence.current;
     try {
-      const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
+      const file = await fetchAssetAsFile(path, pathFileName(path).replace(/\.[^.]+$/, '') || 'edit-ref');
       // 取图期间切了对话（或输入整套换过）：不写进别的对话的输入。
       if (requestSequence !== reEditSequence.current) return;
       editRefSource.current.set(file, path);

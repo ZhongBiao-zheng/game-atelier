@@ -5,6 +5,7 @@ import { mjParamsFromJob } from '@/lib/mjParams';
 import { imageFamily } from '@/lib/modelFamily';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
+import { pathSegments } from '@/lib/pathName';
 
 export interface ReferenceCounts { images: number; videos: number; audios: number }
 
@@ -42,7 +43,7 @@ export function referenceImagesFor(job: Job): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const ref of refs) {
-    const key = ref.startsWith('http') ? ref : ref.split('/').slice(-3).join('/');
+    const key = ref.startsWith('http') ? ref : pathSegments(ref).slice(-3).join('/');
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(ref);

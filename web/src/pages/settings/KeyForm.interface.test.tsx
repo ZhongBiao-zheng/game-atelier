@@ -182,4 +182,12 @@ describe('六家对话模型预置', () => {
     expect(byId('qwen').defaultModels.map(model => [model.id, model.modality, model.protocol])).toEqual([
       ['qwen-plus', 'text', 'openai-chat']]);
   });
+
+  it('Tuzi 推荐预置带一个能看图的便宜对话模型，新用户直接能用 Agent', () => {
+    expect(byId('tuzi').defaultModels.map(model => [model.id, model.modality, model.protocol, model.input_modalities])).toEqual([
+      ['gpt-image-2', 'image', undefined, undefined],
+      ['gemini-3.1-flash-lite', 'text', 'openai-chat', ['text', 'image']]]);
+    // 计费分组不填就不计价；首启引导让用户在 Tuzi 建 Key 时选 default，预置跟着填上。
+    expect(presetInitial(byId('tuzi')).billing_group).toBe('default');
+  });
 });

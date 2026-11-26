@@ -78,7 +78,11 @@ function choose(mode: string) {
   fireEvent.click(screen.getByLabelText('选择生成模式'));
   fireEvent.click(screen.getByRole('option', { name: mode }));
 }
-beforeEach(() => { localStorage.clear(); sessionStorage.clear(); clearStudioDraft(); });
+beforeEach(() => {
+  localStorage.clear(); sessionStorage.clear(); clearStudioDraft();
+  // 这些用例覆盖手动生成；新用户默认 Agent 另有用例。
+  updateStudioView({ inputMode: 'image' });
+});
 afterEach(() => vi.unstubAllGlobals());
 
 it('切换会话隔离历史；列表固定默认项，标出运行并可在统一输入框停止', async () => {

@@ -42,6 +42,7 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.setattr(tokendance_prices, "_fetch_pricing", offline_pricing)
     monkeypatch.setattr(tokendance_prices, "_missing_attempts", {})
     monkeypatch.setattr(tuzi_prices, "start_background_sync", lambda: None)
+    monkeypatch.setattr(tuzi_prices, "_next_stale_sync_at", float("inf"))
     monkeypatch.setattr(openai_hk_prices, "start_background_sync", lambda: None)
     # 公告源同理：启动不拉 CNB / GitHub。
     monkeypatch.setattr(announcement_feed, "start_background_sync", lambda: None)

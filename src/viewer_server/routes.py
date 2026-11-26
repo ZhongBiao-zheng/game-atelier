@@ -1202,12 +1202,18 @@ def _stamp_text_protocol(text_protocol: str | None, modalities: list[str],
     ]
 
 
-def _sync_new_model_prices(provider: str) -> None:
-    """新加的 TokenDance 模型不等下一轮全量同步，后台补拉价格，模型菜单与估价马上可用。"""
+def _sync_new_model_prices(provider: str, base_url: str | None = None) -> None:
+    """新加的 TokenDance / Tuzi 模型（Tuzi 还有新填的计费分组）不等下一轮全量同步，后台补拉价格，
+    模型菜单与估价马上可用。"""
     if provider == "tokendance":
         from character_workflow.lib.tokendance_prices import start_missing_sync
 
         start_missing_sync()
+    host = (urlsplit(base_url or "").hostname or "").lower()
+    if host == "tu-zi.com" or host.endswith(".tu-zi.com"):
+        from character_workflow.lib.tuzi_prices import start_stale_sync
+
+        start_stale_sync()
 
 
 @contextmanager
@@ -1280,7 +1286,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     if spec.provider == "atelier":
         # 局域网网关接进来就排在每个路由组的第一位，本机 KEY 作兜底（ADR-0025）。
         model_routes.put_alias_first(spec.alias)
-    _sync_new_model_prices(spec.provider)
+    _sync_new_model_prices(spec.provider, spec.base_url)
     return {"alias": payload.alias}
 
 
@@ -1316,8 +1322,9 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
         raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）") from None
     except ValidationError as error:
         raise HTTPException(422, "供应商配置无效") from error
-    if stored is not None and "models" in patch_data:
-        _sync_new_model_prices(stored.provider)
+    if stored is not None and ("models" in patch_data or "billing_group" in patch_data
+                               or "base_url" in patch_data):
+        _sync_new_model_prices(stored.provider, patch_data.get("base_url", stored.base_url))
     return {"alias": alias}
 
 

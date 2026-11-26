@@ -53,6 +53,8 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
 服务启动及每6小时请求 [公开价格接口](https://api.tu-zi.com/api/pricing) 与
 [状态接口](https://api.tu-zi.com/api/status)。仅保留已配置的Tuzi分组、模型及caller转换后的实际请求模型，
 写入 `.runtime/prices/tuzi.json`。任一接口失败或人民币系数无效时保留旧快照。
+快照记下这次覆盖的分组与模型（`configured`）；保存 Tuzi 供应商（加模型、改计费分组）后在后台补拉，
+job runner 冻结预计费用前发现快照没覆盖也当场补拉一次，失败后 5 分钟内不再等外网。
 
 按实际请求模型查分组表达式，计算后乘 `usd_exchange_rate`；无表达式时仅接受
 `quota_type=0` 且 `model_price>0`，按 `model_price × group_ratio × usd_exchange_rate` 计算。

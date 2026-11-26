@@ -579,6 +579,13 @@ def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
         from character_workflow.lib.tokendance_prices import ensure_priced
 
         ensure_priced(job.model)
+    from character_workflow.lib.callers.openai_image import _is_tuzi_gateway
+
+    if _is_tuzi_gateway(key.base_url or ""):
+        # 刚加的模型、刚填的计费分组还不在价格快照里：先补拉（失败保留旧快照），否则这张图记成未计价。
+        from character_workflow.lib.tuzi_prices import sync_if_stale
+
+        sync_if_stale()
     if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
         return
     model = next((m for m in key.models if m.id == job.model), None)

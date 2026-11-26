@@ -364,17 +364,22 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
       }
       // 新建时顺手拉模型并预选；地址还没填（自定义供应商）就先只校验密钥。
       if (!editing && fetchModelsBaseUrl && run === listRun.current) {
-        const defaultIds = new Set(preset.defaultModels.map(model => model.id));
+        const presetModels = new Map(preset.defaultModels.map(model => [model.id, model]));
         setPendingRequest('list');
         setFetchError(null);
         previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl, access_key: key, include_all: false, text_protocol: textProtocol })
           .then(remote => {
             if (run !== listRun.current) return;
             setDetected(remote.detected ?? null);
-            const picked = remote.models.filter(m => (m.modality === 'image' || m.modality === 'video')
-              && (modelCatalog(m.id) !== undefined || defaultIds.has(m.id)));
+            // 预置自带的模型（含推荐的对话模型）照预置的写法选上；其余只预选认识的图片、视频模型。
+            const picked = remote.models.filter(m => presetModels.has(m.id)
+              || ((m.modality === 'image' || m.modality === 'video') && modelCatalog(m.id) !== undefined));
             if (picked.length > 0) {
-              setModels(picked.map((m): EditableModel => ({ name: m.name, id: m.id, modality: m.modality, protocol: m.protocol, input_modalities: m.input_modalities })));
+              setModels(picked.map((m): EditableModel => {
+                const own = presetModels.get(m.id);
+                return own?.modality === 'text' ? { ...own }
+                  : { name: m.name, id: m.id, modality: m.modality, protocol: m.protocol, input_modalities: m.input_modalities };
+              }));
             }
             setPreview(null);
             if (guided) void recordOnboardingEvent({ event: 'models_detected', count: picked.length });

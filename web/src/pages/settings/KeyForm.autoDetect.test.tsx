@@ -69,6 +69,24 @@ it('pastes a key, detects models and preselects only known image and video model
   expect(payload.access_key).toBe('sk-onboarding-test');
 });
 
+it('preselects the preset chat model with its protocol and image input so Agent works right after onboarding', async () => {
+  vi.mocked(previewModels).mockResolvedValue({
+    models: [remote('gpt-image-2', 'image'), remote('gemini-3.1-flash-lite', 'text'), remote('gpt-5', 'text')],
+    total: 3, excluded: 0,
+  });
+  open();
+  paste();
+  expect(await screen.findByRole('radio', { name: '已选 2' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '保存并开始' }));
+  await waitFor(() => expect(createKey).toHaveBeenCalled());
+  const payload = vi.mocked(createKey).mock.calls[0][0];
+  expect((payload.models ?? []).map(model => [model.id, model.modality, model.protocol, model.input_modalities])).toEqual([
+    ['gpt-image-2', 'image', null, []],
+    ['gemini-3.1-flash-lite', 'text', 'openai-chat', ['text', 'image']],
+  ]);
+  expect(payload.billing_group).toBe('default');
+});
+
 it('keeps many preselected models valid for the selection view and the save payload', async () => {
   const ids = [
     'gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.6', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
@@ -114,7 +132,7 @@ it('keeps the preset models and shows the fetch error when detection fails', asy
   open();
   paste();
   expect(await screen.findByText('拉取模型列表失败：上游 401')).toBeInTheDocument();
-  expect(screen.getByRole('radio', { name: '已选 1' })).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: '已选 2' })).toBeInTheDocument();
   expect(screen.queryByText(/密钥有效|密钥无效/)).not.toBeInTheDocument();
 });
 

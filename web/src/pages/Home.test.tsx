@@ -4,6 +4,7 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { Home } from './Home';
+import { updateStudioView } from './studioDraft';
 
 /** contentEditable prompt 编辑器没有 .value：落 textContent + input 事件等效键入。 */
 function typePrompt(editor: Element, value: string) {
@@ -12,6 +13,9 @@ function typePrompt(editor: Element, value: string) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
+  // 这些用例覆盖手动生成；新用户默认 Agent 另有用例。
+  updateStudioView({ inputMode: 'image' });
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
       return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);

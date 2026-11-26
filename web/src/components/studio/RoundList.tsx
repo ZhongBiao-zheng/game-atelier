@@ -49,6 +49,7 @@ import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { pathFileName } from '@/lib/pathName';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
@@ -377,7 +378,7 @@ export function RoundList({
         submittedAt: round.submittedAt,
         completedAt: round.completedAt,
         generationCost: round.generationCost,
-        name: path.split('/').pop() || `${round.jobId}-${index + 1}.png`,
+        name: pathFileName(path) || `${round.jobId}-${index + 1}.png`,
       }))
       : []
   )), [rounds]);
@@ -1115,7 +1116,7 @@ function MentionPrompt({
           ) : (
             <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
               <AudioIcon aria-hidden />
-              <span className="max-w-[180px] truncate">{hover.path.split('/').pop()}</span>
+              <span className="max-w-[180px] truncate">{pathFileName(hover.path)}</span>
             </div>
           )}
         </div>,
@@ -1139,6 +1140,24 @@ function UsePromptButton({ onClick }: { onClick: () => void }) {
       <TextIcon size="sm" aria-hidden />
       使用提示词
     </Button>
+  );
+}
+
+/** 「用作参考」：把结果导进输入框当参考图。一张直接导；多张先选是第几张。 */
+function UseAsReferenceButton({ paths, onPick }: { paths: string[]; onPick: (path: string) => void }) {
+  if (paths.length === 0) return null;
+  if (paths.length === 1) return <ActionButton onClick={() => onPick(paths[0])}>用作参考</ActionButton>;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ActionButton>用作参考</ActionButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" className="rounded-xl">
+        {paths.map((path, index) => (
+          <DropdownMenuItem key={path} onSelect={() => onPick(path)}>第 {index + 1} 张</DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1496,7 +1515,7 @@ function DoneBatch({
                     </Button></Hint>
                     <Hint label="下载视频"><a
                       href={videoSrc(path)}
-                      download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
+                      download={pathFileName(path) || `${round.jobId}-${index + 1}.mp4`}
                       aria-label={`下载生成视频 ${index + 1}`}
                       className={RESULT_ACTION_CLASS}
                     >
@@ -1567,7 +1586,7 @@ function DoneBatch({
                     )}
                     <Hint label="下载图片"><a
                       href={imageSrc(path)}
-                      download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
+                      download={pathFileName(path) || `${round.jobId}-${index + 1}.png`}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`下载生成结果 ${index + 1}`}
                       className={RESULT_ACTION_CLASS}
@@ -1593,6 +1612,9 @@ function DoneBatch({
       {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
         <RegenerateButton config={round.config} hint={regenerateHint} onClick={() => { void onRegenerate?.(round.config); }} />
+        {onEditAsReference && round.config.kind !== 'video' && (
+          <UseAsReferenceButton paths={round.imagePaths} onPick={path => { void onEditAsReference(path); }} />
+        )}
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除这一轮」（进回收站，可撤销）。 */}
         {(onSavePromptAsset || deletable) && (
@@ -1618,17 +1640,14 @@ function DoneBatch({
           </DropdownMenuContent>
         </DropdownMenu>
         )}
-        {(runMeta.length > 0 || round.generationCost != null) && (
-          <Hint label="耗时 · 完成时间 · 费用"><p data-testid="round-run-meta" className={ROUND_RUN_META_CLASS}>
-            {runMeta.length > 0 && <span>{runMeta.join(' · ')}</span>}
-            {runMeta.length > 0 && round.generationCost != null && <span aria-hidden>·</span>}
-            {round.generationCost != null && (
-              <span data-testid="round-generation-cost" className="shrink-0">
-                {formatGenerationCost(round.generationCost)}
-              </span>
-            )}
-          </p></Hint>
-        )}
+        {/* 费用常显：没有价格（渠道未核价、聚合商没填计费分组、旧记录）写「未计价」，不留空让人以为漏了。 */}
+        <Hint label="耗时 · 完成时间 · 费用"><p data-testid="round-run-meta" className={ROUND_RUN_META_CLASS}>
+          {runMeta.length > 0 && <span>{runMeta.join(' · ')}</span>}
+          {runMeta.length > 0 && <span aria-hidden>·</span>}
+          <span data-testid="round-generation-cost" className="shrink-0">
+            {round.generationCost != null ? formatGenerationCost(round.generationCost) : '未计价'}
+          </span>
+        </p></Hint>
       </div>}
     </section>
   );

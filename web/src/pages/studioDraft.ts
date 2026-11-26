@@ -145,9 +145,10 @@ type StudioView = { inputMode: StudioInputMode; activeSessionId: string | null }
 export function readStudioView(): StudioView {
   try {
     const saved = JSON.parse(sessionStorage.getItem('studio:view') ?? '{}');
-    return { inputMode: saved.inputMode === 'video' || saved.inputMode === 'agent' ? saved.inputMode : 'image',
+    // 没切换过模式时默认 Agent（2026-11-26 飙哥定：所有人默认对话式创作）。
+    return { inputMode: saved.inputMode === 'video' || saved.inputMode === 'image' ? saved.inputMode : 'agent',
       activeSessionId: typeof saved.activeSessionId === 'string' || saved.activeSessionId === null ? saved.activeSessionId : DEFAULT_STUDIO_SESSION_ID };
-  } catch { return { inputMode: 'image', activeSessionId: DEFAULT_STUDIO_SESSION_ID }; }
+  } catch { return { inputMode: 'agent', activeSessionId: DEFAULT_STUDIO_SESSION_ID }; }
 }
 
 export function updateStudioView(change: Partial<StudioView>) {

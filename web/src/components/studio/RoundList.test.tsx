@@ -647,7 +647,7 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
   it('耗时/生成时间与出图参数分行（次行更小更淡，参数行不含耗时）', () => {
     const { getByTestId } = render(<RoundList rounds={[timedDone]} />);
     const runLine = getByTestId('round-run-meta');
-    expect(runLine.textContent).toBe('12s · 18:00');
+    expect(runLine.textContent).toBe('12s · 18:00·未计价');
     expect(runLine.className).toContain('text-xs');
     // 参数行是另一个元素，不含耗时/时间
     const specLine = getByTestId('round-spec-meta');
@@ -669,9 +669,10 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(runLine.lastElementChild).toBe(cost);
   });
 
-  it('无法计价时不显示费用', () => {
+  it('无法计价时写「未计价」，不留空（2026-11-26 试用反馈：看不到花费）', () => {
     render(<RoundList rounds={[timedDone]} />);
-    expect(screen.queryByTestId('round-generation-cost')).toBeNull();
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('未计价');
+    expect(screen.getByTestId('round-run-meta').lastElementChild).toBe(screen.getByTestId('round-generation-cost'));
   });
 
   it('旧 job 无 completed_at 时不显示耗时/时间（优雅降级）', () => {

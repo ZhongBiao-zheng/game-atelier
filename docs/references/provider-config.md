@@ -151,7 +151,7 @@ OpenAI-HK 按张：GPT Image 2 `¥0.08`、Nano Banana `¥0.20`、Nano Banana HD
 2400 积分（¥0.24），已按精确型号加入统一价表。费用快照目前接在 Studio 提交链路，画布没有接入
 这套估价与费用显示；历史无快照的 Job 不用当前价表回填。
 
-Tuzi 必须在 Key 上显式配置 `billing_group`。`default` 分组已核实 GPT Image 2、
+Tuzi 必须在 Key 上显式配置 `billing_group`（Tuzi 预置默认填 `default`，与首启引导「分组选 default」一致）。`default` 分组已核实 GPT Image 2、
 Seedream 4.5、Seedream 5.0 Pro、Nano Banana Pro、Nano Banana 2 与 Midjourney；
 Midjourney 按任务计费，四张拆分结果只计一次。`绘画` 分组当前只核实 GPT Image 2。
 未知分组或未知模型不显示价格。
@@ -162,7 +162,8 @@ Seedance 自动路由尚不能确定实际服务商，保持不计价。
 统一计价入口是 `web/src/lib/generationCost.ts`。价格规则必须同时命中真实渠道、模型与参数：
 命中后在提交时把总价冻结到 `params.estimated_cost_cny`。OpenRouter 图片成功响应及视频终态
 响应的 `usage.cost` 由 job runner 按固定汇率 `$1 = ¥7` 写入 `params.actual_cost_cny`；历史优先
-实际费用、其次预计快照。旧记录缺少快照，或模型、档位、聚合渠道没有核实价格时都不显示。
+实际费用、其次预计快照。旧记录缺少快照，或模型、档位、聚合渠道没有核实价格时，创作台结果写「未计价」
+（2026-11-26 起，之前是留空）。
 绝不把官方直连价套到 TokenDance / OpenRouter 等聚合商。
 
 目前纳入的直连图片规则：Ark `doubao-seedream-5-0-260128`

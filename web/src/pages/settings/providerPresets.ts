@@ -32,6 +32,8 @@ export interface ProviderPreset {
   defaultModels: KeyModel[];
   /** 对话接口固定的预置（ADR-0044）；不写 = 自动。 */
   textProtocol?: string;
+  /** 聚合商的计费分组：不填就不计价，预置按首启引导里让用户选的分组预先填上。 */
+  billingGroup?: string;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -50,7 +52,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'tokendance', value: 'tokendance', label: 'TokenDance', kind: 'relay', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
   { id: 'openrouter', value: 'openrouter', label: 'OpenRouter', kind: 'relay', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
   { id: 'evolink', value: 'evolink', label: 'EvoLink', kind: 'relay', modalities: ['image'], homepageUrl: 'https://evolink.ai', docsUrl: 'https://docs.evolink.ai', defaultBaseUrl: 'https://api.evolink.ai/v1', defaultModels: [{ name: 'Midjourney V8.2', id: 'mj-v8.2', modality: 'image', protocol: 'evolink' }] },
-  { id: 'tuzi', value: 'custom', label: 'Tuzi', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://tu-zi.com', apiKeyUrl: 'https://api.tu-zi.com', defaultBaseUrl: 'https://api.tu-zi.com', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }] },
+  { id: 'tuzi', value: 'custom', label: 'Tuzi', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://tu-zi.com', apiKeyUrl: 'https://api.tu-zi.com', defaultBaseUrl: 'https://api.tu-zi.com', billingGroup: 'default', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }, { name: 'Gemini 3.1 Flash Lite', id: 'gemini-3.1-flash-lite', modality: 'text', protocol: 'openai-chat', input_modalities: ['text', 'image'] }] },
   { id: 'openai-hk', value: 'custom', label: 'OpenAI-HK', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://www.openai-hk.com', apiKeyUrl: 'https://www.openai-hk.com/v3/ai', defaultBaseUrl: 'https://api.openai-hk.com', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }] },
   { id: 'chatgpt', value: 'chatgpt', label: 'ChatGPT（Codex 登录）', kind: 'subscription', modalities: ['image'], defaultModels: [{ name: 'GPT Image', id: 'gpt-image-2', modality: 'image' }] },
   { id: 'custom', value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
@@ -65,5 +67,6 @@ export function presetInitial(preset: ProviderPreset, baseUrl = preset.defaultBa
     base_url: baseUrl, models: preset.defaultModels, modalities: preset.modalities,
     homepage_url: preset.homepageUrl, docs_url: preset.docsUrl, api_key_url: preset.apiKeyUrl,
     ...(preset.textProtocol ? { text_protocol: preset.textProtocol } : {}),
+    ...(preset.billingGroup ? { billing_group: preset.billingGroup } : {}),
   };
 }

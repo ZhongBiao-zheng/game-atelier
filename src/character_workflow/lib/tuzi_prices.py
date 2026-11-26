@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,9 +18,14 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 
 SYNC_INTERVAL_SECONDS = 6 * 3600
+# 新加的模型或新填的分组不等下一轮全量同步；补拉失败后这段时间内不再等外网。
+STALE_RETRY_SECONDS = 300
 _ORIGIN = "https://api.tu-zi.com"
 _log = logging.getLogger(__name__)
 _worker = PeriodicSync("tuzi-price-sync")
+_stale_lock = threading.Lock()
+# monotonic 时间：早于它不发起补拉。测试夹具把它设成无穷大，保证测试不联外网。
+_next_stale_sync_at = 0.0
 stop_background_sync = _worker.stop
 
 
@@ -187,6 +194,8 @@ def sync() -> dict[str, Any]:
                     _log.warning("Tuzi 模型暂未计价：%s/%s：%s", group, model_id, error)
         snapshot = {
             "synced_at": datetime.now(timezone.utc).isoformat(),
+            # 这次同步覆盖的分组与模型：之后供应商里多出来的，用它判断要不要补拉。
+            "configured": {group: sorted(ids) for group, ids in configured.items()},
             "usd_exchange_rate": rate,
             "group_ratio": {group: ratios[group] for group in configured if group in ratios},
             "billing_expr": expressions,
@@ -199,6 +208,46 @@ def sync() -> dict[str, Any]:
     except (requests.RequestException, ValueError, TypeError, AttributeError, OSError) as error:
         _log.warning("Tuzi 价格同步失败，保留旧快照：%s", error)
         return load_snapshot()
+
+
+def _covers(snapshot: dict[str, Any], configured: dict[str, set[str]]) -> bool:
+    covered = snapshot.get("configured")
+    if not isinstance(covered, dict):
+        return False
+    return all(ids <= set(covered.get(group) or ()) for group, ids in configured.items())
+
+
+def sync_if_stale() -> dict[str, Any]:
+    """冻结预计费用前调用：供应商里有快照没覆盖的分组或模型就当场同步一次。
+
+    只在 6 小时一轮的全量同步里拉价格时，刚加的模型（如公告里一键加入的 Nano Banana 2.1）、
+    刚填的计费分组要等到下一轮才有价，期间出的图都显示未计价。
+    """
+    global _next_stale_sync_at
+    configured = _configured_models()
+    snapshot = load_snapshot()
+    if not configured or _covers(snapshot, configured):
+        return snapshot
+    with _stale_lock:
+        if time.monotonic() < _next_stale_sync_at:
+            return load_snapshot()
+        _next_stale_sync_at = time.monotonic() + STALE_RETRY_SECONDS
+        snapshot = sync()
+    if _covers(snapshot, configured):
+        with _stale_lock:
+            _next_stale_sync_at = 0.0
+    return snapshot
+
+
+def start_stale_sync() -> None:
+    """供应商保存后在后台补拉，不阻塞保存请求。"""
+    def run() -> None:
+        try:
+            sync_if_stale()
+        except Exception:  # noqa: BLE001 —— 价格补拉失败只影响估价
+            _log.exception("Tuzi 价格补拉失败")
+
+    threading.Thread(target=run, name="tuzi-price-stale", daemon=True).start()
 
 
 def start_background_sync() -> None:
