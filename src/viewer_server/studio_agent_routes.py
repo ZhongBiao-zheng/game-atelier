@@ -247,9 +247,11 @@ async def get_session(session_id: CanvasAgentSessionId):
 @router.patch(T)
 def patch_session(session_id: CanvasAgentSessionId, payload: CanvasAgentSessionUpdate):
     def update(current, now):
-        if current.status in {"running", "awaiting_approval"}:
-            raise CanvasToolError("SESSION_BUSY", "这一轮结束后才能修改设置", 409)
         fields = payload.model_dump(exclude_unset=True)
+        # 仅改名不影响正在执行的轮次，随时放行；改模型/权限等运行配置仍需等本轮结束。
+        title_only = set(fields.keys()) <= {"title"}
+        if current.status in {"running", "awaiting_approval"} and not title_only:
+            raise CanvasToolError("SESSION_BUSY", "这一轮结束后才能修改设置", 409)
         if fields.get("effort") == "off":
             fields["effort"] = None
         return fields

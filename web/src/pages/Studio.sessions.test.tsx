@@ -313,4 +313,51 @@ it('同一回合的多个任务共用缩略图组，详情跟随当前图片', a
   expect(batch).not.toHaveTextContent(/近景|远景|再次生成|重新编辑/);
   fireEvent.click(images[1].querySelector('img')!);
   expect(await screen.findByText('远景')).toBeVisible();
+  expect(screen.getByTestId('media-detail-dialog')).toBeVisible();
+});
+
+it('支持重命名当前对话（含默认对话与普通对话）', async () => {
+  const { requests } = server();
+  const respond = requests.getMockImplementation()!;
+  requests.mockImplementation(async (url, init) => {
+    if (url === base + '/' + ordinary && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      return Response.json({ ...session(ordinary, body.title), revision: 2 });
+    }
+    return respond(url, init);
+  });
+  updateStudioView({ activeSessionId: ordinary });
+  mount();
+  await screen.findByText('配个背景');
+  fireEvent.click(screen.getByRole('button', { name: '重命名当前对话' }));
+  const input = screen.getByRole('textbox', { name: '编辑对话名称' });
+  fireEvent.change(input, { target: { value: '角色立绘探索' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(await screen.findByText('角色立绘探索')).toBeVisible();
+  expect(requests).toHaveBeenCalledWith(
+    base + '/' + ordinary,
+    expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ title: '角色立绘探索' }) }),
+  );
+});
+
+it('Agent 单次产出 8 张图时按编号网格排版，点图进统一详情页', async () => {
+  const { requests } = server();
+  const respond = requests.getMockImplementation()!;
+  requests.mockImplementation((url, init) => url === base + '/' + ordinary + '/jobs'
+    ? Promise.resolve(Response.json({
+      jobs: Array.from({ length: 8 }, (_, i) => job(`many-${i}`, `方案提示词 ${i + 1}`, ordinary, 'turn-art')),
+    }))
+    : respond(url, init));
+  updateStudioView({ activeSessionId: ordinary });
+  mount();
+  const batch = await screen.findByTestId('agent-multi-job-batch');
+  expect(within(batch).getByText('共 8 张作品')).toBeVisible();
+  expect(within(batch).getByText('#1')).toBeVisible();
+  expect(within(batch).getByText('#8')).toBeVisible();
+  const images = batch.querySelectorAll('figure');
+  expect(images).toHaveLength(8);
+  fireEvent.click(images[7].querySelector('img')!);
+  const detail = await screen.findByTestId('media-detail-dialog');
+  expect(within(detail).getByText('方案提示词 8')).toBeVisible();
+  expect(within(detail).getByText('8 / 8')).toBeVisible();
 });

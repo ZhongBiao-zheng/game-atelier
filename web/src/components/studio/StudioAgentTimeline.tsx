@@ -242,8 +242,10 @@ export function StudioAgentTurnCard({ turn, session, agent, jobs, messages, rend
   const replies = messages.filter(m => m.role === 'assistant' || (!hasJobs && m.role === 'system'));
   const parsedReplies = replies.map(message => ({ message, ...parseAgentReply(message.text) }));
   const visibleReplies = parsedReplies.filter(item => item.body.length > 0);
-  // 只有整条时间线的最后一轮、且已正常结束，才显示它的推荐追问。
-  const suggestions = last && turn.status === 'idle' ? parsedReplies.at(-1)?.suggestions ?? [] : [];
+  // 只有当前会话最新一轮 Agent 且已正常结束，才显示它的推荐追问；从本轮回复倒序取最近一组，避免末尾短句把追问吞掉。
+  const suggestions = last && turn.status === 'idle'
+    ? [...parsedReplies].reverse().find(item => item.suggestions.length > 0)?.suggestions ?? []
+    : [];
   const errors = messages.filter(m => m.role === 'error');
   // 一轮结束：流式尾帧与最终回复同位交叉淡化（见 SettlingReply）。尾帧按本轮与最终回复的 message_id 暂存：
   // 只有流式期间还不存在、结束时新出现的那条助手回复才接这一帧。

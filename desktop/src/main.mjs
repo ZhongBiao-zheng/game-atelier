@@ -86,7 +86,7 @@ const state = {
 };
 
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
-const describe = (server) => `{ port: ${server.port}, instance: ${server.instance} }`;
+const describe = (server) => `{ port: ${server.port}, instance: ${server.instance}${server.version ? `, version: ${server.version}` : ''} }`;
 const serverUrl = (server) => `http://127.0.0.1:${server.port}/`;
 const theme = () => rt.savedTheme(parent) ?? 'dark';
 
@@ -320,6 +320,7 @@ async function prepareRuntime() {
     const info = rt.readRuntimeInfo(RUNTIME_INFO);
     if (!info) throw failure('install');
     log(`runtime for this build: ${info.file} build=${info.build}`);
+    rt.repairBundlePointers(root);
     const reason = rt.replacementReason(root, info);
     if (reason) log(`runtime replacement: ${reason}`);
     if (reason === 'too-old') throw failure('install', '已有的运行环境比本安装包新，请安装新版 Atelier');
@@ -355,7 +356,12 @@ async function boot() {
     let dataRoot = await runtime.dataRoot().catch((error) => { throw failure('start', error.message); });
     let server = await rt.verifiedServer(dataRoot);
     if (server) {
-      log(`attached to ${describe(server)}, owned=${rt.isOwned(dataRoot, server)}`);
+      const owned = rt.isOwned(dataRoot, server);
+      log(`attached to ${describe(server)}, owned=${owned}`);
+      const bundled = rt.installed(runtime.root) ? rt.runtimeVersion(runtime.root) : null;
+      if (!owned && server.version && bundled && server.version !== bundled) {
+        log(`attached external server version ${server.version} differs from bundled runtime ${bundled}`);
+      }
     } else {
       let reason = '';
       // The launcher reports the data root it started with (first start writes the config).

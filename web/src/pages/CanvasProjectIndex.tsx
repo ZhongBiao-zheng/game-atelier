@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, type Transition } from 'motion/react';
 import { Link } from 'wouter';
-import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, SearchIcon, UploadIcon } from '@/components/ui/icons';
+import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, HideIcon, MoreIcon, RetryIcon, SearchIcon, ShowIcon, UploadIcon } from '@/components/ui/icons';
+import { fetchHiddenCanvasProjects, setCanvasProjectGalleryHidden } from '@/api/gallery';
 
 import {
   canvasMediaUrl,
@@ -60,6 +61,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importedIds, setImportedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [hiddenOnHomeIds, setHiddenOnHomeIds] = useState<ReadonlySet<string>>(() => new Set());
   const importRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!importedIds.size) return;
@@ -91,7 +93,12 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     setLoading(true);
     setLoadError(null);
     try {
-      setProjects(await listCanvasProjects());
+      const [list, hiddenIds] = await Promise.all([
+        listCanvasProjects(),
+        fetchHiddenCanvasProjects().catch(() => [] as string[]),
+      ]);
+      setProjects(list);
+      setHiddenOnHomeIds(new Set(hiddenIds));
     } catch (error) {
       setLoadError((error as Error).message);
     } finally {
@@ -162,6 +169,37 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       setActionError((error as Error).message);
     } finally {
       setBusyProjectId(null);
+    }
+  }
+
+  async function toggleHiddenOnHome(project: CanvasProjectSummary) {
+    const nextHidden = !hiddenOnHomeIds.has(project.project_id);
+    setHiddenOnHomeIds(current => {
+      const next = new Set(current);
+      if (nextHidden) next.add(project.project_id);
+      else next.delete(project.project_id);
+      return next;
+    });
+    try {
+      const updated = await setCanvasProjectGalleryHidden(project.project_id, nextHidden);
+      setHiddenOnHomeIds(new Set(updated));
+      if (nextHidden) {
+        notify.undo(`已在首页隐藏「${clipName(project.name)}」的作品`, () => {
+          void setCanvasProjectGalleryHidden(project.project_id, false)
+            .then(restored => setHiddenOnHomeIds(new Set(restored)))
+            .catch(error => notify.error(errorText(error)));
+        });
+      } else {
+        notify.info(`已在首页恢复展示「${clipName(project.name)}」的作品`);
+      }
+    } catch (error) {
+      setHiddenOnHomeIds(current => {
+        const reverted = new Set(current);
+        if (nextHidden) reverted.delete(project.project_id);
+        else reverted.add(project.project_id);
+        return reverted;
+      });
+      notify.error(errorText(error));
     }
   }
 
@@ -286,8 +324,10 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               >
                 <CanvasProjectCard
                   project={project}
+                  hiddenOnHome={hiddenOnHomeIds.has(project.project_id)}
                   onOpen={() => onOpenProject(project.project_id)}
                   onInlineRename={name => renameProjectInline(project, name)}
+                  onToggleHiddenOnHome={() => void toggleHiddenOnHome(project)}
                   onExport={() => void handleExport(project)}
                   onDelete={() => void deleteProject(project)}
                   disabled={busyProjectId === project.project_id}
@@ -316,16 +356,20 @@ const CARD_VARIANTS = {
 
 function CanvasProjectCard({
   project,
+  hiddenOnHome,
   onOpen,
   onInlineRename,
+  onToggleHiddenOnHome,
   onExport,
   onDelete,
   disabled,
   highlighted,
 }: {
   project: CanvasProjectSummary;
+  hiddenOnHome: boolean;
   onOpen: () => void;
   onInlineRename: (name: string) => Promise<void>;
+  onToggleHiddenOnHome: () => void;
   onExport: () => void;
   onDelete: () => void;
   disabled: boolean;
@@ -374,8 +418,9 @@ function CanvasProjectCard({
           className="-ml-2 font-medium text-foreground"
           onSave={onInlineRename}
         />
-        <p className="text-xs tabular-nums text-muted-foreground">
-          {project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}
+        <p className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+          <span>{project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}</span>
+          {hiddenOnHome && <span className="inline-flex items-center gap-1 text-subtle-foreground"><HideIcon size="sm" aria-hidden="true" />首页隐藏</span>}
         </p>
       </div>
       <DropdownMenu>
@@ -386,6 +431,9 @@ function CanvasProjectCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => window.setTimeout(beginInlineRename, 0)}><EditIcon aria-hidden="true" />重命名</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onToggleHiddenOnHome}>
+            {hiddenOnHome ? <><ShowIcon aria-hidden="true" />在首页展示作品</> : <><HideIcon aria-hidden="true" />在首页隐藏作品</>}
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={onExport}><DownloadIcon aria-hidden="true" />导出项目包</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onDelete} className="text-destructive"><DeleteIcon aria-hidden="true" />删除</DropdownMenuItem>

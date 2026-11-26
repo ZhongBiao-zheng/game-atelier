@@ -105,3 +105,14 @@ it('Agent 参考图片复用图片堆叠和引用编号', () => {
   expect(new Set(vi.mocked(URL.createObjectURL).mock.calls.map(([file]) => (file as File).name))).toEqual(new Set(files.slice(0, 16).map(file => file.name)));
   expect(screen.queryByLabelText('引用资产')).toBeNull();
 });
+
+it('首页 Agent 输入栏只保留模式、对话模型、出图模型和技能', () => {
+  updateStudioView({ inputMode: 'agent' });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ skills: [], sessions: [], models: [], errors: [] }))));
+  render(<Page home />);
+  const track = screen.getByLabelText('选择生成模式').parentElement!.parentElement!;
+  expect(Array.from(track.querySelectorAll('button')).map(btn => btn.getAttribute('aria-label') ?? btn.textContent))
+    .toEqual(['选择生成模式', '选择模型', '模型偏好', '选择 Skill', '打开创作资产']);
+  expect(screen.queryByLabelText('创作模式')).toBeNull();
+  expect(screen.queryByLabelText(/权限模式/)).toBeNull();
+});

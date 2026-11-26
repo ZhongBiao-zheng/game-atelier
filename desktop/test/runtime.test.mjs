@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  compareVersions, contractLevel, DESKTOP_CONTRACT, meetsContract, readRuntimeInfo, replacementReason,
-  uniqueDownloadPath, validVersion,
+  compareVersions, contractLevel, DESKTOP_CONTRACT, meetsContract, readRuntimeInfo,
+  repairBundlePointers, replacementReason, uniqueDownloadPath, validVersion,
 } from '../src/runtime.mjs';
 
 function tmp(name) {
@@ -121,6 +121,23 @@ test('the build\'s runtime description needs a version, a sha256 and a BUILD_ID'
     assert.equal(readRuntimeInfo(file), null, JSON.stringify(broken));
   }
 });
+test('repairBundlePointers recovers truncated last-good from current or highest valid version', () => {
+  const ok = String(DESKTOP_CONTRACT);
+  const root = bundle([['5.138.0', ok, 'old'], ['5.142.0', ok, 'new']], '5.142.0', '5.142.0');
+  // Simulate abrupt shutdown leaving a 0-byte last-good file.
+  fs.writeFileSync(path.join(root, 'last-good'), '');
+  assert.equal(repairBundlePointers(root), '5.142.0');
+  assert.equal(fs.readFileSync(path.join(root, 'last-good'), 'utf8').trim(), '5.142.0');
+  assert.equal(replacementReason(root, shell('5.138.0', 'old')), null);
+
+  // Both last-good and current corrupted: recover from versions/ highest valid version.
+  fs.writeFileSync(path.join(root, 'last-good'), '');
+  fs.writeFileSync(path.join(root, 'current'), '');
+  assert.equal(repairBundlePointers(root), '5.142.0');
+  assert.equal(fs.readFileSync(path.join(root, 'last-good'), 'utf8').trim(), '5.142.0');
+  assert.equal(fs.readFileSync(path.join(root, 'current'), 'utf8').trim(), '5.142.0');
+});
+
 test('downloads never overwrite', () => {
   const dir = tmp('dl');
   assert.equal(uniqueDownloadPath(dir, 'a.png'), path.join(dir, 'a.png'));

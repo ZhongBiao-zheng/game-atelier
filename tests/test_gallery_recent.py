@@ -168,8 +168,34 @@ def test_hidden_sidecar_corrupted_falls_back_empty(client, tmp_path):
     runtime = tmp_path / ".runtime"
     runtime.mkdir(exist_ok=True)
     (runtime / "gallery-hidden.json").write_text("not-json", encoding="utf-8")
-    assert client.get("/api/gallery/hidden").json() == {"paths": []}
+    assert client.get("/api/gallery/hidden").json() == {"paths": [], "canvas_project_ids": []}
     assert len(client.get("/api/gallery/recent").json()["items"]) == 1
+
+
+def test_hidden_canvas_project_filters_recent_gallery(client, tmp_path, monkeypatch):
+    """按画布项目 ID 隐藏后，该画布的作品不再出现在首页作品展示。"""
+    import character_workflow.lib.canvas_projects as cp
+
+    img_a = tmp_path / "canvases" / "proj-a" / "v1.png"
+    img_b = tmp_path / "canvases" / "proj-b" / "v1.png"
+    _make_image(img_a)
+    _make_image(img_b)
+    monkeypatch.setattr(
+        cp,
+        "list_canvas_gallery_images",
+        lambda: [("proj-a", "job-a", "node-a", img_a), ("proj-b", "job-b", "node-b", img_b)],
+    )
+
+    resp = client.post("/api/gallery/hidden", json={"canvas_project_id": "proj-a", "hidden": True})
+    assert resp.status_code == 200
+    assert resp.json()["canvas_project_ids"] == ["proj-a"]
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["canvas_project_id"] for i in items] == ["proj-b"]
+
+    resp = client.post("/api/gallery/hidden", json={"canvas_project_id": "proj-a", "hidden": False})
+    assert resp.json()["canvas_project_ids"] == []
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert {i["canvas_project_id"] for i in items} == {"proj-a", "proj-b"}
 
 
 

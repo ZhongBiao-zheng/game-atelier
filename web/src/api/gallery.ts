@@ -29,6 +29,13 @@ export async function fetchGalleryHidden(): Promise<string[]> {
   return Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string') : [];
 }
 
+export async function fetchHiddenCanvasProjects(): Promise<string[]> {
+  const data = await requestJson<{ canvas_project_ids?: unknown }>('/api/gallery/hidden', '读取隐藏画布清单');
+  return Array.isArray(data.canvas_project_ids)
+    ? data.canvas_project_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+}
+
 export async function setGalleryHidden(path: string, hidden: boolean): Promise<string[]> {
   const data = await requestJson<{ paths: string[] }>(
     '/api/gallery/hidden',
@@ -40,6 +47,19 @@ export async function setGalleryHidden(path: string, hidden: boolean): Promise<s
     },
   );
   return data.paths;
+}
+
+export async function setCanvasProjectGalleryHidden(canvasProjectId: string, hidden: boolean): Promise<string[]> {
+  const data = await requestJson<{ canvas_project_ids?: string[] }>(
+    '/api/gallery/hidden',
+    hidden ? '在首页隐藏画布作品' : '在首页展示画布作品',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ canvas_project_id: canvasProjectId, hidden }),
+    },
+  );
+  return Array.isArray(data.canvas_project_ids) ? data.canvas_project_ids : [];
 }
 
 /** sidecar 存相对路径、job.output_paths 是绝对路径——后缀比对两态通吃。 */

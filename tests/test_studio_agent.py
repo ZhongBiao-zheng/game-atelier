@@ -149,3 +149,21 @@ def test_attachment_scope(client):
     with pytest.raises(ValueError):
         media_path(first, "upload:../other.png")
     assert client.get(f"{BASE}/{second}/attachments/nonexistent").status_code == 404
+
+
+def test_rename_session_allowed_while_running_and_default_session(client):
+    sid = client.post(BASE, json={"title": "初始名"}).json()["session_id"]
+    store.mutate(sid, lambda current, now: {"status": "running"})
+
+    # 运行中仅修改 title 允许成功；改其他设置仍拦截 409。
+    ok = client.patch(f"{BASE}/{sid}", json={"title": "新标题"})
+    assert ok.status_code == 200
+    assert ok.json()["title"] == "新标题"
+
+    blocked = client.patch(f"{BASE}/{sid}", json={"permission_mode": "review"})
+    assert blocked.status_code == 409
+
+    # 默认会话也支持重命名。
+    default_ok = client.patch(f"{BASE}/{store.DEFAULT_SESSION_ID}", json={"title": "我的主线对话"})
+    assert default_ok.status_code == 200
+    assert default_ok.json()["title"] == "我的主线对话"

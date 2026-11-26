@@ -67,7 +67,7 @@ export function useStudioComposer(home = false) {
       sending.current = false;
     }
   }
-  return { mode, switchMode, agent, text, setText, files, setFiles, skill, setSkill, editor, send };
+  return { home, mode, switchMode, agent, text, setText, files, setFiles, skill, setSkill, editor, send };
 }
 
 export type StudioComposerState = ReturnType<typeof useStudioComposer>;
@@ -104,16 +104,24 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
     void updateSettings({ model_alias: fallback.alias, model: fallback.model });
   }, [fallback, settings.model_alias, settings.model, updateSettings]);
   const triggerClassName = studioControlClass + ' shrink-0 w-auto';
-  const controls = <>
-    <CanvasAgentModelPicker triggerClassName={triggerClassName} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
+  const menuDirection = props.menuDirection ?? 'up';
+  const controls = state.home ? <>
+    <CanvasAgentModelPicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
             disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
-    <CanvasAgentModeMenu triggerClassName={triggerClassName} mode={creation} disabled={busy} onSelect={creation_mode => void agent.updateSettings({ creation_mode })} />
-    <CanvasAgentPreferencePicker triggerClassName={triggerClassName} models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
+    <CanvasAgentPreferencePicker triggerClassName={triggerClassName} direction={menuDirection} label="出图模型" models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
             preferred={settings.preferred_models ?? []} disabled={busy} onChange={agent.updateSettings} />
-    <CanvasAgentPermissionMenu triggerClassName={triggerClassName} auto={(settings.permission_mode ?? 'auto') === 'auto'} disabled={busy}
+    <CanvasAgentSkillPicker triggerClassName={triggerClassName} direction={menuDirection} label={skill ?? '技能'} skills={agent.skills} selected={skill}
+            onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
+  </> : <>
+    <CanvasAgentModelPicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
+            disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
+    <CanvasAgentModeMenu triggerClassName={triggerClassName} direction={menuDirection} mode={creation} disabled={busy} onSelect={creation_mode => void agent.updateSettings({ creation_mode })} />
+    <CanvasAgentPreferencePicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
+            preferred={settings.preferred_models ?? []} disabled={busy} onChange={agent.updateSettings} />
+    <CanvasAgentPermissionMenu triggerClassName={triggerClassName} direction={menuDirection} showLabel auto={(settings.permission_mode ?? 'auto') === 'auto'} disabled={busy}
             confirmAbove={agent.confirmAbove} onModeChange={permission_mode => void agent.updateSettings({ permission_mode })}
             onConfirmAboveChange={agent.updateConfirmAbove} />
-    <CanvasAgentSkillPicker triggerClassName={triggerClassName} label={skill ?? '技能'} skills={agent.skills} selected={skill}
+    <CanvasAgentSkillPicker triggerClassName={triggerClassName} direction={menuDirection} label={skill ?? '技能'} skills={agent.skills} selected={skill}
             onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
   </>;
   const agentProps = state.mode === 'agent' ? {

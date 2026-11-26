@@ -317,7 +317,8 @@ class BundleDownloader:
                 version = latest_version()
                 if not VERSION.fullmatch(self.current):
                     raise ValueError("当前版本无效。")
-                if tuple(map(int, version.split("."))) <= tuple(map(int, self.current.split("."))):
+                from viewer_server.bundle_update import version_key
+                if version_key(version) <= version_key(self.current):
                     return self._state("idle")
                 blocked = _read_json(self.updates / "blocked.json")
                 if version in blocked and not retry_blocked:

@@ -29,7 +29,8 @@ import {
   type MentionKind,
 } from '@/lib/mentionTokens';
 
-import { Lightbox } from '../Lightbox';
+import { providerLabel } from '@/lib/providerLabels';
+import { Lightbox, type LightboxMediaMeta } from '../Lightbox';
 import {
   CompletionUnderlay,
   expectedDurationMs,
@@ -169,6 +170,46 @@ const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
 // 参考图只占提示词这一行的左侧——标签行与操作行始终从最左缘开始，有没有参考图都一样。
 const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-4';
 const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
+const EMBEDDED_GRID_CLASS = 'grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4';
+type EmbeddedMediaLayout = 'single' | 'row' | 'grid';
+
+function buildLightboxMeta(item: {
+  config: RoundConfig;
+  submittedAt: string;
+  completedAt?: string | null;
+  generationCost?: number;
+}): LightboxMediaMeta {
+  const { config, submittedAt, completedAt, generationCost } = item;
+  const elapsedSec = submittedAt && completedAt
+    ? Math.max(0, Math.round((Date.parse(completedAt) - Date.parse(submittedAt)) / 1000))
+    : null;
+  const sizeText = config.sizeMode === 'custom' && config.size
+    ? config.size
+    : [config.ratio, config.resolution].filter(Boolean).join(' · ') || config.size || undefined;
+  const tags = [
+    config.complexity ? COMPLEXITY_LABELS[config.complexity] : null,
+    config.background === 'transparent' ? '透明背景' : null,
+    config.output_format === 'gif' ? gifSummary(config) : null,
+    config.sourceAssetTitle ? `来源：${config.sourceAssetTitle}` : null,
+  ].filter((t): t is string => Boolean(t));
+  const mjFlags = shownMjMetadata(config);
+  return {
+    title: '作品详情',
+    prompt: config.prompt,
+    model: config.modelName || modelDisplayName({ id: config.model }),
+    modelId: config.model,
+    provider: config.provider ? providerLabel(config.provider, config.alias ?? undefined) : (config.alias ?? undefined),
+    dimensions: sizeText,
+    quality: config.quality ? (QUALITY_LABELS[config.quality] ?? config.quality) : undefined,
+    duration: elapsedSec != null && Number.isFinite(elapsedSec) ? `${elapsedSec}s` : undefined,
+    cost: generationCost != null ? formatGenerationCost(generationCost) : undefined,
+    createdAt: submittedAt ? formatBeijingTime(submittedAt) : undefined,
+    tags: tags.length > 0 ? tags : undefined,
+    extra: mjFlags ? (
+      <p className="break-words rounded-md bg-popover px-2.5 py-1.5 font-mono text-xs text-muted-foreground">{mjFlags}</p>
+    ) : undefined,
+  };
+}
 const ROUND_ACTIONS_CLASS = 'flex flex-wrap items-center gap-2';
 const ROUND_RUN_META_CLASS = 'flex items-center gap-1.5 border-l border-border pl-3 text-xs tabular-nums text-muted-foreground';
 
@@ -335,6 +376,9 @@ export function RoundList({
         jobId: round.jobId,
         deletable: round.shareable !== false,
         config: round.config,
+        submittedAt: round.submittedAt,
+        completedAt: round.completedAt,
+        generationCost: round.generationCost,
         name: path.split('/').pop() || `${round.jobId}-${index + 1}.png`,
       }))
       : []
@@ -450,8 +494,32 @@ export function RoundList({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasEarlierHistory, historyAutoLoadArmed]);
+  // Agent 嵌入式批量出图自适应排版：单张舒展、2~4 张自然比例、5 张及以上（如 8~10 张）用 4 列规整画廊网格并带编号。
+  const embeddedMediaCount = embedded
+    ? rounds.reduce((total, r) => (
+      r.kind === 'done' ? total + r.imagePaths.length
+        : r.kind === 'pending' ? total + Math.max(1, r.config.n ?? 1)
+          : total
+    ), 0)
+    : 0;
+  const embeddedLayout: EmbeddedMediaLayout | undefined = embedded
+    ? (embeddedMediaCount >= 5 ? 'grid' : embeddedMediaCount === 1 ? 'single' : 'row')
+    : undefined;
+  const embeddedStartOffsets = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!embedded) return map;
+    let offset = 0;
+    for (const r of rounds) {
+      map.set(roundKey(r), offset);
+      if (r.kind === 'done') offset += r.imagePaths.length;
+      else if (r.kind === 'pending') offset += Math.max(1, r.config.n ?? 1);
+    }
+    return map;
+  }, [embedded, rounds]);
+
   const renderMedia = (r: RoundState, mediaActive: boolean) => {
     const key = roundKey(r);
+    const batchOffset = embeddedStartOffsets.get(key) ?? 0;
     // 嵌在 Agent 回合里的结果没有单独的外层，删除不做整轮淡出。
     const fadeThen = <A extends unknown[]>(remove?: (...args: A) => void | Promise<void>) => (
       remove && !embedded ? (...args: A) => removeAfterFade(key, () => remove(...args)) : remove
@@ -462,6 +530,7 @@ export function RoundList({
       <PendingBatch
         round={r}
         embedded={embedded}
+        embeddedLayout={embeddedLayout}
         showActions={!embedded || rounds.length === 1}
         onCancel={onCancel}
         onReEdit={onReEdit}
@@ -477,6 +546,8 @@ export function RoundList({
       <DoneBatch
         round={r}
         embedded={embedded}
+        embeddedLayout={embeddedLayout}
+        batchOffset={batchOffset}
         showActions={!embedded || rounds.length === 1}
         favorites={favorites}
         onToggleFavorite={onToggleFavorite}
@@ -527,7 +598,7 @@ export function RoundList({
     <>
       <div
         data-testid="studio-round-list"
-        className={embedded ? "w-full text-left" : "mx-auto mt-8 w-full min-w-0 max-w-[1024px] space-y-8 text-left"}
+        className={embedded ? "w-full space-y-2 text-left" : "mx-auto mt-8 w-full min-w-0 max-w-[1024px] space-y-8 text-left"}
       >
         {hasEarlierHistory && (
           <div
@@ -537,8 +608,11 @@ export function RoundList({
             className="h-px w-full"
           />
         )}
+        {embedded && embeddedLayout === 'grid' && (
+          <p className="text-xs tabular-nums text-muted-foreground">共 {embeddedMediaCount} 张作品</p>
+        )}
         {embedded ? <MediaActivationBoundary>
-          {active => <div className={ROUND_MEDIA_CLASS}>{rounds.map(r => r.kind !== 'agent' && (
+          {active => <div className={embeddedLayout === 'grid' ? EMBEDDED_GRID_CLASS : ROUND_MEDIA_CLASS}>{rounds.map(r => r.kind !== 'agent' && (
             <Fragment key={roundKey(r)}>{renderMedia(r, active)}</Fragment>
           ))}</div>}
         </MediaActivationBoundary> : mountedRounds.map((r, index) => {
@@ -572,16 +646,14 @@ export function RoundList({
           onPrevious={lightboxStep(-1)}
           onNext={lightboxStep(1)}
           preloadSrcs={lightboxNeighbours}
-          downloadName={lightboxItems[lightboxIndex]?.name}
+          downloadName={lightboxCurrent?.name}
+          counter={lightboxItems.length > 1 && lightboxIndex >= 0 ? { current: lightboxIndex + 1, total: lightboxItems.length } : undefined}
+          meta={lightboxCurrent ? buildLightboxMeta(lightboxCurrent) : undefined}
           onUseAsReference={onEditAsReference && lightboxCurrent
             ? () => { void onEditAsReference(lightboxCurrent.path); } : undefined}
           onCopyPrompt={lightboxCurrent ? () => lightboxCurrent.config.prompt : undefined}
           onDelete={onDeleteResult && lightboxCurrent?.deletable
             ? () => { void onDeleteResult(lightboxCurrent.jobId, lightboxCurrent.path); } : undefined}
-          details={embedded && lightboxItems[lightboxIndex] && <>
-            <p>{lightboxItems[lightboxIndex].config.prompt}</p>
-            <SpecChips config={lightboxItems[lightboxIndex].config} />
-          </>}
         />
       )}
     </>
@@ -589,7 +661,7 @@ export function RoundList({
 }
 
 function PendingBatch({
-  round, embedded, showActions,
+  round, embedded, embeddedLayout, showActions,
   onCancel,
   onReEdit,
   onUsePrompt,
@@ -600,6 +672,7 @@ function PendingBatch({
   mediaActive,
 }: {
   embedded: boolean;
+  embeddedLayout?: EmbeddedMediaLayout;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'pending' }>;
   onCancel?: (jobId: string) => void | Promise<void>;
@@ -668,8 +741,12 @@ function PendingBatch({
               data-testid={i === 0 && round.jobId ? `studio-pending-${round.jobId}` : undefined}
               data-skeleton
               aria-busy="true"
-              style={aspectStyle(round.config)}
-              className="relative flex w-[251.5px] items-center justify-center overflow-hidden rounded-lg bg-card/40"
+              style={embeddedLayout === 'grid' ? undefined : aspectStyle(round.config)}
+              className={embeddedLayout === 'grid'
+                ? 'relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-card/40'
+                : embeddedLayout === 'single'
+                  ? 'relative flex w-96 max-w-full items-center justify-center overflow-hidden rounded-lg bg-card/40'
+                  : 'relative flex w-[251.5px] items-center justify-center overflow-hidden rounded-lg bg-card/40'}
             >
               {i === 0 && !showActions && cancel && <div className="absolute bottom-2 right-2">{cancel}</div>}
               <span
@@ -1227,7 +1304,7 @@ function ResultMoreMenu({
 }
 
 function DoneBatch({
-  round, embedded, showActions,
+  round, embedded, embeddedLayout, batchOffset = 0, showActions,
   favorites,
   onToggleFavorite,
   hiddenPaths,
@@ -1252,6 +1329,8 @@ function DoneBatch({
   justCompleted,
 }: {
   embedded: boolean;
+  embeddedLayout?: EmbeddedMediaLayout;
+  batchOffset?: number;
   showActions: boolean;
   round: Extract<RoundState, { kind: 'done' }>;
   /** 这一轮刚从「生成中」变成完成：结果在占位交接层上淡入。 */
@@ -1424,16 +1503,23 @@ function DoneBatch({
           : round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
               const hidden = !!hiddenPaths && isGalleryHidden(path, hiddenPaths);
+              const isGrid = embeddedLayout === 'grid';
+              const tileClass = isGrid
+                ? 'media-edge group relative aspect-square w-full overflow-hidden rounded-lg bg-card cursor-pointer'
+                : embeddedLayout === 'single'
+                  ? 'media-edge group w-96 max-w-full overflow-hidden rounded-lg bg-card cursor-pointer'
+                  : 'media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer';
               return (
                 <ResultFrame
                   key={path}
                   config={round.config}
+                  uniformSquare={isGrid}
                   justCompleted={justCompleted}
                   startedAt={startedAt}
                   progressKey={roundKey(round)}
                   roundJob={embedded && index === 0 ? round.jobId : undefined}
                   testId={`studio-result-thumb-${index + 1}`}
-                  className="media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
+                  className={tileClass}
                   onClick={() => onLightbox?.(imageSrc(path))}
                   media={({ onSize, onReady }) => (
                     <RevealImage
@@ -1443,10 +1529,17 @@ function DoneBatch({
                       decoding="async"
                       onLoad={event => onSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
                       onReady={onReady}
-                      className="media-checker relative h-full w-full object-contain"
+                      className={isGrid
+                        ? 'media-checker relative h-full w-full object-cover'
+                        : 'media-checker relative h-full w-full object-contain'}
                     />
                   )}
                 >
+                  {isGrid && (
+                    <span className="pointer-events-none absolute left-2 top-2 rounded-sm bg-scrim px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">
+                      #{batchOffset + index + 1}
+                    </span>
+                  )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {resultMenu(index, path, 'image')}
 
@@ -1541,8 +1634,9 @@ function DoneBatch({
 
 /** 结果卡：与占位卡同一个按目标比例的框（读到真实尺寸后改用真实比例）。
  *  刚生成完的结果先垫着占位交接层，媒体解码后在它上面淡入；历史结果直接在卡片底色上淡入。 */
-function ResultFrame({ config, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
+function ResultFrame({ config, uniformSquare = false, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
   config: RoundConfig;
+  uniformSquare?: boolean;
   justCompleted: boolean;
   startedAt: number;
   /** 所属轮次的 key：交接层细条从占位细条画到的位置起冲。 */
@@ -1557,7 +1651,7 @@ function ResultFrame({ config, justCompleted, startedAt, progressKey, roundJob, 
   const [style, onSize] = useResultAspect(aspectStyle(config));
   const [revealed, setRevealed] = useState(false);
   return (
-    <figure data-round-job={roundJob} data-testid={testId} style={style} className={className} onClick={onClick}>
+    <figure data-round-job={roundJob} data-testid={testId} style={uniformSquare ? undefined : style} className={className} onClick={onClick}>
       {justCompleted && (
         <CompletionUnderlay
           revealed={revealed}

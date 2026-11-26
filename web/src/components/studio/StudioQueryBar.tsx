@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AiIcon, CheckIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
+import { AiIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
 
 import { ToolbarPopover } from './ToolbarPopover';
-import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
+import { DEFAULT_HISTORY_FILTERS, type GenMode, type HistoryFilters, type TimeFilter } from '@/lib/historyFilters';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
@@ -13,13 +13,13 @@ const TIME_OPTS: { key: TimeFilter; label: string }[] = [
   { key: '3m', label: '最近三个月' },
 ];
 const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
-  { key: 'agent', label: 'Agent', icon: <AiIcon size="lg" aria-hidden /> },
-  { key: 'image', label: '图片', icon: <ImageIcon size="lg" aria-hidden /> },
-  { key: 'video', label: '视频', icon: <VideoIcon size="lg" aria-hidden /> },
+  { key: 'agent', label: 'Agent', icon: <AiIcon size="sm" aria-hidden /> },
+  { key: 'image', label: '图片', icon: <ImageIcon size="sm" aria-hidden /> },
+  { key: 'video', label: '视频', icon: <VideoIcon size="sm" aria-hidden /> },
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
-  { key: 'favorite', label: '喜欢', icon: <FavoriteIcon size="lg" aria-hidden /> },
-  { key: 'hidden', label: '隐藏', icon: <HideIcon size="lg" aria-hidden /> },
+  { key: 'favorite', label: '喜欢', icon: <FavoriteIcon size="sm" aria-hidden /> },
+  { key: 'hidden', label: '隐藏', icon: <HideIcon size="sm" aria-hidden /> },
 ];
 
 /** 查询面板 chip——复用 PromptInput ControlButton 配方（h-7 rounded-md token 色）。 */
@@ -63,12 +63,12 @@ export function StudioQueryBar({
   }, [searchOpen]);
 
   const optionCls =
-    'flex h-8 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60';
+    'flex h-8 w-full items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground aria-selected:bg-secondary aria-selected:text-foreground aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60';
   const timeLabel = filters.time === 'all' ? '' : TIME_OPTS.find(option => option.key === filters.time)?.label;
   const modeLabel = MODE_OPTS.filter(option => filters.modes.includes(option.key)).map(option => option.label).join('、');
   const opLabel = OP_OPTS.find(option => option.key === filters.op)?.label;
   const summary = [timeLabel, modeLabel, opLabel].filter(Boolean);
-  const sectionCls = 'px-3 pb-1 pt-2 text-xs text-muted-foreground';
+  const sectionCls = 'mb-1.5 text-xs text-muted-foreground';
 
   return (
     <div
@@ -123,47 +123,64 @@ export function StudioQueryBar({
           <ChevronDownIcon size="sm" aria-hidden className={summary.length ? 'text-primary' : 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} direction="down" align="end" aria-label="筛选面板"
-          className="w-60 rounded-xl border border-border bg-card p-2" maxHeight={480}>
-          <div className={sectionCls}>时间</div>
-          <div role="listbox" aria-label="时间筛选列表">
-            {TIME_OPTS.map((o) => (
-              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
-                onClick={() => onChange({ ...filters, time: o.key })}>
-                <span>{o.label}</span>
-                {filters.time === o.key && <CheckIcon aria-hidden className="text-primary" />}
+          className="flex w-72 flex-col gap-3.5 rounded-xl border border-border bg-card p-3.5" maxHeight={480}>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">筛选</span>
+            {summary.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => onChange({ ...DEFAULT_HISTORY_FILTERS, search: filters.search })}
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                重置
               </Button>
-            ))}
+            )}
           </div>
-          <div className={sectionCls}>生成模式</div>
-          <div role="listbox" aria-label="生成模式列表" aria-multiselectable="true">
-            {MODE_OPTS.map((o) => {
-              const active = filters.modes.includes(o.key);
-              return (
-                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                  onClick={() => onChange({
-                    ...filters,
-                    modes: active
-                      ? filters.modes.filter((mode) => mode !== o.key)
-                      : [...filters.modes, o.key],
-                  })}>
-                  <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                  {active && <CheckIcon aria-hidden className="text-primary" />}
+          <div>
+            <div className={sectionCls}>时间</div>
+            <div role="listbox" aria-label="时间筛选列表" className="grid grid-cols-2 gap-1 rounded-lg bg-popover p-1">
+              {TIME_OPTS.map((o) => (
+                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
+                  onClick={() => onChange({ ...filters, time: o.key })}>
+                  <span>{o.label}</span>
                 </Button>
-              );
-            })}
+              ))}
+            </div>
           </div>
-          <div className={sectionCls}>操作类型</div>
-          <div role="listbox" aria-label="操作类型列表">
-            {OP_OPTS.map((o) => {
-              const active = filters.op === o.key;
-              return (
-                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                  onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
-                  <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                  {active && <CheckIcon aria-hidden className="text-primary" />}
-                </Button>
-              );
-            })}
+          <div>
+            <div className={sectionCls}>生成模式</div>
+            <div role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className="grid grid-cols-3 gap-1 rounded-lg bg-popover p-1">
+              {MODE_OPTS.map((o) => {
+                const active = filters.modes.includes(o.key);
+                return (
+                  <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+                    onClick={() => onChange({
+                      ...filters,
+                      modes: active
+                        ? filters.modes.filter((mode) => mode !== o.key)
+                        : [...filters.modes, o.key],
+                    })}>
+                    {o.icon}<span>{o.label}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div className={sectionCls}>操作类型</div>
+            <div role="listbox" aria-label="操作类型列表" className="grid grid-cols-2 gap-1 rounded-lg bg-popover p-1">
+              {OP_OPTS.map((o) => {
+                const active = filters.op === o.key;
+                return (
+                  <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+                    onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
+                    {o.icon}<span>{o.label}</span>
+                  </Button>
+                );
+              })}
+            </div>
           </div>
         </ToolbarPopover>
       </div>

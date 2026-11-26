@@ -1285,7 +1285,7 @@ function StudioFull() {
           rounds={items} embedded={embedded}
           renderAgent={entry => session && <StudioAgentTurnCard turn={entry.turn} session={session}
             agent={composer.agent} messages={entry.messages} jobs={entry.jobs}
-            renderJobs={jobs => renderRounds(studioJobsToRounds(jobs, keys), true)}
+            renderJobs={jobs => renderRounds(studioJobsToRounds(jobs, keys, 'asc'), true)}
             last={!pending && !hasHistoryFilters(historyFilters) && timeline.at(-1) === entry}
             onRetry={() => void retryAgentTurn(entry.turn, entry.messages)}
             onPickSuggestion={text => {
@@ -2021,10 +2021,12 @@ function jobSessionId(job: Job) {
   return job.studio_agent_session_id ?? DEFAULT_STUDIO_SESSION_ID;
 }
 
-function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
+function studioJobsToRounds(jobs: Job[], keys: KeyView[] = [], order: 'desc' | 'asc' = 'desc'): RoundState[] {
   return jobs
     .filter((job) => job.status !== 'pending_confirm')
-    .sort((a, b) => Date.parse(b.submitted_at) - Date.parse(a.submitted_at))
+    .sort((a, b) => order === 'asc'
+      ? Date.parse(a.submitted_at) - Date.parse(b.submitted_at)
+      : Date.parse(b.submitted_at) - Date.parse(a.submitted_at))
     .flatMap((job): RoundState[] => {
       const mode = deriveGenMode(job);
       if (job.status === 'done') {

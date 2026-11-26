@@ -5,8 +5,26 @@ import { Button } from '@/components/ui/button';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { Hint } from '@/components/ui/tooltip';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
+import { MetaTag } from '@/components/MetaTag';
+import { modelBrand } from '@/lib/modelCatalog';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { animate, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+
+export interface LightboxMediaMeta {
+  title?: string;
+  prompt?: string;
+  model?: string;
+  modelId?: string;
+  provider?: string;
+  dimensions?: string;
+  quality?: string;
+  duration?: string;
+  cost?: string;
+  createdAt?: string;
+  tags?: readonly string[];
+  extra?: ReactNode;
+}
 
 // 遮罩已是不透明度足够的纯色 bg-scrim，按钮不再叠毛玻璃：全屏 backdrop-filter 每帧重算模糊，开合与翻页都卡。
 const CONTROL_CLASS = 'absolute size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 border-0 disabled:pointer-events-none disabled:opacity-30';
@@ -51,7 +69,7 @@ export function Lightbox({
   onClose,
   onPrevious,
   onNext,
-  downloadName, details, preloadSrcs,
+  downloadName, details, meta, counter, preloadSrcs,
   onDownload, onUseAsReference, onCopyPrompt, onDelete,
 }: {
   src: string;
@@ -60,6 +78,10 @@ export function Lightbox({
   onNext?: () => void;
   downloadName?: string;
   details?: ReactNode;
+  /** 结构化媒体信息：传入时进入全站统一图文分离详情态（桌面左图右栏，窄屏上图下栏）。 */
+  meta?: LightboxMediaMeta;
+  /** 同批多图翻页计数（如 2 / 8）。 */
+  counter?: { current: number; total: number };
   /** 前后相邻图片的地址：后台预加载，翻页时直接可显示。 */
   preloadSrcs?: readonly string[];
   onDownload?: () => void;
@@ -200,6 +222,188 @@ export function Lightbox({
     }
   }, [preloadSrcs, src]);
 
+  const hasPanel = Boolean(meta || details);
+  const specRows: { label: string; value: string; brandId?: string }[] = meta
+    ? [
+      meta.model ? { label: '模型', value: meta.model, brandId: meta.modelId ?? meta.model } : null,
+      meta.provider ? { label: '平台', value: meta.provider } : null,
+      meta.dimensions ? { label: '尺寸', value: meta.dimensions } : null,
+      meta.quality ? { label: '质量', value: meta.quality } : null,
+      meta.duration ? { label: '耗时', value: meta.duration } : null,
+      meta.cost ? { label: '费用', value: meta.cost } : null,
+      meta.createdAt ? { label: '时间', value: meta.createdAt } : null,
+    ].filter((row): row is { label: string; value: string; brandId?: string } => row !== null)
+    : [];
+  const promptCopyText = onCopyPrompt ?? (meta?.prompt ? () => meta.prompt! : undefined);
+  const showFooterCopy = Boolean(promptCopyText && !meta?.prompt);
+  const hasFooterActions = Boolean(onUseAsReference || onDownload || downloadName || showFooterCopy || onDelete);
+
+  if (hasPanel) {
+    return createPortal(
+      <div
+        data-state={closing ? 'closed' : 'open'}
+        className="scrim-fade fixed inset-0 z-50 flex items-center justify-center bg-scrim p-3 md:p-6"
+        onClick={requestClose}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={meta?.title || '作品详情'}
+          data-testid="media-detail-dialog"
+          className="flex h-[90dvh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-card md:flex-row"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* 左侧（窄屏上方）：纯媒体舞台，绝无文字或参数遮挡 */}
+          <div className="relative flex h-[58%] min-h-0 flex-1 items-center justify-center overflow-hidden bg-background p-4 md:h-full md:p-6">
+            <div ref={stageRef} className="grid h-full w-full place-items-center">
+              {layers.map(layer => (
+                <RevealImage
+                  key={layer.src}
+                  src={layer.src}
+                  alt={layer.src === src ? '大图' : ''}
+                  aria-hidden={layer.src === src ? undefined : true}
+                  onReady={() => handleReady(layer.src)}
+                  className={`media-checker col-start-1 row-start-1 max-h-full max-w-full rounded-lg object-contain ${layer.phase === 'leaving' ? 'pointer-events-none opacity-0' : ''}`}
+                />
+              ))}
+            </div>
+            {(onPrevious || onNext) && (
+              <>
+                <Button variant="ghost" size="icon"
+                  type="button"
+                  aria-label="上一张"
+                  disabled={!onPrevious}
+                  onClick={() => onPrevious?.()}
+                  className={`${CONTROL_CLASS} ${ARROW_CLASS} left-3`}
+                >
+                  <ChevronLeftIcon size="lg" />
+                </Button>
+                <Button variant="ghost" size="icon"
+                  type="button"
+                  aria-label="下一张"
+                  disabled={!onNext}
+                  onClick={() => onNext?.()}
+                  className={`${CONTROL_CLASS} ${ARROW_CLASS} right-3`}
+                >
+                  <ChevronRightIcon size="lg" />
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* 右侧（窄屏下方）：独立结构化信息栏与操作栏 */}
+          <aside className="flex h-[42%] w-full shrink-0 flex-col border-t border-border bg-card md:h-full md:w-88 lg:w-96 md:border-l md:border-t-0">
+            <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium text-foreground">{meta?.title || '作品详情'}</span>
+                {counter && counter.total > 1 && (
+                  <span className="shrink-0 rounded-sm bg-secondary px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+                    {counter.current} / {counter.total}
+                  </span>
+                )}
+              </div>
+              <Button variant="ghost" size="icon" type="button" aria-label="关闭" onClick={requestClose} className="size-8 shrink-0 rounded-full">
+                <CloseIcon size="md" />
+              </Button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+              {meta?.prompt && (
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">提示词</span>
+                    {promptCopyText && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        aria-label="复制提示词"
+                        onClick={() => copy(promptCopyText())}
+                        className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <SwapIcon swapKey={copyState === 'copied'} variant="pop">
+                          {copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}
+                        </SwapIcon>
+                        <span>{copyState === 'copied' ? '已复制' : '复制'}</span>
+                      </Button>
+                    )}
+                  </div>
+                  <p className="whitespace-pre-wrap break-words rounded-lg bg-popover p-3 text-sm leading-relaxed text-foreground">
+                    {meta.prompt}
+                  </p>
+                </section>
+              )}
+
+              {(specRows.length > 0 || (meta?.tags && meta.tags.length > 0)) && (
+                <section className="space-y-2">
+                  <span className="block text-xs text-muted-foreground">生成参数</span>
+                  {specRows.length > 0 && (
+                    <dl className="divide-y divide-border rounded-lg border border-border bg-popover/60">
+                      {specRows.map(row => (
+                        <div key={row.label} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                          <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+                          <dd className="flex min-w-0 items-center gap-1.5 truncate font-medium tabular-nums text-foreground">
+                            {row.brandId && <ModelBrandIcon brand={modelBrand(row.brandId)} size="sm" />}
+                            <span className="truncate">{row.value}</span>
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {meta?.tags && meta.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {meta.tags.map((tag, idx) => <MetaTag key={idx}>{tag}</MetaTag>)}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {meta?.extra && <div className="space-y-2">{meta.extra}</div>}
+              {details && <div className="space-y-3 text-sm text-foreground">{details}</div>}
+            </div>
+
+            {hasFooterActions && (
+              <footer className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
+                {onUseAsReference && (
+                  <Button variant="secondary" size="sm" type="button" aria-label="设为参考" onClick={onUseAsReference} className="gap-1.5">
+                    <AddImageIcon size="sm" aria-hidden />设为参考
+                  </Button>
+                )}
+                {showFooterCopy && promptCopyText && (
+                  <Button variant="secondary" size="sm" type="button" aria-label="复制提示词" onClick={() => copy(promptCopyText())} className="gap-1.5">
+                    <SwapIcon swapKey={copyState === 'copied'} variant="pop">
+                      {copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}
+                    </SwapIcon>
+                    {copyState === 'copied' ? '已复制' : '复制提示词'}
+                  </Button>
+                )}
+                {onDownload ? (
+                  <Button variant="secondary" size="sm" type="button" aria-label="下载图片" onClick={onDownload} className="gap-1.5">
+                    <DownloadIcon size="sm" aria-hidden />下载
+                  </Button>
+                ) : downloadName && (
+                  <Button variant="secondary" size="sm" asChild className="gap-1.5">
+                    <a href={src} download={downloadName} aria-label="下载图片">
+                      <DownloadIcon size="sm" aria-hidden />下载
+                    </a>
+                  </Button>
+                )}
+                {onDelete && (
+                  <Hint label="删除（⌫）">
+                    <Button variant="ghost" size="icon" type="button" aria-label="删除" onClick={deleteCurrent} className="ml-auto size-8 text-muted-foreground hover:text-destructive">
+                      <DeleteIcon size="sm" aria-hidden />
+                    </Button>
+                  </Hint>
+                )}
+              </footer>
+            )}
+          </aside>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
   return createPortal(
     <div
       data-state={closing ? 'closed' : 'open'}
@@ -219,7 +423,6 @@ export function Lightbox({
           />
         ))}
       </div>
-      {details && <div className="absolute inset-x-4 bottom-4 mx-auto max-h-[25vh] max-w-xl overflow-auto break-words rounded-lg bg-card p-3 text-sm text-foreground" onClick={event => event.stopPropagation()}>{details}</div>}
       <Button variant="bare"
         type="button"
         aria-label="关闭"

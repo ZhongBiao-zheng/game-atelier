@@ -1,7 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CheckIcon, ModelIcon } from '@/components/ui/icons';
+import { CheckIcon, ChevronDownIcon, ModelIcon } from '@/components/ui/icons';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
+import { modelBrand } from '@/lib/modelCatalog';
+import { providerLabel } from '@/lib/providerLabels';
 import { cn } from '@/lib/utils';
 import type {
   CanvasAgentCreationMode, CanvasAgentGenerationModel, CanvasAgentModelRef,
@@ -21,12 +25,14 @@ const sameRef = (a: CanvasAgentModelRef, b: CanvasAgentModelRef) => a.alias === 
  * 一致）：一个都没勾就不能生成。勾选结果在自动打开时也保留，再关掉时恢复。
  * 图像 / 视频两页始终都在（偏好与当前创作模式无关），页内按供应商（Key 别名）分组。
  */
-export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, triggerClassName, disabled, onChange }: {
+export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, triggerClassName, direction = 'up', label, disabled, onChange }: {
   models: CanvasAgentGenerationModel[] | null;
   mode: CanvasAgentCreationMode;
   auto: boolean;
   preferred: CanvasAgentModelRef[];
   triggerClassName?: string;
+  direction?: 'up' | 'down';
+  label?: string;
   disabled?: boolean;
   onChange: (update: { auto_models?: boolean; preferred_models?: CanvasAgentModelRef[] }) => void;
 }) {
@@ -42,8 +48,8 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
     // alias 为 null 的是「智能路由」组。
     const byAlias = new Map<string, CanvasAgentGenerationModel[]>();
     for (const item of rows) {
-      const label = item.alias ?? '智能路由';
-      byAlias.set(label, [...(byAlias.get(label) ?? []), item]);
+      const groupKey = item.alias ?? '智能路由';
+      byAlias.set(groupKey, [...(byAlias.get(groupKey) ?? []), item]);
     }
     return [...byAlias.entries()];
   }, [rows]);
@@ -53,6 +59,8 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
     onChange({ preferred_models: isChosen(ref)
       ? preferred.filter(existing => !sameRef(existing, ref)) : [...preferred, ref] });
   }
+
+  const totalChosen = chosenCount('image') + chosenCount('video');
 
   return (
     <>
@@ -66,18 +74,24 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
         onClick={() => setOpen(value => !value)}
         className={cn(
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
-          !auto && 'text-primary',
+          label && 'flex w-auto gap-1.5 px-2.5 text-xs',
+          open && 'bg-secondary text-foreground',
           triggerClassName,
         )}
-      ><ModelIcon /></Button></Hint>
+      >
+        <ModelIcon size="sm" className={!auto ? 'text-primary' : undefined} />
+        {label && <span>{auto ? label : `${label} (${totalChosen})`}</span>}
+        {label && <ChevronDownIcon size="sm" className="text-muted-foreground" />}
+      </Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
-        direction="up"
+        direction={direction}
         align="start"
+        maxHeight={400}
         aria-label="模型偏好"
-        className="flex w-72 flex-col gap-2 rounded-xl border border-border bg-popover p-2 shell-glow"
+        className="flex w-80 flex-col gap-2 rounded-xl border border-border bg-card p-2.5"
       >
         <div className="flex items-center justify-between px-1">
           <p className="text-sm font-medium">模型偏好</p>
@@ -105,32 +119,44 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
             ))}
           </TabsList>
         </Tabs>
-        <div role="listbox" aria-multiselectable aria-label={`${KIND_LABELS[activeKind]}模型`} className="max-h-72 overflow-y-auto">
-          {!models && <p className="px-2 py-3 text-xs text-muted-foreground">读取中…</p>}
-          {models && rows.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有可用的{KIND_LABELS[activeKind]}模型</p>}
-          {groups.map(([alias, items]) => (
-            <div key={alias} role="group" aria-label={alias}>
-              <p className="px-2 pb-1 pt-2 text-xs text-muted-foreground">{alias}</p>
-              {items.map(item => {
-                const checked = !auto && isChosen(item);
-                return (
-                  <Button variant="bare"
-                    key={`${item.alias}/${item.model}`}
-                    type="button"
-                    role="option"
-                    aria-selected={checked}
-                    aria-disabled={auto}
-                    disabled={auto}
-                    onClick={() => toggle(item)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary disabled:opacity-50 disabled:hover:bg-transparent"
-                  >
-                    <Hint label={item.model}><span className="min-w-0 flex-1 truncate text-xs">{item.name}</span></Hint>
-                    {checked && <CheckIcon size="sm" className="shrink-0 text-primary" />}
-                  </Button>
-                );
-              })}
-            </div>
-          ))}
+        <div role="listbox" aria-multiselectable aria-label={`${KIND_LABELS[activeKind]}模型`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1">
+          {!models && <p className="px-3 py-3 text-xs text-muted-foreground">加载中…</p>}
+          {models && rows.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">没有可用的{KIND_LABELS[activeKind]}模型</p>}
+          {groups.map(([groupAlias, items]) => {
+            const head = items[0];
+            const isAutoGroup = head?.alias === null;
+            const groupLabel = isAutoGroup ? '智能路由' : (head?.provider ? providerLabel(head.provider, groupAlias) : groupAlias);
+            return (
+              <div key={groupAlias} role="group" aria-label={groupAlias} className="flex flex-col gap-0.5 pb-1">
+                <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2 text-xs text-muted-foreground">
+                  <ProviderBrandIcon provider={isAutoGroup ? { provider: 'auto' } : { provider: head?.provider ?? undefined, base_url: head?.base_url, alias: groupAlias, icon: head?.icon }} size="sm" />
+                  <span className="truncate">{groupLabel}</span>
+                  {!isAutoGroup && groupLabel !== groupAlias && <span className="truncate text-subtle-foreground">· {groupAlias}</span>}
+                </div>
+                {items.map(item => {
+                  const checked = !auto && isChosen(item);
+                  return (
+                    <Button variant="bare"
+                      key={`${item.alias}/${item.model}`}
+                      type="button"
+                      role="option"
+                      aria-selected={checked}
+                      aria-disabled={auto}
+                      disabled={auto}
+                      onClick={() => toggle(item)}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
+                    >
+                      <span className={checked ? 'text-foreground' : 'text-muted-foreground'}>
+                        <ModelBrandIcon brand={modelBrand(item.model)} size="md" />
+                      </span>
+                      <Hint label={item.model}><span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span></Hint>
+                      {checked && <CheckIcon size="sm" className="shrink-0 text-primary" />}
+                    </Button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
         {!auto && chosenCount(activeKind) === 0 && rows.length > 0 && (
           <p className="px-1 text-xs text-muted-foreground">未选{KIND_LABELS[activeKind]}模型，Agent 无法生成{KIND_LABELS[activeKind]}</p>

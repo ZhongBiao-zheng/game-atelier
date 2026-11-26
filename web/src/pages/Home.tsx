@@ -150,6 +150,8 @@ export function Home() {
         <Lightbox
           src={galleryImageSrc(viewing)}
           downloadName={viewing.filename}
+          meta={{ title: viewing.filename }}
+          counter={{ current: viewingIndex + 1, total: items.length }}
           onClose={() => setViewingPath(null)}
           onPrevious={viewingIndex > 0 ? () => setViewingPath(items[viewingIndex - 1].path) : undefined}
           onNext={viewingIndex < items.length - 1 ? () => setViewingPath(items[viewingIndex + 1].path) : undefined}

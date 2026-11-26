@@ -589,12 +589,18 @@ export interface CanvasAgentPlan {
 
 export interface CanvasAgentChatModel {
   alias: string;
+  provider?: string;
+  base_url?: string | null;
+  icon?: string | null;
   model: string;
   name: string;
   reasoning: boolean | null;
 }
 
 export interface CanvasAgentGenerationModel extends CanvasAgentModelRef {
+  provider?: string | null;
+  base_url?: string | null;
+  icon?: string | null;
   name: string;
   kind: 'image' | 'video';
 }

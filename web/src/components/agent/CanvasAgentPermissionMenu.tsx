@@ -1,24 +1,39 @@
 import { useRef, useState } from 'react';
-import { AutoModeIcon, ConfirmModeIcon } from '@/components/ui/icons';
+import { AutoModeIcon, CheckIcon, ChevronDownIcon, ConfirmModeIcon } from '@/components/ui/icons';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import { NumberInput } from '@/components/ui/number-input';
-import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { Hint } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /** 与服务端 canvas_agent_cost.MAX_CONFIRM_ABOVE_CNY 一致。 */
 const MAX_CONFIRM_ABOVE = 10_000;
 
+const PERMISSION_OPTIONS: {
+  mode: 'auto' | 'review';
+  label: string;
+  description: string;
+  Icon: typeof AutoModeIcon;
+}[] = [
+  { mode: 'auto', label: 'Auto', description: '自动执行，超额生成前先确认', Icon: AutoModeIcon },
+  { mode: 'review', label: '审查', description: '每一步操作前都先确认', Icon: ConfirmModeIcon },
+];
+
 /**
  * 权限：审查 = 每一步都先确认；Auto = 直接执行，只有单次估价超过确认金额的生成先确认
  * （服务端 canvas_agent_runtime.generation_over_threshold，未计价的不拦）。
  */
-export function CanvasAgentPermissionMenu({ auto, confirmAbove, triggerClassName, disabled, onModeChange, onConfirmAboveChange }: {
+export function CanvasAgentPermissionMenu({
+  auto, confirmAbove, triggerClassName, direction = 'up', showLabel = false, disabled,
+  onModeChange, onConfirmAboveChange,
+}: {
   auto: boolean;
   /** null：还没读到。 */
   confirmAbove: number | null;
   triggerClassName?: string;
+  direction?: 'up' | 'down';
+  showLabel?: boolean;
   disabled?: boolean;
   onModeChange: (mode: 'review' | 'auto') => void;
   onConfirmAboveChange: (value: number) => void;
@@ -40,38 +55,68 @@ export function CanvasAgentPermissionMenu({ auto, confirmAbove, triggerClassName
         onClick={() => setOpen(value => !value)}
         className={cn(
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
-          auto && 'text-primary',
+          showLabel && 'flex w-auto gap-1.5 px-2.5 text-xs',
+          open && 'bg-secondary text-foreground',
           triggerClassName,
         )}
-      >{auto ? <AutoModeIcon /> : <ConfirmModeIcon />}</Button></Hint>
+      >
+        {auto
+          ? <AutoModeIcon size={showLabel ? 'sm' : 'md'} className="shrink-0 text-primary" />
+          : <ConfirmModeIcon size={showLabel ? 'sm' : 'md'} className="shrink-0" />}
+        {showLabel && <span>{auto ? 'Auto' : '审查'}</span>}
+        {showLabel && <ChevronDownIcon size="sm" className="shrink-0 text-muted-foreground" />}
+      </Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
-        direction="up"
+        direction={direction}
         align="end"
         aria-label="权限模式"
-        className="flex w-60 flex-col gap-2.5 rounded-xl border border-border bg-popover p-2 shell-glow"
+        className="flex w-64 flex-col gap-2 rounded-xl border border-border bg-card p-2"
       >
-        <Segmented aria-label="权限模式" className="grid-cols-2 bg-secondary/60">
-          <SegmentedItem value="review" selected={!auto} onSelect={() => onModeChange('review')}>审查</SegmentedItem>
-          <SegmentedItem value="auto" selected={auto} onSelect={() => onModeChange('auto')}>Auto</SegmentedItem>
-        </Segmented>
-        {auto && confirmAbove !== null && (
-          <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-            <span>超过</span>
-            <NumberInput
-              aria-label="确认金额"
-              value={confirmAbove}
-              min={0}
-              max={MAX_CONFIRM_ABOVE}
-              unit="¥"
-              onValueChange={onConfirmAboveChange}
-              className="w-24"
-            />
-            <span>的生成先确认</span>
-          </div>
-        )}
+        <div role="radiogroup" aria-label="权限模式" className="flex flex-col gap-1 rounded-lg bg-popover p-1">
+          {PERMISSION_OPTIONS.map(({ mode, label, description, Icon }) => {
+            const selected = (mode === 'auto') === auto;
+            return (
+              <Button
+                key={mode}
+                variant="ghost"
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onModeChange(mode)}
+                className={cn(
+                  'h-auto w-full items-start justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left font-normal hover:bg-secondary/60',
+                  selected && 'bg-secondary ring-1 ring-inset ring-primary/60 hover:bg-secondary',
+                )}
+              >
+                <Icon size="md" className={cn('mt-0.5 shrink-0', selected && mode === 'auto' ? 'text-primary' : 'text-muted-foreground')} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-foreground">{label}</span>
+                  <span className="block text-xs text-muted-foreground">{description}</span>
+                </span>
+                {selected && <CheckIcon size="sm" className="mt-0.5 shrink-0 text-primary" />}
+              </Button>
+            );
+          })}
+        </div>
+        <Collapse open={auto && confirmAbove !== null}>
+          {confirmAbove !== null && (
+            <div className="flex items-center justify-between gap-2 border-t border-border px-1.5 pt-2 text-xs text-muted-foreground">
+              <span>超额确认阈值</span>
+              <NumberInput
+                aria-label="确认金额"
+                value={confirmAbove}
+                min={0}
+                max={MAX_CONFIRM_ABOVE}
+                unit="¥"
+                onValueChange={onConfirmAboveChange}
+                className="w-24"
+              />
+            </div>
+          )}
+        </Collapse>
       </ToolbarPopover>
     </>
   );

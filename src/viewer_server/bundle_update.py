@@ -18,6 +18,15 @@ from viewer_server.connection_status import probe_connection_status
 from viewer_server.pid import _is_alive, read_instance, read_pid, read_port
 
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+# 5.x 是退役号段，永久排在 0.x 之前（与 scripts/bootstrap.py::version_key 一致）。
+LEGACY_MAJOR = 5
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    parts = tuple(int(p) for p in version.split("."))
+    return (0 if parts[0] == LEGACY_MAJOR else 1, *parts)
+
+
 UPDATE_ID = re.compile(r"[0-9a-f]{32}\Z")
 UPDATE_ENV = "GAME_ATELIER_UPDATE_ID"
 ROLLBACK_ENV = "GAME_ATELIER_UPDATE_ROLLBACK_ID"
@@ -230,9 +239,9 @@ def apply_update(root: Path, runtime: Path, to: str, update_id: str) -> int:
             # Freeze the restart deadline separately from any preceding drain period.
             pending["restart_started_at"] = time.time()
             pending["phase"] = "restarting"
-            atomic_write_json(root / "updates/pending.json", pending)
+            atomic_write_json(root / "updates/pending.json", pending, durable=True)
             if service:
-                atomic_write_text(root / "current", to + "\n")
+                atomic_write_text(root / "current", to + "\n", durable=True)
             _stop(runtime, expected_instance=pending.get("from_instance"))
             stopped = True
             timeout = SERVICE_START_TIMEOUT if service else NORMAL_START_TIMEOUT
@@ -248,11 +257,11 @@ def apply_update(root: Path, runtime: Path, to: str, update_id: str) -> int:
             if not _wait_ready(runtime, to, update_id=update_id, ready=True,
                                timeout=max(0, deadline - time.monotonic())):
                 raise RuntimeError("新版初始化失败或超时")
-            atomic_write_text(root / "previous", old + "\n")
+            atomic_write_text(root / "previous", old + "\n", durable=True)
             # last-good is the commit point. Recovery recognizes it even if the executor
             # exits before writing the result or removing pending.json.
-            atomic_write_text(root / "current", to + "\n")
-            atomic_write_text(root / "last-good", to + "\n")
+            atomic_write_text(root / "current", to + "\n", durable=True)
+            atomic_write_text(root / "last-good", to + "\n", durable=True)
             _finish(root, runtime, pending, "succeeded")
             return 0
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -265,8 +274,8 @@ def apply_update(root: Path, runtime: Path, to: str, update_id: str) -> int:
             if stopped:
                 try:
                     pending["phase"] = "rollback"
-                    atomic_write_json(root / "updates/pending.json", pending)
-                    atomic_write_text(root / "current", old + "\n")
+                    atomic_write_json(root / "updates/pending.json", pending, durable=True)
+                    atomic_write_text(root / "current", old + "\n", durable=True)
                     _stop(runtime)
                     _start(root, runtime, old, service=service, update_id=update_id)
                     if not _wait_ready(runtime, old, timeout=ROLLBACK_TIMEOUT):
@@ -274,7 +283,7 @@ def apply_update(root: Path, runtime: Path, to: str, update_id: str) -> int:
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as rollback:
                     reason += "；" + str(rollback)
             elif _pointer(root, "last-good") == old:
-                atomic_write_text(root / "current", old + "\n")
+                atomic_write_text(root / "current", old + "\n", durable=True)
             _block(root, to, reason)
             _finish(root, runtime, pending, "failed", reason)
             return 1
@@ -299,7 +308,7 @@ def recover_pending(root: Path, runtime: Path) -> None:
             _finish(root, runtime, pending, "failed", "等待任务期间服务已重启，本次更新已取消")
             return
         if _pointer(root, "last-good") == pending["to"]:
-            atomic_write_text(root / "current", pending["to"] + "\n")
+            atomic_write_text(root / "current", pending["to"] + "\n", durable=True)
             _finish(root, runtime, pending, "succeeded")
             return
         start = pending.get("restart_started_at", pending.get("started_at", 0))
@@ -311,7 +320,7 @@ def recover_pending(root: Path, runtime: Path) -> None:
         # A survivor must be stopped using the same verified PID/instance protocol as normal
         # shutdown. Never overwrite the records while another instance is still alive.
         _stop(runtime)
-        atomic_write_text(root / "current", old + "\n")
+        atomic_write_text(root / "current", old + "\n", durable=True)
         reason = "更新执行器已退出，已恢复上一个可用版本"
         _block(root, pending["to"], reason)
         _finish(root, runtime, pending, "failed", reason)
@@ -347,10 +356,10 @@ def cleanup_versions(root: Path) -> None:
     previous = _pointer(root, "previous")
     if not previous:
         return
-    cutoff = tuple(map(int, previous.split(".")))
+    cutoff = version_key(previous)
     for folder in (root / "versions").iterdir():
         if (folder.name in keep or not VERSION.fullmatch(folder.name) or folder.is_symlink()
-                or tuple(map(int, folder.name.split("."))) >= cutoff
+                or version_key(folder.name) >= cutoff
                 or Path(sys.executable).resolve().is_relative_to(folder.resolve())):
             continue
         try:

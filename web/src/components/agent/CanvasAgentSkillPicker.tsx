@@ -20,11 +20,12 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, disabled, onSelect, onChanged, label }: {
+export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, direction = 'up', disabled, onSelect, onChanged, label }: {
   label?: string;
   skills: CanvasAgentSkill[];
   selected: string | null;
   triggerClassName?: string;
+  direction?: 'up' | 'down';
   disabled?: boolean;
   onSelect: (name: string) => void;
   /** 导入或删除之后重新读取列表。 */
@@ -119,20 +120,20 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dis
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
-        direction="up"
+        direction={direction}
         align="start"
         autoFocus
+        maxHeight={400}
         aria-label="Skill"
-        className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
+        className="flex w-72 flex-col gap-2 rounded-xl border border-border bg-card p-2"
       >
         <Input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索 Skill"
           aria-label="搜索 Skill"
-          className="mb-1"
         />
-        <div role="listbox" aria-label="Skill 列表" className="max-h-64 overflow-y-auto">
+        <div role="listbox" aria-label="Skill 列表" className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1">
           {userSkills.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">还没有导入 Skill</p>}
           {userSkills.length > 0 && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的 Skill</p>}
           {matches.map(item => (

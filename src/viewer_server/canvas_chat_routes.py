@@ -106,14 +106,27 @@ async def _call(function, *args):
 
 @router.get("/agent/models")
 async def get_chat_models() -> dict:
-    return await asyncio.to_thread(list_chat_models)
+    return await asyncio.to_thread(list_chat_models, wait=False)
 
 
 def _generation_models() -> dict:
+    from character_workflow.lib import keys
     from character_workflow.lib.canvas_model_catalog import model_rows
-    return {"models": [{"alias": row["alias"], "model": row["model"], "name": row["name"],
-                        "kind": kind}
-                       for kind in ("image", "video") for row in model_rows(kind)]}
+    key_map = {k.alias: k for k in keys.read_keys_db().keys}
+    items = []
+    for kind in ("image", "video"):
+        for row in model_rows(kind):
+            key = key_map.get(row["alias"]) if row["alias"] else None
+            items.append({
+                "alias": row["alias"],
+                "provider": row.get("provider") or (key.provider if key else None),
+                "base_url": key.base_url if key else None,
+                "icon": key.icon if key else None,
+                "model": row["model"],
+                "name": row["name"],
+                "kind": kind,
+            })
+    return {"models": items}
 
 
 @router.get("/agent/generation-models")

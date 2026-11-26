@@ -10,8 +10,6 @@ import {
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
-import { CreationAssetPanel } from '@/components/assets/CreationAssetPanel';
-import { readCreationMediaFile } from '@/api/creationAssets';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import { MAX_REF_IMAGES, type FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { maxReferenceImages } from '@/lib/referenceLimits';
@@ -74,7 +72,6 @@ export function StudioCompact() {
   const [saved] = useState(loadSelection);
   const [draft] = useState(readStudioDraft);
   const [pending, setPending] = useState(false);
-  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   // 非错误的一句提示（参考超出上限只加入了几张）。
   const [compactNotice, setCompactNotice] = useState<string | null>(null);
@@ -463,8 +460,6 @@ export function StudioCompact() {
         {heroHeading}
       </h1>
       <StudioComposer state={composer}
-        assetPanelOpen={assetPanelOpen}
-        onToggleAssetPanel={composer.mode === 'agent' ? () => setAssetPanelOpen(open => !open) : undefined}
         onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         estimateLabel={estimateLabel}
         onNotice={setCompactNotice}
@@ -519,18 +514,6 @@ export function StudioCompact() {
         videoFrames={videoFrames}
         onVideoFramesChange={setVideoFrames}
       />
-      {assetPanelOpen && composer.mode === 'agent' && <CreationAssetPanel initialKind="media"
-        onClose={() => setAssetPanelOpen(false)}
-        onUsePrompt={(_asset, text) => composer.setText(text)}
-        onUseMedia={async (asset, content) => {
-          if (!content.mime_type.startsWith('image/')) { setCompactError('Agent 只支持图片参考'); return; }
-          if (composer.files.length >= 16) { setCompactError('参考图已满'); return; }
-          try {
-            const file = await readCreationMediaFile(asset.asset_id, content);
-            composer.setFiles(current => [...current, file].slice(0, 16));
-            setCompactError(null);
-          } catch (error) { setCompactError(errorText(error)); }
-        }} />}
       {compactError && (
         <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
           {compactError}

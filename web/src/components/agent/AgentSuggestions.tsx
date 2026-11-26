@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { AiIcon, ArrowToolIcon } from '@/components/ui/icons';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 
-const SUGGESTION_LINE = /^(?:[-*•]\s*)?→\s+(.+)$/;
+const SUGGESTION_LINE = /^(?:[-*•]\s*|\d+[.)、]\s*)?(?:→|->|⇒)\s*(.+)$/;
 const MAX_SUGGESTIONS = 3;
 
 /** 回复末尾连续的 `→ ` 行是推荐追问（约定见 agent_instructions.CORE「汇报」），从正文里剥离；正文中间的箭头行不算。 */

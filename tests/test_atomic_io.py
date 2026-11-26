@@ -104,3 +104,27 @@ def test_keys_db_read_goes_through_the_retrying_reader(isolated_data_root, monke
 
     assert keys.read_keys_db().keys == []
     assert seen == [data_root.keys_file()]
+
+
+def test_atomic_write_durable_calls_fsync(tmp_path, monkeypatch):
+    synced = []
+    real_fsync = aio.os.fsync
+
+    def spy_fsync(fd):
+        synced.append(fd)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(aio.os, "fsync", spy_fsync)
+    target = tmp_path / "last-good"
+
+    aio.atomic_write_text(target, "5.142.0\n", durable=True)
+
+    assert target.read_text(encoding="utf-8") == "5.142.0\n"
+    assert len(synced) >= 1
+
+
+def test_bundle_version_key_orders_legacy_5x_before_0x():
+    from viewer_server.bundle_update import version_key
+
+    assert version_key("5.142.0") > version_key("5.140.0")
+    assert version_key("0.1.0") > version_key("5.142.0")

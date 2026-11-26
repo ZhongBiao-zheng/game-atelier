@@ -79,20 +79,43 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
     raise AssertionError("unreachable")
 
 
-def atomic_write_bytes(path: Path, data: bytes) -> None:
+def _fsync_dir(directory: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def atomic_write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     try:
-        tmp.write_bytes(data)
+        if durable:
+            with tmp.open("wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        else:
+            tmp.write_bytes(data)
         _replace_with_retry(tmp, path)
+        if durable:
+            _fsync_dir(path.parent)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
 
 
-def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
-    atomic_write_bytes(path, text.encode(encoding))
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8", *, durable: bool = False) -> None:
+    atomic_write_bytes(path, text.encode(encoding), durable=durable)
 
 
-def atomic_write_json(path: Path, data: Any) -> None:
-    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+def atomic_write_json(path: Path, data: Any, *, durable: bool = False) -> None:
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2), durable=durable)

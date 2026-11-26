@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 CHAT_PROVIDERS = frozenset({"openai", "openrouter", "custom", "seedream", "tokendance", "atelier"})
 CACHE_SECONDS = 600
-FETCH_TIMEOUT = (5, 20)
+FAIL_CACHE_SECONDS = 60
+FETCH_TIMEOUT = (3, 6)
 
 _NON_CHAT_ID_HINTS = (
     "image", "dall-e", "dalle", "banana", "seedream", "flux", "midjourney", "mj_",
@@ -39,6 +40,8 @@ _NEW_API_CHAT_TYPES = frozenset({"openai", "openai-chat"})
 _NEW_API_MEDIA_TYPES = ("image", "video", "generate", "edit", "embedding", "audio", "veo", "sora")
 
 _cache: dict[str, tuple[float, dict[str, dict]]] = {}
+_fail_cache: dict[str, tuple[float, str]] = {}
+_refreshing: set[str] = set()
 _cache_lock = threading.Lock()
 
 
@@ -135,23 +138,56 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     return out
 
 
-def _upstream_for(key: keys.KeySpec, now: float) -> tuple[dict[str, dict], str | None]:
+def _upstream_for(key: keys.KeySpec, now: float, *, wait: bool = True) -> tuple[dict[str, dict], str | None]:
     with _cache_lock:
         cached = _cache.get(key.alias)
+        failed = _fail_cache.get(key.alias)
     if cached and now - cached[0] < CACHE_SECONDS:
         return cached[1], None
+    if failed and now - failed[0] < FAIL_CACHE_SECONDS:
+        return (cached[1] if cached else {}), failed[1]
+    if not wait:
+        _schedule_refresh(key)
+        return (cached[1] if cached else {}), None
     try:
         upstream = _fetch(key)
     except (requests.RequestException, ValueError) as error:
         logger.warning("chat model list failed for %s: %s", key.alias, type(error).__name__)
+        with _cache_lock:
+            _fail_cache[key.alias] = (now, "模型能力获取失败")
         return (cached[1] if cached else {}), "模型能力获取失败"
     with _cache_lock:
         _cache[key.alias] = (now, upstream)
+        _fail_cache.pop(key.alias, None)
     return upstream, None
 
 
-def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
-    upstream, error = _upstream_for(key, now)
+def _schedule_refresh(key: keys.KeySpec) -> None:
+    with _cache_lock:
+        if key.alias in _refreshing:
+            return
+        _refreshing.add(key.alias)
+
+    def _run() -> None:
+        now = time.monotonic()
+        try:
+            upstream = _fetch(key)
+        except (requests.RequestException, ValueError) as error:
+            logger.warning("background chat model refresh failed for %s: %s", key.alias, type(error).__name__)
+            with _cache_lock:
+                _fail_cache[key.alias] = (now, "模型能力获取失败")
+                _refreshing.discard(key.alias)
+            return
+        with _cache_lock:
+            _cache[key.alias] = (now, upstream)
+            _fail_cache.pop(key.alias, None)
+            _refreshing.discard(key.alias)
+
+    threading.Thread(target=_run, name=f"chat-models-{key.alias}", daemon=True).start()
+
+
+def _models_for(key: keys.KeySpec, now: float, *, wait: bool = True) -> tuple[list[dict], str | None]:
+    upstream, error = _upstream_for(key, now, wait=wait) if not wait else _upstream_for(key, now)
     rows = []
     from character_workflow.lib.llm_protocols import detect
 
@@ -164,13 +200,25 @@ def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
         # Anthropic、Gemini 首版不开思考：列表里没拉到也标成不支持，面板不显示思考档位。
         reasoning = (False if model.protocol in (ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT)
                      else (info["reasoning"] if info else None))
-        rows.append({"alias": key.alias, "model": model.id, "name": model.name or model.id,
-                     "reasoning": reasoning})
+        rows.append({
+            "alias": key.alias,
+            "provider": key.provider,
+            "base_url": key.base_url,
+            "icon": key.icon,
+            "model": model.id,
+            "name": model.name or model.id,
+            "reasoning": reasoning,
+        })
     return rows, error
 
 
-def list_chat_models() -> dict:
-    """Every configured key's enabled agent-capable text models; failures are reported per key."""
+def list_chat_models(*, wait: bool = True) -> dict:
+    """Every configured key's enabled agent-capable text models; failures are reported per key.
+
+    wait=False returns immediately with locally enabled models and cached upstream capabilities,
+    warming stale keys in background threads so switching to Agent mode is never blocked by slow
+    upstream /models probes.
+    """
     candidates = [
         key for key in keys.read_keys_db().keys
         if key.enabled and key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
@@ -179,8 +227,11 @@ def list_chat_models() -> dict:
     if not candidates:
         return {"models": [], "errors": []}
     now = time.monotonic()
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        results = list(pool.map(lambda key: _models_for(key, now), candidates))
+    if not wait:
+        results = [_models_for(key, now, wait=False) for key in candidates]
+    else:
+        with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+            results = list(pool.map(lambda key: _models_for(key, now), candidates))
     models: list[dict] = []
     errors: list[dict] = []
     for key, (rows, error) in zip(candidates, results):

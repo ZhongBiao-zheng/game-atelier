@@ -284,7 +284,8 @@ class UpdateController:
             if state.get("status") != "ready":
                 raise HTTPException(409, "新版尚未准备好")
             try:
-                newer = tuple(map(int, state["to"].split("."))) > tuple(map(int, self.current.split(".")))
+                from viewer_server.bundle_update import version_key
+                newer = version_key(state["to"]) > version_key(self.current)
             except (KeyError, ValueError, AttributeError):
                 newer = False
             if not newer:

@@ -89,14 +89,71 @@ function interpreter(payload) {
     : path.join(payload, 'python', 'bin', 'python3');
 }
 
+export function isValidPayload(root, version) {
+  if (!validVersion(version)) return false;
+  const payload = path.join(root, 'versions', version);
+  return readTrim(path.join(payload, 'VERSION')) === version && fs.existsSync(interpreter(payload));
+}
+
 /** A bundle is usable when `last-good` names a complete version directory (ADR-0030). */
 export function validateBundle(root) {
   const version = readTrim(path.join(root, 'last-good'));
   if (!version) throw new Error('运行包缺少 last-good');
   if (!validVersion(version)) throw new Error(`运行包版本无效：${version}`);
-  const payload = path.join(root, 'versions', version);
-  if (readTrim(path.join(payload, 'VERSION')) !== version || !fs.existsSync(interpreter(payload))) {
+  if (!isValidPayload(root, version)) {
     throw new Error(`运行包版本目录不完整：${version}`);
+  }
+}
+
+function writePointerAtomically(file, version) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    fs.writeSync(fd, `${version}\n`, 0, 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+}
+
+/**
+ * If `last-good` was truncated or corrupted (e.g. abrupt shutdown before fsync), recover from
+ * `current`, `previous`, or the highest complete version under `versions/` instead of letting
+ * the shell wipe the bundle back to the installer's original version.
+ */
+export function repairBundlePointers(root) {
+  if (!fs.existsSync(root)) return null;
+  try {
+    validateBundle(root);
+    return null;
+  } catch (error) {
+    log(`bundle pointer check failed: ${error.message}`);
+  }
+  const candidates = [];
+  for (const name of ['current', 'previous']) {
+    const version = readTrim(path.join(root, name));
+    if (isValidPayload(root, version)) candidates.push(version);
+  }
+  try {
+    const entries = fs.readdirSync(path.join(root, 'versions'));
+    const valid = entries
+      .filter((entry) => isValidPayload(root, entry))
+      .sort((a, b) => compareVersions(b, a));
+    candidates.push(...valid);
+  } catch { /* versions dir missing */ }
+  const recovered = candidates[0] ?? null;
+  if (!recovered) return null;
+  try {
+    writePointerAtomically(path.join(root, 'last-good'), recovered);
+    if (!isValidPayload(root, readTrim(path.join(root, 'current')))) {
+      writePointerAtomically(path.join(root, 'current'), recovered);
+    }
+    log(`repaired bundle pointers to ${recovered}`);
+    return recovered;
+  } catch (error) {
+    log(`failed to repair bundle pointers: ${error.message}`);
+    return null;
   }
 }
 
@@ -104,7 +161,8 @@ export function installed(root) {
   try {
     validateBundle(root);
     return true;
-  } catch {
+  } catch (error) {
+    log(`installed check failed: ${error.message}`);
     return false;
   }
 }
@@ -316,7 +374,7 @@ export async function verifiedServer(dataRoot) {
   const res = await httpGet(port, '/api/connection/status');
   const body = res && parseJson(res.body);
   if (res?.status === 200 && body?.service === 'game-atelier' && body.instance_id === instance) {
-    return { port, instance };
+    return { port, instance, version: typeof body.app_version === 'string' ? body.app_version : null };
   }
   return null;
 }

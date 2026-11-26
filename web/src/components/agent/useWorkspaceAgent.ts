@@ -127,6 +127,20 @@ function carriedSettings(session: CanvasAgentSession | StudioAgentSession): Canv
   };
 }
 
+/** 跨页面共享的控件缓存：从首页切到创作台或重开面板时立刻展示，后台再静默刷新。测试环境不跨用例复用。 */
+const CONTROLS_CACHE_ENABLED = import.meta.env.MODE !== 'test';
+let cachedChatModels: CanvasAgentChatModelList | null = null;
+let cachedGenerationModels: CanvasAgentGenerationModel[] | null = null;
+let cachedSkills: CanvasAgentSkill[] | null = null;
+let cachedConfirmAbove: number | null = null;
+
+export function clearWorkspaceAgentControlsCache() {
+  cachedChatModels = null;
+  cachedGenerationModels = null;
+  cachedSkills = null;
+  cachedConfirmAbove = null;
+}
+
 export function useWorkspaceAgent(projectId: string | null, open: boolean, home = false, loadControls = open, sharedEvents = false) {
   const [sessions, setSessions] = useState<StudioAgentSessionSummary[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -138,15 +152,15 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [outgoing, setOutgoing] = useState<OutgoingMessage | null>(null);
   const [streaming, setStreaming] = useState('');
   const [tool, setTool] = useState<AgentToolStatus | null>(null);
-  const [models, setModels] = useState<CanvasAgentChatModelList | null>(null);
-  const [generationModels, setGenerationModels] = useState<CanvasAgentGenerationModel[] | null>(null);
-  const [skills, setSkills] = useState<CanvasAgentSkill[]>([]);
+  const [models, setModels] = useState<CanvasAgentChatModelList | null>(() => CONTROLS_CACHE_ENABLED ? cachedChatModels : null);
+  const [generationModels, setGenerationModels] = useState<CanvasAgentGenerationModel[] | null>(() => CONTROLS_CACHE_ENABLED ? cachedGenerationModels : null);
+  const [skills, setSkills] = useState<CanvasAgentSkill[]>(() => CONTROLS_CACHE_ENABLED ? (cachedSkills ?? []) : []);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // 用量与待办按会话记：切会话时旧会话的内容留着显示，不会把旧会话的数挂到新会话上。
   const [usage, setUsage] = useState<{ sessionId: string; value: CanvasAgentSessionUsage } | null>(null);
   const [plan, setPlan] = useState<{ sessionId: string; value: CanvasAgentPlan | null } | null>(null);
-  const [confirmAbove, setConfirmAbove] = useState<number | null>(null);
+  const [confirmAbove, setConfirmAbove] = useState<number | null>(() => CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
     const model = rememberedModel();
@@ -246,30 +260,32 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return () => { cancelled = true; };
   }, [home, open, projectId, refreshList, selectSession]);
 
-  // 模型列表要实时拉各 Key 的 /models，只在首次打开时拉一次。
+  // SWR：已有跨页缓存时先秒显，每次打开控件仍静默刷新一次以同步 Key 改动。
+  const controlsFetched = useRef(false);
   useEffect(() => {
-    if (!loadControls || models) return;
-    listCanvasAgentChatModels().then(setModels, loadError => setError(messageOf(loadError)));
-  }, [loadControls, models]);
-
-  useEffect(() => {
-    if (!loadControls || generationModels) return;
-    listCanvasAgentGenerationModels()
-      .then(result => setGenerationModels(result.models), loadError => setError(messageOf(loadError)));
-  }, [loadControls, generationModels]);
+    if (!loadControls || controlsFetched.current) return;
+    controlsFetched.current = true;
+    listCanvasAgentChatModels().then(result => {
+      cachedChatModels = result;
+      setModels(result);
+    }, loadError => setError(messageOf(loadError)));
+    listCanvasAgentGenerationModels().then(result => {
+      cachedGenerationModels = result.models;
+      setGenerationModels(result.models);
+    }, loadError => setError(messageOf(loadError)));
+    getCanvasAgentSettings().then(settings => {
+      cachedConfirmAbove = settings.confirm_above_cny;
+      setConfirmAbove(settings.confirm_above_cny);
+    }, loadError => setError(messageOf(loadError)));
+  }, [loadControls]);
 
   const reloadSkills = useCallback(() => {
-    listCanvasAgentSkills().then(result => setSkills(result.skills), loadError => setError(messageOf(loadError)));
+    listCanvasAgentSkills().then(result => {
+      cachedSkills = result.skills;
+      setSkills(result.skills);
+    }, loadError => setError(messageOf(loadError)));
   }, []);
   useEffect(() => { if (loadControls) reloadSkills(); }, [loadControls, reloadSkills]);
-
-  useEffect(() => {
-    if (!loadControls || confirmAbove !== null) return;
-    getCanvasAgentSettings().then(
-      settings => setConfirmAbove(settings.confirm_above_cny),
-      loadError => setError(messageOf(loadError)),
-    );
-  }, [loadControls, confirmAbove]);
 
   const onAgentEvent = (event: CanvasAgentEventPayload) => {
       if ((projectId !== null && event.project_id !== projectId) || !event.session_id) return;
@@ -451,6 +467,17 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return updated;
   });
 
+  /** 重命名对话（支持当前对话或列表中任意已有对话，不阻塞运行中的轮次）。 */
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return undefined;
+    const updated = await updateCanvasAgentSession(projectId, id, { title: trimmed });
+    acceptSession(updated);
+    setSessions(current => current.map(item => item.session_id === id
+      ? { ...item, title: updated.title, revision: updated.revision } : item));
+    return updated;
+  }, [acceptSession, projectId]);
+
   /** 删除对话；返回回收站条目 id（没进回收站时为 null），调用方用它发撤销 toast。 */
   const removeSession = (id: string, revision: number) => run(async () => {
     const trashId = await deleteCanvasAgentSession(projectId, id, revision);
@@ -507,7 +534,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     // 切会话期间旧会话还在显示，创作台按它过滤记录，等新会话读到再一起换。
     selectedSessionId: (selecting ? session?.session_id : null) ?? sessionIdRef.current
       ?? (projectId === null && restoring ? readStudioView().activeSessionId : null),
-    onAgentEvent, onReconnect, createSession, reloadSkills, sendStudio, removeSession, waitingForSession,
+    onAgentEvent, onReconnect, createSession, reloadSkills, sendStudio, renameSession, removeSession, waitingForSession,
     refreshSessions: refreshList,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };

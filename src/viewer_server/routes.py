@@ -1866,7 +1866,9 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     show_canvas_on_home（默认开）时混入画布上正在显示、没打码的生成图。
     """
     items: list[dict] = []
-    hidden = set(_read_gallery_hidden())
+    hidden_paths, hidden_canvas_ids = _read_gallery_hidden_state()
+    hidden = set(hidden_paths)
+    hidden_canvases = set(hidden_canvas_ids)
     studio_dir = _project_root() / "studio"
     if studio_dir.exists():
         studio_root = studio_dir.resolve()
@@ -1909,6 +1911,8 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     show_canvas = bool(_read_config().get("show_canvas_on_home", True))
     for canvas_project_id, canvas_job_id, canvas_node_id, f in (
             list_canvas_gallery_images() if show_canvas else []):
+        if canvas_project_id in hidden_canvases:
+            continue
         try:
             if f.suffix.lower() not in _GALLERY_EXTS:
                 continue
@@ -1946,18 +1950,25 @@ def _gallery_hidden_file() -> Path:
     return _runtime() / "gallery-hidden.json"
 
 
-def _read_gallery_hidden() -> list[str]:
+def _read_gallery_hidden_state() -> tuple[list[str], list[str]]:
     path = data_root.runtime_dir() / "gallery-hidden.json"
     if not path.is_file():
-        return []
+        return [], []
     try:
         payload = json.loads(read_text_with_retry(path))
     except (OSError, json.JSONDecodeError):
-        return []
-    paths = payload.get("paths") if isinstance(payload, dict) else None
-    if not isinstance(paths, list):
-        return []
-    return [value for value in paths if isinstance(value, str)]
+        return [], []
+    if not isinstance(payload, dict):
+        return [], []
+    raw_paths = payload.get("paths")
+    raw_canvases = payload.get("canvas_project_ids")
+    paths = [v for v in raw_paths if isinstance(v, str)] if isinstance(raw_paths, list) else []
+    canvases = [v for v in raw_canvases if isinstance(v, str)] if isinstance(raw_canvases, list) else []
+    return paths, canvases
+
+
+def _read_gallery_hidden() -> list[str]:
+    return _read_gallery_hidden_state()[0]
 
 
 
@@ -1975,25 +1986,39 @@ def _normalize_gallery_path(raw: str) -> str:
 
 class _GalleryHiddenPatch(BaseModel):
     model_config = {"extra": "forbid"}
-    path: str = Field(min_length=1)
+    path: str | None = Field(default=None, min_length=1)
+    canvas_project_id: str | None = Field(default=None, min_length=1)
     hidden: bool
 
 
 @router.get("/gallery/hidden")
 def gallery_hidden() -> dict:
-    return {"paths": _read_gallery_hidden()}
+    paths, canvas_project_ids = _read_gallery_hidden_state()
+    return {"paths": paths, "canvas_project_ids": canvas_project_ids}
 
 
 @router.post("/gallery/hidden")
 def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
-    target = _normalize_gallery_path(patch.path)
+    if (patch.path is None) == (patch.canvas_project_id is None):
+        raise HTTPException(status_code=422, detail="必须提供 path 或 canvas_project_id 中的一项")
     # 读→改→写持锁：读失败按空处理时，不持锁的并发写会把整份列表覆盖成空。叶子锁，内部不取别的锁。
     with file_lock(_gallery_hidden_file().with_suffix(".lock")):
-        paths = [p for p in _read_gallery_hidden() if p != target]
-        if patch.hidden:
-            paths.append(target)
-        atomic_write_json(_gallery_hidden_file(), {"paths": paths})
-    return {"paths": paths}
+        paths, canvas_project_ids = _read_gallery_hidden_state()
+        if patch.path is not None:
+            target = _normalize_gallery_path(patch.path)
+            paths = [p for p in paths if p != target]
+            if patch.hidden:
+                paths.append(target)
+        elif patch.canvas_project_id is not None:
+            project_id = patch.canvas_project_id.strip()
+            canvas_project_ids = [cid for cid in canvas_project_ids if cid != project_id]
+            if patch.hidden and project_id:
+                canvas_project_ids.append(project_id)
+        data: dict[str, list[str]] = {"paths": paths}
+        if canvas_project_ids:
+            data["canvas_project_ids"] = canvas_project_ids
+        atomic_write_json(_gallery_hidden_file(), data)
+    return {"paths": paths, "canvas_project_ids": canvas_project_ids}
 
 
 def _gallery_favorites_file() -> Path:
