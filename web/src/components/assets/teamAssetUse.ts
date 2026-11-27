@@ -5,7 +5,7 @@ export type TeamUseEntry = Pick<TeamLibraryIndexEntry, 'id' | 'kind' | 'title' |
 export type UseTeamMedia = (file: File, entry: TeamUseEntry, sourceKey: string) => void | Promise<void>;
 export type UseTeamPrompt = (text: string, entry: TeamUseEntry) => void;
 
-export async function readTeamMedia(url: string, entry: TeamUseEntry): Promise<File> {
+export async function readTeamMedia(url: string, entry: Pick<TeamUseEntry, 'title' | 'mime_type'>): Promise<File> {
   const response = await connectionFetch(url);
   if (!response.ok) throw new Error('读取失败');
   const blob = await response.blob();

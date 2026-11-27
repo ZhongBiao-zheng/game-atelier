@@ -38,18 +38,19 @@ function useStableColumns<T>(items: T[], itemKey: (item: T) => string, ratio: (i
   return columns;
 }
 
-export function AssetMasonry<T>({ items, itemKey, ratio, children }: {
+export function AssetMasonry<T>({ items, itemKey, ratio, children, compact = false }: {
+  compact?: boolean;
   items: T[];
   itemKey: (item: T) => string;
   ratio: (item: T) => number;
   children: (item: T) => ReactNode;
 }) {
   const [left, right] = useStableColumns(items, itemKey, ratio);
-  return <div className="grid grid-cols-2 items-start gap-2">
-    <div className="min-w-0 space-y-2">
+  return <div className={compact ? 'grid grid-cols-2 items-start gap-1' : 'grid grid-cols-2 items-start gap-2'}>
+    <div className={compact ? 'min-w-0 space-y-1' : 'min-w-0 space-y-2'}>
       {left.map(item => <div key={itemKey(item)}>{children(item)}</div>)}
     </div>
-    <div className="min-w-0 space-y-2">
+    <div className={compact ? 'min-w-0 space-y-1' : 'min-w-0 space-y-2'}>
       {right.map(item => <div key={itemKey(item)}>{children(item)}</div>)}
     </div>
   </div>;

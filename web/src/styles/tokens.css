@@ -386,6 +386,13 @@
     to { opacity: 0; transform: scale(var(--indicator-scale)); }
   }
   .indicator-pop { --indicator-scale: 0.6; }
+  .history-checkbox[data-state='checked'] {
+    --indicator-scale: 0.9;
+    animation: indicatorIn var(--motion-fast) var(--ease-atelier-out);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .history-checkbox[data-state='checked'] { --indicator-scale: 1; }
+  }
   [data-touched] > .indicator-pop[data-state='checked'] {
     animation: indicatorIn var(--motion-fast) var(--ease-atelier-out);
   }

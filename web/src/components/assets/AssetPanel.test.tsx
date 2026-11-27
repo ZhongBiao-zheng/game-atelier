@@ -12,7 +12,7 @@ vi.mock('./CreationAssetPanel', async () => {
   const { forwardRef } = await import('react');
   return { CreationAssetPanel: forwardRef(() => <div>提示词</div>) };
 });
-const props = { onClose: vi.fn(), onUseMedia: vi.fn(), onUsePrompt: vi.fn() };
+const props = { onHistoryReference: vi.fn(), onClose: vi.fn(), onUseMedia: vi.fn(), onUsePrompt: vi.fn() };
 
 it('opens history by default and remembers the library tab', async () => {
   vi.mocked(loadUiPrefs).mockResolvedValue({});

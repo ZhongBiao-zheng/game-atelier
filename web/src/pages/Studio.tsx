@@ -1610,6 +1610,7 @@ function StudioFull() {
           onClose={() => {
             setAssetPanelOpen(false);
             setTeamPanelTarget(null);
+            setAssetPanelKind('prompt');
           }}
           onUsePrompt={(asset, renderedPrompt) => {
             if (composer.mode === 'agent') { composer.setText(renderedPrompt); return; }
@@ -1620,6 +1621,35 @@ function StudioFull() {
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
           onReproduce={requestReproduce}
+          onHistoryReference={async items => {
+            let added = 0;
+            const texts: string[] = [];
+            const agentImages: File[] = [];
+            for (const item of items) {
+              if (item.kind === 'text') {
+                texts.push(await (await item.read()).text());
+                added++;
+              } else if (composer.mode === 'agent') {
+                if (item.kind !== 'image' || composer.files.length + agentImages.length >= 16) continue;
+                agentImages.push(await item.read());
+                added++;
+              } else {
+                const route = mediaReferenceRoute(`${item.kind}/`);
+                if ('notice' in route) continue;
+                const frames = referenceSlots.current.videoFrames;
+                if (route.target === 'frame' && frames.first && (frames.last || (videoCaps?.maxFrames ?? 2) < 2)) continue;
+                const file = await item.read();
+                if (addReferenceFile(file, file.type, file.name)) added++;
+              }
+            }
+            if (agentImages.length) composer.setFiles(current => [...current, ...agentImages].slice(0, 16));
+            if (texts.length) {
+              const append = (current: string) => [current, ...texts].filter(Boolean).join('\n');
+              if (composer.mode === 'agent') composer.setText(append);
+              else { setPromptText(append); setClickPinned(true); }
+            }
+            if (added < items.length) setAssetNotice(`只加入了 ${added} 张`);
+          }}
           onUseTeamMedia={(file, entry, key) => {
             const reused = teamReferenceFiles.current.get(key) ?? file;
             teamReferenceFiles.current.set(key, reused);
@@ -1803,6 +1833,7 @@ function StudioFull() {
     else if (route.target === 'audios') { slots.referenceAudios = [...slots.referenceAudios, file]; setReferenceAudios(slots.referenceAudios); }
     else { slots.referenceImages = [...slots.referenceImages, file]; setReferenceImages(slots.referenceImages); }
     sourceTitleFile.current = file; setPromptAssetSourceTitle(title); setClickPinned(true); setAssetNotice('已加入参考图');
+    return true;
   }
 
   async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {

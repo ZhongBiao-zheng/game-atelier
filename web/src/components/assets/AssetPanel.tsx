@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import type { HistoryReference } from '@/api/history';
 import { Button } from '@/components/ui/button';
 import { CloseIcon } from '@/components/ui/icons';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,7 +12,7 @@ import { HistoryPanel } from './HistoryPanel';
 
 type Tab = 'history' | 'library';
 
-export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps>(function AssetPanel(props, ref) {
+export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps & { onHistoryReference: (items: HistoryReference[]) => Promise<void> }>(function AssetPanel(props, ref) {
   const directed = Boolean(props.saveRequest || props.initialKind === 'team');
   const [tab, setTab] = useState<Tab>(directed ? 'library' : 'history');
   const interacted = useRef(directed);
@@ -52,7 +53,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base }}>
-          {tab === 'history' ? <HistoryPanel /> : <CreationAssetPanel {...props} ref={library} embedded />}
+          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
         </motion.div>
       </AnimatePresence>
     </div>

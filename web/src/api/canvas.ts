@@ -1,3 +1,4 @@
+import { downloadResponse } from '@/lib/downloadResponse';
 import { request, requestJson } from './http';
 import type { Job } from '@/schema/jobs';
 import type {
@@ -243,23 +244,6 @@ export async function downloadCanvasLayers(
   await downloadResponse(response, format === 'psd' ? '图层.psd' : '全部图层.zip');
 }
 
-async function downloadResponse(response: Response, fallbackName: string): Promise<void> {
-  const blob = await response.blob();
-  const disposition = response.headers.get('content-disposition') ?? '';
-  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  const filename = encodedName
-    ? decodeURIComponent(encodedName)
-    : plainName ?? fallbackName;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export function inspectCanvasPackage(file: File): Promise<CanvasPackageInspection> {
   const form = new FormData();
