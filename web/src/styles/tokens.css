@@ -720,6 +720,12 @@
     border-color: var(--primary);
     color: var(--primary);
   }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-flow-local .canvas-creation-handle.connectable .canvas-node-handle-dot {
+      /* 全局 reduced-motion 的 transition-property 使用了 !important。 */
+      transition: none !important;
+    }
+  }
   /* 分组的连接点是框右侧外面的「+」：选中分组才出现，拖出去就是把整组连给新节点。
      连接点本身留在框的右边线上（连线从边线出发，贴着框），往外挪的只是「+」和它的点击范围。 */
   .canvas-flow .react-flow__handle.canvas-group-add-handle::before {

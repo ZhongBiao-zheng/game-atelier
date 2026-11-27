@@ -191,6 +191,19 @@ describe('canvas connection policy', () => {
     expect(blocked.y + size.height).toBeLessThanOrEqual(0);
   });
 
+  it('keeps the drop anchor inside a group while avoiding its member cards', () => {
+    const group = { ...groupNode('group', ['member']), size: { width: 900, height: 600 } };
+    const member = { ...node('member', 'image'), position: { x: 450, y: 260 }, size: { width: 120, height: 100 } };
+    const doc = document([group, member]);
+    const size = { width: 100, height: 80 };
+    expect(placeCanvasConnectedNode({ x: 200, y: 200 }, size, false, doc)).toEqual({ x: 200, y: 160 });
+    const blocked = placeCanvasConnectedNode({ x: 450, y: 300 }, size, false, doc);
+    expect(blocked.x).toBe(450);
+    expect(blocked.y + size.height <= 260 || blocked.y >= 360).toBe(true);
+    expect(blocked.y).toBeGreaterThan(0);
+    expect(blocked.y + size.height).toBeLessThan(group.size.height);
+  });
+
   it('offers only immediately valid sources when creating backward from a target handle', () => {
     expect(canvasConnectionCreationCapabilities('target')).toEqual({
       allowEmptyNodes: true,

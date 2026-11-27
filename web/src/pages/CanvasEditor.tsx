@@ -221,6 +221,7 @@ import {
   type CanvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
   canvasNodeProvidesContent,
+  canvasNodeAcceptsInput,
   canvasNodeProvidesOutput,
   canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
@@ -2246,10 +2247,17 @@ function CanvasEditorInner({
       if (canCreateCanvasInputConnection(latestDocument.current, connection)) onConnect(connection);
       return;
     }
+    const current = latestDocument.current;
+    if (!current) return;
+    if (startedFromTarget && !canvasUpstreamNodeTypesForTarget(current, state.fromNode.id).size) {
+      setCreateMenu(null);
+      const target = current.nodes.find(node => node.id === state.fromNode?.id);
+      if (target?.type === 'plugin' && canvasNodeAcceptsInput(target)) notify.info('这个节点的输入已满。');
+      return;
+    }
     if (tap) {
-      const current = latestDocument.current;
-      const node = current?.nodes.find(item => item.id === state.fromNode?.id);
-      if (!node || !current) return;
+      const node = current.nodes.find(item => item.id === state.fromNode?.id);
+      if (!node) return;
       const size = canvasNodeRenderedSize(node, current.content_versions);
       pointer = flowToScreenPosition({
         x: node.position.x + (startedFromTarget ? -96 : size.width + 96),
@@ -3056,13 +3064,16 @@ function CanvasEditorInner({
     const zoom = getZoom();
     const width = size.width * zoom;
     const panel = surface.querySelector<HTMLElement>(`[data-canvas-node-panel-anchor="${CSS.escape(node.id)}"]`);
-    // 面板已在水平方向独立夹紧；这里仅需为节点及其下方的面板高度留出空间。
+    // 面板横向独立夹紧；纵向按实际展开方向为它留出空间。
     const left = topLeft.x, right = topLeft.x + width;
-    const bottom = topLeft.y + size.height * zoom + (panel ? panel.offsetHeight + 16 : 0);
+    const panelHeight = panel ? panel.offsetHeight + 16 : 0;
+    const above = panel?.dataset.side === 'above';
+    const top = topLeft.y - (above ? panelHeight : 0);
+    const bottom = topLeft.y + size.height * zoom + (above ? 0 : panelHeight);
     const delta = (low: number, high: number, min: number, max: number) =>
       low < min ? min - low : Math.min(0, Math.max(min - low, max - high));
     const dx = delta(left, right, bounds.left + 16, bounds.right - 16);
-    const dy = delta(topLeft.y, bottom, bounds.top + 16, bounds.bottom - 16);
+    const dy = delta(top, bottom, bounds.top + 16, bounds.bottom - 16);
     if (dx || dy) {
       const viewport = getViewport();
       void runViewportCommand(() => setViewport({ x: viewport.x + dx, y: viewport.y + dy, zoom },

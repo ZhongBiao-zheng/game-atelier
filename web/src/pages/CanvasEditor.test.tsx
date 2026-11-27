@@ -7,6 +7,7 @@ import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor, canvasMentionGraphSignature } from './CanvasEditor';
+import { notify } from '@/lib/notify';
 import { setPluginsSnapshot } from '@/plugin-host/registry';
 import type { PluginPackageLock } from '@/schema/plugins';
 import spriteLock from '../../../plugins/sprite-sheet/package/manifest.lock.json';
@@ -1451,6 +1452,29 @@ it('offers only content sources when a target handle is dragged to blank canvas'
   expect(within(menu).getAllByRole('menuitem').map(item => item.textContent)).toEqual([
     expect.stringContaining('文本'), expect.stringContaining('图片'),
   ]);
+});
+
+it('explains a full plugin input without opening an empty upstream menu', async () => {
+  const plugin = spriteLock as unknown as PluginPackageLock;
+  const contribution = plugin.contributes.nodes[0];
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]);
+  onTestFinished(() => setPluginsSnapshot([]));
+  const info = vi.spyOn(notify, 'info').mockReturnValue('notice');
+  onTestFinished(() => info.mockRestore());
+  const target: CanvasNode = {
+    id: 'sheet', title: '精灵表', type: 'plugin', z_index: 0, position: { x: 0, y: 0 },
+    data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
+      data_schema_version: contribution.payload_schema_version, payload: {}, generation_draft: null },
+  };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [target, imageNode('source', '图片', imageDraft)],
+    connections: [{ id: 'input', source_node_id: 'source', target_node_id: target.id, role: 'input' }],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'simulate blank target connection' }));
+  expect(screen.queryByRole('menu', { name: '连接创建节点' })).toBeNull();
+  expect(info).toHaveBeenCalledWith('这个节点的输入已满。');
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
 });
 
 it('persists resized node dimensions from the Atelier resize chrome', async () => {

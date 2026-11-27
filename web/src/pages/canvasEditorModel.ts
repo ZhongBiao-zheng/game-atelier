@@ -1166,6 +1166,7 @@ export function placeCanvasConnectedNode(anchor: CanvasPoint, size: CanvasSize, 
   const x = anchor.x - (upstream ? size.width : 0);
   const y = anchor.y - size.height * handleY;
   const column = document.nodes.flatMap(node => {
+    if (node.type === 'group') return [];
     const occupied = canvasNodeRenderedSize(node, document.content_versions);
     return x < node.position.x + occupied.width && x + size.width > node.position.x
       ? [{ top: node.position.y, bottom: node.position.y + occupied.height }] : [];

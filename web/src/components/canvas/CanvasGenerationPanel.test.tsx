@@ -1168,14 +1168,13 @@ it('clamps the generation panel inside the left edge instead of centering off-sc
   expect(placement.side).toBe('below');
 });
 
-it('stays below the node and stops at the bottom edge instead of flipping above', () => {
+it('flips above a node when the panel fits only on that side', () => {
   const nearBottom = rect(500, 560, 240, 140);
 
   const placement = placeCanvasGenerationPanel(nearBottom, VIEWPORT, 290);
 
-  expect(placement.side).toBe('below');
-  expect(placement.top).toBe(VIEWPORT.bottom - 16 - 290);
-  expect(placement.top).toBeLessThan(nearBottom.bottom + 16);
+  expect(placement.side).toBe('above');
+  expect(placement.top + 290).toBe(nearBottom.top - 16);
 });
 
 it('keeps the generation panel directly below a node with room to spare', () => {

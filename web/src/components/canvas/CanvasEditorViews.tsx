@@ -1090,12 +1090,7 @@ export interface CanvasPanelPlacement {
   side: CanvasPanelSide;
 }
 
-/** 生成面板永远贴在节点正下方，视口坐标系；只做边界夹紧，不翻到上方。
- *
- *  横向按节点中心对齐，纵向紧跟节点底边；面板任一边离可视区边界不足一个 gap 时停在边界处，
- *  节点继续往外拖时面板留在边上、节点自己走。所以节点靠底时面板会盖住节点下半部分——这是
- *  飙哥 2026-09-11 明确要的行为（「就在下面，靠边就停」），换掉了原来的上下翻转。
- *  maxHeight 仍限制超高内容并让面板内部滚动。 */
+/** 默认紧贴节点底边。下方放不下且上方放得下时翻边，其余情况夹紧在可视区内。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
@@ -1107,8 +1102,11 @@ export function placeCanvasGenerationPanel(
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
   const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
   const left = clamp(anchor.left + anchor.width / 2 - width / 2, bounds.left + gap, bounds.right - gap - width);
-  const top = clamp(anchor.bottom + gap, bounds.top + gap, bounds.bottom - gap - height);
-  return { left, top, width, maxHeight, side: 'below' };
+  const below = anchor.bottom + gap;
+  const above = anchor.top - gap - height;
+  const side = below + height > bounds.bottom - gap && above >= bounds.top + gap ? 'above' : 'below';
+  const top = clamp(side === 'above' ? above : below, bounds.top + gap, bounds.bottom - gap - height);
+  return { left, top, width, maxHeight, side };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -1192,15 +1190,6 @@ function canvasNodeGeometry(state: ReactFlowState, nodeId: string) {
   return `${x},${y},${node.measured.width ?? 0},${node.measured.height ?? 0}`;
 }
 
-function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) {
-  return a !== null
-    && Math.abs(a.left - b.left) < 0.5
-    && Math.abs(a.top - b.top) < 0.5
-    && a.width === b.width
-    && a.maxHeight === b.maxHeight
-    && a.side === b.side;
-}
-
 /** 生成面板挂在画布区域上，不再挂在节点里面。
  *
  *  原实现是 React Flow 节点的子元素，靠 scale(1/zoom) 反缩放对抗画布缩放。两个后果：
@@ -1241,7 +1230,9 @@ export function CanvasNodeFloatingPanel({
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
+  const [placement, setPlacement] = useState<Pick<CanvasPanelPlacement, 'width' | 'maxHeight' | 'side'> | null>(null);
+  const lastSide = useRef<CanvasPanelSide | null>(null);
+  const entranceStarted = useRef(false);
   const side = placement?.side;
   const innerRef = useRef<HTMLDivElement>(null);
   const [createdFromHandle] = useState(() => isConnectedNodeEntering(nodeId));
@@ -1249,7 +1240,8 @@ export function CanvasNodeFloatingPanel({
   const placed = placement !== null;
   useLayoutEffect(() => {
     const inner = innerRef.current;
-    if (!placed || !inner) return;
+    if (!placed || !inner || entranceStarted.current) return;
+    entranceStarted.current = true;
     const focusedAtStart = document.activeElement;
     const focusInput = () => {
       if (createdFromHandle && inner.isConnected && (document.activeElement === focusedAtStart || document.activeElement === document.body)) {
@@ -1262,17 +1254,14 @@ export function CanvasNodeFloatingPanel({
     }
     const reduced = prefersReducedMotion();
     const controls = clearOnFinish(animate(inner, reduced ? { opacity: [0, 1] }
-      : { opacity: [0, 1], y: [side === 'above' ? 6 : -6, 0] }, {
+      : { opacity: [0, 1], y: [lastSide.current === 'above' ? 6 : -6, 0] }, {
       delay: createdFromHandle && !reduced ? MOTION_NODE_PANEL_DELAY : 0,
       duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out,
     }), inner);
     let active = true;
     void controls.finished.then(() => { if (active) focusInput(); });
     return () => { active = false; controls.stop(); };
-  }, [placed, side, createdFromHandle]);
-  useEffect(() => {
-    if (side) onSideChange?.(side);
-  }, [onSideChange, side]);
+  }, [placed, createdFromHandle]);
   const geometrySelector = useCallback(
     (state: ReactFlowState) => hiddenWhileDragging ? '' : canvasNodeGeometry(state, nodeId),
     [nodeId, hiddenWhileDragging],
@@ -1285,6 +1274,14 @@ export function CanvasNodeFloatingPanel({
     if (!anchor || !panel || hiddenWhileDragging) return;
     // 外层节点不会随进场动效缩放。测量、视口原点和面板尺寸只在布局变化时重读。
     const shell = anchor.closest<HTMLElement>('.react-flow__node') ?? anchor;
+    const publishPlacement = ({ width, maxHeight, side }: CanvasPanelPlacement) => {
+      if (side !== lastSide.current) {
+        lastSide.current = side;
+        onSideChange?.(side);
+      }
+      setPlacement(current => current?.side === side && current.width === width && current.maxHeight === maxHeight
+        ? current : { width, maxHeight, side });
+    };
     const measure = () => {
       const measured = surface && canvasChromeInsetBounds(surface);
       const bounds = measured?.width && measured.height ? measured : {
@@ -1299,9 +1296,10 @@ export function CanvasNodeFloatingPanel({
       const fx = frame?.left ?? 0, fy = frame?.top ?? 0;
       const height = panel.offsetHeight;
       const base = placeCanvasGenerationPanel(rect, bounds, height);
-      const next = { ...base, left: base.left - (origin?.left ?? 0), top: base.top - (origin?.top ?? 0) };
+      panel.style.left = `${base.left - (origin?.left ?? 0)}px`;
+      panel.style.top = `${base.top - (origin?.top ?? 0)}px`;
       panel.style.removeProperty('transform');
-      setPlacement(current => samePlacement(current, next) ? current : next);
+      publishPlacement(base);
       return ([x, y, zoom]: readonly number[]) => {
         const scale = zoom / oz;
         const left = fx + x + (rect.left - fx - ox) * scale;
@@ -1310,6 +1308,7 @@ export function CanvasNodeFloatingPanel({
         const moved = placeCanvasGenerationPanel({ left, top, width, height: heightScaled,
           right: left + width, bottom: top + heightScaled }, bounds, height);
         panel.style.transform = `translate3d(${moved.left - base.left}px, ${moved.top - base.top}px, 0)`;
+        if (moved.side !== lastSide.current) publishPlacement(moved);
       };
     };
     let follow = measure();
@@ -1326,18 +1325,17 @@ export function CanvasNodeFloatingPanel({
       observer.disconnect();
       window.removeEventListener('resize', place);
     };
-  }, [anchor, surface, flowStore, geometry, hiddenWhileDragging]);
+  }, [anchor, surface, flowStore, geometry, hiddenWhileDragging, onSideChange]);
 
   return createPortal(
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
+      data-side={side}
       // 平移使用 transform，拖动收起使用独立的 translate。
       className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
-        left: placement?.left ?? 0,
-        top: placement?.top ?? 0,
         width: placement?.width ?? CANVAS_GENERATION_PANEL_WIDTH,
         maxHeight: placement?.maxHeight,
         overflowY: 'auto',

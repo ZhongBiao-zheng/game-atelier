@@ -105,3 +105,8 @@ describe('主题色色卡', () => {
     expect(body('.accent-swatch')).toContain('mask-image: linear-gradient(#000 0 0);');
   });
 });
+
+it('减少动态效果时关闭画布创建句柄圆点的过渡', () => {
+  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.canvas-flow-local \.canvas-creation-handle\.connectable \.canvas-node-handle-dot\s*\{\s*transition:\s*none\s*!important;/;
+  expect(tokens).toMatch(reduced);
+});
