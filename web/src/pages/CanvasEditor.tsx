@@ -79,6 +79,7 @@ import { canvasEdgeTypes, fadeOutCanvasEdge } from '@/components/canvas/CanvasCo
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { flashCanvasEdges, flashCanvasNodes, markCanvasNodesEntering } from '@/components/canvas/canvasNodeAttention';
 import { canvasHistoryAffectedNodes, canvasHistoryHint, canvasRectsIntersect, canvasRemoteNodeChanges, type CanvasHistoryHint } from '@/pages/canvasHistoryAttention';
+import { bindCanvasMagneticHandles } from '@/components/canvas/canvasMagneticInteraction';
 import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import {
   AddMenuButton,
@@ -1740,6 +1741,8 @@ function CanvasEditorInner({
     });
   }, [collapsedStackMemberIds]);
 
+  const pendingHandleNode = createMenu?.compareSlot ? undefined : createMenu?.sourceId;
+  const pendingHandleClass = createMenu?.sourceHandle === 'target' ? 'canvas-pending-left' : 'canvas-pending-right';
   const flowNodes = useMemo<FlowNode[]>(() => {
     // 节点卡上报新图已盖上来时重算：屏上版本记在 ref 里，这个计数把它变成依赖。
     void revealRevision;
@@ -1756,9 +1759,11 @@ function CanvasEditorInner({
         revealedImageVersions.current.set(node.id, currentImageVersionId);
       }
       const shownVersionId = node.type === 'image' ? revealedImageVersions.current.get(node.id) ?? null : null;
+      const className = node.id === pendingHandleNode ? pendingHandleClass : undefined;
       const cached = flowNodeCache.current.get(node.id);
       if (
         cached?.node === node
+        && cached.flowNode.className === className
         && cached.selected === selected
         && cached.liveLayout === liveLayout
         && cached.hidden === hidden
@@ -1773,6 +1778,7 @@ function CanvasEditorInner({
       const flowNode: FlowNode = {
         id: node.id,
         type: 'canvasNode',
+        className,
         position: liveLayout?.position ?? node.position,
         style: {
           width: renderedSize.width,
@@ -1818,7 +1824,7 @@ function CanvasEditorInner({
       });
     }
     return next;
-  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholders, resultStackOwnerById, revealRevision, selectedNodeIds]);
+  }, [pendingHandleNode, pendingHandleClass, collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholders, resultStackOwnerById, revealRevision, selectedNodeIds]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -2238,14 +2244,29 @@ function CanvasEditorInner({
   }, []);
 
   const gestureStart = useRef<XYPosition | null>(null);
+  const dragStarted = useRef(false);
+  // xyflow starts immediately so a tap still gets onConnectEnd. Hand the visual
+  // over only once the same screen-pixel threshold used by tap creation is crossed.
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      if (!gestureStart.current || dragStarted.current ||
+        isCanvasHandleTap(gestureStart.current, { x: event.clientX, y: event.clientY })) return;
+      dragStarted.current = true;
+      setConnectionInProgress(true);
+    };
+    window.addEventListener('pointermove', move, true);
+    return () => window.removeEventListener('pointermove', move, true);
+  }, []);
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
     setConnectionInProgress(false);
     const start = gestureStart.current;
+    const dragged = dragStarted.current;
+    dragStarted.current = false;
     gestureStart.current = null;
     if (state.isValid || !state.fromNode || event.type === 'touchcancel') return;
     let pointer = pointerPosition(event);
     if (!pointer) return;
-    const tap = start && isCanvasHandleTap(start, pointer);
+    const tap = !dragged && start && isCanvasHandleTap(start, pointer);
     if (!tap && state.toHandle) return;
     const startedFromTarget = state.fromHandle?.type === 'target';
     const compareSlot = state.fromHandle?.id;
@@ -4100,6 +4121,12 @@ function CanvasEditorInner({
     void operation.then(clearPending, clearPending);
     return operation;
   }, [commitViewportDocument, getViewport, projectId]);
+
+  const disableMagnetism = connectionInProgress || !!createMenu || selectedNodeIds.size > 1;
+  useLayoutEffect(() => {
+    const region = editorRegionRef.current;
+    if (!loading && documentLoaded && region && !disableMagnetism) return bindCanvasMagneticHandles(region, selectedId);
+  }, [loading, documentLoaded, disableMagnetism, selectedId]);
 
   // 菜单、新节点和连线共享同一个画布点。边缘空间不够时只平移视口，始终保留松手的画布坐标。
   useLayoutEffect(() => {
@@ -6135,7 +6162,7 @@ function CanvasEditorInner({
           connectionDragThreshold={0}
           onConnectStart={event => {
             gestureStart.current = pointerPosition(event);
-            setConnectionInProgress(true);
+            dragStarted.current = false;
           }}
           onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}

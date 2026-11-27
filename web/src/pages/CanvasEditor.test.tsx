@@ -104,7 +104,7 @@ vi.mock('@xyflow/react', () => {
     }) => unknown) => selector({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     ViewportPortal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    getBezierPath: () => [''],
+    getBezierPath: ({ targetX, targetY }: { targetX: number; targetY: number }) => [`M0 0 L${targetX} ${targetY}`],
     ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop, onSelectionStart, onSelectionEnd }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
@@ -114,6 +114,7 @@ vi.mock('@xyflow/react', () => {
         hidden?: boolean;
         data: unknown;
         position?: { x: number; y: number };
+        className?: string;
         style?: { width?: number; height?: number };
       }>;
       nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
@@ -161,7 +162,7 @@ vi.mock('@xyflow/react', () => {
             />
           ))}
           {CanvasNode && nodes.filter(node => node.selected).map(node => (
-            <CanvasNode key={`view-${node.id}`} id={node.id} data={node.data} selected={true} />
+            <div key={`view-${node.id}`} className={`react-flow__node ${node.className ?? ''}`} data-id={node.id}><CanvasNode id={node.id} data={node.data} selected={true} /></div>
           ))}
           {nodes.length > 1 && (
             <button
@@ -326,8 +327,8 @@ vi.mock('@xyflow/react', () => {
       children?: React.ReactNode;
       isVisible?: boolean;
     } & React.HTMLAttributes<HTMLDivElement>) => isVisible ? <div {...props}>{children}</div> : null,
-    Handle: ({ type, children, ...props }: { type: 'source' | 'target'; children?: React.ReactNode; 'aria-label'?: string }) => (
-      <button type="button" aria-label={props['aria-label'] ?? type}>{children}</button>
+    Handle: ({ type, children, ...props }: { type: 'source' | 'target'; children?: React.ReactNode; 'aria-label'?: string; 'data-magnetic-side'?: string }) => (
+      <button type="button" data-magnetic-side={props['data-magnetic-side']} aria-label={props['aria-label'] ?? type}>{children}</button>
     ),
     Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
     SelectionMode: { Partial: 'partial', Full: 'full' },
@@ -1482,6 +1483,25 @@ it('offers only content sources when a target handle is dragged to blank canvas'
   ]);
 });
 
+it.each([
+  ['simulate blank connection', 'right', 480, 320],
+  ['simulate blank target connection', 'left', 520, 360],
+] as const)('keeps only the initiating side hidden while %s has its menu', async (action, side, x, y) => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [imageNode('origin', '图片')] }));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByLabelText('simulate node select'));
+  fireEvent.click(screen.getByLabelText(action));
+  expect(screen.getByRole('menu', { name: '连接创建节点' })).toBeVisible();
+  const origin = document.querySelector('.react-flow__node[data-id="origin"]')!;
+  expect(origin).toHaveClass('canvas-pending-' + side);
+  expect(origin).not.toHaveClass(side === 'left' ? 'canvas-pending-right' : 'canvas-pending-left');
+  expect(origin.querySelectorAll('[data-magnetic-side]')).toHaveLength(2);
+  expect(document.querySelector('.canvas-handle-add-ghost')).toBeNull();
+  expect(document.querySelector('.react-flow__connection-path')).toHaveAttribute('d', `M0 0 L${x} ${y}`);
+  fireEvent.click(screen.getByLabelText('关闭连接创建菜单'));
+  expect(origin).not.toHaveClass('canvas-pending-' + side);
+});
+
 it('explains a full plugin input without opening an empty upstream menu', async () => {
   const plugin = spriteLock as unknown as PluginPackageLock;
   const contribution = plugin.contributes.nodes[0];
@@ -2344,7 +2364,7 @@ it('re-places the generation panel when the node it is anchored to moves', async
     expect(document.querySelector('[data-canvas-node-panel-anchor="image-one"]')).toBeTruthy();
   });
 
-  const shell = document.querySelector('.canvas-node-shell') as HTMLElement;
+  const shell = document.querySelector('.react-flow__node[data-id="image-one"]') as HTMLElement;
   expect(shell).toBeTruthy();
   const measure = vi.spyOn(shell, 'getBoundingClientRect');
 

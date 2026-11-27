@@ -31,9 +31,9 @@ export function CanvasGroupFrame({ node, context, selected }: {
     />
     {/* 分组作为素材包整包供参考：这是它唯一的连线端点（只出不进）。外层 flow 节点是
         pointer-events:none（好让下面的连线露出来），所以这个把手要自己开回可点。 */}
-    <Handle type="source" position={Position.Right}
+    <Handle type="source" position={Position.Right} data-magnetic-side="right"
       className="canvas-node-handle canvas-group-add-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
-      <span className="canvas-group-add" aria-hidden="true"><AddIcon /></span>
+      <span className="canvas-magnetic-anchor" aria-hidden="true"><span className="canvas-group-add"><AddIcon /></span></span>
     </Handle>
     {/* 名字就是分组本身的把手：按住拖动整组，单击改名。它在框的左上角外侧，不占成员的位置。 */}
     <div className="pointer-events-auto absolute bottom-full left-0 flex max-w-full items-center gap-2 pb-2 text-sm"

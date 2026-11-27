@@ -35,16 +35,22 @@ function ropes(origins: XYPosition[], from: Position, to: XYPosition, toPosition
     })[0]} />);
 }
 
-/** 拖线预览。从分组拖出时每个成员各牵一条线，线尾圆点标出落点。 */
+/** 拖线预览。从分组拖出时每个成员各牵一条线，带加号的把手随指针移动，对比槽沿用圆点。 */
 export function CanvasConnectionLine({
-  fromX, fromY, toX, toY, fromPosition, toPosition, fromNode,
+  fromX, fromY, toX, toY, fromPosition, toPosition, fromNode, fromHandle,
 }: ConnectionLineComponentProps<FlowNode>) {
   const nodeLookup = useStore(state => state.nodeLookup) as NodeLookup;
+  const zoom = useStore(state => state.transform[2]);
+  const compareSlot = fromHandle.id === 'before' || fromHandle.id === 'after';
   const domain = 'domain' in fromNode.data ? fromNode.data.domain : null;
   const origins = domain?.type === 'group' ? outputOrigins(nodeLookup, [fromNode.id]) : [{ x: fromX, y: fromY }];
   return <g>
     {ropes(origins, fromPosition, { x: toX, y: toY }, toPosition)}
-    <circle cx={toX} cy={toY} r={4} className="fill-primary" />
+    {compareSlot ? <circle cx={toX} cy={toY} r={4} className="fill-primary" /> :
+      <g className="canvas-handle-add-ghost" transform={`translate(${toX} ${toY}) scale(${1 / zoom})`}>
+        <circle r={13} />
+        <path d="M-4.5 0H4.5M0 -4.5V4.5" />
+      </g>}
   </g>;
 }
 
