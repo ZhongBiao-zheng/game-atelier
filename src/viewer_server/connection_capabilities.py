@@ -243,6 +243,10 @@ GET /api/canvas/projects/{project_id}/versions/{version_id}/media
 GET /api/canvas/projects/{project_id}/versions/{version_id}/download
 GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
 GET /api/canvas/projects/{project_id}/jobs
+GET /api/canvas/projects/{project_id}/group-runs
+POST /api/canvas/projects/{project_id}/groups/{group_id}/group-runs
+POST /api/canvas/projects/{project_id}/group-runs/{run_id}/resume
+POST /api/canvas/projects/{project_id}/group-runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/groups/{group_id}/run-plan
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/text-revision

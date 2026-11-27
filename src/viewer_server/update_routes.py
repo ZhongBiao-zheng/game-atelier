@@ -83,7 +83,7 @@ def work_request(path: str, method: str) -> bool:
     if path.startswith("/api/canvas/projects/"):
         return bool(re.search(
             r"/(runs(?:/[^/]+)?|agent/sessions(?:/[^/]+/messages)?|"
-            r"classify|media-operations)$", path)) or path.endswith("/resume-mj-edit")
+            r"groups/[^/]+/group-runs|group-runs/[^/]+/resume|classify|media-operations)$", path)) or path.endswith("/resume-mj-edit")
     return False
 
 
@@ -186,6 +186,7 @@ def data_root_move_work() -> dict[str, int]:
 def active_work() -> dict[str, int]:
     """拦着应用内更新的进行中工作。"""
     from character_workflow.lib.jobs import list_jobs
+    from character_workflow.lib.canvas_group_runs import active_step_jobs
     from character_workflow.lib.canvas_projects import list_canvas_projects
     from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
     from character_workflow.lib.studio_agent_sessions import summaries as studio_sessions
@@ -195,8 +196,10 @@ def active_work() -> dict[str, int]:
                 for s in list_canvas_agent_sessions(p.project_id).sessions]
     statuses = [s.status for s in sessions] + [s["status"] for s in studio_sessions()]
     gateway = gateway_work(update_drain=True)
-    jobs = sum(j.status.value in {"pending", "running"} for j in list_jobs())
-    return {"jobs": jobs, "agents": statuses.count("running"),
+    group_steps = active_step_jobs()
+    jobs = [j for j in list_jobs() if j.status.value in {"pending", "running"}]
+    between_steps = sum(not any(j.job_id == step for j in jobs) for step in group_steps)
+    return {"jobs": len(jobs) + between_steps, "agents": statuses.count("running"),
             "approvals": statuses.count("awaiting_approval"),
             "gateway": gateway}
 
