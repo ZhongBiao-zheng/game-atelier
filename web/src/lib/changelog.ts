@@ -32,6 +32,21 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.144.0', date: '2026-11-27', headline: '改名 Cobrush，文本节点改版，创作台默认 Agent', changes: [
+    { kind: 'feat', text: '产品改名为 Cobrush。桌面版直接运行新安装包即可替换旧的 Atelier，作品、设置和运行环境都保留；Mac 上装好后可以把「应用程序」里的旧 Atelier 移到废纸篓。' },
+    { kind: 'feat', text: '首次打开先选择作品存放位置，可以放到 C 盘以外的磁盘。' },
+    { kind: 'feat', text: '创作台默认进入 Agent 模式，直接说想要什么就行；手动切换过模式的对话照旧。推荐的 Tuzi 供应商同时开通一个便宜的对话模型。' },
+    { kind: 'feat', text: '结果下方新增「用作参考」，一次出了多张时按缩略图选一张。' },
+    { kind: 'feat', text: '桌面版在图片上右键可以复制图片或另存为；保存完成的提示里可以直接打开所在文件夹。' },
+    { kind: 'feat', text: '本机 ComfyUI 是否在运行会实时显示。' },
+    { kind: 'feat', text: '画布文本节点改为预览：选中后在下方面板读全文、直接改字；选中一段写一句要求就能只改这段，结果写回原节点，可撤销。鼠标在文本上滚轮滚动文字，其他地方照常缩放画布。' },
+    { kind: 'feat', text: '画布上连好文本或图片后，提示词可以留空直接生成，连上的内容自动作为输入。' },
+    { kind: 'feat', text: 'Tuzi 预置自带 Midjourney；添加模型时列表更好找，认不出类型的模型可以直接在行里选类型。供应商页合并为一页：已启用的在上，可添加的在下。' },
+    { kind: 'feat', text: 'Midjourney 支持 Niji 8（含 style raw）；新增 Vidu Q4、Q3 视频模型。' },
+    { kind: 'fix', text: '修复 Windows 上下载的图片文件名带完整路径、在「下载」里搜不到的问题。' },
+    { kind: 'fix', text: '修复输入中文拼音时提示框里的灰色提示和字母叠在一起的问题。' },
+    { kind: 'fix', text: '生成结果没有价格时显示「未计价」。新添加的 Tuzi 供应商会自动填好计费分组；以前添加的，在「控制台 → 供应商」编辑该供应商，展开「高级」把计费分组填为 default 后花费就能正常显示。' },
+  ] },
   { version: '5.143.0', date: '2026-11-26', headline: '局域网共享画布，修复 Windows 保存供应商失败', changes: [
     { kind: 'fix', text: '修复 Windows 部分数据目录里测试连接成功、保存供应商却失败的问题。遇到文件占用、权限不足或磁盘已满时，保存窗口会提示具体原因。' },
     { kind: 'feat', text: '供应商报错时可以直接导出诊断日志。重启后也能在「控制台 → 通用」导出，文件只包含排查所需的错误信息。' },
