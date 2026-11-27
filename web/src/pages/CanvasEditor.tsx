@@ -73,6 +73,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { withAutoProvider } from '@/lib/modelRoutes';
+import { useCanvasGroupRuns } from '@/hooks/useCanvasGroupRuns';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { canvasEdgeTypes, fadeOutCanvasEdge } from '@/components/canvas/CanvasConnectionEdge';
 import { SwapIcon } from '@/components/ui/swap-icon';
@@ -960,12 +961,15 @@ function CanvasEditorInner({
   useEffect(() => {
     if (agentIndicator === 'idle' && externalRound.current) externalRound.current.open = false;
   }, [agentIndicator]);
+  const { latest: groupRuns, steps: groupSteps, refresh: refreshGroupRuns } = useCanvasGroupRuns(
+    projectId, !!document?.nodes.some(node => node.type === 'group'));
   const { jobs, acceptJobs, applyLocalJob, reset: resetJobSync } = useCanvasJobSync({
     projectId,
     mergeRunDocument,
     onError: setError,
     onDocumentChanged: revision => remoteDocumentChanged.current(revision),
     onCanvasAgent: onAgentEvent,
+    refreshGroupRuns,
   });
   const jobsByRunId = useMemo(() => new Map(
     jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
@@ -5770,6 +5774,7 @@ function CanvasEditorInner({
   }, [keys, leaveCanvas, locateNode, selectOnlyNode, setLocation, submitRun]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    groupRuns, groupSteps, refreshGroupRuns,
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
     annotationController,
@@ -5874,6 +5879,7 @@ function CanvasEditorInner({
     deleteNode,
     runFailureAction,
   }), [
+    groupRuns, groupSteps, refreshGroupRuns,
     runFailureAction,
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,

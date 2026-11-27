@@ -33,6 +33,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
+import type { GroupRun } from '@/api/canvasGroupRuns';
 import { AddIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
@@ -197,6 +198,9 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  groupRuns?: ReadonlyMap<string, GroupRun>;
+  groupSteps?: ReadonlyMap<string, GroupRun['steps'][number]>;
+  refreshGroupRuns?: () => Promise<void>;
   projectCategories?: readonly string[];
   resolveFinalCategory?: (sha256: string) => string | null;
   finalizationRevision?: string;
@@ -446,6 +450,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
+  const groupStep = context?.groupSteps?.get(node.id);
+  const groupHeader = useRef<HTMLElement>(null);
+  useAnimateOnChange(groupStep?.status, status => { if (status === 'failed') shakeOnError(groupHeader.current); });
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
   useEffect(() => {
@@ -626,7 +633,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
       />
-      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
+      <header ref={groupHeader} className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -660,6 +667,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           </span>
         )}
         <CanvasNodeRunBadge state={nodeRunState} />
+        {groupStep?.status === 'done' && <CheckIcon size="sm" role="img" aria-label="整体执行已完成" className="content-swap-in ml-1 text-status-done" />}
       </header>
       <NodeToolbar
         isVisible={toolbarPresence.mounted}
