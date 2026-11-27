@@ -549,6 +549,34 @@ it('resumes MJ editing after saving without blocking its own request', async () 
   expect(screen.queryByText('画布命令正在提交，请等待完成后再离开或执行其他操作。')).not.toBeInTheDocument();
 });
 
+it('keeps the non-image preview and its content mounted until the dialog exit animation ends', async () => {
+  // Radix reads a live CSSStyleDeclaration. jsdom has no stylesheet animation lifecycle.
+  const computedStyle = window.getComputedStyle;
+  const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const result = computedStyle(element, pseudo);
+    if (element.matches('.dialog-in, .scrim-fade')) {
+      Object.defineProperty(result, 'animationName', { get: () => element.getAttribute('data-state') });
+    }
+    return result;
+  });
+  onTestFinished(() => { style.mockRestore(); });
+  const version = { version_id: 'text-v', kind: 'text' as const, text: '退场时保留的正文',
+    created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' as const } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('text', '文本预览', version.version_id)], content_versions: { [version.version_id]: version },
+  }));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByLabelText('simulate node select'));
+  fireEvent.click(screen.getByRole('button', { name: '查看 文本预览 详情' }));
+  const dialog = screen.getByRole('dialog', { name: '文本预览' });
+  const body = within(dialog).getByText(version.text);
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+  expect(dialog).toHaveAttribute('data-state', 'closed');
+  expect(body).toBeInTheDocument();
+  fireEvent(dialog, Object.assign(new Event('animationend', { bubbles: true }), { animationName: 'closed' }));
+  expect(dialog).not.toBeInTheDocument();
+});
+
 it('opens layer-stack details and inspects hidden layers without changing the canvas', async () => {
   const base = mockFileUpload(new File(['x'], 'base.png'), 7).version;
   const layer = { ...base, version_id: 'layer-detail', width: 80, height: 40 };
