@@ -466,6 +466,30 @@ def test_classify_model_recognizes_doubao_conversation_without_misclassifying_me
     assert _classify_model({"id": "doubao-future-media-260101"}) == "unknown"
 
 
+def test_classify_model_keeps_only_midjourney_entry_as_image():
+    """Tuzi 把 MJ 的任务动作和速度档都挂成独立 id（81 个）；只有出图入口能单独生成。"""
+    from viewer_server.routes import _classify_model
+
+    for mid in ("mj_imagine", "mj-v8.2", "midjourney", "niji-7", "niji_journey"):
+        assert _classify_model({"id": mid}) == "image", mid
+    for mid in ("mj_fast_imagine", "mj_relax_blend", "mj_turbo_upscale_4x", "mj_describe",
+                "mj_fast_video", "mj_variation", "mj_relax_prompt_analyzer", "niji_upscale"):
+        assert _classify_model({"id": mid, "supported_endpoint_types": ["midjourney-proxy"]}) \
+            == "excluded", mid
+
+
+def test_classify_model_recognizes_relay_conversation_families():
+    """Tuzi 上标注「文本」+ OpenAI 对话接口、却因 id 词表缺失落进未识别的家族。"""
+    from viewer_server.routes import _classify_model
+
+    for mid in ("grok-4.7", "kimi-k3", "glm-5.3-flash", "gemma-7b-it", "o1", "o3-mini",
+                "o4-mini-2025-04-16", "MiniMax-M2.5-highspeed"):
+        assert _classify_model({"id": mid}) == "text", mid
+    # 同一厂商的视频模型与「o 开头但不是 o 系列」的 id 不能被带进对话。
+    assert _classify_model({"id": "MiniMax-H3"}) == "unknown"
+    assert _classify_model({"id": "omni-flash"}) == "unknown"
+
+
 def _preview_with_upstream(client, rows, **payload):
     import unittest.mock as mock
     fake = mock.MagicMock()

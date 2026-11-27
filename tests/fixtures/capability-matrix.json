@@ -142,6 +142,18 @@
       "model": "mj_fast_imagine", "provider": "midjourney",
       "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
       "min_pixels": null, "max_pixels": null
+    },
+    {
+      "why": "聚合商推荐登记的 MJ 唯一入口；模型列表把它归到图片也按这个族判",
+      "model": "mj_imagine", "provider": "custom",
+      "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
+    },
+    {
+      "why": "niji 以族名开头，与 mj_ 前缀同族；版本体系另算（--niji）",
+      "model": "niji-7", "provider": "custom",
+      "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
     }
   ]
 }

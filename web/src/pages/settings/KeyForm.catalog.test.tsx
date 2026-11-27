@@ -43,8 +43,8 @@ it('discovers through a template catalog, warns, and binds rows of the template 
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
   expect(await screen.findByText('已发现不代表可用')).toBeInTheDocument();
   expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({ protocol_id: 'hp-aaaaaaaaaaaa' }));
-  for (const name of [/painter/, /mystery/, /chat/]) fireEvent.click(screen.getByRole('button', { name }));
-  fireEvent.click(screen.getByRole('radio', { name: '图片' }));  // 未识别行由用户指定分类
+  for (const name of [/painter/, /chat/]) fireEvent.click(screen.getByRole('checkbox', { name }));
+  await chooseOption(screen.getByRole('combobox', { name: /^类型 .*mystery/ }), '图片');  // 未识别行选类型即勾上
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(createKey).toHaveBeenCalled());
   const models = vi.mocked(createKey).mock.calls[0][0].models ?? [];

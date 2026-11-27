@@ -85,7 +85,7 @@ describe('供应商弹窗', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
     expect(await screen.findByRole('status')).toHaveTextContent(/可用 · \d+ ms/);
     expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({ alias: 'Tuzi', access_key: null }));
-    expect(screen.getByRole('button', { name: /remote/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('checkbox', { name: /remote/ })).not.toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(patchKey).toHaveBeenCalledWith('Tuzi', expect.objectContaining({ models: [expect.objectContaining({ id: 'gpt-image-2', name: 'My model' })] })));
   });
@@ -103,9 +103,9 @@ describe('供应商弹窗', () => {
     vi.mocked(createKey).mockResolvedValue({ alias: 'test' });
     render(<KeyForm presetId="custom" initial={{ alias: 'test', base_url: 'https://example.com', access_key: 'test', models: [] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-    fireEvent.click(await screen.findByRole('button', { name: /mystery/ }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /mystery/ }));
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('radio', { name: '视频' }));
+    await chooseOption(screen.getByRole('combobox', { name: '类型 mystery' }), '视频');
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({ models: [expect.objectContaining({ id: 'mystery', modality: 'video' })] })));
   });
@@ -124,7 +124,7 @@ it('keeps selected preview models when switching to the selected segment', async
   vi.mocked(createKey).mockResolvedValue({ alias: 'test' });
   render(<KeyForm presetId="custom" initial={{ alias: 'test', base_url: 'https://example.com', access_key: 'test', models: [] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-  fireEvent.click(await screen.findByRole('button', { name: /remote/ }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: /remote/ }));
   fireEvent.click(screen.getByRole('radio', { name: '已选 1' }));
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({ models: [expect.objectContaining({ id: 'remote', modality: 'video' })] })));
@@ -137,7 +137,7 @@ it('restores stored classification and name when a removed tag is selected again
     models: [{ id: 'stored', name: 'Custom name', modality: 'video' }] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'stored' }));
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-  fireEvent.click(await screen.findByRole('button', { name: /stored/ }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: /stored/ }));
   fireEvent.click(screen.getByRole('radio', { name: '已选 1' }));
   fireEvent.click(screen.getByText('模型详情'));
   expect(within(screen.getByLabelText('模型分类 1')).queryByRole('radio')).not.toBeInTheDocument();
@@ -150,7 +150,7 @@ it('includes a manually added upstream model while the all segment is open', asy
   vi.mocked(createKey).mockResolvedValue({ alias: 'test' });
   render(<KeyForm presetId="custom" initial={{ alias: 'test', base_url: 'https://example.com', access_key: 'test', models: [] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-  await screen.findByRole('button', { name: /remote/ });
+  await screen.findByRole('checkbox', { name: /remote/ });
   fireEvent.click(screen.getByText('手动添加模型'));
   fireEvent.change(screen.getByLabelText('添加模型 ID'), { target: { value: 'remote' } });
   await chooseOption(screen.getByLabelText('新增模型类型'), '视频');

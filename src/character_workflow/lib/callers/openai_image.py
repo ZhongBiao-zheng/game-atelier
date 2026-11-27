@@ -791,6 +791,20 @@ def image_family(model: str) -> str:
     return "standard"
 
 
+# 族名与版本之外，MJ 出图入口的 id 里只允许出现 imagine：聚合商把 blend / upscale / video 等
+# 任务动作和 fast / relax / turbo 速度档都挂成独立 id（Tuzi 一族 81 个），它们共用同一个
+# imagine 端点或根本不是出图，速度档由生成参数里的 accountFilter 决定。
+_MJ_ENTRY_TOKENS = {"mj", "midjourney", "niji", "journey", "imagine"}
+
+
+def is_midjourney_entry(model: str) -> bool:
+    """MJ 族里可以直接作为出图模型登记的 id（mj_imagine、mj-v8.2、niji-7 等）。"""
+    if image_family(model) != "midjourney":
+        return False
+    tokens = [token for token in normalized_model_id(model).split("-") if token]
+    return all(token in _MJ_ENTRY_TOKENS or re.fullmatch(r"v?\d+", token) for token in tokens)
+
+
 def fixed_nano_resolution_quality(model: str) -> str | None:
     """Return the deterministic quality route encoded by a fixed Nano Banana model id."""
     if image_family(model) != "nano-banana":

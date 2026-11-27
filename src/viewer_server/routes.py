@@ -32,6 +32,7 @@ from character_workflow.lib.atomic_io import (
     atomic_write_json,
     read_text_with_retry,
 )
+from character_workflow.lib.callers.openai_image import image_family, is_midjourney_entry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.local_paths import data_root_file
@@ -1394,7 +1395,11 @@ _AUDIO_NON_GENERATION_ID_HINTS = (
 )
 _TEXT_ID_HINTS = (
     "gpt", "claude", "gemini", "deepseek", "qwen", "llama", "mistral", "command-r",
+    "grok", "kimi", "glm", "gemma",
 )
+# 词边界判不了的对话家族：OpenAI o 系列（o1 / o3-mini / o4-mini）与 MiniMax M 系列
+# （MiniMax-M2.5；同家的 MiniMax-H3 是视频，不能整家归对话）。
+_TEXT_ID_PATTERN = re.compile(r"o\d+(?:-|$)|minimax-m\d")
 # 协议动词（冒号后半段）判视觉；seedance:generations 这类动词无信息量，靠厂商前缀兜。
 _PROTOCOL_IMAGE_HINTS = (
     "image-generations", "image-generation", "images", "image-edits", "images-edits",
@@ -1482,6 +1487,10 @@ def _classify_model(item: dict) -> str:
     if out:
         return "excluded"
 
+    # MJ 族与运行时同一判据（image_family）：只有出图入口归图片；任务动作和速度档虽然也挂成
+    # 独立 id，但不能单独生成，必须排在视频词之前（mj_fast_video 是对已有图的动作）。
+    if image_family(mid) == "midjourney":
+        return "image" if is_midjourney_entry(mid) else "excluded"
     if _id_hits(mid, _VIDEO_ID_HINTS):
         return "video"
     if _id_hits(mid, _IMAGE_ID_HINTS):
@@ -1492,7 +1501,7 @@ def _classify_model(item: dict) -> str:
         # 火山 /models 对豆包对话模型通常不返回 output_modalities 或
         # supported_protocols；只收明确的对话家族，未知 doubao 家族仍交给用户确认。
         return "text"
-    if _id_hits(mid, _TEXT_ID_HINTS):
+    if _id_hits(mid, _TEXT_ID_HINTS) or _TEXT_ID_PATTERN.match(mid.rsplit("/", 1)[-1]):
         return "text"
     return "unknown"
 

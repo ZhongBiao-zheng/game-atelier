@@ -39,8 +39,15 @@
 获取目录不代表已适配每个模型的音色与生成参数；上游专属参数仍需各 caller 单独支持。
 
 分类是四级瀑布（`routes.py::_classify_model`）：协议标注判视觉 → 协议**全部**是非视觉动词才判
-`excluded` → 读 `architecture.output_modalities`（OpenRouter 的权威字段）→ id 关键词（**词边界**
-匹配，裸子串会把 `inkling` 判成 kling 视频、`wanx` 判成视频）→ `unknown`。
+`excluded` → 读 `architecture.output_modalities`（OpenRouter 的权威字段）→ MJ 族（与运行时
+`image_family` 同判据）→ id 关键词（**词边界** 匹配，裸子串会把 `inkling` 判成 kling 视频、`wanx`
+判成视频）→ `unknown`。
+
+**MJ 族只留出图入口**：聚合商把 MJ 的任务动作（blend / describe / upscale / variation / video…）和
+速度档（fast / relax / turbo）都挂成独立 id。`is_midjourney_entry` 只认族名、版本号与 `imagine`
+组成的 id（`mj_imagine`、`mj-v8.2`、`niji-7`）为图片，其余判 `excluded`：速度档由生成参数的
+`accountFilter` 决定，动作不能单独生成。2026-11-27 Tuzi 实测 531 → MJ 81 个只剩 `mj_imagine`；
+同批补了 grok / kimi / glm / gemma 与 o 系列、MiniMax-M 系列的对话判据，未识别 208 → 63。
 
 **认不出一律 `unknown` 留着，绝不丢**：协议词汇是各厂自造的（实测同一份词元跳动数据里就有
 `zai:layout-parsing` / `bocha:web-search` / `unifuncs:web-reader`），词表永远追不完，「认不出就

@@ -4,7 +4,6 @@ import { ProviderIconPicker } from '@/components/keys/ProviderIconPicker';
 import { defaultIconUrl } from '@/api/providerIcons';
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import { CheckIcon, CloseIcon, ErrorIcon, HelpIcon, HideIcon, LoadingIcon, ShowIcon } from '@/components/ui/icons';
-import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
@@ -20,7 +19,8 @@ import { listHttpProtocols } from '@/api/httpProtocols';
 import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 import { probeKey, recordOnboardingEvent, type KeyProbeResult } from '@/api/onboarding';
-import { modelCatalog } from '@/lib/modelCatalog';
+import { modelBrand, modelCatalog, modelDisplayName } from '@/lib/modelCatalog';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { MOTION_DURATION } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
@@ -456,7 +456,10 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     const selected = currentSelection.current();
     const enabledIds = new Set(selected.map(m => m.id.trim()).filter(Boolean));
     const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
-    const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
+    // 同类里：拉取时已启用的排最前，再按目录热度（Midjourney、GPT Image…），其余保持上游顺序。
+    // 只在拉取时排一次，勾选过程中行不跳动。
+    const rank = (m: RemoteModel) => (enabledIds.has(m.id) ? -1 : modelCatalog(m.id)?.rank ?? Infinity);
+    const sorted = [...remote.models].sort((a, b) => order(a) - order(b) || (rank(a) === rank(b) ? 0 : rank(a) - rank(b)));
     setDetected(remote.detected ?? null);
     setFetchError(null);
     // 手填行和预置行省略分类时默认为图片；选择器用 null 标记待分类的勾选。
@@ -708,6 +711,12 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     ...((preview?.models ?? []).some((m) => m.category === 'excluded') ? (['excluded'] as const) : []),
   ];
 
+  const toggleFetched = (id: string) => setFetchedChecked(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const selectAllVisible = () => {
     const next = new Set(fetchedChecked);
     pickerVisible.forEach((m) => next.add(m.id));
@@ -898,32 +907,36 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                     onValueChange={value => { if (value) setPickerFilter(value as typeof pickerFilter); }}>
                     {pickerFilters.map(filter => <ToggleGroupItem key={filter} value={filter}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</ToggleGroupItem>)}
                   </ToggleGroup>
-                  <div className="flex max-h-56 flex-wrap content-start items-start gap-2 overflow-auto">
-                    {pickerVisible.map(model => <div key={model.id} className="max-w-full space-y-2">
-                      <Hint label={model.name}><Toggle size="sm" variant="outline" pressed={fetchedChecked.has(model.id)} aria-label={`${model.name} ${model.id}`} onPressedChange={() => {
-                        const next = new Set(fetchedChecked);
-                        if (next.has(model.id)) next.delete(model.id); else next.add(model.id);
-                        setFetchedChecked(next);
-                      }} className="max-w-full rounded-full px-3 font-mono font-normal aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-foreground">
-                        {/* 勾与类型圆点占同一个 16px 槽位：勾选时标签宽度不变，旁边的标签不跟着挪。 */}
-                        <SwapIcon swapKey={fetchedChecked.has(model.id)} variant="pop" className="size-4">
-                          {fetchedChecked.has(model.id) ? <CheckIcon size="sm" aria-hidden /> : <span aria-hidden className={`size-1.5 rounded-full ${typeDot(resolvedModality(model))}`} />}
-                        </SwapIcon><span className="truncate">{model.id}</span>
-                      </Toggle></Hint>
-                      {!model.modality && fetchedChecked.has(model.id) && <ToggleGroup type="single" size="sm" aria-label={`分类 ${model.id}`} className="flex-wrap"
-                        value={modalityPick[model.id] ?? ''}
-                        onValueChange={value => { if (value) setModalityPick({ ...modalityPick, [model.id]: value as ModelModality }); }}>
-                        {GENERATION_MODALITIES.map(modality => <ToggleGroupItem key={modality} value={modality}>{CATEGORY_LABELS[modality]}</ToggleGroupItem>)}
-                      </ToggleGroup>}
-                    </div>)}
-                    {pickerVisible.length === 0 && <p className="text-xs text-muted-foreground">没有匹配的模型</p>}
+                  <div role="list" aria-label="上游模型" className="max-h-72 overflow-auto rounded-lg border border-border py-1">
+                    {pickerVisible.map(model => {
+                      const checked = fetchedChecked.has(model.id);
+                      const name = modelDisplayName(model);
+                      const rowId = `remote-model-${model.id}`;
+                      return <div key={model.id} role="listitem" className="flex min-h-11 items-center gap-3 px-3 py-1.5 hover:bg-secondary/60">
+                        <Checkbox id={rowId} checked={checked} aria-label={`${model.name} ${model.id}`} onCheckedChange={() => toggleFetched(model.id)} />
+                        <span className="text-muted-foreground"><ModelBrandIcon brand={modelBrand(model.id)} size="md" /></span>
+                        <Label htmlFor={rowId} className="min-w-0 flex-1 cursor-pointer font-normal">
+                          <span className="block truncate text-sm">{name}</span>
+                          {name !== model.id && <span className="block truncate font-mono text-xs text-muted-foreground">{model.id}</span>}
+                        </Label>
+                        {/* 判不出类型的行常驻类型选择：选了就勾上，不用先勾选再找按钮。 */}
+                        {!model.modality && <Select value={modalityPick[model.id] ?? ''} onValueChange={value => {
+                          setModalityPick({ ...modalityPick, [model.id]: value as ModelModality });
+                          if (!checked) toggleFetched(model.id);
+                        }}>
+                          <SelectTrigger size="sm" aria-label={`类型 ${model.id}`} aria-invalid={checked && !modalityPick[model.id]} className="w-24 shrink-0"><SelectValue placeholder="选类型" /></SelectTrigger>
+                          <SelectContent>{GENERATION_MODALITIES.map(modality => <SelectItem key={modality} value={modality}>{CATEGORY_LABELS[modality]}</SelectItem>)}</SelectContent>
+                        </Select>}
+                      </div>;
+                    })}
+                    {pickerVisible.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">没有匹配的模型</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                     <span>已选 {fetchedChecked.size} 个模型</span>
                     <Button variant="link" size="sm" className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground" type="button" onClick={selectAllVisible} disabled={!pickerVisible.length}>全选当前 {pickerVisible.length} 个</Button>
                     <Button variant="link" size="sm" type="button" onClick={() => setFetchedChecked(new Set())} disabled={!fetchedChecked.size} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">清空选择</Button>
                     <Button variant="link" size="sm" type="button" onClick={applyFetchedSelection} disabled={unresolvedChecked.length > 0} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">启用所选（{fetchedChecked.size}）</Button>
-                    {unresolvedChecked.length > 0 && <span className="text-destructive">{unresolvedChecked.length} 个未识别模型待指定分类</span>}
+                    {unresolvedChecked.length > 0 && <Button variant="link" size="sm" type="button" onClick={() => { setPickerQuery(''); setPickerFilter('unknown'); }} className="h-auto px-0 text-xs text-destructive">{unresolvedChecked.length} 个模型还没选类型</Button>}
                   </div>
                 </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
                   {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-xs">

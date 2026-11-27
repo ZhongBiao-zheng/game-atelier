@@ -132,7 +132,7 @@ it('keeps the preset models and shows the fetch error when detection fails', asy
   open();
   paste();
   expect(await screen.findByText('拉取模型列表失败：上游 401')).toBeInTheDocument();
-  expect(screen.getByRole('radio', { name: '已选 2' })).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: '已选 3' })).toBeInTheDocument();
   expect(screen.queryByText(/密钥有效|密钥无效/)).not.toBeInTheDocument();
 });
 
@@ -149,7 +149,7 @@ it('keeps the manual connection result when the onboarding timer fires afterward
   open();
   paste();
   fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
-  await screen.findByRole('button', { name: /chat-demo/ });
+  await screen.findByRole('checkbox', { name: /chat-demo/ });
   // The separate key probe runs from the same timer, even when its list request is superseded.
   await waitFor(() => expect(probeKey).toHaveBeenCalledOnce());
   expect(previewModels).toHaveBeenCalledOnce();

@@ -659,7 +659,7 @@ describe('KeyForm 模型选择器', () => {
       ], { total: 3, excluded: 0 }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /seedance-2\.0/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /seedance-2\.0/ }));
     fireEvent.click(screen.getByRole('button', { name: '显示全部' }));
 
     await waitFor(() => expect(screen.getByText('已显示全部，含不可生成模型')).toBeInTheDocument());
@@ -673,16 +673,16 @@ describe('KeyForm 模型选择器', () => {
   it('未识别模型必须显式二选一，不静默按图片入库', async () => {
     const fetchMock = await openPicker(previewBody([{ id: 'glm-4.7', category: 'unknown' }], { total: 1 }));
 
-    fireEvent.click(screen.getByRole('button', { name: /glm-4\.7/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /glm-4\.7/ }));
     // 手滑勾中一个聊天模型：不指定分类就不许放行（旧行为是静默变图片模型，出图时把
     // 它的 id 发给 /images/generations）
     expect(screen.getByRole('button', { name: '启用所选（1）' })).toBeDisabled();
-    expect(screen.getByText('1 个未识别模型待指定分类')).toBeInTheDocument();
+    expect(screen.getByText('1 个模型还没选类型')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '类型 glm-4.7' })).toHaveAttribute('aria-invalid', 'true');
 
-    const pick = screen.getByRole('radiogroup', { name: '分类 glm-4.7' });
-    fireEvent.click(within(pick).getByRole('radio', { name: '视频' }));
-    // 二选一按钮不能被 label 激活行为顺带把勾选切掉（所以行不再整个包在 label 里）
-    expect(screen.getByRole('button', { name: /glm-4\.7/ })).toHaveAttribute('aria-pressed', 'true');
+    await chooseOption(screen.getByRole('combobox', { name: '类型 glm-4.7' }), '视频');
+    // 选类型不能顺带把勾选切掉（类型下拉不在勾选的 label 里）
+    expect(screen.getByRole('checkbox', { name: /glm-4\.7/ })).toBeChecked();
     expect(screen.getByRole('button', { name: '启用所选（1）' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '启用所选（1）' }));
 
@@ -716,7 +716,7 @@ describe('KeyForm 模型选择器', () => {
     fireEvent.click(screen.getByRole('button', { name: '全选当前 2 个' }));
     // 只勾中两个视频，图片模型没被带上
     expect(screen.getByText('已选 2 个模型')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /seedance-2\.0/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('checkbox', { name: /seedance-2\.0/ })).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: '清空选择' }));
     expect(screen.getByText('已选 0 个模型')).toBeInTheDocument();
@@ -762,7 +762,7 @@ describe('KeyForm 模型选择器', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
     await screen.findByText(/上游 \d+ 个模型/);
     // 已启用的模型自动预勾，直接「启用所选」即可回写
-    expect(screen.getByRole('button', { name: /seedream-5\.0-pro/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('checkbox', { name: /seedream-5\.0-pro/ })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: '启用所选（1）' }));
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
 
