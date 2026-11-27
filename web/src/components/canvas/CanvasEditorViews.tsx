@@ -1,3 +1,5 @@
+import { Popover, PopoverAnchor } from '@/components/ui/popover';
+import { CanvasSplitGridPopover } from './CanvasSplitGridPopover';
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { CanvasNodeFlash, isConnectedNodeEntering, playCanvasNodeEntrance } from './canvasNodeAttention';
 import { fadePresenceClass, useFadePresence } from './useFadePresence';
@@ -63,7 +65,7 @@ import { CanvasFinalizationMenu } from './CanvasFinalizationMenu';
 import { CanvasCompareSurface } from './CanvasCompareSurface';
 import { canvasCompareFrame, canvasCompareSource, type CanvasCompareInputs, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasAnnotationDelivery, CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasMediaOperation, CanvasAnnotationDelivery, CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -151,6 +153,7 @@ import type {
 import type { Job } from '@/schema/jobs';
 import type { JobErrorAction } from '@/lib/errorPresentation';
 import {
+  type CanvasMediaOperationPlaceholder,
   canvasNodeAcceptsInput,
   CANVAS_COMPARE_SLOTS,
   canvasNodeProvidesOutput,
@@ -182,7 +185,7 @@ import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
-export type CanvasPlaceholderFlowNode = Node<{ label: string; leaving?: boolean }, 'canvasPlaceholder'>;
+export type CanvasPlaceholderFlowNode = Node<Pick<CanvasMediaOperationPlaceholder, 'label' | 'leaving' | 'preview'>, 'canvasPlaceholder'>;
 export type FlowNode = CanvasFlowNode | CanvasPlaceholderFlowNode;
 
 export interface CanvasGenerationPanelContextValue {
@@ -308,6 +311,7 @@ export interface CanvasNodeContextValue {
   reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
   toggleFreeResize: (node: CanvasContentNode) => void;
+  splitImage: (node: CanvasContentNode, operation: Extract<CanvasMediaOperation, { kind: 'split' }>) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode, mode?: 'inpaint' | 'outpaint') => void;
@@ -343,14 +347,23 @@ const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
 export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowNode>) {
-  // 长得和生成中的图片节点一样：上方标题栏（图标 + 「图片」+ 运行态标签）、卡片里转圈。
-  // 结果节点落地时占位卡留在原位 200ms 淡出，结果节点同时淡入，中间不露出画布。
+  const ref = useRef<HTMLDivElement>(null);
+  const preview = data.preview;
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || !preview || !motionAvailable()) return;
+    const reduced = prefersReducedMotion();
+    const controls = clearOnFinish(animate(element, reduced ? { opacity: [0, 1] } : { opacity: [0, 1], scale: [0.94, 1] }, {
+      duration: MOTION_DURATION.fast, delay: reduced ? 0 : preview.delay, ease: MOTION_EASE.out,
+    }), element);
+    return () => controls.stop();
+  }, [preview]);
   return (
     <div
-      className={cn('relative h-full transition-opacity duration-200', data.leaving && 'pointer-events-none opacity-0')}
+      className={cn('relative h-full transition-opacity duration-200', preview && 'rounded-lg border border-border bg-card', data.leaving && 'pointer-events-none opacity-0')}
       data-canvas-placeholder="true"
     >
-      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
+      {!preview && <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <ImageFileIcon size="sm" className="shrink-0" />
           <span className="min-w-0 truncate font-medium text-foreground">图片</span>
@@ -359,8 +372,13 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
           <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
           {data.label}
         </span>
-      </header>
-      <article
+      </header>}
+      {preview ? <div ref={ref} role="img" aria-label={data.label} className="media-checker relative h-full overflow-hidden rounded-lg">
+        <img alt="" draggable={false} src={preview.url} className="pointer-events-none absolute max-w-none" style={{
+          width: `${100 / preview.width}%`, height: `${100 / preview.height}%`,
+          left: `${-100 * preview.x / preview.width}%`, top: `${-100 * preview.y / preview.height}%`,
+        }} />
+      </div> : <article
         role="status"
         aria-busy="true"
         aria-label={`图片，${data.label}`}
@@ -370,7 +388,7 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
           <LoadingIcon size="lg" />
         </span>
         <span>{data.label}</span>
-      </article>
+      </article>}
       <Handle type="target" position={Position.Left} className="canvas-node-handle" isConnectable={false} aria-label="处理中的节点">
         <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
       </Handle>
@@ -1970,6 +1988,14 @@ function ImageNodeToolbar({
       || (action.action.kind === 'host_call' && plugin.runtime === 'host' && isHostPluginId(plugin.id)))
       .map(action => ({ plugin, action, Icon: pluginIcon(action.icon) }))
   )), [plugins]);
+  const splitAnchor = useRef<HTMLButtonElement>(null);
+  const splitOpenRef = useRef(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  function toggleSplit(open: boolean) {
+    splitOpenRef.current = open;
+    setSplitOpen(open);
+    updateMenuOpen(open);
+  }
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 「自定义工具条」从更多菜单里打开：菜单随后收起，不能把弹窗还开着的工具条一起收掉。
   const settingsOpenRef = useRef(false);
@@ -2027,10 +2053,8 @@ function ImageNodeToolbar({
       ...common,
       label: `切分 ${node.title}`,
       icon: <Icon />,
-      disabled: !currentVersionId || replacing,
-      run: () => {
-        if (currentVersionId) context.openMediaOperation(node, 'split');
-      },
+      disabled: !imageContent?.width || !imageContent.height || replacing,
+      run: () => toggleSplit(!splitOpenRef.current),
     };
     if (definition.id === 'upscale') {
       const longEdge = Math.max(imageContent?.width ?? 0, imageContent?.height ?? 0);
@@ -2081,19 +2105,18 @@ function ImageNodeToolbar({
 
   // 菜单展开期间节点可能失去选中，工具栏要像设置弹窗一样保持可见。
   function updateMenuOpen(open: boolean) {
-    onOverlayOpenChange(open || settingsOpenRef.current);
+    onOverlayOpenChange(open || settingsOpenRef.current || splitOpenRef.current);
   }
 
   const layerActionDisabled = !currentVersionId || submitting || replacing;
   const compareSource = canvasCompareSource(imageContent, context.jobsByResultNodeId.get(node.id), context.resolveVersion);
   const editDisabled = !currentVersionId || submitting || replacing;
-  // U2：外露局部修改 + 自定义工具条前 3 项 + 保存到资产（默认：局部修改、AI高清、抠图、下载、保存到资产），
-  // 其余一律进「更多」。
   const inpaintAction: ImageToolbarAction = {
     id: 'inpaint' as CanvasImageQuickToolId, label: `局部修改 ${node.title}`, text: '局部修改',
     icon: <BrushIcon />, disabled: editDisabled, run: () => context.openMaskEdit(node, 'inpaint'),
   };
   const inlineActions = [inpaintAction, ...actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT)];
+  const splitInline = inlineActions.some(action => action.id === 'split');
   const overflowActions: ImageToolbarAction[] = [
     ...actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT),
     { id: 'annotate' as CanvasImageQuickToolId, label: `标注 ${node.title}`, text: '标注', icon: <EditIcon />,
@@ -2123,7 +2146,8 @@ function ImageNodeToolbar({
   }
 
   return (
-    <>
+    <Popover open={splitOpen} onOpenChange={toggleSplit}>
+      <PopoverAnchor virtualRef={splitAnchor} />
       {inlineActions.map(action => action.href ? (
         <MediaToolLink
           key={action.id}
@@ -2167,6 +2191,9 @@ function ImageNodeToolbar({
           key={action.id}
           label={action.label}
           text={action.text}
+          ref={action.id === 'split' ? splitAnchor : undefined}
+          aria-haspopup={action.id === 'split' ? 'dialog' : undefined}
+          aria-expanded={action.id === 'split' ? splitOpen : undefined}
           destructive={action.destructive}
           disabled={action.disabled}
           onClick={action.run}
@@ -2186,12 +2213,13 @@ function ImageNodeToolbar({
       <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border" />
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <MediaToolButton label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>
+          <MediaToolButton ref={splitInline ? undefined : splitAnchor} label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>
             <MoreIcon />
           </MediaToolButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="center"
+          onCloseAutoFocus={event => { if (splitOpenRef.current) event.preventDefault(); }}
           className="nodrag min-w-40 [&_svg]:size-4"
           onPointerDown={event => event.stopPropagation()}
         >
@@ -2266,6 +2294,10 @@ function ImageNodeToolbar({
           </>}
         </DropdownMenuContent>
       </DropdownMenu>
+      {imageContent?.width && imageContent.height ? <CanvasSplitGridPopover width={imageContent.width} height={imageContent.height}
+        onReturnFocus={() => splitAnchor.current?.focus({ preventScroll: true })}
+        onSubmit={operation => { toggleSplit(false); context.splitImage(node, operation); }}
+        onCustom={() => { toggleSplit(false); context.openMediaOperation(node, 'split'); }} /> : null}
       <CanvasImageToolbarPreferencesDialog
         open={settingsOpen}
         value={context.canvasUiPreferences.image_toolbar}
@@ -2275,7 +2307,7 @@ function ImageNodeToolbar({
         onOpenChange={updateSettingsOpen}
         onSave={value => void saveSettings(value)}
       />
-    </>
+    </Popover>
   );
 }
 

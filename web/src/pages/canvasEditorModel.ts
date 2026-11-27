@@ -1,3 +1,4 @@
+import { MOTION_DURATION, MOTION_SPLIT_STAGGER } from '@/lib/motion';
 import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { enabledNodeContribution } from '@/plugin-host/registry';
@@ -748,43 +749,82 @@ export interface CanvasMediaOperationPlaceholder {
   position: { x: number; y: number };
   size: CanvasSize;
   label: string;
+  preview?: { url: string; x: number; y: number; width: number; height: number; delay: number };
   /** 结果节点已经落在同一位置：占位卡淡出（200ms）让位，与结果节点的淡入交叉。 */
   leaving?: boolean;
 }
 
-const MEDIA_OPERATION_PLACEHOLDER_LABEL: Record<CanvasMediaOperation['kind'], string> = {
-  crop: '裁剪中…',
-  split: '切图中…',
-  remove_background: '抠图中…',
-};
+export function equalSplitLines(count: number) {
+  return Array.from({ length: count - 1 }, (_, i) => (i + 1) / count);
+}
 
-/** 本地媒体操作是同步接口，结果节点要等处理完才从服务端回来。这段空档给用户一个占位节点，
- *  落点镜像服务端 canvas_media_operations 的公式：源节点右侧 96px、垂直居中；尺寸与源节点在
- *  画布上的实际尺寸一致（切图例外，按长边 240）。结果一到就撤掉换成真节点。
- *  服务端为避让已有节点可能再做纵向偏移，占位不追。 */
-export function canvasMediaOperationPlaceholder(
-  source: CanvasNode,
-  sourceSize: CanvasSize,
-  version: { width: number; height: number },
-  operation: CanvasMediaOperation,
-): CanvasMediaOperationPlaceholder {
-  let size = sourceSize;
-  if (operation.kind === 'split') {
-    const longEdge = Math.max(version.width, version.height);
-    const shortEdge = Math.min(version.width, version.height);
-    let scale = Math.max(240 / longEdge, 80 / shortEdge);
-    if (longEdge * scale > 1600) scale = 1600 / longEdge;
-    size = { width: version.width * scale, height: version.height * scale };
+/** Python round 在恰好半像素时取最近的偶数。 */
+export function canvasSplitAxis(lines: number[], length: number) {
+  return [0, ...[...lines].sort((a, b) => a - b).map(line => {
+    const pixel = line * length;
+    const floor = Math.floor(pixel);
+    return pixel - floor === 0.5 && floor % 2 === 0 ? floor : Math.round(pixel);
+  }), length];
+}
+
+export function predictSplitGridPlaceholders(
+  source: CanvasNode, sourceSize: CanvasSize, pixels: CanvasSize,
+  operation: Extract<CanvasMediaOperation, { kind: 'split' }>, nodes: readonly CanvasNode[], url: string,
+): CanvasMediaOperationPlaceholder[] {
+  const xs = canvasSplitAxis(operation.vertical_lines, pixels.width);
+  const ys = canvasSplitAxis(operation.horizontal_lines, pixels.height);
+  if ([xs, ys].some(cuts => cuts.some((cut, i) => i > 0 && cut - cuts[i - 1] < 16))) {
+    throw new Error('每格至少需要 16 × 16 像素，请调整切线。');
   }
+  const columns = xs.length - 1, rows = ys.length - 1;
+  const widths = Array<number>(columns).fill(0), heights = Array<number>(rows).fill(0);
+  const pieces = ys.slice(1).flatMap((bottom, row) => xs.slice(1).map((right, col) => {
+    const w = right - xs[col], h = bottom - ys[row];
+    const long = Math.max(w, h);
+    const scale = Math.min(1600 / long, Math.max(240 / long, 80 / Math.min(w, h)));
+    const size = { width: w * scale, height: h * scale };
+    widths[col] = Math.max(widths[col], size.width);
+    heights[row] = Math.max(heights[row], size.height);
+    return { row, col, size, x: xs[col] / pixels.width, y: ys[row] / pixels.height, width: w / pixels.width, height: h / pixels.height };
+  }));
+  const offsets = (sizes: number[]) => {
+    let next = 0;
+    return sizes.map(size => { const offset = next; next += size + 16; return offset; });
+  };
+  const dx = offsets(widths), dy = offsets(heights);
+  const left = source.position.x + sourceSize.width + 96;
+  const right = left + dx[columns - 1] + widths[columns - 1];
+  const height = dy[rows - 1] + heights[rows - 1];
+  let shift = 0;
+  // 与 _placement_shift 使用同一个整组包围盒和已有节点的持久化尺寸。
+  for (let attempt = 0; attempt <= nodes.length; attempt++) {
+    let next = shift;
+    for (const node of nodes) {
+      const size = node.size ?? (node.type === 'text' ? CANVAS_TEXT_NODE_DEFAULT_SIZE : CANVAS_DEFAULT_NODE_SIZE);
+      const pos = node.position;
+      if (left < pos.x + size.width + 32 && right > pos.x - 32 &&
+        source.position.y + shift < pos.y + size.height + 32 && source.position.y + height + shift > pos.y - 32) {
+        next = Math.max(next, pos.y + size.height + 32 - source.position.y);
+      }
+    }
+    if (next === shift) break;
+    shift = next;
+  }
+  const interval = Math.min(MOTION_SPLIT_STAGGER, MOTION_DURATION.base / Math.max(1, pieces.length - 1));
+  return pieces.map(({ row, col, size, ...crop }, i) => ({
+    id: `placeholder-split-${source.id}-${row}-${col}`, sourceNodeId: source.id, label: '切图中…', size,
+    position: { x: left + dx[col], y: source.position.y + dy[row] + shift },
+    preview: { ...crop, url, delay: i * interval },
+  }));
+}
+
+export function canvasMediaOperationPlaceholder(
+  source: CanvasNode, sourceSize: CanvasSize, operation: Exclude<CanvasMediaOperation, { kind: 'split' }>,
+): CanvasMediaOperationPlaceholder {
   return {
-    id: `placeholder-${operation.kind}`,
-    sourceNodeId: source.id,
-    position: {
-      x: source.position.x + sourceSize.width + 96,
-      y: source.position.y + (sourceSize.height - size.height) / 2,
-    },
-    size,
-    label: MEDIA_OPERATION_PLACEHOLDER_LABEL[operation.kind],
+    id: `placeholder-${operation.kind}`, sourceNodeId: source.id,
+    position: { x: source.position.x + sourceSize.width + 96, y: source.position.y },
+    size: sourceSize, label: operation.kind === 'crop' ? '裁剪中…' : '抠图中…',
   };
 }
 

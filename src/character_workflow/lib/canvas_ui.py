@@ -17,14 +17,14 @@ from character_workflow.lib.schemas import (
 )
 
 
-# 与前端 canvasImageToolbar.tsx 同序：前 3 个外露在节点工具条上（U2），其余进「更多」。
+# 与前端 canvasImageToolbar.tsx 同序：前 5 个外露在节点工具条上，其余进「更多」。
 DEFAULT_IMAGE_TOOL_IDS = [
     "upscale",
     "removeBackground",
-    "download",
-    "crop",
     "split",
+    "download",
     "info",
+    "crop",
 ]
 
 

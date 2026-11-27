@@ -1,3 +1,4 @@
+import { canvasSplitAxis, equalSplitLines } from '@/pages/canvasEditorModel';
 import { AddIcon, MinusIcon, RedoIcon, UndoIcon } from '@/components/ui/icons';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
@@ -784,17 +785,17 @@ function cropWithPixelSize(
 }
 
 function splitTiles(lines: SplitLines, width: number, height: number) {
-  const xs = [0, ...lines.vertical, 1];
-  const ys = [0, ...lines.horizontal, 1];
+  const xs = canvasSplitAxis(lines.vertical, width);
+  const ys = canvasSplitAxis(lines.horizontal, height);
   const tiles: Array<{ number: number; left: number; top: number; width: number; height: number }> = [];
   for (let row = 0; row < ys.length - 1; row += 1) {
     for (let column = 0; column < xs.length - 1; column += 1) {
       tiles.push({
         number: tiles.length + 1,
-        left: xs[column],
-        top: ys[row],
-        width: Math.round(xs[column + 1] * width) - Math.round(xs[column] * width),
-        height: Math.round(ys[row + 1] * height) - Math.round(ys[row] * height),
+        left: xs[column] / width,
+        top: ys[row] / height,
+        width: xs[column + 1] - xs[column],
+        height: ys[row + 1] - ys[row],
       });
     }
   }
@@ -912,8 +913,8 @@ function cropHandleLabel(handle: Exclude<CropHandle, 'move'>) {
 
 function evenSplit(rows: number, columns: number): SplitLines {
   return {
-    horizontal: Array.from({ length: rows - 1 }, (_, index) => (index + 1) / rows),
-    vertical: Array.from({ length: columns - 1 }, (_, index) => (index + 1) / columns),
+    horizontal: equalSplitLines(rows),
+    vertical: equalSplitLines(columns),
   };
 }
 

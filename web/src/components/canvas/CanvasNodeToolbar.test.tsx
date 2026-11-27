@@ -148,6 +148,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
     toggleFreeResize: vi.fn(),
+    splitImage: vi.fn(),
     openMediaOperation: vi.fn(),
     removeBackground: vi.fn(),
     openMaskEdit: vi.fn(),
@@ -647,16 +648,16 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
   for (const label of ['删除 图片', '将 图片 存入资产库', '复制 图片 的生成提示词', '反推 图片 的提示词', '替换 图片']) {
     expect(within(toolbar).queryByRole('button', { name: label })).not.toBeInTheDocument();
   }
-  // U2：外露局部修改 + 自定义顺序的前 3 个快捷工具；其余快捷工具、拆分图层和工具条设置都在「更多」里。
+  // U2：外露局部修改 + 自定义顺序的前 5 个快捷工具；其余快捷工具、拆分图层和工具条设置都在「更多」里。
   expect(within(toolbar).getByRole('button', { name: '局部修改 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
-  expect(within(toolbar).queryByRole('button', { name: '切分 图片' })).not.toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
   expect(within(toolbar).queryByRole('button', { name: '拆分 图片 的图层' })).not.toBeInTheDocument();
   const moreButton = within(toolbar).getByRole('button', { name: '图片 的更多工具' });
   expect(within(toolbar).queryByRole('button', { name: 'AI高清 图片' })).not.toBeInTheDocument();
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   expect(await screen.findByRole('menuitem', { name: 'AI高清 图片' })).toBeInTheDocument();
-  expect(screen.getByRole('menuitem', { name: '切分 图片' })).toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: '切分 图片' })).toBeNull();
   fireEvent.click(screen.getByRole('menuitem', { name: '拆分 图片 的图层' }));
   expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
   act(() => moreButton.focus());
@@ -1022,6 +1023,7 @@ it('keeps hide fixed before a trailing more menu that holds save and share for i
 
   const imageButtons = within(screen.getByRole('toolbar', { name: '图片 节点工具' })).getAllByRole('button')
     .map(button => button.getAttribute('aria-label'));
+  expect(imageButtons).toEqual(expect.arrayContaining(['切分 图片', '查看 图片 详情']));
   expect(imageButtons.slice(-2)).toEqual(['保存 图片', '图片 的更多工具']);
   expect(imageButtons).not.toContain('遮盖 图片 的内容');
   expect(imageButtons).not.toContain('将 图片 存入资产库');

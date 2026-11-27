@@ -1,4 +1,5 @@
 import { expect, it, test } from 'vitest';
+import splitCases from '../../../tests/fixtures/canvas_split_layout.json';
 
 import {
   acceptCanvasJobs,
@@ -7,6 +8,8 @@ import {
   canvasCompareHasInput,
   canvasNodeHasHideableContent,
   canvasMediaOperationPlaceholder,
+  predictSplitGridPlaceholders,
+  sizeLockedToCanvasVersion,
   canvasNodeRenderZIndex,
   canvasGenerationPreferenceForModel,
   canvasPendingInputNodes,
@@ -334,10 +337,10 @@ test('canvasDeletionBlockedMessage 只拦 job 仍在跑的节点，生成完成�
   expect(canvasDeletionBlockedMessage([node], ids, jobFor('pending_confirm'))).toContain('正在生成');
 });
 
-test('canvasMediaOperationPlaceholder 镜像服务端落点：源节点右侧 96px、垂直居中、尺寸同源节点（切图长边 240）', () => {
+test('canvasMediaOperationPlaceholder 镜像服务端落点：源节点右侧 96px、垂直居中、尺寸同源节点', () => {
   const source = placementNode('image-a', 100, 200);
   const sourceSize = { width: 320, height: 425 };
-  const matting = canvasMediaOperationPlaceholder(source, sourceSize, { width: 1856, height: 2464 }, { kind: 'remove_background' });
+  const matting = canvasMediaOperationPlaceholder(source, sourceSize, { kind: 'remove_background' });
   expect(matting).toEqual({
     id: 'placeholder-remove_background',
     sourceNodeId: 'image-a',
@@ -345,10 +348,7 @@ test('canvasMediaOperationPlaceholder 镜像服务端落点：源节点右侧 96
     size: sourceSize,
     label: '抠图中…',
   });
-  const split = canvasMediaOperationPlaceholder(source, sourceSize, { width: 1024, height: 768 }, { kind: 'split', horizontal_lines: [], vertical_lines: [] });
-  expect(split.size).toEqual({ width: 240, height: 180 });
-  expect(split.position.y).toBeCloseTo(200 + (425 - 180) / 2);
-  expect(split.label).toBe('切图中…');
+
 });
 
 function placementNode(id: string, x: number, y: number): CanvasNode {
@@ -367,6 +367,18 @@ function placementNode(id: string, x: number, y: number): CanvasNode {
     },
   };
 }
+
+it.each(splitCases)('predicts the server’s exact row-major split geometry: $name', fixture => {
+  const [width, height] = fixture.pixels;
+  const source = { ...placementNode('source', 32.25, 43.5), size: { width: fixture.sourceSize[0], height: fixture.sourceSize[1] } };
+  const nodes = [source, ...fixture.blockers.map(([x, y, w, h], i) => ({
+    ...placementNode(`blocker-${i}`, x, y), size: { width: w, height: h },
+  }))];
+  const pieces = predictSplitGridPlaceholders(source, sizeLockedToCanvasVersion(source.size, { width, height }),
+    { width, height }, { kind: 'split', horizontal_lines: fixture.horizontal, vertical_lines: fixture.vertical }, nodes, 'test.png');
+  expect(pieces.map(p => [p.position.x, p.position.y, p.size.width, p.size.height,
+    Math.round(p.preview!.width * width), Math.round(p.preview!.height * height)])).toEqual(fixture.pieces);
+});
 
 it('keeps the preferred position when it is free', () => {
   expect(placeCanvasNodeWithoutOverlap(

@@ -88,7 +88,7 @@ export function CanvasImageToolbarPreferencesDialog({
       <DialogContent className="max-h-[92dvh] min-w-0 max-w-3xl grid-cols-1 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>自定义图片快捷工具</DialogTitle>
-          <DialogDescription>勾选要用的工具，拖动调整顺序。前 4 个直接显示在节点上方，其余在「更多」里。设置会应用到所有画布项目。</DialogDescription>
+          <DialogDescription>勾选要用的工具，拖动调整顺序。前 {IMAGE_TOOLBAR_INLINE_LIMIT} 个直接显示在节点上方，其余在「更多」里。设置会应用到所有画布项目。</DialogDescription>
         </DialogHeader>
 
         <section aria-label="工具栏预览" className="rounded-lg border border-border bg-card p-4">

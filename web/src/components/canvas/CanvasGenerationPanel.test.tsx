@@ -222,6 +222,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
     toggleFreeResize: vi.fn(),
+    splitImage: vi.fn(),
     openMediaOperation: vi.fn(),
     removeBackground: vi.fn(),
     openMaskEdit: vi.fn(),

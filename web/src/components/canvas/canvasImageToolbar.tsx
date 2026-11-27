@@ -16,16 +16,16 @@ export interface CanvasImageToolDefinition {
 }
 
 /** 工具条上直接露出的快捷工具数（另有固定的「局部修改」「保存到资产」）；排在后面的收进「更多」。
- *  谁排前面由「自定义工具条」的顺序决定（U2：默认外露 AI高清、抠图、下载）。 */
-export const IMAGE_TOOLBAR_INLINE_LIMIT = 3;
+ *  谁排前面由「自定义工具条」的顺序决定。 */
+export const IMAGE_TOOLBAR_INLINE_LIMIT = 5;
 
 export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'upscale', label: 'AI高清', icon: UpscaleIcon, defaultVisible: true },
   { id: 'removeBackground', label: '抠图', icon: CutIcon, defaultVisible: true },
-  { id: 'download', label: '下载', icon: DownloadIcon, defaultVisible: true },
-  { id: 'crop', label: '裁剪', icon: CropIcon, defaultVisible: true },
   { id: 'split', label: '切分', icon: GridIcon, defaultVisible: true },
+  { id: 'download', label: '下载', icon: DownloadIcon, defaultVisible: true },
   { id: 'info', label: '查看', icon: ShowIcon, defaultVisible: true },
+  { id: 'crop', label: '裁剪', icon: CropIcon, defaultVisible: true },
   { id: 'resize', label: '比例缩放', icon: LockIcon, defaultVisible: false },
   { id: 'angle', label: '多角度', icon: AngleIcon, defaultVisible: false },
 ];

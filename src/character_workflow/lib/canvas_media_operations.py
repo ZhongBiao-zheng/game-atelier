@@ -401,6 +401,10 @@ def _image_display_size(node: Any, version: Any) -> CanvasSize:
     if display is not None and getattr(display, "free_resize", False):
         return _node_display_size(node)
     ratio = width_px / height_px
+    size = node.size
+    if size and 0 < size.width <= 4000 and 0 < size.height <= 4000:
+        if abs(size.width / ratio - size.height) <= 1:
+            return size
     width = min(4000.0, max(240.0, node.size.width if node.size is not None else 320.0))
     height = width / ratio
     if height < 150:
@@ -412,7 +416,7 @@ def _image_display_size(node: Any, version: Any) -> CanvasSize:
     if width > 4000:
         width = 4000.0
         height = width / ratio
-    return CanvasSize(width=round(width), height=round(height))
+    return CanvasSize(width=math.floor(width + 0.5), height=math.floor(height + 0.5))
 
 
 def _fit_size(width: int, height: int, box: CanvasSize) -> CanvasSize:

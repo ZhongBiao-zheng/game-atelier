@@ -17,6 +17,7 @@ import {
   Background,
   BackgroundVariant,
   MiniMap,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
@@ -42,6 +43,8 @@ import {
   cancelCanvasRun,
   resumeCanvasMjEdit,
   canvasDownloadUrl,
+  canvasMediaUrlAtWidth,
+  canvasThumbnailWidth,
   createCanvasReversePromptConfig,
   dismissCanvasCandidate,
   listCanvasJobs,
@@ -218,6 +221,7 @@ import {
   placeCanvasConnectedNode,
   canvasDeletionBlockedMessage,
   canvasMediaOperationPlaceholder,
+  predictSplitGridPlaceholders,
   type CanvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
   canvasNodeProvidesContent,
@@ -639,12 +643,11 @@ function CanvasEditorInner({
   const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
-  const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
-  // 占位节点允许拖动；结果节点落地时按占位被拖走的位移搬过去。ref 供异步回调读最新位置。
-  const mediaPlaceholderRef = useRef<CanvasMediaOperationPlaceholder | null>(null);
-  const updateMediaPlaceholder = useCallback((next: CanvasMediaOperationPlaceholder | null) => {
-    mediaPlaceholderRef.current = next;
-    setMediaPlaceholder(next);
+  const [mediaPlaceholders, setMediaPlaceholders] = useState<CanvasMediaOperationPlaceholder[]>([]);
+  const mediaPlaceholdersRef = useRef<CanvasMediaOperationPlaceholder[]>([]);
+  const updateMediaPlaceholders = useCallback((next: CanvasMediaOperationPlaceholder[]) => {
+    mediaPlaceholdersRef.current = next;
+    setMediaPlaceholders(next);
   }, []);
   // 框选期间 React Flow 会把与选中节点相连的边一并选中，边上的剪刀就冒出来了。
   // 边的选中只认点击，框选期间到达的 select 变更一律丢弃。
@@ -1787,7 +1790,7 @@ function CanvasEditorInner({
     for (const id of revealedImageVersions.current.keys()) {
       if (!activeIds.has(id)) revealedImageVersions.current.delete(id);
     }
-    if (mediaPlaceholder) {
+    for (const mediaPlaceholder of mediaPlaceholders) {
       next.push({
         id: mediaPlaceholder.id,
         type: 'canvasPlaceholder',
@@ -1797,16 +1800,19 @@ function CanvasEditorInner({
           height: mediaPlaceholder.size.height,
           zIndex: maximumPersistedZIndex + 2,
         },
-        data: { label: mediaPlaceholder.label, leaving: mediaPlaceholder.leaving },
+        width: mediaPlaceholder.size.width,
+        height: mediaPlaceholder.size.height,
+        handles: [{ type: 'target', position: Position.Left, x: 0, y: mediaPlaceholder.size.height / 2 }],
+        data: { label: mediaPlaceholder.label, leaving: mediaPlaceholder.leaving, preview: mediaPlaceholder.preview },
         selectable: false,
-        draggable: true,
+        draggable: !mediaPlaceholder.preview && !mediaPlaceholder.leaving,
         connectable: false,
         deletable: false,
         focusable: false,
       });
     }
     return next;
-  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, revealRevision, selectedNodeIds]);
+  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholders, resultStackOwnerById, revealRevision, selectedNodeIds]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -1877,6 +1883,11 @@ function CanvasEditorInner({
       );
       return [flowEdge];
     });
+    for (const piece of mediaPlaceholders) {
+      if (!piece.preview || piece.leaving) continue;
+      next.push({ id: `edge-${piece.id}`, source: piece.sourceNodeId, target: piece.id, type: 'canvasConnection',
+        className: 'canvas-input-edge', selectable: false, focusable: false, deletable: false });
+    }
     for (const id of flowEdgeCache.current.keys()) {
       if (!liveIds.has(id)) flowEdgeCache.current.delete(id);
     }
@@ -1887,7 +1898,7 @@ function CanvasEditorInner({
     }
     flowEdgesRef.current = next;
     return next;
-  }, [activeNodeId, collapsedStackMemberIds, document?.connections, document?.nodes, layerConnections, resultStackOwnerById, selectedConnectionIds]);
+  }, [activeNodeId, collapsedStackMemberIds, document?.connections, document?.nodes, layerConnections, mediaPlaceholders, resultStackOwnerById, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -1910,18 +1921,19 @@ function CanvasEditorInner({
         return next;
       });
     }
-    const placeholder = mediaPlaceholderRef.current;
-    if (placeholder) {
+    const placeholders = mediaPlaceholdersRef.current;
+    const [placeholder] = placeholders;
+    if (placeholder && !placeholder.preview && !placeholder.leaving) {
       const moved = changes.find(change => change.type === 'position' && change.id === placeholder.id && change.position);
       if (moved?.type === 'position' && moved.position) {
-        updateMediaPlaceholder({ ...placeholder, position: moved.position });
+        updateMediaPlaceholders([{ ...placeholder, position: moved.position }]);
       }
     }
     const graphChanges = changes.filter(change => (
-      (change.type === 'remove' && change.id !== placeholder?.id)
+      (change.type === 'remove' && !placeholders.some(piece => piece.id === change.id))
       || (
         change.type === 'position'
-        && change.id !== placeholder?.id
+        && !placeholders.some(piece => piece.id === change.id)
         && activeResizeNodeId.current !== change.id
       )
     ));
@@ -1966,7 +1978,7 @@ function CanvasEditorInner({
       resizePreviewFrame.current = null;
       setLiveNodeLayout(null);
     }
-  }, [commit, updateMediaPlaceholder]);
+  }, [commit, updateMediaPlaceholders]);
 
   const onConnect = useCallback((connection: Connection) => {
     const document = latestDocument.current;
@@ -5122,8 +5134,11 @@ function CanvasEditorInner({
     target: { nodeId: string; versionId: string },
     operation: CanvasMediaOperation,
   ) => {
-    // 抠图没有对话框，错误走全局提示；其余操作的错误留在对话框里。
-    const reportError = operation.kind === 'remove_background' ? setError : setMediaOperationError;
+    const reportError = (text: string) => {
+      if (operation.kind === 'split') notify.error(text);
+      if (operation.kind === 'remove_background') setError(text);
+      else setMediaOperationError(text);
+    };
     if (mediaOperationInFlight.current) return;
     if (documentCommandInFlight.current) {
       reportError('另一个媒体操作正在处理，请稍后重试。');
@@ -5133,27 +5148,41 @@ function CanvasEditorInner({
     setMediaOperationBusy(true);
     setMediaOperationError(null);
     let placeholderHandedOver = false;
+    let commandLocked = false;
     try {
+      const initial = latestDocument.current;
+      if (!initial) return;
+      const source = initial.nodes.find(node => node.id === target.nodeId);
+      const version = initial.content_versions[target.versionId];
+      const editsLayer = operation.kind !== 'split' && layerMaterialNodeIds(initial).has(target.nodeId);
+      const predict = (doc: CanvasDocument, node: CanvasNode) => {
+        if (editsLayer || version?.kind !== 'image' || !version.width || !version.height) return [];
+        const size = canvasNodeRenderedSize(node, doc.content_versions);
+        if (operation.kind !== 'split') return [canvasMediaOperationPlaceholder(node, size, operation)];
+        const url = canvasMediaUrlAtWidth(projectId, target.versionId, canvasThumbnailWidth(size.width * Math.max(flowStore.getState().transform[2], 1)));
+        return predictSplitGridPlaceholders(node, size, { width: version.width, height: version.height }, operation, doc.nodes, url);
+      };
+      let pieces = source ? predict(initial, source) : [];
+      updateMediaPlaceholders(pieces);
       if (!await persistNow()) {
         reportError('自动保存失败，图片处理尚未开始。请检查服务后重试。');
         return;
       }
       const before = latestDocument.current;
-      if (!before) return;
-      const sourceNode = before.nodes.find(node => node.id === target.nodeId);
-      const sourceVersion = before.content_versions[target.versionId];
-      let placeholder: CanvasMediaOperationPlaceholder | null = null;
-      const editsLayer = operation.kind !== 'split' && layerMaterialNodeIds(before).has(target.nodeId);
-      if (!editsLayer && sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
-        placeholder = canvasMediaOperationPlaceholder(
-          sourceNode,
-          canvasNodeRenderedSize(sourceNode, before.content_versions),
-          { width: sourceVersion.width, height: sourceVersion.height },
-          operation,
-        );
-        updateMediaPlaceholder(placeholder);
+      if (!before || !editorMounted.current) return;
+      if (before.nodes !== initial.nodes && operation.kind === 'split') {
+        const latestSource = before.nodes.find(node => node.id === target.nodeId);
+        if (!latestSource) return;
+        pieces = predict(before, latestSource);
+        updateMediaPlaceholders(pieces);
+      }
+      const [placeholder] = pieces;
+      if (documentCommandInFlight.current || runSubmissionInFlight.current) {
+        reportError('另一个画布操作正在提交，请稍后重试。');
+        return;
       }
       const dirtyAtCommand = dirtyVersion.current;
+      commandLocked = true;
       documentCommandInFlight.current = true;
       const result = await runCanvasMediaOperation(
         projectId,
@@ -5162,12 +5191,13 @@ function CanvasEditorInner({
         serverRevision.current,
         operation,
       );
+      if (!editorMounted.current) return;
       const concurrent = latestDocument.current ?? before;
       const knownNodeIds = new Set(concurrent.nodes.map(node => node.id));
       const knownConnectionIds = new Set(concurrent.connections.map(connection => connection.id));
       // 占位节点被拖走过，结果节点整体跟着搬同样的位移。
-      const dragged = placeholder && mediaPlaceholderRef.current?.id === placeholder.id
-        ? mediaPlaceholderRef.current.position
+      const dragged = placeholder && !placeholder.preview && mediaPlaceholdersRef.current[0]?.id === placeholder.id
+        ? mediaPlaceholdersRef.current[0].position
         : null;
       const shift = dragged && placeholder
         ? { x: dragged.x - placeholder.position.x, y: dragged.y - placeholder.position.y }
@@ -5207,11 +5237,11 @@ function CanvasEditorInner({
       // 结果节点接替占位卡：结果淡入、占位卡留在原位淡出，两层交叉，不露画布。
       markCanvasNodesEntering(createdNodes.map(node => node.id), placeholder ? 1 : undefined);
       if (placeholder && motionAvailable()) {
-        const leaving = { ...(mediaPlaceholderRef.current ?? placeholder), leaving: true };
+        const leaving = mediaPlaceholdersRef.current.map(piece => ({ ...piece, leaving: true }));
         placeholderHandedOver = true;
-        updateMediaPlaceholder(leaving);
+        updateMediaPlaceholders(leaving);
         window.setTimeout(() => {
-          if (mediaPlaceholderRef.current?.id === leaving.id) updateMediaPlaceholder(null);
+          if (mediaPlaceholdersRef.current === leaving) updateMediaPlaceholders([]);
         }, MOTION_DURATION.base * 1000);
       }
       setDocument(synced);
@@ -5227,15 +5257,20 @@ function CanvasEditorInner({
     } catch (operationError) {
       reportError((operationError as Error).message);
     } finally {
-      documentCommandInFlight.current = false;
+      if (commandLocked) documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
-      if (!placeholderHandedOver) updateMediaPlaceholder(null);
+      if (!placeholderHandedOver) updateMediaPlaceholders([]);
       setMediaOperationBusy(false);
       if (saveQueued.current) void flushSave().catch(() => {
         setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
       });
     }
-  }, [announceToolNotice, flushSave, persistNow, projectId, updateMediaPlaceholder]);
+  }, [announceToolNotice, flowStore, flushSave, persistNow, projectId, updateMediaPlaceholders]);
+
+  const splitImage = useCallback((node: CanvasContentNode, operation: Extract<CanvasMediaOperation, { kind: 'split' }>) => {
+    const versionId = node.data.current_version_id;
+    if (versionId) void executeMediaOperation({ nodeId: node.id, versionId }, operation);
+  }, [executeMediaOperation]);
 
   const submitMediaOperation = useCallback((operation: CanvasMediaOperation) => {
     if (!mediaOperation) return Promise.resolve();
@@ -5819,6 +5854,7 @@ function CanvasEditorInner({
     expandLayerStack,
     toggleFreeResize,
     openMediaOperation,
+    splitImage,
     removeBackground,
     openMaskEdit,
     openImageEdit,
@@ -5887,6 +5923,7 @@ function CanvasEditorInner({
     openImageEdit,
     submitImageEdit,
     openMediaOperation,
+    splitImage,
     removeBackground,
     previewContent,
     previewLayerStack,
