@@ -29,8 +29,8 @@ import { StudioSessionControls } from '@/components/studio/StudioSessionControls
 import { StudioAgentTurnCard } from '@/components/studio/StudioAgentTimeline';
 import { StudioComposer, useStudioComposer } from '@/components/studio/StudioComposer';
 import type { InputFlashRequest } from '@/components/studio/PromptInput';
+import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
-  CreationAssetPanel,
   type CreationAssetPanelHandle,
   type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
@@ -1596,7 +1596,7 @@ function StudioFull() {
         </div>
       </div>
       {assetPanelOpen && (
-        <CreationAssetPanel
+        <AssetPanel
           key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}

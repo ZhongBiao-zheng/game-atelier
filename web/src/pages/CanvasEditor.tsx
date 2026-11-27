@@ -139,8 +139,8 @@ import {
   isUploadedImageMaterialNode,
   restoreCanvasNodeFocus,
 } from '@/components/canvas/canvasNodePanelInteraction';
+import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
-  CreationAssetPanel,
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
@@ -6710,7 +6710,7 @@ function CanvasEditorInner({
         <AnimatePresence initial={false}>
         {libraryMode && (
           <CanvasSidePanelMotion key="library">
-          <CreationAssetPanel
+          <AssetPanel
             key={libraryPanelKey}
             ref={creationAssetPanelRef}
             refreshKey={assetsRevision}
