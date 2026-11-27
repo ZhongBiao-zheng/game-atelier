@@ -31,7 +31,7 @@ function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>
 }
 
 vi.mock('@xyflow/react', () => ({
-  // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
+  useStoreApi: () => ({ getState: () => ({ transform: [0, 0, 1] }), subscribe: () => () => {} }),
   useStore: (selector: (state: {
     transform: [number, number, number];
     nodeLookup: Map<string, never>;
@@ -339,7 +339,7 @@ it('renders the generation composer as an independent panel below the selected n
   const panel = screen.getByLabelText('图片设置');
   expect(panel).toHaveAttribute('data-floating-node-panel', 'true');
   expect(panel.closest('article')).toBeNull();
-  expect(panel.parentElement).toHaveAttribute('data-canvas-node-panel-anchor', 'config-one');
+  expect(panel.closest('[data-canvas-node-panel-anchor]')).toHaveAttribute('data-canvas-node-panel-anchor', 'config-one');
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
   expect(within(panel).queryByRole('button', { name: '图片设置' })).not.toBeInTheDocument();
   const generate = within(panel).getByRole('button', { name: '生成' });

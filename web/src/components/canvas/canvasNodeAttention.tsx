@@ -16,12 +16,18 @@ import {
 /** 点名之后多久内挂上的才播：屏外节点（onlyRenderVisibleElements 没渲染）之后平移过去不补播。 */
 const ATTENTION_WINDOW_MS = 400;
 
-const entrances = new Map<string, { scale: number; at: number }>();
+type EntranceOrigin = 'left' | 'right' | 'center';
+const entrances = new Map<string, { scale: number; at: number; origin: EntranceOrigin }>();
+
+export function isConnectedNodeEntering(id: string) {
+  const entry = entrances.get(id);
+  return Boolean(entry && entry.origin !== 'center' && Date.now() - entry.at <= ATTENTION_WINDOW_MS);
+}
 
 /** 新建节点：外壳挂载时从 scale 淡入放大到 1（200ms）。scale = 1 只淡入（媒体处理结果接替占位卡）。 */
-export function markCanvasNodesEntering(ids: Iterable<string>, scale = 0.98) {
+export function markCanvasNodesEntering(ids: Iterable<string>, scale = 0.98, origin: EntranceOrigin = 'center') {
   const at = Date.now();
-  for (const id of ids) entrances.set(id, { scale, at });
+  for (const id of ids) entrances.set(id, { scale, at, origin });
 }
 
 /** 节点外壳挂载时调一次；没被点名、或点名已过期就什么都不做。减弱动态效果时只淡入。 */
@@ -34,9 +40,10 @@ export function playCanvasNodeEntrance(id: string, shell: HTMLElement) {
   const keyframes = reduced || entrance.scale === 1
     ? { opacity: [0, 1] }
     : { opacity: [0, 1], scale: [entrance.scale, 1] };
+  if (!reduced) shell.style.transformOrigin = `${entrance.origin} center`;
   clearOnFinish(
     animate(shell, keyframes, { duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out }),
-    shell,
+    shell, ['opacity', 'transform', 'transform-origin'],
   );
 }
 

@@ -83,6 +83,7 @@ import {
   EditorMessage,
   ToolButton,
   canvasNodeTypes,
+  canvasChromeInsetBounds,
   copyablePromptForNode,
   canvasStackMemberMotion,
   clearStackMemberMotion,
@@ -212,6 +213,9 @@ import {
   CANVAS_TEXT_NODE_DEFAULT_SIZE,
   acceptServerContentVersions,
   canvasConnectionCreationCapabilities,
+  canvasUpstreamNodeTypesForTarget,
+  isCanvasHandleTap,
+  placeCanvasConnectedNode,
   canvasDeletionBlockedMessage,
   canvasMediaOperationPlaceholder,
   type CanvasMediaOperationPlaceholder,
@@ -297,6 +301,7 @@ interface CreateMenuState {
   /** 从输出侧拖出时要一起连进新节点的全部来源：起点在多选里就是整组，否则只有起点。 */
   sourceIds?: string[];
   sourceHandle?: 'source' | 'target';
+  compareSlot?: 'before' | 'after';
   /** 拖线松手时指针的屏幕位置；列表贴着它摆，线接到列表靠来源那一侧的正中。 */
   pointer?: XYPosition;
 }
@@ -679,7 +684,6 @@ function CanvasEditorInner({
   const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
-  const [createMenuDock, setCreateMenuDock] = useState<{ left: number; top: number; anchor: XYPosition } | null>(null);
   const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
     setGenerationPreferencesTab(tab);
     setGenerationPreferencesOpen(true);
@@ -720,6 +724,7 @@ function CanvasEditorInner({
   const activeResizeNodeId = useRef<string | null>(null);
   const resizePreviewFrame = useRef<number | null>(null);
   const dirtyVersion = useRef(0);
+  const saveBeforePanelFocus = useRef(false);
   const [dirtySignal, setDirtySignal] = useState(0);
   const activeTextEditingNodeIds = useRef(new Set<string>());
   const autosaveObservedDirtyVersion = useRef(0);
@@ -793,6 +798,8 @@ function CanvasEditorInner({
   const projectRenameInFlight = useRef(false);
   const {
     screenToFlowPosition,
+    flowToScreenPosition,
+    setViewport,
     fitView,
     fitBounds,
     getViewport,
@@ -1194,7 +1201,7 @@ function CanvasEditorInner({
 
   useEffect(() => {
     if (!createMenu) return;
-    requestAnimationFrame(() => createMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+    requestAnimationFrame(() => createMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus({ preventScroll: true }));
   }, [createMenu]);
 
   latestDocument.current = document;
@@ -1533,6 +1540,12 @@ function CanvasEditorInner({
       saveQueued.current = snapshot;
     }
     if (!saveQueued.current) return;
+    // 创建手势会自动把光标交给提示词；先提交这一笔结构编辑，再进入延迟保存的输入会话。
+    if (saveBeforePanelFocus.current) {
+      saveBeforePanelFocus.current = false;
+      void flushSave().catch(() => undefined);
+      return;
+    }
     // 队列已经排上了，卸载冲刷与 beforeunload 守卫照样看得到；输入法组合和文本编辑会话
     // 期间都只更新内存，不启动保存。退出文本编辑后 textEditingSignal 变化，再统一保存一次。
     if (imeComposing.current || activeTextEditingNodeIds.current.size > 0) return;
@@ -2205,15 +2218,19 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([request.targetNodeId]));
   }, []);
 
+  const gestureStart = useRef<XYPosition | null>(null);
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
     setConnectionInProgress(false);
-    if (state.isValid || !state.fromNode) return;
-    if (state.toHandle) return;
-    const pointer = pointerPosition(event);
+    const start = gestureStart.current;
+    gestureStart.current = null;
+    if (state.isValid || !state.fromNode || event.type === 'touchcancel') return;
+    let pointer = pointerPosition(event);
+    if (!pointer) return;
+    const tap = start && isCanvasHandleTap(start, pointer);
+    if (!tap && state.toHandle) return;
     const startedFromTarget = state.fromHandle?.type === 'target';
-    const dropNodeId = state.toNode?.id ?? (
-      pointer ? connectionDropNodeId(pointer, startedFromTarget ? 'right' : 'left') : null
-    );
+    const compareSlot = state.fromHandle?.id;
+    const dropNodeId = tap ? null : state.toNode?.id ?? connectionDropNodeId(pointer, startedFromTarget ? 'right' : 'left');
     const sourceIds = startedFromTarget ? [state.fromNode.id] : connectionSourceIds(state.fromNode.id);
     if (dropNodeId) {
       if (sourceIds.length > 1) {
@@ -2224,65 +2241,32 @@ function CanvasEditorInner({
         source: startedFromTarget ? dropNodeId : state.fromNode.id,
         target: startedFromTarget ? state.fromNode.id : dropNodeId,
         sourceHandle: null,
-        targetHandle: null,
+        targetHandle: startedFromTarget ? compareSlot ?? null : null,
       };
       if (canCreateCanvasInputConnection(latestDocument.current, connection)) onConnect(connection);
       return;
     }
-    if (!pointer) return;
+    if (tap) {
+      const current = latestDocument.current;
+      const node = current?.nodes.find(item => item.id === state.fromNode?.id);
+      if (!node || !current) return;
+      const size = canvasNodeRenderedSize(node, current.content_versions);
+      pointer = flowToScreenPosition({
+        x: node.position.x + (startedFromTarget ? -96 : size.width + 96),
+        y: node.position.y + size.height * (compareSlot === 'before' ? 0.35 : compareSlot === 'after' ? 0.65 : 0.5),
+      });
+    }
     setAddOpen(false);
     setCreateMenu({
-      screen: {
-        x: Math.max(12, Math.min(pointer.x, window.innerWidth - 252)),
-        y: Math.max(12, Math.min(pointer.y, window.innerHeight - 356)),
-      },
+      screen: pointer,
+      compareSlot: isCanvasCompareSlot(compareSlot) ? compareSlot : undefined,
       flow: screenToFlowPosition(pointer),
       sourceId: state.fromNode.id,
       sourceIds: startedFromTarget ? undefined : sourceIds,
       sourceHandle: state.fromHandle?.type ?? 'source',
       pointer,
     });
-  }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
-
-  const screenToFlowPositionRef = useRef(screenToFlowPosition);
-  screenToFlowPositionRef.current = screenToFlowPosition;
-  // 从连线拖出的创建列表：垂直居中对着松手点，线贴着列表靠来源那一侧的边、接在正中。
-  // 量的是 offset 尺寸，不受进场动效的 transform 影响。
-  useLayoutEffect(() => {
-    const menu = createMenuRef.current;
-    const pointer = createMenu?.pointer;
-    if (!menu || !pointer) { setCreateMenuDock(null); return; }
-    const toFlow = screenToFlowPositionRef.current;
-    const fromOutput = createMenu.sourceHandle !== 'target';
-    const { offsetWidth: width, offsetHeight: height } = menu;
-    const left = Math.max(12, Math.min(fromOutput ? pointer.x : pointer.x - width, window.innerWidth - width - 12));
-    const top = Math.max(12, Math.min(pointer.y - height / 2, window.innerHeight - height - 12));
-    setCreateMenuDock({
-      left, top,
-      anchor: toFlow({ x: fromOutput ? left : left + width, y: top + height / 2 }),
-    });
-  }, [createMenu]);
-
-  // 创建列表是屏幕上的浮层，但它属于画布上的一个位置：平移 / 缩放画布时跟着那个位置走，
-  // 否则列表钉在屏幕上、连线却跟着画布跑。直接改 style，不走 React（平移每帧都会触发）。
-  useEffect(() => {
-    const menu = createMenuRef.current;
-    if (!menu || !createMenu) return;
-    const [originX, originY, originZoom] = flowStore.getState().transform ?? [0, 0, 1];
-    const docked = Boolean(createMenu.pointer);
-    const attachX = docked && createMenu.sourceHandle === 'target' ? menu.offsetWidth : 0;
-    const attachY = docked ? menu.offsetHeight / 2 : 0;
-    const startX = Number.parseFloat(menu.style.left) + attachX;
-    const startY = Number.parseFloat(menu.style.top) + attachY;
-    return flowStore.subscribe((state, previous) => {
-      if (!state.transform || state.transform === previous.transform) return;
-      const frame = state.domNode?.getBoundingClientRect();
-      const [x, y, zoom] = state.transform;
-      const scale = zoom / originZoom;
-      menu.style.left = `${(startX - (frame?.left ?? 0) - originX) * scale + x + (frame?.left ?? 0) - attachX}px`;
-      menu.style.top = `${(startY - (frame?.top ?? 0) - originY) * scale + y + (frame?.top ?? 0) - attachY}px`;
-    });
-  }, [createMenu, createMenuDock, flowStore]);
+  }, [connectSources, connectionSourceIds, flowToScreenPosition, onConnect, screenToFlowPosition]);
 
   const sweepHits = useRef<ReadonlySet<string>>(new Set());
 
@@ -2631,6 +2615,13 @@ function CanvasEditorInner({
       flowBounds,
       node => canvasNodeRenderedSize(node, latestDocument.current?.content_versions ?? {}),
     );
+  }
+
+  function menuNodePosition(menu: CreateMenuState | null, size: CanvasSize, handleY = 0.5) {
+    if (!menu) return defaultPosition(size);
+    if (!menu.pointer || !latestDocument.current) return placeNewNode(menu.flow, size);
+    return placeCanvasConnectedNode(menu.flow, size,
+      menu.sourceHandle === 'target', latestDocument.current, handleY);
   }
 
   function defaultPosition(size: CanvasSize = CANVAS_DEFAULT_NODE_SIZE) {
@@ -3010,6 +3001,7 @@ function CanvasEditorInner({
               role: 'input',
               source_node_id: sourceNodeId,
               target_node_id: targetNodeId,
+              ...(menu.compareSlot ? { slot: menu.compareSlot } : {}),
             });
           }
         }
@@ -3036,12 +3028,46 @@ function CanvasEditorInner({
     } else {
       commit(apply, true);
     }
-    markCanvasNodesEntering([node.id]);
+    const linked = Boolean(menu?.pointer && menu.sourceId);
+    markCanvasNodesEntering([node.id], linked ? 0.92 : 0.98,
+      linked ? (menu?.sourceHandle === 'target' ? 'right' : 'left') : 'center');
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set());
+    setSelectedNodeIds(new Set(linked ? [node.id] : []));
     setAddOpen(false);
     setCreateMenu(null);
-    if (focus) focusNewNodesHandler.current([node]);
+    if (linked) {
+      saveBeforePanelFocus.current = true;
+      setDismissedGenerationPanelNodeId(null);
+      requestAnimationFrame(() => {
+        const pending = pendingViewportCommand.current;
+        if (pending) void pending.then(() => revealConnectedNode(node));
+        else revealConnectedNode(node);
+      });
+    } else if (focus) focusNewNodesHandler.current([node]);
+  }
+
+  function revealConnectedNode(node: CanvasNode) {
+    const surface = editorRegionRef.current;
+    if (!surface || !latestSelectedNodeIds.current.has(node.id)) return;
+    const bounds = canvasChromeInsetBounds(surface);
+    if (!bounds.width || !bounds.height) return;
+    const size = canvasNodeRenderedSize(node, latestDocument.current?.content_versions ?? {});
+    const topLeft = flowToScreenPosition(node.position);
+    const zoom = getZoom();
+    const width = size.width * zoom;
+    const panel = surface.querySelector<HTMLElement>(`[data-canvas-node-panel-anchor="${CSS.escape(node.id)}"]`);
+    // 面板已在水平方向独立夹紧；这里仅需为节点及其下方的面板高度留出空间。
+    const left = topLeft.x, right = topLeft.x + width;
+    const bottom = topLeft.y + size.height * zoom + (panel ? panel.offsetHeight + 16 : 0);
+    const delta = (low: number, high: number, min: number, max: number) =>
+      low < min ? min - low : Math.min(0, Math.max(min - low, max - high));
+    const dx = delta(left, right, bounds.left + 16, bounds.right - 16);
+    const dy = delta(topLeft.y, bottom, bounds.top + 16, bounds.bottom - 16);
+    if (dx || dy) {
+      const viewport = getViewport();
+      void runViewportCommand(() => setViewport({ x: viewport.x + dx, y: viewport.y + dy, zoom },
+        { duration: viewportMotionMs(MOTION_DURATION.base) }));
+    }
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
@@ -3051,7 +3077,7 @@ function CanvasEditorInner({
   function addCompareNode(menu: CreateMenuState | null = createMenu) {
     const size = { width: 320, height: 320 };
     appendNode({ id: makeId('compare'), type: 'compare', title: '对比',
-      position: menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size),
+      position: menuNodePosition(menu, size, 0.35),
       size, z_index: 0, data: {} }, menu);
   }
 
@@ -3113,7 +3139,7 @@ function CanvasEditorInner({
       title: kind === 'audio'
         ? (audioFamily === 'music' ? '音乐' : '语音')
         : { text: '文本', image: '图片', video: '视频' }[kind],
-      position: menu?.flow ? placeNewNode(menu.flow, nodeSize) : defaultPosition(nodeSize),
+      position: menuNodePosition(menu, nodeSize),
       z_index: 0,
     };
     const data = { current_version_id: null, generation_draft: draft, active_run_id: null };
@@ -4047,6 +4073,34 @@ function CanvasEditorInner({
     void operation.then(clearPending, clearPending);
     return operation;
   }, [commitViewportDocument, getViewport, projectId]);
+
+  // 菜单、新节点和连线共享同一个画布点。边缘空间不够时只平移视口，始终保留松手的画布坐标。
+  useLayoutEffect(() => {
+    const menu = createMenuRef.current;
+    if (!menu || !createMenu) return;
+    const screen = createMenu.screen;
+    const width = menu.offsetWidth, height = menu.offsetHeight;
+    const left = screen.x - (createMenu.sourceHandle === 'target' ? width : 0);
+    const top = screen.y - height / 2;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.translate = 'none';
+    menu.style.visibility = 'visible';
+    const [tx, ty, zoom] = flowStore.getState().transform;
+    const unsubscribe = flowStore.subscribe((state, previous) => {
+      if (state.transform === previous.transform) return;
+      const [x, y, z] = state.transform;
+      const dx = x - tx + createMenu.flow.x * (z - zoom);
+      const dy = y - ty + createMenu.flow.y * (z - zoom);
+      menu.style.translate = `${dx}px ${dy}px`;
+    });
+    const dx = Math.max(12 - left, Math.min(0, window.innerWidth - 12 - left - width));
+    const dy = Math.max(12 - top, Math.min(0, window.innerHeight - 12 - top - height));
+    if (dx || dy) void runViewportCommand(() => setViewport({ x: tx + dx, y: ty + dy, zoom },
+      { duration: viewportMotionMs(MOTION_DURATION.fast) }));
+    return unsubscribe;
+  }, [createMenu, flowStore, runViewportCommand, setViewport]);
+
 
   const expandLayerStack = useCallback((nodeId: string) => {
     const current = latestDocument.current;
@@ -6015,7 +6069,12 @@ function CanvasEditorInner({
           onSelectionStart={onSelectionStart}
           onSelectionEnd={onSelectionEnd}
           onConnect={onConnect}
-          onConnectStart={() => setConnectionInProgress(true)}
+          connectOnClick={false}
+          connectionDragThreshold={0}
+          onConnectStart={event => {
+            gestureStart.current = pointerPosition(event);
+            setConnectionInProgress(true);
+          }}
           onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}
           onEdgesChange={onEdgesChange}
@@ -6119,7 +6178,7 @@ function CanvasEditorInner({
           nodesDraggable
           nodesConnectable
           onlyRenderVisibleElements
-          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting', createMenu?.sourceId && 'canvas-flow-pending-connection')}
+          className={cn('canvas-flow canvas-flow-local', multiSelectionActive && 'canvas-flow-multiselect', connectionInProgress && 'canvas-flow-connecting')}
         >
           <CanvasZoomCssVars />
           {ownerRoom.connected && document && <RoomSelectionOverlay members={ownerRoom.members.filter(member=>member.client_id !== ownerRoom.clientId)} document={document}/>}
@@ -6145,9 +6204,10 @@ function CanvasEditorInner({
           </AnimatePresence>
           {createMenu?.sourceId && (
             <CanvasPendingConnection
+              slot={createMenu.compareSlot}
               sourceIds={createMenu.sourceIds ?? [createMenu.sourceId]}
               handle={createMenu.sourceHandle ?? 'source'}
-              to={createMenuDock?.anchor ?? createMenu.flow}
+              to={createMenu.flow}
             />
           )}
         </ReactFlow>
@@ -6578,11 +6638,12 @@ function CanvasEditorInner({
             initial={motionAvailable() ? { opacity: 0, scale: prefersReducedMotion() ? 1 : 0.96 } : false}
             animate={{ opacity: 1, scale: 1, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.out } }}
             exit={motionAvailable() ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
-            className={cn('fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow', createMenu.sourceHandle === 'target' ? 'origin-right' : 'origin-left')}
-            style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}
+            className={cn('fixed z-20 max-h-[calc(100dvh-1.5rem)] w-56 overflow-y-auto rounded-xl border border-border bg-popover p-2 shell-glow', createMenu.sourceHandle === 'target' ? 'origin-right' : 'origin-left')}
+            style={{ visibility: 'hidden' }}
           >
-            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><CloseIcon /></Button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu, 'speech')} onAddMusic={() => addGenerationNode('audio', createMenu, 'music')} onUpload={() => uploadRef.current?.click()} />
+            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">{createMenu.sourceHandle === 'target' ? '添加上游节点' : '添加下游节点'}</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><CloseIcon /></Button></div>
+            <CanvasCreateMenuItems allowedTypes={createMenu.sourceHandle === 'target' && createMenu.sourceId
+              ? canvasUpstreamNodeTypesForTarget(document, createMenu.sourceId) : undefined} {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu, 'speech')} onAddMusic={() => addGenerationNode('audio', createMenu, 'music')} onUpload={() => uploadRef.current?.click()} />
           </motion.div>
         )}
         </AnimatePresence>
@@ -6918,7 +6979,8 @@ function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, n
   </>;
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddCompare }: {
+function CanvasCreateMenuItems({ allowedTypes, allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddCompare }: {
+  allowedTypes?: ReadonlySet<string>;
   onAddCompare?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
   rejectedModes?: ReadonlySet<string>;
@@ -6932,11 +6994,11 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
   onUpload: () => void;
 }) {
   return <>
-    {allowEmptyNodes && <AddMenuButton icon={<TextIcon />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
-    {allowEmptyNodes && <AddMenuButton icon={<ImageFileIcon />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
-    {allowEmptyNodes && <AddMenuButton icon={<VideoFileIcon />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
-    {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="语音" description="旁白与配音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
-    {allowEmptyNodes && <AddMenuButton icon={<MusicFileIcon />} title="音乐" description="配乐与歌曲" onClick={onAddMusic} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {allowEmptyNodes && (!allowedTypes || allowedTypes.has('text')) && <AddMenuButton icon={<TextIcon />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
+    {allowEmptyNodes && (!allowedTypes || allowedTypes.has('image')) && <AddMenuButton icon={<ImageFileIcon />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
+    {allowEmptyNodes && (!allowedTypes || allowedTypes.has('video')) && <AddMenuButton icon={<VideoFileIcon />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
+    {allowEmptyNodes && (!allowedTypes || allowedTypes.has('audio')) && <AddMenuButton icon={<AudioFileIcon />} title="语音" description="旁白与配音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {allowEmptyNodes && (!allowedTypes || allowedTypes.has('audio')) && <AddMenuButton icon={<MusicFileIcon />} title="音乐" description="配乐与歌曲" onClick={onAddMusic} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {onAddCompare && <AddMenuButton icon={<CompareIcon />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
     {allowUpload && <AddMenuButton icon={<UploadIcon />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
@@ -7610,6 +7672,7 @@ function CanvasZoomCssVars() {
       }
       if (!target || zoom === lastZoom) return;
       lastZoom = zoom;
+      target.style.setProperty('--canvas-zoom', String(zoom));
       target.style.setProperty('--canvas-handle-size', `${48 / zoom}px`);
       target.style.setProperty('--canvas-handle-dot-size', `${12 / zoom}px`);
       target.style.setProperty('--canvas-handle-border-size', `${2 / zoom}px`);

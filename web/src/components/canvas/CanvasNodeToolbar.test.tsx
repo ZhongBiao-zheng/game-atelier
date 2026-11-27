@@ -35,7 +35,7 @@ function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>
 }
 
 vi.mock('@xyflow/react', () => ({
-  // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
+  useStoreApi: () => ({ getState: () => ({ transform: [0, 0, 1] }), subscribe: () => () => {} }),
   useStore: (selector: (state: {
     transform: [number, number, number];
     nodeLookup: Map<string, never>;

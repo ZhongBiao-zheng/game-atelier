@@ -78,7 +78,7 @@ vi.mock('@xyflow/react', () => {
   const selectionListeners = new Set<(state: MockSelectionState, previous: MockSelectionState) => void>();
   let selectionState: MockSelectionState = { transform: flowTransform, userSelectionRect: null };
   const flowStoreApi = {
-    getState: () => ({ nodeLookup: new Map<string, { selectable?: boolean }>() }),
+    getState: () => ({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     setState: () => undefined,
     subscribe: (listener: (state: MockSelectionState, previous: MockSelectionState) => void) => {
       selectionListeners.add(listener);
@@ -282,6 +282,7 @@ vi.mock('@xyflow/react', () => {
     useStoreApi: () => flowStoreApi,
     useReactFlow: () => ({
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
+      flowToScreenPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
       fitView: vi.fn(),
       ...viewportHelpers,
       getZoom: () => 1,
@@ -1417,13 +1418,14 @@ it('creates a node and input connection when a source handle is dragged to blank
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'simulate blank connection' }));
   const menu = screen.getByRole('menu', { name: '连接创建节点' });
+  expect(within(menu).getByText('添加下游节点')).toBeVisible();
   expect(within(menu).queryByRole('menuitem', { name: /上传素材/ })).not.toBeInTheDocument();
   fireEvent.click(within(menu).getByRole('menuitem', { name: /^图片/ }));
 
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
     nodes: expect.arrayContaining([
       expect.objectContaining({ id: 'source-one' }),
-      expect.objectContaining({ type: 'image', position: { x: 480, y: 320 } }),
+      expect.objectContaining({ type: 'image', position: { x: 480, y: 232 } }),
     ]),
     connections: [expect.objectContaining({
       role: 'input',
@@ -1431,6 +1433,8 @@ it('creates a node and input connection when a source handle is dragged to blank
       target_node_id: expect.stringMatching(/^image-/),
     })],
   })));
+  const created = lastSavedDocument()?.nodes.find(node => node.type === 'image');
+  expect(document.querySelector(`[data-canvas-node-panel-anchor="${created?.id}"]`)).toBeInTheDocument();
 });
 
 it('offers only content sources when a target handle is dragged to blank canvas', async () => {
@@ -1442,10 +1446,10 @@ it('offers only content sources when a target handle is dragged to blank canvas'
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'simulate blank target connection' }));
 
-  // 目标端手柄要的是内容来源：空生成节点与生成配置都填不进去，只留上传素材。
   const menu = screen.getByRole('menu', { name: '连接创建节点' });
+  expect(within(menu).getByText('添加上游节点')).toBeVisible();
   expect(within(menu).getAllByRole('menuitem').map(item => item.textContent)).toEqual([
-    expect.stringContaining('上传素材'),
+    expect.stringContaining('文本'), expect.stringContaining('图片'),
   ]);
 });
 

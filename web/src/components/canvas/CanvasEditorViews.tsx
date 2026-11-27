@@ -1,5 +1,5 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
-import { CanvasNodeFlash, playCanvasNodeEntrance } from './canvasNodeAttention';
+import { CanvasNodeFlash, isConnectedNodeEntering, playCanvasNodeEntrance } from './canvasNodeAttention';
 import { fadePresenceClass, useFadePresence } from './useFadePresence';
 import { useAnnotationToolbarSwap } from './annotation/useAnnotationToolbarSwap';
 import { SharedGenerationStatus } from './SharedGenerationStatus';
@@ -24,6 +24,7 @@ import {
   NodeToolbar,
   Position,
   useStore,
+  useStoreApi,
   type Node,
   type ReactFlowState,
   type NodeProps,
@@ -39,7 +40,7 @@ import {
 } from 'react';
 import { Reorder } from 'motion/react';
 import { Collapse } from '@/components/ui/collapse';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, prefersReducedMotion, shakeOnError, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, MOTION_NODE_PANEL_DELAY, motionAvailable, prefersReducedMotion, shakeOnError, stagger, useAnimateOnChange, type AnimationPlaybackControls } from '@/lib/motion';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
@@ -334,7 +335,7 @@ export interface CanvasNodeContextValue {
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 /** 连接点圆点：拖线吸附到有效接口（xyflow 给接口加 connectingto + valid）时放大到 125%，150ms。 */
-const CANVAS_HANDLE_DOT_CLASS = 'canvas-node-handle-dot transition-[border-color,scale] duration-150 motion-safe:in-[.connectingto.valid]:scale-125';
+const CANVAS_HANDLE_DOT_CLASS = 'canvas-node-handle-dot transition-[border-color,scale] duration-150 motion-safe:in-[.connectingto.valid]:scale-110';
 const EMPTY_PLUGIN_INPUTS: readonly PluginNodeInput[] = [];
 const EMPTY_HOST_PLUGINS: ReadonlyMap<string, HostPluginModule> = new Map();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
@@ -395,6 +396,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
+  const pickTooltipRef = useRef<HTMLSpanElement>(null);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
   const draftKeys = context?.keys;
   const textPreference = context?.canvasUiPreferences.generation_defaults.text;
@@ -402,7 +404,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     ? resolveCanvasGenerationDraft(node, draftKeys, textPreference)
     : null, [node, draftKeys, textPreference]);
   const nodeContent = context ? contentForNode(node, context.resolveVersion) : undefined;
-  const imageBitmapWidth = useCanvasImageBitmapWidth(node.size?.width ?? 320);
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
   );
@@ -490,12 +491,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     if (shellElement) playCanvasNodeEntrance(node.id, shellElement);
   }, [node.id, shellElement]);
 
-  function moveMaterialPickTooltip(clientX: number, clientY: number) {
-    setMaterialPickPointer({
-      left: clientX + 14,
-      top: clientY + 14,
-    });
-  }
   const annotating = context?.annotationController?.nodeId === node.id;
   const annotationToolbar = useAnnotationToolbarSwap(annotating);
   // 选中节点的工具条进出场各 150ms 淡变；xyflow 的 NodeToolbar 自己决定挂不挂，这里延迟卸载让淡出播完。
@@ -812,9 +807,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           event.stopPropagation();
           context.selectNode(node.id);
         }}
+        onPointerEnter={event => {
+          if (materialPickEligible) setMaterialPickPointer({ left: event.clientX + 14, top: event.clientY + 14 });
+        }}
         onPointerMove={event => {
-          if (context.materialPick && materialPickEligible) {
-            moveMaterialPickTooltip(event.clientX, event.clientY);
+          if (pickTooltipRef.current) {
+            pickTooltipRef.current.style.transform = `translate3d(${event.clientX + 14}px, ${event.clientY + 14}px, 0)`;
           }
         }}
         onPointerLeave={() => setMaterialPickPointer(null)}
@@ -849,8 +847,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       >
         {materialPickPointer && createPortal(
           <span
-            className="pointer-events-none fixed z-30 max-w-64 truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium text-foreground backdrop-blur-glass shell-glow"
-            style={materialPickPointer}
+            ref={pickTooltipRef}
+            className="pointer-events-none fixed left-0 top-0 z-30 max-w-64 truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium text-foreground backdrop-blur-glass shell-glow"
+            style={{ transform: `translate3d(${materialPickPointer.left}px, ${materialPickPointer.top}px, 0)` }}
           >
             选择 {node.title}
           </span>,
@@ -925,13 +924,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             </div>
           )}
           {content && content.kind !== 'text' && !content.pending_shared_original && (
-            <MediaPreview
-              kind={content.kind}
-              // 节点卡上的图按屏幕上的显示宽度取缩略图。画布上一屏能有几十上百个节点，
-              // 发原图等于让浏览器同时解出同样多张满分辨率位图；放大到超过档位时才换原图。
-              src={content.kind === 'image'
-                ? canvasMediaUrlAtWidth(context.projectId, content.version_id, imageBitmapWidth)
-                : canvasMediaUrl(context.projectId, content.version_id)}
+            <CanvasNodeMediaPreview
+              projectId={context.projectId} version={content} cardWidth={node.size?.width ?? 320}
               title={node.title}
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
@@ -980,7 +974,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
-          {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
+          {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && <PluginNodeContent node={node} context={context} selected={Boolean(selected)} />}
@@ -1003,8 +997,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         </Handle>
       ))}
       {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
-        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
-          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
+        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle canvas-creation-handle" aria-label="连接到此节点">
+          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true"><AddIcon size="sm" /></span>
         </Handle>
       )}
       {(canvasNodeProvidesOutput(node) || node.type === 'image_edit' || (node.type === 'layer_stack'
@@ -1013,10 +1007,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           type="source"
           isConnectable={node.type !== 'layer_stack' && node.type !== 'image_edit'}
           position={Position.Right}
-          className="canvas-node-handle"
+          className="canvas-node-handle canvas-creation-handle"
           aria-label="从此节点连接"
         >
-          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true" />
+          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true"><AddIcon size="sm" /></span>
         </Handle>
       )}
       {generationPanelVisible && draft && (
@@ -1108,7 +1102,7 @@ export function placeCanvasGenerationPanel(
   panelHeight: number,
 ): CanvasPanelPlacement {
   const gap = CANVAS_GENERATION_PANEL_GAP;
-  const width = CANVAS_GENERATION_PANEL_WIDTH;
+  const width = Math.min(CANVAS_GENERATION_PANEL_WIDTH, Math.max(1, bounds.width - gap * 2));
   const maxHeight = Math.max(160, bounds.height - gap * 2);
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
   const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
@@ -1121,7 +1115,7 @@ export function placeCanvasGenerationPanel(
  *
  *  只夹进视口还不够：面板贴着可视区下沿摆的时候，「开始生成」正好落在底部那两组控件底下
  *  （1280×720 实测），主操作点不到。按控件的实际矩形收缩可用区域，尺寸变了不用改这里。 */
-function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
+export function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
   const bounds = surface.getBoundingClientRect();
   const edge = (selector: string) => surface.querySelector(selector)?.getBoundingClientRect() ?? null;
   const rail = edge('.canvas-tool-dock') ?? edge('.canvas-mobile-rail');
@@ -1216,8 +1210,7 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点
  *  的屏幕矩形算，文字也不再被分数倍缩放糊掉。
  *
- *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
- *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
+ *  平移和缩放只更新外壳的 transform；进场动画单独写内层。 */
 /** 拖动节点时工具条与生成面板朝节点方向收起（150ms，退场曲线），松手再浮现（200ms，进场曲线）。
  *  减弱动态效果时不位移，只淡变。
  *  静止时不留 translate / opacity：祖先上残留的 translate 会让面板里的 backdrop-blur 失效。 */
@@ -1230,7 +1223,7 @@ function canvasDragChromeClass(dragging: boolean, toward: 'up' | 'down') {
   );
 }
 
-function CanvasNodeFloatingPanel({
+export function CanvasNodeFloatingPanel({
   nodeId,
   anchor,
   surfaceRef,
@@ -1250,68 +1243,96 @@ function CanvasNodeFloatingPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
   const side = placement?.side;
-  // 定位完成（visibility 解除）那一刻进场；left/top 管位置，动画只动 transform。
-  useAnimateOnChange(placement !== null, placed => {
-    const panel = panelRef.current;
-    if (!placed || !panel) return;
-    clearOnFinish(animate(panel, { opacity: [0, 1], y: [6, 0] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out }), panel);
-  });
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [createdFromHandle] = useState(() => isConnectedNodeEntering(nodeId));
+  const flowStore = useStoreApi();
+  const placed = placement !== null;
+  useLayoutEffect(() => {
+    const inner = innerRef.current;
+    if (!placed || !inner) return;
+    const focusedAtStart = document.activeElement;
+    const focusInput = () => {
+      if (createdFromHandle && inner.isConnected && (document.activeElement === focusedAtStart || document.activeElement === document.body)) {
+        inner.querySelector<HTMLElement>('[contenteditable="true"],textarea')?.focus({ preventScroll: true });
+      }
+    };
+    if (!motionAvailable()) {
+      const frame = requestAnimationFrame(focusInput);
+      return () => cancelAnimationFrame(frame);
+    }
+    const reduced = prefersReducedMotion();
+    const controls = clearOnFinish(animate(inner, reduced ? { opacity: [0, 1] }
+      : { opacity: [0, 1], y: [side === 'above' ? 6 : -6, 0] }, {
+      delay: createdFromHandle && !reduced ? MOTION_NODE_PANEL_DELAY : 0,
+      duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out,
+    }), inner);
+    let active = true;
+    void controls.finished.then(() => { if (active) focusInput(); });
+    return () => { active = false; controls.stop(); };
+  }, [placed, side, createdFromHandle]);
   useEffect(() => {
     if (side) onSideChange?.(side);
   }, [onSideChange, side]);
-  // 平移与缩放都改 transform，订阅它就不用起 rAF 常驻轮询。
-  const transform = useStore(canvasFlowTransform);
-  // 拖动 / 缩放这个节点本身不动 transform，得另外订阅节点自己的几何。
   const geometrySelector = useCallback(
-    (state: ReactFlowState) => canvasNodeGeometry(state, nodeId),
-    [nodeId],
+    (state: ReactFlowState) => hiddenWhileDragging ? '' : canvasNodeGeometry(state, nodeId),
+    [nodeId, hiddenWhileDragging],
   );
   const geometry = useStore(geometrySelector);
   const surface = surfaceRef?.current ?? null;
 
-  const place = useCallback(() => {
-    if (!anchor) return;
-    const measured = surface ? canvasChromeInsetBounds(surface) : null;
-    // 容器还没布局（宽或高为 0）时按视口算，否则面板会被夹成 240×160。
-    const bounds: CanvasPanelRect = measured && measured.width > 0 && measured.height > 0
-      ? measured
-      : {
-        left: 0,
-        top: 0,
-        right: window.innerWidth,
-        bottom: window.innerHeight,
-        width: window.innerWidth,
-        height: window.innerHeight,
-      };
-    const viewportPlacement = placeCanvasGenerationPanel(
-      anchor.getBoundingClientRect(),
-      bounds,
-      panelRef.current?.offsetHeight ?? 0,
-    );
-    // portal 进容器时按容器坐标存，避免 render 阶段再读一次布局。
-    // 原点用容器自身的矩形，不能用上面那个被控件收缩过的 bounds。
-    const origin = surface?.getBoundingClientRect();
-    const next = origin
-      ? {
-        ...viewportPlacement,
-        left: viewportPlacement.left - origin.left,
-        top: viewportPlacement.top - origin.top,
-      }
-      : viewportPlacement;
-    setPlacement(current => samePlacement(current, next) ? current : next);
-  }, [anchor, surface]);
-
   useLayoutEffect(() => {
-    place();
+    const panel = panelRef.current;
+    if (!anchor || !panel || hiddenWhileDragging) return;
+    // 外层节点不会随进场动效缩放。测量、视口原点和面板尺寸只在布局变化时重读。
+    const shell = anchor.closest<HTMLElement>('.react-flow__node') ?? anchor;
+    const measure = () => {
+      const measured = surface && canvasChromeInsetBounds(surface);
+      const bounds = measured?.width && measured.height ? measured : {
+        left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight,
+        width: window.innerWidth, height: window.innerHeight,
+      };
+      const rect = shell.getBoundingClientRect();
+      const state = flowStore.getState();
+      const [ox, oy, oz] = state.transform;
+      const frame = state.domNode?.getBoundingClientRect();
+      const origin = surface?.getBoundingClientRect();
+      const fx = frame?.left ?? 0, fy = frame?.top ?? 0;
+      const height = panel.offsetHeight;
+      const base = placeCanvasGenerationPanel(rect, bounds, height);
+      const next = { ...base, left: base.left - (origin?.left ?? 0), top: base.top - (origin?.top ?? 0) };
+      panel.style.removeProperty('transform');
+      setPlacement(current => samePlacement(current, next) ? current : next);
+      return ([x, y, zoom]: readonly number[]) => {
+        const scale = zoom / oz;
+        const left = fx + x + (rect.left - fx - ox) * scale;
+        const top = fy + y + (rect.top - fy - oy) * scale;
+        const width = rect.width * scale, heightScaled = rect.height * scale;
+        const moved = placeCanvasGenerationPanel({ left, top, width, height: heightScaled,
+          right: left + width, bottom: top + heightScaled }, bounds, height);
+        panel.style.transform = `translate3d(${moved.left - base.left}px, ${moved.top - base.top}px, 0)`;
+      };
+    };
+    let follow = measure();
+    const place = () => { follow = measure(); };
+    const unsubscribe = flowStore.subscribe((state, previous) => {
+      if (state.transform !== previous.transform) follow(state.transform);
+    });
+    const observer = new ResizeObserver(place);
+    observer.observe(panel);
+    if (surface) observer.observe(surface);
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
-  }, [geometry, place, transform]);
+    return () => {
+      unsubscribe();
+      observer.disconnect();
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor, surface, flowStore, geometry, hiddenWhileDragging]);
 
   return createPortal(
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
-      // 进场动画写内联 transform 并在结束时清掉，与这里的拖动收起不重叠。
+      // 平移使用 transform，拖动收起使用独立的 translate。
       className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
@@ -1324,7 +1345,7 @@ function CanvasNodeFloatingPanel({
         visibility: placement ? undefined : 'hidden',
       }}
     >
-      {children}
+      <div ref={innerRef}>{children}</div>
     </div>,
     surface ?? document.body,
   );
@@ -1569,7 +1590,6 @@ function MediaCandidateCard({
   const horizontalOffset = index + 1;
   const version = context.resolveVersion(candidate.version_id);
   const terminalFailure = candidate.status === 'failed' || candidate.status === 'canceled';
-  const imageBitmapWidth = useCanvasImageBitmapWidth(node.size?.width ?? 320);
   return (
     <section
       role="group"
@@ -1589,11 +1609,8 @@ function MediaCandidateCard({
     >
       {version?.kind === node.type
         ? (
-          <MediaPreview
-            kind={version.kind}
-            src={version.kind === 'image'
-              ? canvasMediaUrlAtWidth(context.projectId, version.version_id, imageBitmapWidth)
-              : canvasMediaUrl(context.projectId, version.version_id)}
+          <CanvasNodeMediaPreview
+            projectId={context.projectId} version={version} cardWidth={node.size?.width ?? 320}
             title={`${node.title} · 候选 ${number}`}
             fit={node.data.display.fit}
             freeResize={node.data.display.free_resize}
@@ -4076,6 +4093,17 @@ function CanvasCrossfadeImage({ src, alt, fitClassName, className, onReady }: {
   );
 }
 
+/** 缩略图跨档时只更新媒体，兄弟节点的生成表单无需重渲染。 */
+function CanvasNodeMediaPreview({ projectId, version, cardWidth, ...props }:
+  Omit<Parameters<typeof MediaPreview>[0], 'kind' | 'src'> & {
+    projectId: string; version: CanvasMediaVersion; cardWidth: number;
+  }) {
+  const bitmapWidth = useCanvasImageBitmapWidth(cardWidth);
+  const src = version.kind === 'image' ? canvasMediaUrlAtWidth(projectId, version.version_id, bitmapWidth)
+    : canvasMediaUrl(projectId, version.version_id);
+  return <MediaPreview {...props} kind={version.kind} src={src} />;
+}
+
 function MediaPreview({
   kind,
   src,
@@ -4349,9 +4377,10 @@ function hideHoverHandles(event: ReactPointerEvent<HTMLDivElement>) {
   delete event.currentTarget.dataset.hoverSide;
 }
 
-function CanvasCompareNodeBody({ node, context, bitmapWidth }: {
-  node: CanvasCompareNode; context: CanvasNodeContextValue; bitmapWidth: number | null;
+function CanvasCompareNodeBody({ node, context }: {
+  node: CanvasCompareNode; context: CanvasNodeContextValue;
 }) {
+  const bitmapWidth = useCanvasImageBitmapWidth(node.size?.width ?? 320);
   const inputs = context.compareInputsByNodeId?.get(node.id);
   const beforeVersionId = inputs?.before?.versionId ?? null;
   const afterVersionId = inputs?.after?.versionId ?? null;

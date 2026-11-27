@@ -1137,10 +1137,44 @@ export function canvasModesRejectingSources(
   return rejected;
 }
 
-export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
-  return sourceHandle === 'target'
-    ? { allowEmptyNodes: false, allowUpload: true }
-    : { allowEmptyNodes: true, allowUpload: false };
+const creationTypes = ['text', 'image', 'video', 'audio'] as const;
+
+export function canvasUpstreamNodeTypesForTarget(document: CanvasDocument, targetId: string): ReadonlySet<string> {
+  const target = document.nodes.find(node => node.id === targetId);
+  if (target?.type === 'compare') return new Set(['image']);
+  if (target?.type === 'plugin') {
+    const contribution = enabledNodeContribution(target.data.plugin_id, target.data.node_type)?.node;
+    const count = document.connections.filter(edge => edge.role === 'input' && edge.target_node_id === targetId).length;
+    if (!contribution || (contribution.max_inputs !== null && count >= contribution.max_inputs)) return new Set();
+    return new Set(contribution.input_modalities);
+  }
+  if (!target || !canvasNodeProvidesContent(target)) return new Set();
+  return new Set(creationTypes.filter(type => canvasModeAcceptsNodeType(target.data.generation_draft?.mode ?? target.type, type)));
+}
+
+export function canvasConnectionCreationCapabilities(_side: 'source' | 'target') {
+  return { allowEmptyNodes: true, allowUpload: false };
+}
+
+export function isCanvasHandleTap(start: CanvasPoint, end: CanvasPoint) {
+  return Math.hypot(end.x - start.x, end.y - start.y) < 6;
+}
+
+/** 用户指定的落点在视口边界外也有效。仅当节点真有重叠时，沿同一列找最近的空位。 */
+export function placeCanvasConnectedNode(anchor: CanvasPoint, size: CanvasSize, upstream: boolean,
+  document: CanvasDocument, handleY = 0.5): CanvasPoint {
+  const x = anchor.x - (upstream ? size.width : 0);
+  const y = anchor.y - size.height * handleY;
+  const column = document.nodes.flatMap(node => {
+    const occupied = canvasNodeRenderedSize(node, document.content_versions);
+    return x < node.position.x + occupied.width && x + size.width > node.position.x
+      ? [{ top: node.position.y, bottom: node.position.y + occupied.height }] : [];
+  });
+  const free = (top: number) => column.every(rect => top >= rect.bottom || top + size.height <= rect.top);
+  if (free(y)) return { x, y };
+  const candidates = column.flatMap(rect => [rect.bottom + CANVAS_NODE_PLACEMENT_GAP,
+    rect.top - CANVAS_NODE_PLACEMENT_GAP - size.height]).sort((a, b) => Math.abs(a - y) - Math.abs(b - y));
+  return { x, y: candidates.find(free)! };
 }
 
 export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {

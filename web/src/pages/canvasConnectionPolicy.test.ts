@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import framesLock from '../../../plugins/frames/package/manifest.lock.json';
+import { getPluginsSnapshot, setPluginsSnapshot } from '@/plugin-host/registry';
+import type { PluginPackageLock } from '@/schema/plugins';
 
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 
 import {
   canvasConnectionCreationCapabilities,
+  canvasUpstreamNodeTypesForTarget,
+  placeCanvasConnectedNode,
+  isCanvasHandleTap,
   canCreateCanvasInputConnection,
   canvasNodeAcceptsInput,
   canvasNodeHasCurrentContent,
@@ -144,10 +150,51 @@ describe('canvas connection policy', () => {
     expect(closestCanvasConnectionEndpoint({ x: 60, y: 160 }, nodes, 'left')).toBeNull();
   });
 
+  it('filters upstream creation by the actual target modality', () => {
+    const doc = document([node('t', 'text'), node('i', 'image'), node('v', 'video'), node('a', 'audio'),
+      node('p', 'plugin'), { ...node('c', 'image'), type: 'compare', data: {} }]);
+    expect([...canvasUpstreamNodeTypesForTarget(doc, 'i')]).toEqual(['text', 'image']);
+    expect([...canvasUpstreamNodeTypesForTarget(doc, 'a')]).toEqual(['text']);
+    for (const id of ['v', 't']) expect([...canvasUpstreamNodeTypesForTarget(doc, id)]).toEqual(['text', 'image', 'video', 'audio']);
+    expect([...canvasUpstreamNodeTypesForTarget(doc, 'c')]).toEqual(['image']);
+    expect(canvasUpstreamNodeTypesForTarget(doc, 'p').size).toBe(0);
+  });
+
+  it('honors an enabled plugin’s input modalities and capacity', () => {
+    const snapshot = getPluginsSnapshot();
+    const manifest = framesLock as unknown as PluginPackageLock;
+    const contribution = manifest.contributes.nodes[0];
+    const target = node('target', 'plugin');
+    if (target.type !== 'plugin') throw new Error('Expected a plugin fixture');
+    target.data.plugin_id = manifest.id;
+    target.data.node_type = contribution.type;
+    const doc = document([target, node('source', 'video')]);
+    try {
+      setPluginsSnapshot([{ id: manifest.id, enabled: true, availability: 'ok', manifest, reason: null }]);
+      expect([...canvasUpstreamNodeTypesForTarget(doc, target.id)]).toEqual(['video']);
+      doc.connections.push({ id: 'edge', role: 'input', source_node_id: 'source', target_node_id: target.id });
+      expect(canvasUpstreamNodeTypesForTarget(doc, target.id).size).toBe(0);
+    } finally {
+      setPluginsSnapshot(snapshot);
+    }
+  });
+
+  it('uses screen distance for handle taps and preserves unobstructed flow anchors', () => {
+    const start = { x: 0, y: 0 };
+    expect(isCanvasHandleTap(start, { x: 4, y: 4 })).toBe(true);
+    expect(isCanvasHandleTap(start, { x: 0, y: 6 })).toBe(false);
+    const size = { width: 100, height: 80 };
+    expect(placeCanvasConnectedNode(start, size, false, document([]))).toEqual({ x: 0, y: -40 });
+    expect(placeCanvasConnectedNode(start, size, true, document([]))).toEqual({ x: -100, y: -40 });
+    const blocked = placeCanvasConnectedNode(start, size, false, document([node('taken', 'image')]));
+    expect(blocked.x).toBe(0);
+    expect(blocked.y + size.height).toBeLessThanOrEqual(0);
+  });
+
   it('offers only immediately valid sources when creating backward from a target handle', () => {
     expect(canvasConnectionCreationCapabilities('target')).toEqual({
-      allowEmptyNodes: false,
-      allowUpload: true,
+      allowEmptyNodes: true,
+      allowUpload: false,
     });
     expect(canvasConnectionCreationCapabilities('source')).toEqual({
       allowEmptyNodes: true,

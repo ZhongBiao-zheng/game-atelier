@@ -21,6 +21,7 @@ export const MOTION_SPRING = {
 
 /** 错峰出场的间隔（秒）。 */
 export const MOTION_STAGGER = 0.05;
+export const MOTION_NODE_PANEL_DELAY = 0.08;
 
 /** 当前环境能不能播 vanilla animate()。jsdom 没有 matchMedia：一律不播，测试里元素直接停在终态、不卡在动画起点。 */
 export function motionAvailable(): boolean {
