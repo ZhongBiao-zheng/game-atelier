@@ -41,7 +41,9 @@ export function CanvasSplitGridPopover({ width, height, onSubmit, onCustom, onRe
   }
   function submit(cols: number, rows: number) {
     highlight(cols, rows);
-    if (!message(cols, rows)) onSubmit({ kind: 'split', horizontal_lines: equalSplitLines(rows), vertical_lines: equalSplitLines(cols) });
+    if (message(cols, rows)) return;
+    returnFocus.current = false;
+    onSubmit({ kind: 'split', horizontal_lines: equalSplitLines(rows), vertical_lines: equalSplitLines(cols) });
   }
   return <PopoverContent side="top" align="center" sideOffset={8} aria-label="网格切分"
     className="nodrag w-56 rounded-xl border border-border bg-card p-3 shell-glow"

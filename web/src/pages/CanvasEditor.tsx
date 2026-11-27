@@ -1,4 +1,5 @@
 import { copySharedNodes, reproduceFrozen } from '@/api/collabTransfer';
+import { Lightbox } from '@/components/Lightbox';
 import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import { pluginInputsFromDocument } from '@/plugin-host/inputs';
@@ -34,7 +35,7 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, RedoIcon, SelectIcon, SettingsIcon, ShowIcon, StopIcon, TextFileIcon, TextIcon, UndoIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { BrushIcon, AddImageIcon, AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, RedoIcon, SelectIcon, SettingsIcon, ShowIcon, StopIcon, TextFileIcon, TextIcon, UndoIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { currentHostNodeType, isHostPluginId, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
@@ -318,6 +319,7 @@ interface MaterialPickState {
 }
 
 interface PreviewState {
+  sourceRect: DOMRect | null;
   nodeId: string;
   title: string;
   version: CanvasContentVersion;
@@ -4477,7 +4479,10 @@ function CanvasEditorInner({
   }, [mentionGraphSignature]);
   const previewContent = useCallback((versionId: string, title: string, nodeId: string) => {
     const version = latestDocument.current?.content_versions[versionId];
-    if (version) setPreview({ nodeId, title, version });
+    if (version) {
+      const shell = editorRegionRef.current?.querySelector(`.react-flow__node[data-id="${CSS.escape(nodeId)}"]`);
+      setPreview({ nodeId, title, version, sourceRect: shell?.getBoundingClientRect() ?? null });
+    }
   }, []);
 
   const previewLayerStack = useCallback((nodeId: string) => setLayerPreviewId(nodeId), []);
@@ -5133,12 +5138,8 @@ function CanvasEditorInner({
   const executeMediaOperation = useCallback(async (
     target: { nodeId: string; versionId: string },
     operation: CanvasMediaOperation,
+    reportError: (text: string) => void,
   ) => {
-    const reportError = (text: string) => {
-      if (operation.kind === 'split') notify.error(text);
-      if (operation.kind === 'remove_background') setError(text);
-      else setMediaOperationError(text);
-    };
     if (mediaOperationInFlight.current) return;
     if (documentCommandInFlight.current) {
       reportError('另一个媒体操作正在处理，请稍后重试。');
@@ -5269,14 +5270,14 @@ function CanvasEditorInner({
 
   const splitImage = useCallback((node: CanvasContentNode, operation: Extract<CanvasMediaOperation, { kind: 'split' }>) => {
     const versionId = node.data.current_version_id;
-    if (versionId) void executeMediaOperation({ nodeId: node.id, versionId }, operation);
+    if (versionId) void executeMediaOperation({ nodeId: node.id, versionId }, operation, notify.error);
   }, [executeMediaOperation]);
 
   const submitMediaOperation = useCallback((operation: CanvasMediaOperation) => {
     if (!mediaOperation) return Promise.resolve();
     return executeMediaOperation(
       { nodeId: mediaOperation.nodeId, versionId: mediaOperation.version.version_id },
-      operation,
+      operation, setMediaOperationError,
     );
   }, [executeMediaOperation, mediaOperation]);
 
@@ -5306,7 +5307,7 @@ function CanvasEditorInner({
         return;
       }
       announceToolNotice(`${node.title} 抠图中…`);
-      await executeMediaOperation(target, { kind: 'remove_background' });
+      await executeMediaOperation(target, { kind: 'remove_background' }, setError);
     })();
   }, [announceToolNotice, executeMediaOperation]);
 
@@ -5319,7 +5320,7 @@ function CanvasEditorInner({
       announceToolNotice(`模型已就绪，${mattingPrompt.title} 抠图中…`);
       await executeMediaOperation(
         { nodeId: mattingPrompt.nodeId, versionId: mattingPrompt.versionId },
-        { kind: 'remove_background' },
+        { kind: 'remove_background' }, setError,
       );
     } catch (downloadError) {
       setError((downloadError as Error).message);
@@ -6036,6 +6037,17 @@ function CanvasEditorInner({
   const previewPrompt = previewNode
     ? copyablePromptForNode(previewNode, jobsByResultNodeId)
     : null;
+  const previewImages = preview?.version.kind === 'image' ? document.nodes.filter(node =>
+    node.type === 'image' && !node.hidden && node.data.current_version_id && document.content_versions[node.data.current_version_id]?.kind === 'image') : [];
+  const previewIndex = previewImages.findIndex(node => node.id === preview?.nodeId);
+  const stepPreview = (delta: number) => {
+    const next = previewIndex >= 0 ? previewImages[previewIndex + delta] : null;
+    if (next?.type !== 'image') return;
+    const versionId = next.data.current_version_id;
+    if (versionId) return () => previewContent(versionId, next.title, next.id);
+  };
+  const editablePreview = previewNode?.type === 'image' && previewNode.data.current_version_id === preview?.version.version_id
+    ? previewNode : null;
   // 从图片的输出端拖出来的新建菜单才给「对比」：新节点会把这张图接到 Before。
   const createMenuFromImage = Boolean(createMenu?.sourceId && createMenu.sourceHandle !== 'target'
     && (createMenu.sourceIds ?? [createMenu.sourceId]).every(id => document?.nodes.find(node => node.id === id)?.type === 'image'));
@@ -6976,38 +6988,32 @@ function CanvasEditorInner({
             </DialogContent>
           )}
         </Dialog>
-        <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
-          {preview && (
-            <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{preview.title}</DialogTitle>
-                <DialogDescription>原始内容、来源与生成信息</DialogDescription>
-              </DialogHeader>
-              <CanvasActionFeedback error={error} notice={toolNotice} action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)} />
-              <CanvasPreview
-                projectId={projectId}
-                preview={preview}
-                onReproduce={preview.version.frozen_generation ? () => {
-                  const snapshot = preview.version.frozen_generation!;
-                  const candidates = keys.filter(key => key.models.some(item => item.id === snapshot.model_id));
-                  const key = candidates.find(item => item.provider === snapshot.provider) ?? candidates[0];
-                  void applyServerInsertion(revision => reproduceFrozen(projectId, preview.version.version_id,
-                    revision, defaultPosition(), key?.alias ?? null, key ? snapshot.model_id : null),
-                  { placement: 'group' }).then(inserted => {
-                    if (!inserted) return;
-                    setPreview(null);
-                    if (!key) announceToolNotice(`原模型为 ${snapshot.model_name || snapshot.model_id}（${snapshot.provider_label || snapshot.provider}），请选择本机可用模型`);
-                  });
-                } : undefined}
-                job={previewJob}
-                nodes={document.nodes}
-                onCopyPrompt={previewNode && previewPrompt && isContentNode(previewNode)
-                  ? () => void copyPrompt(previewNode)
-                  : undefined}
-              />
-            </DialogContent>
-          )}
-        </Dialog>
+        {preview && <CanvasPreview
+          projectId={projectId}
+          preview={preview}
+          onClose={() => setPreview(null)}
+          onPrevious={stepPreview(-1)} onNext={stepPreview(1)}
+          onEdit={editablePreview ? () => { setPreview(null); openMaskEdit(editablePreview); } : undefined}
+          onReference={editablePreview ? () => { setPreview(null); createImageFromSource(editablePreview.id); } : undefined}
+          feedback={<CanvasActionFeedback error={error} notice={toolNotice} action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)} />}
+          onReproduce={preview.version.frozen_generation ? () => {
+            const snapshot = preview.version.frozen_generation!;
+            const candidates = keys.filter(key => key.models.some(item => item.id === snapshot.model_id));
+            const key = candidates.find(item => item.provider === snapshot.provider) ?? candidates[0];
+            void applyServerInsertion(revision => reproduceFrozen(projectId, preview.version.version_id,
+              revision, defaultPosition(), key?.alias ?? null, key ? snapshot.model_id : null),
+            { placement: 'group' }).then(inserted => {
+              if (!inserted) return;
+              setPreview(null);
+              if (!key) announceToolNotice(`原模型为 ${snapshot.model_name || snapshot.model_id}（${snapshot.provider_label || snapshot.provider}），请选择本机可用模型`);
+            });
+          } : undefined}
+          job={previewJob}
+          nodes={document.nodes}
+          onCopyPrompt={previewNode && previewPrompt && isContentNode(previewNode)
+            ? () => void copyPrompt(previewNode)
+            : undefined}
+        />}
       </section>
     </CanvasNodeContext.Provider>
   );
@@ -7100,7 +7106,7 @@ function CanvasShortcutList() {
 }
 
 function CanvasPreview({
-  onReproduce,
+  onClose, onPrevious, onNext, onEdit, onReference, feedback, onReproduce,
   projectId,
   preview,
   job,
@@ -7109,6 +7115,12 @@ function CanvasPreview({
 }: {
   projectId: string;
   preview: PreviewState;
+  feedback: ReactNode;
+  onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  onEdit?: () => void;
+  onReference?: () => void;
   onReproduce?: () => void;
   job?: Job;
   nodes: CanvasNode[];
@@ -7124,26 +7136,62 @@ function CanvasPreview({
     source_width?: number; source_height?: number;
   } | undefined;
   const src = version.kind === 'text' ? null : localCanvasTransport.mediaUrl(projectId, version.version_id);
-  return (
-    <div className="space-y-4">
+  const metadata = <>
+    <dl className="grid gap-2 rounded-lg border border-border bg-background p-4 text-sm sm:grid-cols-2">
+      <MetadataItem label="类型" value={contentKindLabel(version.kind)} />
+      <MetadataItem label="来源" value={contentOriginLabel(version, job)} />
+      {version.kind !== 'text' && version.width && version.height && (
+        <MetadataItem label="尺寸" value={`${version.width} × ${version.height}`} numeric />
+      )}
+      {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatCanvasBytes(version.bytes)} numeric />}
+      {version.kind !== 'text' && <MetadataItem label="格式" value={version.mime_type} />}
+      <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
+      <MetadataItem label="版本" value={version.version_id} technical />
+    </dl>
+    {version.frozen_generation && <FrozenGenerationDetails generation={version.frozen_generation}
+      mediaUrl={id => localCanvasTransport.mediaUrl(projectId, id)} />}
+    {onReproduce && <Button size="sm" variant="outline" onClick={onReproduce}>复刻生成</Button>}
+    {!version.frozen_generation && job?.canvas_run && (
+      <CanvasGenerationMetadata snapshot={job.canvas_run.snapshot} job={job} nodes={nodes} />
+    )}
+  </>;
+  if (version.kind === 'image' && src) {
+    const actions = [
+      { label: '局部修改', Icon: BrushIcon, run: onEdit },
+      { label: '设为参考', Icon: AddImageIcon, run: onReference },
+      { label: '复制提示词', Icon: CopyIcon, run: onCopyPrompt },
+    ];
+    return <Lightbox src={src} sourceRect={preview.sourceRect} meta={{ title: preview.title }}
+      onClose={onClose} onPrevious={onPrevious} onNext={onNext}
+      imageOverlay={<>
+        {showSource && <span className="pointer-events-none absolute inset-0 bg-background" />}
+        {showMask && maskId && <div aria-label="可编辑区域" className="pointer-events-none absolute inset-0 bg-primary/50" style={{ maskImage: `linear-gradient(white, white), url("${localCanvasTransport.mediaUrl(projectId, maskId)}")`, maskMode: 'luminance', maskComposite: 'subtract', maskSize: '100% 100%' }} />}
+        {showSource && edit?.source_version_id && <img src={localCanvasTransport.mediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
+          left: `${(edit.x || 0) / edit.width * 100}%`, top: `${(edit.y || 0) / edit.height * 100}%`,
+          width: `${(edit.source_width || edit.width) / edit.width * 100}%`, height: `${(edit.source_height || edit.height) / edit.height * 100}%`,
+        } : { inset: 0, width: '100%', height: '100%' }} />}
+      </>}
+      details={<>{feedback}
+        {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
+        {edit && maskId && (edit.mode === 'inpaint' || edit.mode === 'outpaint') && <Toggle size="sm" pressed={showMask} onPressedChange={setShowMask}>查看选区</Toggle>}
+        {metadata}</>}
+      bottomActions={<>
+        {actions.map(({ label, Icon, run }) => run && <Hint key={label} label={label}>
+          <Button size="icon" variant="ghost" aria-label={label} className="size-8 rounded-full" onClick={run}><Icon size="sm" /></Button>
+        </Hint>)}
+        <Hint label="下载"><Button size="icon" variant="ghost" asChild className="size-8 rounded-full">
+          <a href={canvasDownloadUrl(projectId, version.version_id)} aria-label="下载原文件"><DownloadIcon size="sm" /></a>
+        </Button></Hint>
+      </>} />;
+  }
+  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+    <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
+      <DialogHeader><DialogTitle>{preview.title}</DialogTitle><DialogDescription>原始内容、来源与生成信息</DialogDescription></DialogHeader>
+      {feedback}
       {version.kind === 'text' && (
         <p className="max-h-[58dvh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-4 text-sm leading-relaxed text-foreground">
           {readablePromptVariables(version.text) || '暂无文本内容'}
         </p>
-      )}
-      {version.kind === 'image' && src && (
-        <div className="flex flex-col items-center gap-2">
-          <div className="relative inline-block max-w-full">
-            <img src={src} alt={preview.title} decoding="async" className={`block max-h-[58dvh] max-w-full rounded-lg object-contain ${showSource ? 'invisible' : ''}`} />
-            {showMask && maskId && <div aria-label="可编辑区域" className="pointer-events-none absolute inset-0 bg-primary/50" style={{ maskImage: `linear-gradient(white, white), url("${localCanvasTransport.mediaUrl(projectId, maskId)}")`, maskMode: 'luminance', maskComposite: 'subtract', maskSize: '100% 100%' }} />}
-            {showSource && edit?.source_version_id && <img src={localCanvasTransport.mediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
-              left: `${(edit.x || 0) / edit.width * 100}%`, top: `${(edit.y || 0) / edit.height * 100}%`,
-              width: `${(edit.source_width || edit.width) / edit.width * 100}%`, height: `${(edit.source_height || edit.height) / edit.height * 100}%`,
-            } : { inset: 0, width: '100%', height: '100%' }} />}
-          </div>
-          {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
-          {edit && maskId && (edit.mode === 'inpaint' || edit.mode === 'outpaint') && <Toggle size="sm" pressed={showMask} onPressedChange={setShowMask}>查看选区</Toggle>}
-        </div>
       )}
       {version.kind === 'video' && src && (
         <video src={src} controls playsInline preload="metadata" className="max-h-[58dvh] w-full rounded-lg object-contain" />
@@ -7151,23 +7199,7 @@ function CanvasPreview({
       {version.kind === 'audio' && src && (
         <audio src={src} controls preload="metadata" className="w-full" />
       )}
-      <dl className="grid gap-2 rounded-lg border border-border bg-background p-4 text-sm sm:grid-cols-2">
-        <MetadataItem label="类型" value={contentKindLabel(version.kind)} />
-        <MetadataItem label="来源" value={contentOriginLabel(version, job)} />
-        {version.kind !== 'text' && version.width && version.height && (
-          <MetadataItem label="尺寸" value={`${version.width} × ${version.height}`} numeric />
-        )}
-        {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatCanvasBytes(version.bytes)} numeric />}
-        {version.kind !== 'text' && <MetadataItem label="格式" value={version.mime_type} />}
-        <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
-        <MetadataItem label="版本" value={version.version_id} technical />
-      </dl>
-      {version.frozen_generation && <FrozenGenerationDetails generation={version.frozen_generation}
-        mediaUrl={id => localCanvasTransport.mediaUrl(projectId, id)} />}
-      {onReproduce && <Button size="sm" variant="outline" onClick={onReproduce}>复刻生成</Button>}
-      {!version.frozen_generation && job?.canvas_run && (
-        <CanvasGenerationMetadata snapshot={job.canvas_run.snapshot} job={job} nodes={nodes} />
-      )}
+      {metadata}
       <DialogFooter>
         {onCopyPrompt && (
           <Button variant="outline" onClick={onCopyPrompt}>
@@ -7182,8 +7214,8 @@ function CanvasPreview({
           </Button>
         )}
       </DialogFooter>
-    </div>
-  );
+    </DialogContent>
+  </Dialog>;
 }
 
 function CanvasActionFeedback({ error, notice, action = null, noticeAction = null, onDismissError, className }: {

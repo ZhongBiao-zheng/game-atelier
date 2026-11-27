@@ -11,7 +11,7 @@ export type FadePresencePhase = 'entering' | 'shown' | 'leaving';
 export function useFadePresence(visible: boolean) {
   const animated = motionAvailable();
   const [mounted, setMounted] = useState(visible);
-  const [phase, setPhase] = useState<FadePresencePhase>('shown');
+  const [phase, setPhase] = useState<FadePresencePhase>(visible && animated ? 'entering' : 'shown');
   if (visible && !mounted) {
     setMounted(true);
     setPhase(animated ? 'entering' : 'shown');
@@ -34,11 +34,4 @@ export function useFadePresence(visible: boolean) {
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
   }, [phase]);
   return { mounted, phase };
-}
-
-/** 与 useFadePresence 配套的透明度类：进出都是 150ms subtle，退场期间不接指针。 */
-export function fadePresenceClass(phase: FadePresencePhase) {
-  if (phase === 'entering') return 'pointer-events-none opacity-0';
-  if (phase === 'leaving') return 'pointer-events-none opacity-0 transition-opacity duration-150';
-  return 'transition-opacity duration-150';
 }

@@ -11,7 +11,9 @@ import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { MetaTag } from '@/components/MetaTag';
 import { modelBrand } from '@/lib/modelCatalog';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
-import { animate, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { MOTION_DURATION, motionAvailable } from '@/lib/motion';
+import { LIGHTBOX_ZOOM_STEP, useLightboxZoom } from './useLightboxZoom';
+import { useLightboxTransition } from './useLightboxTransition';
 
 export interface LightboxMediaMeta {
   frozenGeneration?: { generation: CanvasFrozenGeneration; mediaUrl: (versionId: string) => string };
@@ -36,14 +38,14 @@ const ARROW_CLASS = 'top-1/2 -translate-y-1/2 [&_svg]:size-5 hover:border-transp
 // 右上角动作组里的按钮：与关闭按钮同一外观，但排在 flex 行里，不各自绝对定位。
 // 走 ghost 配方（bare 控件只减不增），悬停描边与文字色压回大图层的样式。
 const ACTION_CLASS = 'size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 hover:border-transparent hover:text-white [&_svg]:size-6';
-const IMAGE_SCALE_FROM = 0.96;
+
 
 type Layer = { src: string; phase: 'incoming' | 'shown' | 'leaving' };
 
 /** 焦点在可输入元素里时，⌫ 是删字，不是删图。 */
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement
-    && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+    && (target.isContentEditable || target.closest('[contenteditable=true], [contenteditable=""]') !== null || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
 }
 
 
@@ -68,7 +70,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
  * 首页/工坊那两处原本就在顶层，portal 对它们无副作用。
  */
 export function Lightbox({
-  src,
+  src, sourceRect, bottomActions, imageOverlay,
   onClose,
   onPrevious,
   onNext,
@@ -76,6 +78,9 @@ export function Lightbox({
   onDownload, onUseAsReference, onCopyPrompt, onDelete,
 }: {
   src: string;
+  sourceRect?: DOMRect | null;
+  bottomActions?: ReactNode;
+  imageOverlay?: ReactNode;
   onClose: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
@@ -95,7 +100,16 @@ export function Lightbox({
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
-  const stageRef = useRef<HTMLDivElement>(null);
+  const { viewport, plane, image, percent, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
+  const { transition, cancel: cancelTransition } = useLightboxTransition(image, sourceRect, src);
+  const closeTimer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  const dialog = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const previous = document.activeElement;
+    dialog.current?.focus({ preventScroll: true });
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true }); };
+  }, []);
   const opened = useRef(false);
   const closingRef = useRef(false);
   const onCloseRef = useRef(onClose);
@@ -116,13 +130,9 @@ export function Lightbox({
       return;
     }
     setClosing(true);
-    const stage = stageRef.current;
-    if (stage && !prefersReducedMotion()) {
-      animate(stage, { scale: IMAGE_SCALE_FROM }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle });
-    }
-    // 遮罩的 scrimOut 也是 150ms；等它播完再卸载，退场不会被截掉。
-    window.setTimeout(() => onCloseRef.current(), MOTION_DURATION.fast * 1000);
-  }, []);
+    transition(true);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), MOTION_DURATION.fast * 1000);
+  }, [transition]);
 
   const deleteCurrent = useCallback(() => {
     const remove = onDeleteRef.current;
@@ -136,7 +146,27 @@ export function Lightbox({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (closingRef.current) return;
-      if (e.key === 'Escape') requestClose();
+      if (e.key === 'Tab' && dialog.current) {
+        const controls = dialog.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, textarea, select, [contenteditable=true], [tabindex="0"]');
+        const first = controls[0], last = controls[controls.length - 1];
+        if (e.shiftKey && (document.activeElement === dialog.current || document.activeElement === first)) {
+          e.preventDefault(); last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first?.focus();
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation(); requestClose(); return;
+      }
+      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (['0', '1', '+', '=', '-'].includes(e.key)) {
+        e.preventDefault(); e.stopPropagation();
+        cancelTransition();
+        if (e.key === '0' || e.key === '1') zoomTo(e.key === '0' ? null : 1);
+        else zoomBy(e.key === '-' ? 1 / LIGHTBOX_ZOOM_STEP : LIGHTBOX_ZOOM_STEP);
+        return;
+      }
       if (e.key === 'ArrowLeft' && onPreviousRef.current) {
         e.preventDefault();
         onPreviousRef.current();
@@ -150,9 +180,9 @@ export function Lightbox({
         deleteCurrent();
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [requestClose, deleteCurrent]);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [requestClose, deleteCurrent, zoomTo, zoomBy, cancelTransition]);
 
   // 换图：还没显示出来的新图直接作废，只叠最新这张；已显示的旧图留着垫底，等新图就绪。
   useLayoutEffect(() => {
@@ -181,13 +211,12 @@ export function Lightbox({
       });
     });
     // 第一张图就绪时放大进场；之后翻页只做交叉淡化。
-    const stage = stageRef.current;
-    if (opened.current || !stage) return;
+    if (readySrc !== src) return;
+    paint();
+    if (opened.current || closingRef.current) return;
     opened.current = true;
-    if (motionAvailable() && !prefersReducedMotion() && !closingRef.current) {
-      animate(stage, { scale: [IMAGE_SCALE_FROM, 1] }, { duration: MOTION_DURATION.base, ease: MOTION_EASE.out });
-    }
-  }, []);
+    transition(false);
+  }, [paint, src, transition]);
 
   // 每个离场层各按自己的截止时间移走：旧图与新图同步淡出淡入（duration-200），从它开始离场算起播完再卸载。
   // 连翻三张时第二张不会跟着第一张的计时被提前拿掉；回到某张正在离场的图，取消它的清理。
@@ -241,6 +270,30 @@ export function Lightbox({
   const showFooterCopy = Boolean(promptCopyText && !meta?.prompt);
   const hasFooterActions = Boolean(onUseAsReference || onDownload || downloadName || showFooterCopy || onDelete);
 
+  const mediaStage = <>
+    <div role="group" aria-label="图片缩放" className="relative z-10 mx-auto my-1 flex shrink-0 items-center gap-1 rounded-full border border-border bg-card p-1"
+      onClick={event => event.stopPropagation()}>
+      {([['适配', null], ['100%', 1], ['200%', 2]] as const).map(([label, scale]) =>
+        <Button key={label} size="sm" variant="ghost" className="h-7 rounded-full px-2 tabular-nums"
+          onClick={() => { cancelTransition(); zoomTo(scale); }}>{label}</Button>)}
+      <output aria-label="当前缩放" className="min-w-12 border-l border-border px-2 text-center text-xs tabular-nums text-muted-foreground">{percent}%</output>
+    </div>
+    <div ref={viewport} data-lightbox-viewport="" {...handlers}
+      onPointerDownCapture={cancelTransition} onWheelCapture={cancelTransition}
+      className="relative min-h-0 w-full flex-1 touch-none overflow-hidden [container-type:size] data-[pannable=true]:cursor-grab data-[dragging=true]:cursor-grabbing">
+      <div ref={plane} className="absolute inset-0 grid grid-cols-1 grid-rows-1 place-items-center">
+        {layers.map(layer => <div key={layer.src} className="relative col-start-1 row-start-1" onClick={event => event.stopPropagation()}>
+          <RevealImage ref={layer.src === src ? image : undefined} src={layer.src} draggable={false}
+            alt={layer.src === src ? '大图' : ''} aria-hidden={layer.src === src ? undefined : true}
+            onReady={() => handleReady(layer.src)}
+            className={`media-checker block max-h-[100cqh] max-w-[100cqw] select-none rounded-lg object-contain ${layer.phase === 'leaving' ? 'pointer-events-none opacity-0' : ''}`} />
+          {layer.src === src && imageOverlay}
+        </div>)}
+      </div>
+    </div>
+    {bottomActions && <div role="group" aria-label="图片快捷操作" className="mx-auto mt-2 flex shrink-0 items-center gap-1 rounded-full border border-border bg-card p-1"
+      onClick={event => event.stopPropagation()}>{bottomActions}</div>}
+  </>;
   if (hasPanel) {
     return createPortal(
       <div
@@ -249,7 +302,7 @@ export function Lightbox({
         onClick={requestClose}
       >
         <div
-          role="dialog"
+          ref={dialog} tabIndex={-1} role="dialog"
           aria-modal="true"
           aria-label={meta?.title || '作品详情'}
           data-testid="media-detail-dialog"
@@ -257,19 +310,8 @@ export function Lightbox({
           onClick={(e) => e.stopPropagation()}
         >
           {/* 左侧（窄屏上方）：纯媒体舞台，绝无文字或参数遮挡 */}
-          <div className="relative flex h-[58%] min-h-0 flex-1 items-center justify-center overflow-hidden bg-background p-4 md:h-full md:p-6">
-            <div ref={stageRef} className="grid h-full w-full grid-cols-1 grid-rows-1 place-items-center">
-              {layers.map(layer => (
-                <RevealImage
-                  key={layer.src}
-                  src={layer.src}
-                  alt={layer.src === src ? '大图' : ''}
-                  aria-hidden={layer.src === src ? undefined : true}
-                  onReady={() => handleReady(layer.src)}
-                  className={`media-checker col-start-1 row-start-1 max-h-full max-w-full rounded-lg object-contain ${layer.phase === 'leaving' ? 'pointer-events-none opacity-0' : ''}`}
-                />
-              ))}
-            </div>
+          <div className="relative flex h-[58%] min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background p-3 md:h-full md:p-4">
+            {mediaStage}
             {(onPrevious || onNext) && (
               <>
                 <Button variant="ghost" size="icon"
@@ -409,23 +451,13 @@ export function Lightbox({
   }
 
   return createPortal(
-    <div
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label="图片预览"
       data-state={closing ? 'closed' : 'open'}
       className="scrim-fade fixed inset-0 z-50 flex items-center justify-center bg-scrim"
       onClick={requestClose}
     >
-      <div ref={stageRef} className="grid place-items-center">
-        {layers.map(layer => (
-          <RevealImage
-            key={layer.src}
-            src={layer.src}
-            alt={layer.src === src ? '大图' : ''}
-            aria-hidden={layer.src === src ? undefined : true}
-            onReady={() => handleReady(layer.src)}
-            className={`media-checker col-start-1 row-start-1 max-h-[90vh] max-w-[90vw] rounded-lg object-contain ${layer.phase === 'leaving' ? 'pointer-events-none opacity-0' : ''}`}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ))}
+      <div className="flex h-[90dvh] w-[90vw] flex-col pt-12 sm:pt-0">
+        {mediaStage}
       </div>
       <Button variant="bare"
         type="button"

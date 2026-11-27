@@ -7,24 +7,24 @@ import { Button } from '@/components/ui/button';
 import { CanvasSplitGridPopover } from './CanvasSplitGridPopover';
 
 function setup(width = 256, height = 192) {
-  const submit = vi.fn(), custom = vi.fn();
+  const submit = vi.fn(), custom = vi.fn(), returnFocus = vi.fn();
   function Fixture() {
     const [open, setOpen] = useState(true);
     return <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild><Button>切分</Button></PopoverTrigger>
-      <CanvasSplitGridPopover width={width} height={height} onReturnFocus={() => {}}
+      <CanvasSplitGridPopover width={width} height={height} onReturnFocus={returnFocus}
         onSubmit={op => { submit(op); setOpen(false); }}
         onCustom={() => { custom(); setOpen(false); }} />
     </Popover>;
   }
   render(<Fixture />);
-  return { submit, custom };
+  return { submit, custom, returnFocus };
 }
 
 const button = (name: string) => screen.getByRole('button', { name });
 
-it('previews a rectangle on hover and submits the four-column, three-row preset', () => {
-  const { submit } = setup();
+it('previews a rectangle on hover and submits the four-column, three-row preset', async () => {
+  const { submit, returnFocus } = setup();
   fireEvent.pointerEnter(button('3 列 2 行'));
   expect(screen.getByText('3 × 2')).toBeVisible();
   expect(document.querySelectorAll('[data-active=true]')).toHaveLength(6);
@@ -33,6 +33,8 @@ it('previews a rectangle on hover and submits the four-column, three-row preset'
   fireEvent.click(button('4×3'));
   expect(submit).toHaveBeenCalledWith({ kind: 'split', horizontal_lines: [1 / 3, 2 / 3], vertical_lines: [.25, .5, .75] });
   expect(screen.queryByRole('dialog')).toBeNull();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(returnFocus).not.toHaveBeenCalled();
 });
 
 it.each(['{Enter}', ' '])('selects cells with arrows and confirms with %s', async key => {

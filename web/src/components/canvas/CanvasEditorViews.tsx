@@ -2,7 +2,7 @@ import { Popover, PopoverAnchor } from '@/components/ui/popover';
 import { CanvasSplitGridPopover } from './CanvasSplitGridPopover';
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { CanvasNodeFlash, isConnectedNodeEntering, playCanvasNodeEntrance } from './canvasNodeAttention';
-import { fadePresenceClass, useFadePresence } from './useFadePresence';
+import { useFadePresence } from './useFadePresence';
 import { useAnnotationToolbarSwap } from './annotation/useAnnotationToolbarSwap';
 import { SharedGenerationStatus } from './SharedGenerationStatus';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
@@ -666,7 +666,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         position={annotationToolbar.annotating ? Position.Bottom : Position.Top}
         align="center"
         offset={annotationToolbar.annotating ? 12 : 32}
-        className={cn('nodrag', toolbarPresence.phase === 'shown' ? annotationToolbar.className : fadePresenceClass(toolbarPresence.phase))}
+        data-phase={toolbarPresence.phase}
+        className={cn('nodrag canvas-toolbar-presence', annotationToolbar.className)}
       >
         {annotationToolbar.annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
@@ -947,7 +948,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             return reference && reference.kind !== 'text' && reference.pending_shared_original;
           }) && <span role="status" className="pointer-events-none absolute left-2 top-2 rounded bg-card/90 px-2 py-1 text-xs text-muted-foreground">等待房主补齐参考原件</span>}
           {node.type === 'image' && content?.kind === 'image' && context.resolveFinalCategory?.(content.sha256) && (
-            <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 max-w-[calc(100%-1.25rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs backdrop-blur-glass">
+            <span className="pointer-events-none absolute left-2 top-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-border bg-[var(--canvas-chip)] px-2 py-1 text-xs">
               定稿 · {context.resolveFinalCategory(content.sha256)}
             </span>
           )}
@@ -974,7 +975,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           </>}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
-            <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
+            <span className="pointer-events-none absolute bottom-2 right-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-border bg-[var(--canvas-chip)] px-2 py-1 text-xs tabular-nums text-foreground">
               {formatCanvasImageInfo(content)}
             </span>
           )}

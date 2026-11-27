@@ -1139,3 +1139,16 @@
   animation-duration: var(--motion-base);
   animation-timing-function: var(--ease-atelier-subtle);
 }
+
+/* xyflow owns transform; the toolbar entrance uses the independent translate property. */
+.canvas-toolbar-presence {
+  transition: opacity var(--motion-fast) var(--ease-atelier-out), translate var(--motion-fast) var(--ease-atelier-out);
+}
+.canvas-toolbar-presence[data-phase='entering'], .canvas-toolbar-presence[data-phase='leaving'] {
+  pointer-events: none;
+  opacity: 0;
+}
+.canvas-toolbar-presence[data-phase='leaving'] { transition-timing-function: var(--ease-atelier-subtle); }
+@media (prefers-reduced-motion: no-preference) {
+  .canvas-toolbar-presence[data-phase='entering'] { translate: 0 4px; }
+}
