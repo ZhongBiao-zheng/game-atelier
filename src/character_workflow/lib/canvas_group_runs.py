@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from character_workflow.lib import canvas_projects as projects
 from character_workflow.lib import canvas_run_queue, canvas_runs
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
-from character_workflow.lib.canvas_group_plan import group_plan
+from character_workflow.lib.canvas_group_plan import group_plan, quote_id
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import JobStatus, new_job_id, read_job
 
@@ -64,12 +64,14 @@ def _check_idle(project_id, group_id):
         raise RuntimeError(BUSY)
 
 
-def start(project_id, group_id, order, total_cny):
+def start(project_id, group_id, order, total_cny, *, confirmed_quote=None):
     with file_lock(projects.canvas_project_lock_path(project_id)):
         _check_idle(project_id, group_id)
         canvas_runs.recover_canvas_transactions_unlocked(project_id)
         doc = projects._read_canvas_document_unlocked(project_id)
         plan = group_plan(project_id, group_id, doc)
+        if confirmed_quote is not None and confirmed_quote != quote_id(project_id, group_id, plan):
+            raise RuntimeError(STALE)
         if order != plan["order"] or total_cny != plan["total_cny"]:
             raise RuntimeError(STALE)
         if plan["cycle"] or plan["blocked"] or not order:

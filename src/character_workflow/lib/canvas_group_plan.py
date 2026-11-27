@@ -1,4 +1,7 @@
 """Read-only execution plan for generation drafts in a canvas group."""
+import hashlib
+import json
+
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib.callers.openai_image import image_family
 from character_workflow.lib.canvas_projects import read_canvas_document
@@ -26,6 +29,11 @@ def _cycle_members(deps):
         return False
 
     return sorted(node for node in deps if reaches_self(node))
+
+
+def quote_id(project_id, group_id, plan):
+    payload = [project_id, group_id, plan["steps"], plan["blocked"], plan["cycle_nodes"]]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def group_plan(project_id, group_id, document=None):

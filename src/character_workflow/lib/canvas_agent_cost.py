@@ -123,7 +123,7 @@ class TurnSpend:
                 generation_ids.clear()
                 counted.clear()
             call_id = item.get("call_id")
-            if item.get("type") == "function_call" and item.get("name") in GENERATION_TOOLS:
+            if item.get("type") == "function_call" and item.get("name") in GENERATION_TOOLS | {"run_group"}:
                 generation_ids.add(call_id)
             if item.get("type") == "function_call_output" and call_id in generation_ids - counted:
                 self.submitted += submitted_estimate(item.get("output"))

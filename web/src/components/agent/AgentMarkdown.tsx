@@ -10,6 +10,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_canvas: '读取画布',
   list_models: '查看可用模型',
   apply_changes: '修改画布',
+  run_group: '整体执行',
   run_generation: '生成',
   run_generations: '批量生成',
   update_plan: '更新待办',
