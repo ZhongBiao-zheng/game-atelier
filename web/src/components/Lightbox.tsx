@@ -100,8 +100,8 @@ export function Lightbox({
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
-  const { viewport, plane, image, percent, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
-  const { transition, cancel: cancelTransition } = useLightboxTransition(image, sourceRect, src);
+  const { viewport, plane, image, percent, preset, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
+  const { transition, cancel: cancelTransition } = useLightboxTransition(image, viewport, sourceRect, src);
   const closeTimer = useRef<number>();
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
   const dialog = useRef<HTMLDivElement>(null);
@@ -274,7 +274,8 @@ export function Lightbox({
     <div role="group" aria-label="图片缩放" className="relative z-10 mx-auto my-1 flex shrink-0 items-center gap-1 rounded-full border border-border bg-card p-1"
       onClick={event => event.stopPropagation()}>
       {([['适配', null], ['100%', 1], ['200%', 2]] as const).map(([label, scale]) =>
-        <Button key={label} size="sm" variant="ghost" className="h-7 rounded-full px-2 tabular-nums"
+        <Button key={label} size="sm" variant="ghost" aria-pressed={preset === scale}
+          className="h-7 rounded-full px-2 tabular-nums aria-pressed:bg-secondary aria-pressed:text-secondary-foreground"
           onClick={() => { cancelTransition(); zoomTo(scale); }}>{label}</Button>)}
       <output aria-label="当前缩放" className="min-w-12 border-l border-border px-2 text-center text-xs tabular-nums text-muted-foreground">{percent}%</output>
     </div>

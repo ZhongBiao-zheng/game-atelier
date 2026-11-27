@@ -52,6 +52,7 @@ it('resets to fit on navigation and leaves editing shortcuts with their input', 
   expect(next).toHaveBeenCalledOnce();
   rerender(<Lightbox src="/b.png" {...props} />);
   await loadPhoto(400, 1000);
+  expect(screen.getByRole('button', { name: '适配', pressed: true })).toBeVisible();
   expect(screen.getByLabelText('当前缩放')).toHaveTextContent('50%');
 });
 
@@ -77,6 +78,7 @@ it.each([
   }
   fireEvent.click(screen.getByRole('button', { name: '关闭' }));
   expect(animate).toHaveBeenCalledTimes(reduced ? 0 : 2);
+  expect(Boolean(document.body.querySelector(':scope > img[aria-hidden="true"]'))).toBe(flying);
   unmount();
   expect(document.body.querySelector(':scope > img[aria-hidden="true"]')).toBeNull();
 });
@@ -95,4 +97,37 @@ it('hands the image back to the user when they zoom during the opening flight', 
   expect(screen.getByAltText('大图').style.visibility).toBe('');
   expect(document.body.querySelector(':scope > img[aria-hidden="true"]')).toBeNull();
   expect(screen.getByLabelText('当前缩放')).toHaveTextContent('56%');
+});
+
+it('shrinks a zoomed and clipped image inside its viewport on close', async () => {
+  vi.spyOn(motion, 'motionAvailable').mockReturnValue(true);
+  vi.spyOn(motion, 'prefersReducedMotion').mockReturnValue(false);
+  const animate = vi.spyOn(motion, 'animate').mockReturnValue({
+    stop: vi.fn(), finished: new Promise<void>(() => {}),
+  } as unknown as ReturnType<typeof motion.animate>);
+  render(<Lightbox src="/image.png" sourceRect={new DOMRect(40, 30, 200, 125)} onClose={vi.fn()} />);
+  await loadPhoto(410, 250);
+  fireEvent.click(screen.getByRole('button', { name: '200%' }));
+  const image = screen.getByAltText('大图');
+  vi.mocked(image.getBoundingClientRect).mockReturnValue(new DOMRect(90, 60, 820, 500));
+  fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+  expect(document.body.querySelector(':scope > img[aria-hidden="true"]')).toBeNull();
+  expect(animate).toHaveBeenLastCalledWith(image, { scale: [1, .96] }, expect.anything());
+});
+
+it('distinguishes Fit from actual pixels at the same percentage and clears presets on free zoom', async () => {
+  render(<Lightbox src="/small.png" onClose={vi.fn()} />);
+  const viewport = await loadPhoto(400, 250);
+  const pressed = (name: string) => screen.getByRole('button', { name, pressed: true });
+  expect(screen.getByLabelText('当前缩放')).toHaveTextContent('100%');
+  expect(pressed('适配')).toBeVisible();
+  fireEvent.keyDown(window, { key: '1' });
+  expect(pressed('100%')).toBeVisible();
+  expect(screen.getByRole('button', { name: '适配', pressed: false })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '200%' }));
+  expect(pressed('200%')).toBeVisible();
+  fireEvent.wheel(viewport, { deltaY: 100 });
+  expect(screen.queryByRole('button', { pressed: true })).toBeNull();
+  fireEvent.keyDown(window, { key: '0' });
+  expect(pressed('适配')).toBeVisible();
 });

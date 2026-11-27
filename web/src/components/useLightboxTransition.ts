@@ -7,7 +7,7 @@ function visible(rect?: DOMRect | null) {
 }
 
 /** The flying copy can cross the edge of the clipped zoom viewport. */
-export function useLightboxTransition(image: RefObject<HTMLImageElement>, sourceRect: DOMRect | null | undefined, src: string) {
+export function useLightboxTransition(image: RefObject<HTMLImageElement>, viewport: RefObject<HTMLDivElement>, sourceRect: DOMRect | null | undefined, src: string) {
   const source = useRef(sourceRect);
   source.current = sourceRect;
   const active = useRef<{ element: HTMLElement; cancel: () => void } | null>(null);
@@ -22,7 +22,11 @@ export function useLightboxTransition(image: RefObject<HTMLImageElement>, source
     const ease = closing ? MOTION_EASE.subtle : MOTION_EASE.out;
     const target = img.getBoundingClientRect();
     const origin = source.current;
-    if (!origin || !visible(origin) || !visible(target)) {
+    const stage = closing ? viewport.current?.getBoundingClientRect() : null;
+    // A body-level copy would reveal the pixels currently clipped by the stage.
+    const clipped = closing && (!stage || target.left < stage.left || target.right > stage.right ||
+      target.top < stage.top || target.bottom > stage.bottom);
+    if (clipped || !origin || !visible(origin) || !visible(target)) {
       const animation = clearOnFinish(animate(img, { scale: closing ? [1, .96] : [.96, 1] }, { duration, ease }), img, ['transform']);
       const running = { element: img, cancel: () => { animation.stop(); img.style.removeProperty('transform'); active.current = null; } };
       active.current = running;
@@ -44,6 +48,6 @@ export function useLightboxTransition(image: RefObject<HTMLImageElement>, source
     const running = { element: copy, cancel };
     active.current = running;
     void animation.finished.then(() => { if (active.current === running) { copy.remove(); if (!closing) img.style.removeProperty('visibility'); active.current = null; } });
-  }, [image]);
+  }, [image, viewport]);
   return { transition, cancel };
 }
