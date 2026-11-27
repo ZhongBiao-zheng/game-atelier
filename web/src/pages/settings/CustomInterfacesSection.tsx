@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { deleteHttpProtocol, listHttpProtocols } from '@/api/httpProtocols';
 import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Hint } from '@/components/ui/tooltip';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 import { errorText } from '@/lib/errorText';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 
 const KIND_LABELS = { image: '图片', video: '视频', audio: '音频' } as const;
 
@@ -19,6 +22,10 @@ export function CustomInterfacesSection() {
   const [creating, setCreating] = useState<HttpProtocolKind | null>(null);
   const [deleting, setDeleting] = useState<HttpProtocolRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const lastError = useRef<string | null>(null);
+  if (error) lastError.current = error;
+  const canAnimate = motionAvailable();
+  const reduced = prefersReducedMotion();
   // 弹窗关闭后沿用最后一份内容播完退场。
   const shownEditing = useRetainedSession(editing);
   const shownCreating = useRetainedSession(creating);
@@ -27,7 +34,7 @@ export function CustomInterfacesSection() {
   useEffect(() => {
     let active = true;
     const load = () => listHttpProtocols()
-      .then(result => { if (active) setRows(result.protocols); })
+      .then(result => { if (active) setRows(result.protocols ?? []); })
       .catch(e => { if (active) setError(errorText(e)); });
     void load();
     window.addEventListener(KEYS_CHANGED_EVENT, load);
@@ -46,9 +53,9 @@ export function CustomInterfacesSection() {
   };
 
   return (
-    <section aria-label="自定义接口" className="space-y-2">
+    <section aria-label="自定义接口" className="space-y-2 border-t border-border pt-6">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm text-muted-foreground">自定义接口</h2>
+        <h2 className="text-xs font-medium text-muted-foreground">自定义接口</h2>
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" type="button">新建</Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -58,24 +65,43 @@ export function CustomInterfacesSection() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {rows.length > 0 && <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-        {rows.map(row => <li key={row.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{row.name}</p>
-            <p className={`text-xs ${row.available ? 'text-muted-foreground' : 'text-destructive'}`}>
-              {row.available
-                ? `${row.kind ? KIND_LABELS[row.kind] : ''} · ${row.used_by.length ? `${row.used_by.length} 个模型` : '未使用'}`
-                : row.error}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" type="button" onClick={() => setEditing(row)}>编辑</Button>
-          <Hint label={row.used_by.length ? '还有模型在使用' : undefined}>
-            <span><Button variant="ghost" size="sm" type="button" disabled={row.used_by.length > 0}
-              onClick={() => setDeleting(row)}>删除</Button></span>
-          </Hint>
-        </li>)}
-      </ul>}
+      <Collapse open={Boolean(error)} appear>
+        <p role="alert" className="text-sm text-destructive">{error ?? lastError.current}</p>
+      </Collapse>
+      <Collapse open={rows.length > 0}>
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+          <AnimatePresence initial={false}>
+            {rows.map(row => (
+              <motion.li
+                key={row.id}
+                initial={canAnimate ? (reduced ? { opacity: 0 } : { opacity: 0, height: 0 }) : false}
+                animate={canAnimate ? { opacity: 1, height: 'auto' } : undefined}
+                exit={canAnimate ? (reduced
+                  ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }
+                  : { opacity: 0, height: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.inOut } }) : undefined}
+                transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{row.name}</p>
+                    <p className={`text-xs ${row.available ? 'text-muted-foreground' : 'text-destructive'}`}>
+                      {row.available
+                        ? `${row.kind ? KIND_LABELS[row.kind] : ''} · ${row.used_by.length ? `${row.used_by.length} 个模型` : '未使用'}`
+                        : row.error}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" type="button" onClick={() => setEditing(row)}>编辑</Button>
+                  <Hint label={row.used_by.length ? '还有模型在使用' : undefined}>
+                    <span><Button variant="ghost" size="sm" type="button" disabled={row.used_by.length > 0}
+                      onClick={() => setDeleting(row)}>删除</Button></span>
+                  </Hint>
+                </div>
+              </motion.li>
+            ))}
+          </AnimatePresence>
+        </ul>
+      </Collapse>
       {shownEditing && <CustomInterfaceDialog key={`edit-${shownEditing.session}`} open={Boolean(editing)}
         identifier={shownEditing.value.id} kind={shownEditing.value.kind ?? 'image'}
         onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}

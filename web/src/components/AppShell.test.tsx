@@ -75,10 +75,10 @@ function renderAt(path: string) {
 }
 
 describe('AppShell', () => {
-  it('renders the provider add route inside the console', async () => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ keys: [] }) } as Response);
-    renderAt('/settings/providers/new');
-    expect(await screen.findByRole('heading', { name: '添加' })).toBeInTheDocument();
+  it('renders the provider page and inline catalog inside the console', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ keys: [], protocols: [] }) } as Response);
+    renderAt('/settings/providers');
+    expect(await screen.findByRole('region', { name: '添加供应商' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   });

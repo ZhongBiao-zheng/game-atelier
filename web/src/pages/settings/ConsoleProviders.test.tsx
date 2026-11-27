@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { ProviderRow } from '@/components/keys/ProviderRow';
 import { KeysPage } from './Keys';
 import { ModelRoutesSection } from './ModelRoutesSection';
-import { ProviderAddPage } from './ProviderAddPage';
 import * as keys from '@/api/keys';
 import * as gateway from '@/api/gateway';
 import * as comfyui from '@/api/comfyui';
@@ -35,7 +34,7 @@ vi.mock('@/api/gateway', () => ({
   }),
   restoreGatewayMember: vi.fn().mockResolvedValue({ members: [], unavailable_routes: [] }),
 }));
-it('局域网排第一且不显示额度', async () => {
+it('局域网排第一且不显示额度，下方同页展示未配置的供应商并隐藏已配置的团队网关', async () => {
   render(<KeysPage embedded />);
   await screen.findByText('lan');
   const rows = screen.getAllByRole('listitem');
@@ -44,40 +43,54 @@ it('局域网排第一且不显示额度', async () => {
   expect(screen.queryByLabelText('中转额度')).not.toBeInTheDocument();
   expect(rows[1]).toHaveTextContent('正常');
   expect(rows[0]).toHaveTextContent('未用过');
-  expect(screen.getByRole('link', { name: '添加供应商' })).toHaveAttribute('href', '/settings/providers/new');
+  // 已配置的团队网关（atelier）从下方目录隐藏，自定义供应商位于添加供应商标题栏。
+  const catalog = screen.getByRole('region', { name: '添加供应商' });
+  expect(within(catalog).queryByRole('button', { name: /团队网关/ })).not.toBeInTheDocument();
+  expect(within(catalog).getByRole('button', { name: /自定义供应商/ })).toBeInTheDocument();
 });
-it('添加页按供应商、中转、团队和自定义分组，支持查找与点击弹窗添加自定义供应商', async () => {
-  render(<ProviderAddPage />);
-  expect(await screen.findByText('已添加')).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: '供应商' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: '中转' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: '团队网关' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: '自定义' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
-  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: 'Tuzi' } });
-  expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /OpenAI-HK/ })).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: '' } });
-  fireEvent.click(screen.getByRole('button', { name: /自定义供应商/ }));
+it('同页添加区按分组平铺、支持查找与点击弹窗添加自定义供应商，无包裹框', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [] });
+  render(<KeysPage embedded />);
+  const catalog = await screen.findByRole('region', { name: '添加供应商' });
+  expect(within(catalog).getByRole('heading', { name: '供应商' })).toBeInTheDocument();
+  expect(within(catalog).getByRole('heading', { name: '中转' })).toBeInTheDocument();
+  expect(within(catalog).getByRole('heading', { name: '订阅' })).toBeInTheDocument();
+  expect(within(catalog).getByRole('heading', { name: '本机' })).toBeInTheDocument();
+  expect(within(catalog).getByRole('heading', { name: '团队网关' })).toBeInTheDocument();
+  const tuziBtn = within(catalog).getByRole('button', { name: /Tuzi/ });
+  expect(tuziBtn).not.toHaveClass('bg-card');
+  expect(within(catalog).getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
+  fireEvent.change(within(catalog).getByRole('textbox', { name: '查找可添加的供应商' }), { target: { value: 'Tuzi' } });
+  expect(within(catalog).getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  expect(within(catalog).queryByRole('button', { name: /OpenAI-HK/ })).not.toBeInTheDocument();
+  fireEvent.change(within(catalog).getByRole('textbox', { name: '查找可添加的供应商' }), { target: { value: '' } });
+  fireEvent.click(within(catalog).getByRole('button', { name: /自定义供应商/ }));
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
   expect(screen.getByLabelText('请求地址')).toBeInTheDocument();
 });
-it('custom 预设按域名识别已添加，不把所有中转都标为已添加', async () => {
-  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '我的兔子', provider: 'custom',
-    base_url: 'https://api.tu-zi.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' }] });
-  render(<ProviderAddPage />);
-  const tuzi = screen.getByRole('button', { name: /Tuzi/ });
-  await waitFor(() => expect(within(tuzi).getByText('已添加')).toBeInTheDocument());
-  expect(within(screen.getByRole('button', { name: /OpenAI-HK/ })).queryByText('已添加')).not.toBeInTheDocument();
+it('已启用和已关闭的预置供应商均从下方目录隐藏，按域名识别 custom 预设', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [
+    { alias: '我的兔子', provider: 'custom', enabled: true, base_url: 'https://api.tu-zi.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' },
+    { alias: 'OpenAI', provider: 'openai', enabled: false, base_url: 'https://api.openai.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' },
+  ] });
+  render(<KeysPage embedded />);
+  await screen.findByText('我的兔子');
+  // 已关闭的供应商默认收起。
+  expect(screen.getByRole('button', { name: /已关闭的供应商/ })).toHaveAttribute('aria-expanded', 'false');
+  const catalog = screen.getByRole('region', { name: '添加供应商' });
+  expect(within(catalog).queryByRole('button', { name: /Tuzi/ })).not.toBeInTheDocument();
+  expect(within(catalog).queryByRole('button', { name: /^OpenAI$/ })).not.toBeInTheDocument();
+  expect(within(catalog).getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
 });
-it('未知自定义供应商不把添加模板标成已添加', async () => {
+it('未知自定义供应商不影响下方预置目录', async () => {
   vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '自己的服务', provider: 'custom',
     base_url: 'https://models.example.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' }] });
-  render(<ProviderAddPage />);
-  await waitFor(() => expect(keys.listKeys).toHaveBeenCalled());
-  expect(screen.queryByText('已添加')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /自定义供应商/ })).toBeInTheDocument();
+  render(<KeysPage embedded />);
+  await screen.findByText('自己的服务');
+  const catalog = screen.getByRole('region', { name: '添加供应商' });
+  expect(within(catalog).getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  expect(within(catalog).getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
+  expect(within(catalog).getByRole('button', { name: /自定义供应商/ })).toBeInTheDocument();
 });
 describe('路由成员', () => {
   it('显示欠费时间与全部欠费，恢复后移除状态', async () => {
@@ -140,19 +153,22 @@ it('状态优先级为停用、欠费、长期未用，30 天以内正常', () =
 
 
 it('订阅卡片展示账号和套餐', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [] });
   vi.mocked(keys.getChatGPTSubscription).mockResolvedValueOnce({ available: true, email: 'artist@example.test', plan: 'plus' });
-  render(<ProviderAddPage />);
-  expect(screen.getByRole('heading', { name: '订阅' })).toBeInTheDocument();
-  const card = screen.getByRole('button', { name: /ChatGPT/ });
+  render(<KeysPage embedded />);
+  const catalog = await screen.findByRole('region', { name: '添加供应商' });
+  expect(within(catalog).getByRole('heading', { name: '订阅' })).toBeInTheDocument();
+  const card = within(catalog).getByRole('button', { name: /ChatGPT/ });
   await waitFor(() => expect(card).toHaveTextContent('artist@example.test · plus'));
 });
 
 it('订阅状态加载失败不冒充未登录', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [] });
   vi.mocked(keys.getChatGPTSubscription).mockRejectedValueOnce(new Error('读取登录状态失败'));
-  render(<ProviderAddPage />);
-  expect(screen.getByRole('button', { name: /ChatGPT/ })).toHaveTextContent('加载中…');
-  expect(await screen.findByText('读取登录状态失败')).toBeInTheDocument();
-  expect(screen.queryByText('请先在 Codex 里用 ChatGPT 登录')).not.toBeInTheDocument();
+  render(<KeysPage embedded />);
+  const catalog = await screen.findByRole('region', { name: '添加供应商' });
+  expect(await within(catalog).findByText('读取登录状态失败')).toBeInTheDocument();
+  expect(within(catalog).queryByText('请先在 Codex 里用 ChatGPT 登录')).not.toBeInTheDocument();
 });
 
 

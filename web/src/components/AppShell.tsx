@@ -201,7 +201,6 @@ function AppShellContent() {
             />
           )}</Route>
           <Route path="/settings">{() => <Redirect to="/settings/providers" replace />}</Route>
-          <Route path="/settings/providers/new">{() => <ConsoleLayout />}</Route>
           <Route path="/settings/:page">{() => <ConsoleLayout />}</Route>
           {Kit && <Route path="/kit">{() => <Suspense fallback={null}><Kit /></Suspense>}</Route>}
           <Route>

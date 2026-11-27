@@ -6,7 +6,6 @@ import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/g
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
 import { RelayAdminPage, useAdminGateways } from './RelayAdminPage';
 import { ProvidersPage } from './ProvidersPage';
-import { ProviderAddPage } from './ProviderAddPage';
 import { RoutesPage } from './RoutesPage';
 import { GatewayPage } from './GatewayPage';
 import { GATEWAY_HINT } from './LanSharingSection';
@@ -126,10 +125,9 @@ function GatewayConnection() {
 export function ConsoleLayout() {
   const { aliases: adminAliases } = useAdminGateways();
   const [location] = useLocation();
-  const addingProvider = location === '/settings/providers/new';
-  const current = CONSOLE_NAV.flatMap(group => group.items).find(item => (addingProvider ? '/settings/providers' : location) === item.path);
+  const current = CONSOLE_NAV.flatMap(group => group.items).find(item => location === item.path);
   if (!current) return <Redirect to="/settings/providers" replace />;
-  const Page = addingProvider ? ProviderAddPage : current.page;
+  const Page = current.page;
   const groupLabel = CONSOLE_NAV.find(group => group.items.includes(current))?.group;
   return <div className="flex min-h-full min-w-0 flex-col bg-sidebar md:flex-row">
     <aside className="flex min-w-0 shrink-0 flex-col gap-6 border-b border-border p-4 md:sticky md:top-0 md:h-[calc(100dvh-80px)] md:w-[220px] md:border-b-0">
@@ -165,7 +163,7 @@ export function ConsoleLayout() {
     </aside>
     <main className="console-panel m-2 min-w-0 flex-1 rounded-2xl border border-border bg-panel p-4 md:p-6">
       {/* 换页时正文 150ms 淡入；侧栏的选中滑块交代方向，正文不位移。 */}
-      <div key={addingProvider ? 'providers/new' : current.path} className="content-swap-in space-y-6">
+      <div key={current.path} className="content-swap-in space-y-6">
       {!['/settings/providers', '/settings/routes'].includes(current.path) && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         {groupLabel && <span className="text-subtle-foreground">{groupLabel} /</span>}
         <h1 className="text-sm font-semibold">{current.label}</h1>
