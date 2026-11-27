@@ -133,6 +133,10 @@ GET /api/collab/remote/{peer_key}/projects/{project_id}/borrowable-models
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/local
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/borrowed
 POST /api/studio/jobs/{job_id}/shared-canvas
+GET /api/history
+GET /api/history/{job_id}/{output_index}/thumb
+POST /api/history/download
+DELETE /api/history/{job_id}
 GET /api/gallery/recent
 GET /api/gallery/hidden
 POST /api/gallery/hidden

@@ -311,9 +311,11 @@ def _resolve_output(raw: str) -> Path:
     return path if path.is_absolute() else data_root.resolve_data_root() / raw
 
 
-def _trashable_studio_job(job_id: str) -> Job:
+def _trashable_studio_job(job_id: str, *, history: bool) -> Job:
     job = read_job(job_id)
-    if job.namespace != "studio":
+    if history and job.status != JobStatus.DONE:
+        raise ValueError("只能删除已完成的生成记录")
+    if job.namespace != "studio" and not (history and job.namespace == "canvas"):
         raise ValueError("只能删除创作台的生成记录")
     if job.status in (JobStatus.PENDING, JobStatus.PENDING_CONFIRM):
         raise ValueError("生成中的记录不能删除，先停止")
@@ -381,7 +383,7 @@ def list_usage_archive() -> list[Job]:
     return rows
 
 
-def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
+def trash_studio_job(job_id: str, output_path: str | None = None, *, history: bool = False) -> str:
     """创作台删除：移进回收站（30 天内可还原），返回 trash_id。
 
     不给 output_path 删整轮（任务文件与产物目录）；给了且这一轮不止一份产物时只删这一份：
@@ -390,7 +392,7 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
     from character_workflow.lib.studio_jobs import studio_root
 
     with job_lock(job_id):
-        job = _trashable_studio_job(job_id)
+        job = _trashable_studio_job(job_id, history=history)
         if output_path is not None:
             if output_path not in job.output_paths:
                 raise LookupError("这份结果不在这一轮里")
@@ -407,12 +409,14 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
                 )
         output_dir = studio_root() / job_id
         paths: list[Path] = [_path(job_id)]
-        if output_dir.exists():
-            paths.append(output_dir)
-        for raw in job.output_paths:
-            path = _resolve_output(raw)
-            if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
-                paths.append(path)
+        # Canvas 的不可变版本引用原产物；删除任务记录时文件仍归项目所有。
+        if job.namespace == "studio":
+            if output_dir.exists():
+                paths.append(output_dir)
+            for raw in job.output_paths:
+                path = _resolve_output(raw)
+                if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
+                    paths.append(path)
         archive_for_usage(job)
         return trash.move_to_trash(
             "round", _round_label(job), paths,

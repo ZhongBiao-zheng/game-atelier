@@ -473,6 +473,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     from viewer_server.collab_guest_run_routes import collab_guest_local_router
     app.include_router(collab_guest_local_router)
     app.include_router(collab_transfer_local_router)
+    from viewer_server.history_routes import router as history_router
+    app.include_router(history_router)
     app.include_router(router)
     from viewer_server.comfyui_routes import router as comfyui_router
     app.include_router(comfyui_router)
