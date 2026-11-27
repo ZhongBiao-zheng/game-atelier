@@ -282,6 +282,7 @@ describe('Studio', () => {
     await screen.findByText('Volcengine Ark');
 
     fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
     fireEvent.mouseDown(await screen.findByRole('tab', { name: /媒体/ }));
     fireEvent.click(await screen.findByRole('button', { name: /战鼓/ }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
@@ -2318,6 +2319,7 @@ function mockPanelEndpoints(keys?: unknown, inputResponse?: (order: number) => P
 
 async function openPanelAndReproduce(asset: CreationAsset) {
   fireEvent.click(screen.getByLabelText('打开创作资产'));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
   await act(async () => { await assetPanelProps.current!.onReproduce(asset); });
 }
@@ -2328,6 +2330,7 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     renderStudio();
     await screen.findByText('Volcengine Ark');
     fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
     await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
     const file = new File(['png'], 'rain.png', { type: 'image/png' });
     act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '雨夜电影感', mime_type: 'image/png' } as never, 'lib:e1'); });
@@ -2352,6 +2355,7 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     renderStudio();
     await screen.findByText('Volcengine Ark');
     fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
     await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
     const heic = new File(['heic'], 'photo.heic', { type: 'image/heic' });
     act(() => { assetPanelProps.current!.onUseTeamMedia(heic, { title: '窗边的猫', mime_type: 'image/heic' } as never, 'lib:e3'); });
@@ -2370,6 +2374,7 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     renderStudio();
     await screen.findByText('Volcengine Ark');
     fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
     await waitFor(() => expect(assetPanelProps.current?.onUseTeamPrompt).toBeTypeOf('function'));
     act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
     const file = new File(['png'], 'other.png', { type: 'image/png' });
@@ -2667,6 +2672,7 @@ describe('Studio 复刻：边界', () => {
     renderStudio();
     const reEditButton = await screen.findByRole('button', { name: '重新编辑' });
     fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
     await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
     act(() => { assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
 
@@ -3137,6 +3143,7 @@ it('团队使用连续追加并按来源复用 File，满额不覆盖，也不�
   renderStudio();
   await screen.findByText('Volcengine Ark');
   fireEvent.click(screen.getByLabelText('打开创作资产'));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
   const entry = { id: 'ta-first', kind: 'media', title: '一.png', mime_type: 'image/png' };
   const first = new File(['1'], 'one.png', { type: 'image/png' });
