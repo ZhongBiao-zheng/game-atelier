@@ -13,7 +13,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from character_workflow.lib import keys as _keys
-from character_workflow.lib.video_caps import kling_spec
+from character_workflow.lib.video_caps import kling_spec, vidu_spec
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,11 @@ def _declarative_render(**kw: Any) -> list[str]:
     return declarative.render_video(**kw)
 
 
+def _vidu_render(**kw: Any) -> list[str]:
+    from . import vidu_video
+    return vidu_video.render_video(**kw)
+
+
 VIDEO_ADAPTERS: dict[str, VideoAdapter] = {
     "declarative": VideoAdapter("declarative", "自定义接口", _declarative_render),
     "seedance": VideoAdapter("seedance", "Seedance(火山 / Ark)", _seedance_render),
@@ -66,6 +71,7 @@ VIDEO_ADAPTERS: dict[str, VideoAdapter] = {
     "evolink": VideoAdapter("evolink", "EvoLink（可灵）", _evolink_render),
     "dashscope": VideoAdapter("dashscope", "DashScope(happyhorse / 阿里百炼)", _dashscope_render),
     "openrouter": VideoAdapter("openrouter", "OpenRouter", _openrouter_render),
+    "vidu": VideoAdapter("vidu", "Vidu（兔子）", _vidu_render),
 }
 
 
@@ -92,9 +98,11 @@ def resolve_protocol(provider: str, base_url: str | None, model: str) -> str | N
         return "evolink" if kling_spec(m) is not None else None
     if m.startswith("kling") and _keys.is_openai_hk(base_url):
         return "kling"
-    # 兔子：kling-4.0 挂在统一视频入口 /v1/videos，请求体与可灵新版接口同形。
+    # 兔子：kling-4.0 与 Vidu Q3/Q4 挂在统一视频入口 /v1/videos。
     if kling_spec(m) is not None and _is_tuzi(base_url):
         return "klingai"
+    if vidu_spec(m) is not None and _is_tuzi(base_url):
+        return "vidu"
     return None
 
 

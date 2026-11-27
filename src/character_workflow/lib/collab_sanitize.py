@@ -15,7 +15,7 @@ _PUBLIC_FIELDS = frozenset("""
     watermark temperature max_tokens reasoning_effort voice speed response_format instructions
     lyrics instrumental angle_horizontal angle_pitch angle_distance angle_wide
     requested_size actual_size layer_decomposition layer_max_images bot_type mj_version
-    mj_stylize mj_chaos mj_weird mj_seed mj_no mj_tile mj_iw mj_sref_code mj_profile
+    mj_stylize mj_chaos mj_weird mj_seed mj_no mj_tile mj_style_raw mj_iw mj_sref_code mj_profile
     mj_sw mj_cw mj_ow
 """.split())
 _PRIVATE_VALUE = re.compile(r"(?:^|\s)(?:/[^\s]|[A-Za-z]:[\\/]|\\\\|~/)|(?:file|https?)://", re.I)

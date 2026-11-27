@@ -174,7 +174,7 @@ _REF_VERSION_SUPPORT: dict[str, set[str]] = {
 #     （对照组：--niji 7 不带 tile 正常出图，所以拒的是 tile 不是 niji 7）
 # 只剔除这一个已证伪的组合，不给 tile 建版本白名单：没实测过的版本多半能用，
 # 白名单会把它们一起关掉。与 cref / oref 相反 —— 那两个是实测只有单一版本能用。
-_TILE_REJECTED: set[tuple[str, str]] = {("NIJI_JOURNEY", "7")}
+_TILE_REJECTED: set[tuple[str, str]] = {("NIJI_JOURNEY", "7"), ("NIJI_JOURNEY", "8")}
 
 _REF_SLOT_LABELS = {"cref": "角色参考", "oref": "Omni 参考"}
 
@@ -272,9 +272,12 @@ def _append_flags(prompt: str, params: dict[str, Any],
     if profile_flag:
         parts.append(profile_flag)
     parts.extend(_ref_flags(params, params_in))
+    if params.get("mj_style_raw"):
+        parts.append("--style raw")
     if params.get("mj_tile"):
         if _tile_rejected(params):
-            _warn(params_in, "无缝平铺（--tile）在 niji 7 上会被上游判成提示词格式错误，"
+            version = str(params.get("mj_version") or "").strip() or "7"
+            _warn(params_in, f"无缝平铺（--tile）在 niji {version} 上不被支持，"
                              "本次已去掉；要用它请把版本切到 niji 6 或 niji 5。")
         else:
             parts.append("--tile")  # 无值开关

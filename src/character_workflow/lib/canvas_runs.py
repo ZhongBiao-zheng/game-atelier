@@ -1155,6 +1155,40 @@ def _validate_input_capabilities(
                 f"{spec.label} 最多参考 {spec.max_images} 张图、{spec.max_videos} 个视频"
             )
         return
+    if protocol == "vidu":
+        from character_workflow.lib.video_caps import vidu_spec
+
+        spec = vidu_spec(model.id)
+        if spec is None:
+            raise ValueError("当前 Vidu 模型没有可用的生成协议")
+        if counts["video"]:
+            raise ValueError(f"{spec.label} 不支持参考视频")
+        if counts["audio"] > spec.max_audios:
+            raise ValueError(
+                f"{spec.label} 不支持参考音频" if spec.max_audios <= 0
+                else f"{spec.label} 最多参考 {spec.max_audios} 段音频"
+            )
+        if params.frame_mode == "last":
+            raise ValueError(f"{spec.label} 不支持只设置尾帧，请先设置首帧")
+        if params.frame_mode == "firstlast" and "firstTailGenerate" not in spec.actions:
+            raise ValueError(f"{spec.label} 不支持首尾帧模式")
+        frames = {"first": 1, "firstlast": 2}.get(params.frame_mode or "", 0)
+        if spec.actions == ("referenceGenerate",):
+            if counts["image"] == 0:
+                raise ValueError(f"{spec.label} 至少需要 1 张参考图")
+            if counts["image"] > spec.max_images:
+                raise ValueError(f"{spec.label} 最多参考 {spec.max_images} 张图")
+            return
+        refs_count = max(0, counts["image"] - frames)
+        if (refs_count or counts["audio"]) and "referenceGenerate" not in spec.actions:
+            raise ValueError(f"{spec.label} 不支持图片参考模式，请改用首尾帧")
+        if (refs_count or counts["audio"]) and frames:
+            raise ValueError(f"{spec.label} 图片参考模式不能与首尾帧同时使用")
+        if refs_count > spec.max_images:
+            raise ValueError(f"{spec.label} 最多参考 {spec.max_images} 张图")
+        if counts["image"] == 0 and "textGenerate" not in spec.actions:
+            raise ValueError(f"{spec.label} 不支持纯文生视频，请至少提供 1 张首帧图或参考图")
+        return
     if counts["video"] or counts["audio"]:
         raise ValueError("当前视频模型只支持文本与图片输入")
     if protocol == "declarative":

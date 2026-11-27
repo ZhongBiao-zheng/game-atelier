@@ -574,14 +574,32 @@ def test_cref_dropped_on_unsupported_version_with_warning(mj_key, tmp_path, monk
 
 
 def test_tile_dropped_on_niji_7_with_warning(mj_key, tmp_path, monkeypatch):
-    """niji 7 + --tile 会让整条任务 FAILURE（实测 [invalid_parameter]）：提交前摘掉并回传。"""
+    """niji 7 / niji 8 + --tile 会让整条任务失败：提交前摘掉并回传。"""
+    for version in ("7", "8"):
+        posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+        params: dict = {"bot_type": "NIJI_JOURNEY", "mj_version": version, "mj_tile": True, "ratio": "1:1"}
+
+        _render(tmp_path, n=4, params=params)
+
+        assert "--tile" not in posted[0]["body"]["prompt"]
+        assert any(f"niji {version}" in w for w in params["warnings"])
+
+
+def test_niji_8_and_style_raw_flags(mj_key, tmp_path, monkeypatch):
+    """niji 8 拼出 --niji 8，mj_style_raw 拼出 --style raw 并回写 mj_flags。"""
     posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
-    params: dict = {"bot_type": "NIJI_JOURNEY", "mj_version": "7", "mj_tile": True, "ratio": "1:1"}
+    params: dict = {
+        "bot_type": "NIJI_JOURNEY",
+        "mj_version": "8",
+        "mj_style_raw": True,
+        "ratio": "1:1",
+    }
 
     _render(tmp_path, n=4, params=params)
 
-    assert "--tile" not in posted[0]["body"]["prompt"]
-    assert any("niji 7" in w for w in params["warnings"])
+    assert posted[0]["body"]["botType"] == "NIJI_JOURNEY"
+    assert posted[0]["body"]["prompt"] == "a knight --niji 8 --ar 1:1 --style raw"
+    assert params["mj_flags"] == "--niji 8 --ar 1:1 --style raw"
 
 
 @pytest.mark.parametrize("bot_type,version", [

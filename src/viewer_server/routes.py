@@ -1380,7 +1380,7 @@ class _ModelsPreviewPayload(BaseModel):
 # 数据里就有 zai:layout-parsing / bocha:web-search / unifuncs:web-reader），词表永远追不完，
 # 「认不出就丢」会让某个网关的模型列表整片消失且用户看不出原因。
 _VIDEO_ID_HINTS = (
-    "video", "seedance", "vidu", "kling", "veo", "sora",
+    "video", "seedance", "vidu", "viduq3", "viduq4", "kling", "veo", "sora",
     "happyhorse", "pixverse", "runway", "hailuo",
 )
 _IMAGE_ID_HINTS = (

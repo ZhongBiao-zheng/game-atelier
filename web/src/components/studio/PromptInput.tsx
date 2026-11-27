@@ -733,7 +733,7 @@ export function PromptInput({
   const lastFrameOnlyBlocked =
     isVideo &&
     videoMode === 'firstlast' &&
-    (videoCaps?.family === 'seedance' || videoCaps?.family === 'klingai') &&
+    (videoCaps?.family === 'seedance' || videoCaps?.family === 'klingai' || videoCaps?.family === 'vidu') &&
     (videoCaps?.maxFrames ?? 0) >= 2 &&
     !videoFrames?.first &&
     Boolean(videoFrames?.last);

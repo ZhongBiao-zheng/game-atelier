@@ -31,6 +31,7 @@ import type {
   CanvasSize,
 } from '@/schema/canvas';
 import {
+  isViduVideoModel,
   klingGeneration,
   nearestDuration,
   videoControlCaps,
@@ -1196,9 +1197,10 @@ function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
     if (key.provider === 'evolink') return klingGeneration(id) ? 'evolink' : null;
     if (id.startsWith('kling') && isOpenAiHkBaseUrl(key.base_url)) return 'kling';
     if (klingGeneration(id) && isTuziBaseUrl(key.base_url)) return 'klingai';
+    if (isViduVideoModel(id) && isTuziBaseUrl(key.base_url)) return 'vidu';
     return null;
   })();
-  if (!['seedance', 'kling', 'klingai', 'evolink', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
+  if (!['seedance', 'kling', 'klingai', 'evolink', 'dashscope', 'openrouter', 'vidu'].includes(String(protocol))) return false;
   // Canvas Runner 明确拒绝 HappyHorse video-edit：它只收公网 URL，画布内容是本地版本。
   return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
 }
@@ -1562,7 +1564,7 @@ export function normalizeCanvasImageParams(
   const { reference_images: _images, reference_videos: _videos, reference_audios: _audios, quality, ...retained } = current;
   const params = normalizeImageSizeParams(model, provider, baseUrl, retained, capsOverride);
   if (isEvolinkMidjourney(model, provider)) {
-    for (const field of ['bot_type', 'mode', 'mj_version', 'mj_profile', 'mj_cref', 'mj_cw', 'mj_oref', 'mj_ow']) delete params[field];
+    for (const field of ['bot_type', 'mode', 'mj_version', 'mj_profile', 'mj_style_raw', 'mj_cref', 'mj_cw', 'mj_oref', 'mj_ow']) delete params[field];
   }
   params.n = caps.family === 'midjourney' ? MJ_IMAGES_PER_TASK : Math.max(1, Math.min(4, Number(current.n) || 1));
   if (caps.qualities?.length) {

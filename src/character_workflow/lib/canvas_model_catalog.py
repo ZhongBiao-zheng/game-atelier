@@ -46,7 +46,7 @@ def model_rows(kind: str) -> list[dict]:
                 supports_gif_output, supports_image_complexity, supports_image_quality,
                 supports_transparent_background,
             )
-            from character_workflow.lib.video_caps import kling_spec, seedance_limits
+            from character_workflow.lib.video_caps import kling_spec, seedance_limits, vidu_spec
             limits = {"image": max_reference_images(model.id), "video": 0, "audio": 0}
             duration = None
             if kind == "video":
@@ -70,6 +70,12 @@ def model_rows(kind: str) -> list[dict]:
                               "video": 0 if configured.protocol == "evolink" else kling.max_videos,
                               "audio": 0}
                     duration = {"min": kling.min_duration, "max": kling.max_duration}
+                vidu = vidu_spec(model.id) if configured.protocol == "vidu" else None
+                if vidu:
+                    limits = {"image": max(vidu.max_frames, vidu.max_images),
+                              "video": 0,
+                              "audio": vidu.max_audios}
+                    duration = {"min": vidu.min_duration, "max": vidu.max_duration}
             count = {"min": 1, "max": 4} if kind == "image" else {"min": 1, "max": 1}
             if kind == "image" and image_family(model.id) == "midjourney":
                 count = {"min": 4, "max": 4}

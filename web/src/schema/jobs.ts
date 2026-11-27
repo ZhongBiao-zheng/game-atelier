@@ -172,6 +172,7 @@ export interface JobParams {
   mj_seed?: number; // --seed
   mj_no?: string; // --no 排除词，逗号分隔
   mj_tile?: boolean; // --tile 无缝平铺
+  mj_style_raw?: boolean; // --style raw 原始风格
   mj_iw?: number; // --iw 垫图权重 0-3
   mj_sref_code?: string; // --sref 编号（与图片式 mj_sref 互斥）
   mj_profile?: string; // --profile 个性化 Profile code/ID

@@ -50,7 +50,7 @@ _IMAGE_PARAMS = frozenset({
     "complexity", "output_format", "frame_count", "frame_duration_ms",
     "steps", "cfg_scale", "requested_size", "workflow_inputs",
     "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird", "mj_seed", "mj_no",
-    "mj_tile", "mj_iw", "mj_sref_code", "mj_profile", "mj_sw", "mj_cw", "mj_ow", "mj_flags",
+    "mj_tile", "mj_style_raw", "mj_iw", "mj_sref_code", "mj_profile", "mj_sw", "mj_cw", "mj_ow", "mj_flags",
 })
 
 ALLOWED_PARAMS_BY_KIND = {
@@ -108,7 +108,7 @@ RESUMABLE_PROTOCOLS = frozenset({"tuzi_images", "declarative", "evolink", "yinch
 # 视频协议里有「凭已存订单只轮询」入口的（callers 收 resume_video、回报 on_resume_state）。
 # 续查状态存在 resume_params["video"]：{"protocol", "tasks": [{"id", ...}], "sent"?}，内容由各 caller 定。
 VIDEO_RESUMABLE_PROTOCOLS = frozenset({
-    "evolink", "openrouter", "seedance", "kling", "klingai", "dashscope"})
+    "evolink", "openrouter", "seedance", "kling", "klingai", "dashscope", "vidu"})
 
 
 def is_unpriced(record: Any) -> bool:

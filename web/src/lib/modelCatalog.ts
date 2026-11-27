@@ -1,7 +1,7 @@
 import { normalizedModelId } from './modelFamily';
 
 export type ModelBrand = 'openai' | 'gemini' | 'bytedance' | 'midjourney' | 'flux' | 'kling' | 'minimax' | 'alibaba' | 'anthropic' | 'deepseek' | 'moonshot' | 'zhipu';
-interface CatalogEntry { key: string; name: string; brand: ModelBrand; description: string; match: RegExp }
+interface CatalogEntry { key: string; name: string; brand?: ModelBrand; description: string; match: RegExp }
 // Order is display popularity only; it never changes automatic routing priority.
 const catalog: CatalogEntry[] = [
   { key: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', brand: 'openai', description: 'Most detailed, consistent across edits. GIF output.', match: /^gpt-image-2\.6-sunburst$/ },
@@ -32,6 +32,14 @@ const catalog: CatalogEntry[] = [
   { key: 'kling-3.0-omni', name: 'Kling 3.0 Omni', brand: 'kling', description: 'Kling 3.0 driven by reference images.', match: /^(?:kling-v?3(?:[.-]0)?-omni|kling-o3)(?:-(?:text|image|reference)-to-video)?$/ },
   { key: 'kling-3.0-turbo', name: 'Kling 3.0 Turbo', brand: 'kling', description: 'Quicker, lower-cost Kling 3.0.', match: /^kling-v?3(?:[.-]0)?-turbo(?:-(?:text|image)-to-video)?$/ },
   { key: 'minimax-h3', name: 'MiniMax H3', brand: 'minimax', description: 'Near top-tier quality at a low per-second price.', match: /^minimax-h3$/ },
+  { key: 'viduq4-preview', name: 'Vidu Q4 Preview', description: 'Up to 4K with 15 image and 3 audio references.', match: /^viduq4-preview$/ },
+  { key: 'viduq3-pro', name: 'Vidu Q3 Pro', description: 'Flagship Vidu Q3 with native audio and first/last frames.', match: /^viduq3-pro$/ },
+  { key: 'viduq3-pro-fast', name: 'Vidu Q3 Pro Fast', description: 'Faster Vidu Q3 Pro for image and first/last-frame video.', match: /^viduq3-pro-fast$/ },
+  { key: 'viduq3-turbo', name: 'Vidu Q3 Turbo', description: 'Fast Vidu Q3 across text, frames and image references.', match: /^viduq3-turbo$/ },
+  { key: 'viduq3-drama', name: 'Vidu Q3 Drama', description: 'Reference video tuned for multi-character dialogue scenes.', match: /^viduq3-drama$/ },
+  { key: 'viduq3-ad', name: 'Vidu Q3 Ad', description: 'Reference video tuned for short commercial pacing.', match: /^viduq3-ad$/ },
+  { key: 'viduq3-mix', name: 'Vidu Q3 Mix', description: 'Balanced general-purpose Vidu Q3 reference video.', match: /^viduq3-mix$/ },
+  { key: 'viduq3', name: 'Vidu Q3', description: 'Consistent multi-shot reference video with native audio.', match: /^viduq3$/ },
   { key: 'happyhorse-1.1', name: 'HappyHorse 1.1', brand: 'alibaba', description: 'Alibaba video from text, image or references.', match: /^happyhorse-1\.1(-.*)?$/ },
   { key: 'seedance-2.0-mini', name: 'Seedance 2.0 Mini', brand: 'bytedance', description: 'Lightweight Seedance for quick drafts.', match: /^(doubao-)?seedance-2[.-]0-mini(-\d+)?$/ },
   { key: 'happyhorse-1.0', name: 'HappyHorse 1.0', brand: 'alibaba', description: 'Earlier HappyHorse release.', match: /^happyhorse-1\.0(-.*)?$/ },

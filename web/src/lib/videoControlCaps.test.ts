@@ -160,6 +160,34 @@ describe('videoControlCaps', () => {
     expect(caps.supportsReferenceVideo).toBe(false);
     expect(videoControlCaps('kling-v3-text-to-video', 'evolink').modes).toEqual(['firstlast']);
   });
+
+  it('vidu Q4 / Q3 caps follow the verified Tuzi per-model contract', () => {
+    const q4 = videoControlCaps('viduq4-preview', 'vidu');
+    expect(q4.family).toBe('vidu');
+    expect(q4.modes).toEqual(['firstlast', 'omni']);
+    expect([q4.durations[0], q4.durations.at(-1)]).toEqual([3, 16]);
+    expect(q4.resolutions).toEqual(['540p', '720p', '1080p', '2K', '4K']);
+    expect(q4.supportsAudio).toBe(true);
+    expect(q4.supportsReferenceAudio).toBe(true);
+    expect([q4.maxFrames, q4.maxRefImages, q4.maxRefAudios]).toEqual([1, 15, 3]);
+
+    const pro = videoControlCaps('viduq3-pro', 'vidu');
+    expect(pro.modes).toEqual(['firstlast']);
+    expect([pro.durations[0], pro.durations.at(-1), pro.maxFrames]).toEqual([1, 16, 2]);
+
+    const proFast = videoControlCaps('viduq3-pro-fast', 'vidu');
+    expect(proFast.resolutions).toEqual(['720p', '1080p']);
+    expect(proFast.ratios).toEqual([]);
+
+    const drama = videoControlCaps('viduq3-drama', 'vidu');
+    expect(drama.modes).toEqual(['omni']);
+    expect(drama.ratios).toEqual(['16:9', '9:16', 'adaptive']);
+    expect([drama.maxRefImages, drama.maxRefAudios]).toEqual([7, 3]);
+
+    expect(videoControlCaps('viduq3-ad', 'vidu').supportsAudio).toBe(false);
+    expect(videoControlCaps('viduq3-mix', 'vidu').supportsAudio).toBe(false);
+    expect(videoControlCaps('viduq3-turbo').family).toBe('vidu');
+  });
 });
 
 describe('duration helpers', () => {

@@ -312,6 +312,7 @@ class JobParams(BaseModel):
     mj_seed: int | None = None        # --seed
     mj_no: str | None = None          # --no 排除词，逗号分隔
     mj_tile: bool | None = None       # --tile 无缝平铺
+    mj_style_raw: bool | None = None  # --style raw 原始风格
     mj_iw: float | None = None        # --iw 垫图权重 0-3
     mj_sref_code: str | None = Field(default=None, pattern=r"^[0-9]+$", max_length=32)
     mj_profile: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]+$", max_length=64)
@@ -889,7 +890,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
         # mj_flags 不在其中。
         "mode", "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird",
         "mj_profile", "mj_sref_code",
-        "mj_seed", "mj_no", "mj_tile", "mj_iw", "mj_sw", "mj_cw", "mj_ow",
+        "mj_seed", "mj_no", "mj_tile", "mj_style_raw", "mj_iw", "mj_sw", "mj_cw", "mj_ow",
     }),
     "video": frozenset({
         "duration", "resolution", "ratio", "mode", "frame_mode", "seed",

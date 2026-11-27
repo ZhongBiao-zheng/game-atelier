@@ -105,7 +105,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   已接入：EvoLink 可灵视频（`sent` 为提交时的回显过滤集合，原样存下，因为重建请求会重新上传、得到不同地址）、OpenRouter 视频
   （存上游给的 `polling_url`，结果走 `unsigned_urls`，不需要回显过滤）、Seedance（`sent` 原样存下，理由同 EvoLink：本地参考视频经 OSS 上传；
   提交响应已直出的那单存 `tasks[].url`，续查时直接下载）、可灵旧版（存端点 `act` 与 `sent`）、可灵新版（存任务地址 `url` 与 `sent`，
-  本地参考视频同样经 OSS 上传）、DashScope（存 `sent`）。任一提交尝试为「未确认」的视频任务不续查，按 `unconfirmed` 失败。
+  本地参考视频同样经 OSS 上传）、Vidu（兔子统一 `/v1/videos`，存任务地址 `url` 与 `sent`）、DashScope（存 `sent`）。任一提交尝试为「未确认」的视频任务不续查，按 `unconfirmed` 失败。
   存下的 `protocol` 与这次按 KEY 算出的协议不同（停机期间 KEY 被改过）时不续查，按 `unconfirmed` 失败；续查时原路由已不存在或网关密钥已撤销，
   同样按 `unconfirmed` 失败（上游已有订单）。
   OpenRouter、可灵旧版、DashScope 视频提交后立即上报订单号，之后失败不再被当成「没执行」换别家重提。
@@ -115,7 +115,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
   各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
   图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/complexity/output_format/frame_count/frame_duration_ms/steps/cfg_scale/requested_size、
-  bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
+  bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_style_raw/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
   image_edit 额外接收 image_edit 对象，layer_split 额外接收 layer_decomposition。未声明字段返回 422。
   `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
 - 密钥策略（第 7 批）：`quota: {cap_cny, period: day|week|month|none, since} | null`（金额 >0 且 ≤1,000,000；since 由主机写，只改金额时保留、改周期时重置）；

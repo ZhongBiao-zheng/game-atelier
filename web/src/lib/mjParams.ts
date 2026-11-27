@@ -26,6 +26,7 @@ export interface MjParams {
   seed: string;
   no: string;
   tile: boolean;
+  styleRaw: boolean;
   /** null = 不发（走上游默认权重）。sw 也适用于编号式 sref，其余权重需对应参考图。 */
   iw: number | null;
   sw: number | null;
@@ -45,6 +46,7 @@ export const MJ_DEFAULTS: MjParams = {
   seed: '',
   no: '',
   tile: false,
+  styleRaw: false,
   iw: null,
   sw: null,
   cw: null,
@@ -53,7 +55,7 @@ export const MJ_DEFAULTS: MjParams = {
 
 /** EvoLink V8.2 固定模型与速度，切换渠道时不继承 Tuzi 的专属参数。 */
 export function evolinkMjParams(params: MjParams): MjParams {
-  return { ...params, botType: 'MID_JOURNEY', mode: 'FAST', version: '8.2', profile: '', cw: null, ow: null };
+  return { ...params, botType: 'MID_JOURNEY', mode: 'FAST', version: '8.2', profile: '', styleRaw: false, cw: null, ow: null };
 }
 
 export const MJ_BOT_TYPES: { value: MjBotType; label: string }[] = [
@@ -72,7 +74,7 @@ export const MJ_MODES: { value: MjMode; label: string }[] = [
 // niji 与 Midjourney 是两套版本体系，flag 名和版本号都不通用（--v 7 vs --niji 6）。
 // 后端 mj_image._version_flag 按 bot_type 决定 flag 名，这里按同一判据给档位。
 export const MJ_VERSIONS = ['8.2', '8.1', '8', '7', '6.1', '6'];
-export const NIJI_VERSIONS = ['7', '6', '5'];
+export const NIJI_VERSIONS = ['8', '7', '6', '5'];
 
 export function versionsFor(botType: MjBotType): string[] {
   return botType === 'NIJI_JOURNEY' ? NIJI_VERSIONS : MJ_VERSIONS;
@@ -103,7 +105,7 @@ export function refSlotSupported(slot: 'cref' | 'oref', version: string): boolea
  *  2026-09-17 实测：v8.2 / niji 6 / niji 5 都出真无缝图，唯独 niji 7 整条任务被判
  *  [invalid_parameter] 提示词格式错误（对照组 niji 7 不带 tile 正常）。 */
 export function tileSupported(botType: MjBotType, version: string): boolean {
-  return !(botType === 'NIJI_JOURNEY' && version === '7');
+  return !(botType === 'NIJI_JOURNEY' && (version === '7' || version === '8'));
 }
 
 export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];
@@ -149,6 +151,7 @@ export function mjParamsToJob(p: MjParams): Record<string, unknown> {
   if (Number.isFinite(seed)) out.mj_seed = seed;
   if (p.no.trim()) out.mj_no = p.no.trim();
   if (p.tile) out.mj_tile = true;
+  if (p.styleRaw) out.mj_style_raw = true;
   if (p.iw !== null) out.mj_iw = p.iw;
   if (p.sw !== null) out.mj_sw = p.sw;
   if (p.cw !== null) out.mj_cw = p.cw;
@@ -179,6 +182,7 @@ export function mjParamsFromJob(params: Record<string, unknown> | undefined): Mj
     seed: typeof p.mj_seed === 'number' ? String(p.mj_seed) : '',
     no: typeof p.mj_no === 'string' ? p.mj_no : '',
     tile: p.mj_tile === true,
+    styleRaw: p.mj_style_raw === true,
     iw: typeof p.mj_iw === 'number' ? p.mj_iw : null,
     sw: typeof p.mj_sw === 'number' ? p.mj_sw : null,
     cw: typeof p.mj_cw === 'number' ? p.mj_cw : null,
@@ -195,6 +199,7 @@ export function mjSummary(p: MjParams): string {
   ];
   if (p.chaos > 0) parts.push(`c${p.chaos}`);
   if (p.weird > 0) parts.push(`w${p.weird}`);
+  if (p.styleRaw) parts.push('raw');
   if (p.tile) parts.push('平铺');
   return parts.join(' · ');
 }

@@ -48,6 +48,7 @@ const PARAM_LABELS: Record<string, string> = {
   mj_seed: 'Seed',
   mj_no: '排除词',
   mj_tile: '无缝平铺',
+  mj_style_raw: '原始风格',
   mj_iw: '垫图权重',
   mj_sw: '风格权重',
   mj_cw: '角色权重',

@@ -141,6 +141,82 @@ def kling_spec(model: str) -> KlingSpec | None:
     return None
 
 
+@dataclass(frozen=True)
+class ViduSpec:
+    """Vidu Q4 / Q3 系列型号能力（兔子 /v1/videos 统一入口，2026-11-17 契约 + 11-27 实测）。"""
+    label: str
+    actions: tuple[str, ...]  # textGenerate | generate | firstTailGenerate | referenceGenerate
+    min_duration: int
+    max_duration: int
+    resolutions: tuple[str, ...]
+    ratios: tuple[str, ...]
+    max_frames: int  # 2 = 首+尾，1 = 仅首帧，0 = 无首尾帧模式
+    audio_toggle: bool  # audio bool 开关
+    max_images: int  # referenceGenerate 图片上限
+    max_audios: int  # referenceGenerate MP3 音频上限（sounds[]）
+    ref_supports_auto_ratio: bool = False
+    ref_audio_toggle: bool = True
+    ref_duration_range: tuple[int, int] | None = None
+
+
+_VIDU_RATIOS_5 = ("16:9", "9:16", "1:1", "4:3", "3:4")
+_VIDU_RATIOS_DRAMA = ("16:9", "9:16")
+
+_VIDU_SPECS: dict[str, ViduSpec] = {
+    "viduq4-preview": ViduSpec(
+        "Vidu Q4 Preview", ("generate", "referenceGenerate"), 3, 16,
+        ("540p", "720p", "1080p", "2K", "4K"), _VIDU_RATIOS_5,
+        max_frames=1, audio_toggle=True, max_images=15, max_audios=3,
+        ref_supports_auto_ratio=False,
+    ),
+    "viduq3-pro": ViduSpec(
+        "Vidu Q3 Pro", ("textGenerate", "generate", "firstTailGenerate"), 1, 16,
+        ("540p", "720p", "1080p"), _VIDU_RATIOS_5,
+        max_frames=2, audio_toggle=True, max_images=0, max_audios=0,
+    ),
+    "viduq3-pro-fast": ViduSpec(
+        "Vidu Q3 Pro Fast", ("generate", "firstTailGenerate"), 1, 16,
+        ("720p", "1080p"), (),
+        max_frames=2, audio_toggle=True, max_images=0, max_audios=0,
+    ),
+    "viduq3-turbo": ViduSpec(
+        "Vidu Q3 Turbo", ("textGenerate", "generate", "firstTailGenerate", "referenceGenerate"),
+        1, 16, ("540p", "720p", "1080p"), _VIDU_RATIOS_5,
+        max_frames=2, audio_toggle=True, max_images=7, max_audios=0,
+        ref_supports_auto_ratio=True, ref_audio_toggle=False, ref_duration_range=(3, 15),
+    ),
+    "viduq3": ViduSpec(
+        "Vidu Q3", ("referenceGenerate",), 3, 16,
+        ("540p", "720p", "1080p"), _VIDU_RATIOS_5,
+        max_frames=0, audio_toggle=True, max_images=7, max_audios=0,
+        ref_supports_auto_ratio=True,
+    ),
+    "viduq3-drama": ViduSpec(
+        "Vidu Q3 Drama", ("referenceGenerate",), 2, 16,
+        ("720p", "1080p"), _VIDU_RATIOS_DRAMA,
+        max_frames=0, audio_toggle=True, max_images=7, max_audios=3,
+        ref_supports_auto_ratio=True,
+    ),
+    "viduq3-ad": ViduSpec(
+        "Vidu Q3 Ad", ("referenceGenerate",), 3, 15,
+        ("720p", "1080p"), _VIDU_RATIOS_5,
+        max_frames=0, audio_toggle=False, max_images=7, max_audios=0,
+        ref_supports_auto_ratio=True,
+    ),
+    "viduq3-mix": ViduSpec(
+        "Vidu Q3 Mix", ("referenceGenerate",), 3, 15,
+        ("720p", "1080p"), _VIDU_RATIOS_5,
+        max_frames=0, audio_toggle=False, max_images=7, max_audios=0,
+        ref_supports_auto_ratio=True,
+    ),
+}
+
+
+def vidu_spec(model: str) -> ViduSpec | None:
+    """按精确型号 ID 查 Vidu Q4 / Q3 能力；未知型号返回 None。"""
+    return _VIDU_SPECS.get((model or "").strip().lower())
+
+
 # ── 首尾帧补间的默认参数（序列帧插件的生成草稿用）────────────────────────────────────
 # 只覆盖前后端对「能做首尾帧」判断一致的协议，取值与 web/src/lib/videoControlCaps.ts 同一张表：
 # 不在这里的模型，插件不替用户选（前端遇到 maxFrames < 2 的模型会断开首尾帧连线）。
@@ -175,4 +251,9 @@ def first_last_video_defaults(protocol: str | None, model: str, width: int, heig
             return None
         return {"duration": spec.min_duration, "resolution": spec.resolutions[0],
                 "ratio": nearest_ratio(width, height, spec.ratios)}
+    if protocol == "vidu":
+        spec = vidu_spec(model)
+        if spec is None or "firstTailGenerate" not in spec.actions:
+            return None
+        return {"duration": spec.min_duration, "resolution": spec.resolutions[0], "watermark": False}
     return None

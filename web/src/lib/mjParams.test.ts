@@ -44,6 +44,7 @@ describe('mjParamsToJob', () => {
     expect(out).not.toHaveProperty('mj_no');
     expect(out).not.toHaveProperty('mj_iw');
     expect(out).not.toHaveProperty('mj_tile');
+    expect(out).not.toHaveProperty('mj_style_raw');
     expect(out).not.toHaveProperty('mj_sref_code');
     expect(out).not.toHaveProperty('mj_profile');
   });
@@ -54,11 +55,13 @@ describe('mjParamsToJob', () => {
       seed: '12345',
       no: '  text, watermark  ',
       tile: true,
+      styleRaw: true,
       iw: 1.5,
     });
     expect(out.mj_seed).toBe(12345);
     expect(out.mj_no).toBe('text, watermark');
     expect(out.mj_tile).toBe(true);
+    expect(out.mj_style_raw).toBe(true);
     expect(out.mj_iw).toBe(1.5);
   });
 
@@ -100,6 +103,7 @@ describe('mjParamsFromJob', () => {
       seed: '999',
       no: 'blur',
       tile: true,
+      styleRaw: true,
       iw: 2,
       sw: 250,
       cw: 50,
@@ -133,12 +137,12 @@ describe('mjParamsFromJob', () => {
 describe('版本体系随模型切换', () => {
   it('两套版本档位不通用', () => {
     expect(versionsFor('MID_JOURNEY')).toEqual(['8.2', '8.1', '8', '7', '6.1', '6']);
-    expect(versionsFor('NIJI_JOURNEY')).toEqual(['7', '6', '5']);
+    expect(versionsFor('NIJI_JOURNEY')).toEqual(['8', '7', '6', '5']);
   });
 
   it('切到 niji 时把不合法的版本纠到 niji 的首档', () => {
-    // 留着 7 会让后端拼出 `--niji 7` —— 一个不存在的组合。
-    expect(normalizeVersion('NIJI_JOURNEY', '6.1')).toBe('7'); // 6.1 只有 MJ 有
+    // 6.1 只有 MJ 有，切到 niji 回到首档 8。
+    expect(normalizeVersion('NIJI_JOURNEY', '6.1')).toBe('8');
     expect(normalizeVersion('NIJI_JOURNEY', '6')).toBe('6');   // 6 两边都有，留着
     expect(normalizeVersion('MID_JOURNEY', '5')).toBe('8.2');  // 5 只有 niji 有
     expect(normalizeVersion('MID_JOURNEY', '8.1')).toBe('8.1');
@@ -146,7 +150,7 @@ describe('版本体系随模型切换', () => {
 
   it('从 job 还原时也按 botType 纠版本（旧 job 可能存着另一套的版本号）', () => {
     const restored = mjParamsFromJob({ bot_type: 'NIJI_JOURNEY', mj_version: '6.1' });
-    expect(restored.version).toBe('7');
+    expect(restored.version).toBe('8');
   });
 });
 
@@ -155,22 +159,24 @@ describe('mjSummary', () => {
     expect(mjSummary(MJ_DEFAULTS)).toBe('v8.2 · 快速 · s100');
   });
 
-  it('niji 与非零的 chaos / weird / tile 才出现在摘要里', () => {
+  it('niji 与非零的 chaos / weird / styleRaw / tile 才出现在摘要里', () => {
     const s = mjSummary({
       ...MJ_DEFAULTS,
       botType: 'NIJI_JOURNEY',
-      version: '7',
+      version: '8',
       mode: 'TURBO',
       chaos: 10,
       weird: 250,
+      styleRaw: true,
       tile: true,
     });
-    expect(s).toBe('niji 7 · 极速 · s100 · c10 · w250 · 平铺');
+    expect(s).toBe('niji 8 · 极速 · s100 · c10 · w250 · raw · 平铺');
   });
 });
 
 describe('tile 的版本门禁', () => {
-  it('只挡 niji 7 —— 已实测能用的版本一个都不许被顺手关掉', () => {
+  it('只挡 niji 7 和 niji 8 —— 已实测能用的版本一个都不许被顺手关掉', () => {
+    expect(tileSupported('NIJI_JOURNEY', '8')).toBe(false);
     expect(tileSupported('NIJI_JOURNEY', '7')).toBe(false);
     expect(tileSupported('NIJI_JOURNEY', '6')).toBe(true);
     expect(tileSupported('NIJI_JOURNEY', '5')).toBe(true);

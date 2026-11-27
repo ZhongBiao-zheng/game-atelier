@@ -22,7 +22,7 @@ export type VideoFrameMode = 'auto' | 'first' | 'last' | 'firstlast';
 export type VideoQuality = 'std' | 'pro';
 
 export interface VideoControlCaps {
-  family: 'seedance' | 'happyhorse' | 'kling' | 'klingai' | 'openrouter' | 'standard';
+  family: 'seedance' | 'happyhorse' | 'kling' | 'klingai' | 'vidu' | 'openrouter' | 'standard';
   /** 可用生成方式；只有一种时 VideoControls 隐藏该分区。 */
   modes: VideoMode[];
   /** 可选时长（秒）；空数组 = 该模式无时长参数（如 happyhorse video-edit 随输入），隐藏分区。 */
@@ -274,6 +274,143 @@ function klingaiCaps(id: string, protocol: string): VideoControlCaps | null {
   };
 }
 
+// Vidu Q4 / Q3 系列（兔子 /v1/videos 统一入口，2026-11-17 契约 + 2026-11-27 实测）。
+// 与服务端 video_caps.vidu_spec 同表；adaptive 在参考模式下发 auto。
+const VIDU_RATIOS_5 = ['16:9', '9:16', '1:1', '4:3', '3:4'];
+const VIDU_RATIOS_5_AUTO = [...VIDU_RATIOS_5, 'adaptive'];
+const VIDU_RATIOS_DRAMA = ['16:9', '9:16', 'adaptive'];
+
+const VIDU_CAPS_MAP: Record<string, VideoControlCaps> = {
+  'viduq4-preview': {
+    family: 'vidu',
+    modes: ['firstlast', 'omni'],
+    durations: durationRange(3, 16),
+    resolutions: ['540p', '720p', '1080p', '2K', '4K'],
+    ratios: VIDU_RATIOS_5,
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: true,
+    maxFrames: 1,
+    maxRefImages: 15,
+    maxRefVideos: 0,
+    maxRefAudios: 3,
+  },
+  'viduq3-pro': {
+    family: 'vidu',
+    modes: ['firstlast'],
+    durations: durationRange(1, 16),
+    resolutions: ['540p', '720p', '1080p'],
+    ratios: VIDU_RATIOS_5,
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 2,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+  'viduq3-pro-fast': {
+    family: 'vidu',
+    modes: ['firstlast'],
+    durations: durationRange(1, 16),
+    resolutions: ['720p', '1080p'],
+    ratios: [],
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 2,
+    maxRefImages: 0,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+  'viduq3-turbo': {
+    family: 'vidu',
+    modes: ['firstlast', 'omni'],
+    durations: durationRange(1, 16),
+    resolutions: ['540p', '720p', '1080p'],
+    ratios: VIDU_RATIOS_5_AUTO,
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 2,
+    maxRefImages: 7,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+  viduq3: {
+    family: 'vidu',
+    modes: ['omni'],
+    durations: durationRange(3, 16),
+    resolutions: ['540p', '720p', '1080p'],
+    ratios: VIDU_RATIOS_5_AUTO,
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 0,
+    maxRefImages: 7,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+  'viduq3-drama': {
+    family: 'vidu',
+    modes: ['omni'],
+    durations: durationRange(2, 16),
+    resolutions: ['720p', '1080p'],
+    ratios: VIDU_RATIOS_DRAMA,
+    supportsAudio: true,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: true,
+    maxFrames: 0,
+    maxRefImages: 7,
+    maxRefVideos: 0,
+    maxRefAudios: 3,
+  },
+  'viduq3-ad': {
+    family: 'vidu',
+    modes: ['omni'],
+    durations: durationRange(3, 15),
+    resolutions: ['720p', '1080p'],
+    ratios: VIDU_RATIOS_5_AUTO,
+    supportsAudio: false,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 0,
+    maxRefImages: 7,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+  'viduq3-mix': {
+    family: 'vidu',
+    modes: ['omni'],
+    durations: durationRange(3, 15),
+    resolutions: ['720p', '1080p'],
+    ratios: VIDU_RATIOS_5_AUTO,
+    supportsAudio: false,
+    supportsWatermark: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: 0,
+    maxRefImages: 7,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  },
+};
+
+export function isViduVideoModel(id: string): boolean {
+  return id.trim().toLowerCase() in VIDU_CAPS_MAP;
+}
+
+function viduCaps(id: string): VideoControlCaps | null {
+  return VIDU_CAPS_MAP[id.trim().toLowerCase()] ?? null;
+}
+
 /** 自定义接口（ADR-0036）：只开放模板声明的选项；没有参考视频 / 音频，也没有音画开关。 */
 function declaredVideoCaps(declared: ModelDeclared | null | undefined): VideoControlCaps {
   const caps = availableDeclared(declared);
@@ -308,11 +445,13 @@ export function videoControlCaps(
   if (p === 'dashscope') return happyhorseCaps(id);
   if (p === 'kling') return klingCaps(id);
   if (p === 'klingai' || p === 'evolink') return klingaiCaps(id, p) ?? STANDARD_CAPS;
+  if (p === 'vidu') return viduCaps(id) ?? STANDARD_CAPS;
   if (p === 'openrouter') return OPENROUTER_VIDEO_CAPS;
   // 无协议 → 退回按 modelId 子串识别（命名 provider 历史调用兼容）。
   if (id.includes('seedance')) return seedanceCaps(id);
   if (id.includes('happyhorse')) return happyhorseCaps(id);
   if (id.startsWith('kling')) return klingCaps(id);
+  if (id in VIDU_CAPS_MAP) return VIDU_CAPS_MAP[id];
   return STANDARD_CAPS;
 }
 

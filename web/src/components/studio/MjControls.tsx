@@ -249,6 +249,15 @@ export function MjControls({
             </Segmented>
           </Section>
 
+          {!evolink && (
+            <Section title="原始风格 style raw" hint="减少默认美术加工，更贴合提示词字面描述">
+              <Segmented aria-label="原始风格开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.styleRaw} onSelect={() => onChange({ styleRaw: true })} value="开启" className="text-xs">开启</SegmentedItem>
+                <SegmentedItem selected={!value.styleRaw} onSelect={() => onChange({ styleRaw: false })} value="关闭" className="text-xs">关闭</SegmentedItem>
+              </Segmented>
+            </Section>
+          )}
+
           {tileSupported(value.botType, value.version) && (
             <Section title="无缝平铺 tile" hint="出可四方连续的贴图">
               <Segmented aria-label="无缝平铺开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">

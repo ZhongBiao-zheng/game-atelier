@@ -346,6 +346,23 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 - 图片只收公网 URL：本地图走 EvoLink 自带上传；参考视频不转存第三方，只收公网直链（界面不开视频槽）。
 - 2026-11-10 实测 `kling-v4-flash-text-to-video` 3s：HTTP 402 余额不足（预估 $0.28），未出片、未扣费。
 
+## 视频契约 — Vidu（`vidu`：兔子）
+
+契约源：`api.tu-zi.com/docs/api/video-viduq{4-preview,3-pro,3-pro-fast,3-turbo,3,3-drama,3-ad,3-mix}.md`（2026-11-17 核验）。caller `vidu_video.py`，能力表 `video_caps.vidu_spec`（前端 `videoControlCaps.ts` 同表）。
+
+- 入口：统一 `POST {root}/v1/videos`（JSON，`Authorization: Bearer <key>`），`metadata.action` 指定模式（`textGenerate` / `generate` / `firstTailGenerate` / `referenceGenerate`）；查询 `GET /v1/videos/{id}`，成片地址在 `metadata.url`（部分响应在顶层 `video_url`），缺失时兜底 `/v1/videos/{id}/content`。
+- 图片走 `images[]`，支持公网 URL 或 `data:image/<mime>;base64,...`（2026-11-27 实测直通）；参考音频（`viduq4-preview` / `viduq3-drama`）走 `sounds[]`（0–3 段 MP3），优先经 OSS 转公网 URL，未配 OSS 时回退 base64。
+- 八款型号：
+  - `viduq4-preview`：图生 / 图参（1–15 图 + 0–3 音频），3–16s，540p/720p/1080p/2K/4K，无文生与首尾帧。
+  - `viduq3-pro`：文生 / 图生 / 首尾帧，1–16s，540p/720p/1080p。
+  - `viduq3-pro-fast`：图生 / 首尾帧，1–16s，720p/1080p（无 540p、无画幅参数）。
+  - `viduq3-turbo`：文生 / 图生 / 首尾帧（1–16s）+ 图参（3–15s、1–7 图、无 audio 开关），540p/720p/1080p。
+  - `viduq3`：仅图参（1–7 图），3–16s，540p/720p/1080p。
+  - `viduq3-drama`：仅图参（1–7 图 + 0–3 音频），2–16s，720p/1080p，画幅 16:9/9:16/auto。
+  - `viduq3-ad` / `viduq3-mix`：仅图参（1–7 图），3–15s，720p/1080p，无 audio 开关。
+- 2026-11-27 实测（Tuzi）：`viduq3-turbo` 文生 1s 540p 41.7s 出片（960×528 24fps H.264+AAC）；`viduq4-preview` 图参 3s 540p（base64 图）90.9s 出片（960×528）；`viduq3-pro` 首尾帧 1s 540p（双 base64 图）190.6s 出片（720×720）。
+- 暂未接入：官方 `subjects` 主体库（Tuzi 侧未开放）、`off_peak` 错峰、`is_rec` 提示词改写；计价暂留未计价（Tuzi v2 表达式超出受限解释器子集且未做账单逐位核对）。
+
 ## 语音契约 — MiniMax T2A v2（`minimax-t2a`：词元跳动 / 官方）
 
 契约源：官方 `platform.minimaxi.com/docs/api-reference/speech-t2a-http`，转发 `tokendance.space/docs/protocol-minimax-t2a-v2.md`。
@@ -417,13 +434,14 @@ caller `callers/ark_speech.py`。
     base 含 openai-hk                        → 强制同步通道（gpt-image 发 ?async=true 会 404）
     HK 上的非 gpt-image / nano-banana 族      → 回落 /chat/completions 抽图
 
-视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，七个协议
+视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，八个协议
   declarative → declarative.render_video（自定义接口，只允许 provider=custom）
   seedance   → volcengine_video   （Ark 直连 / 词元跳动改写任务 URL）
   dashscope  → happyhorse_video   （阿里百炼 / 词元跳动转发）
   kling      → kling_video        （HK 聚合旧版接口，挂站点根）
   klingai    → klingai_video      （可灵 3.0 / 4.0 新版接口：词元跳动 / 兔子）
   evolink    → evolink_video      （EvoLink 可灵，按任务拆 id）
+  vidu       → vidu_video         （Vidu Q4 / Q3：兔子统一 /v1/videos）
   openrouter → openrouter_video   （异步 /videos job）
   protocol 为 None → WrongProviderError「无法识别视频模型的接口协议」
 ```

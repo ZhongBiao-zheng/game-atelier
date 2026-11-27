@@ -151,14 +151,14 @@ def dispatch_video(
         raise WrongProviderError("只有自定义供应商可以使用自定义接口")
     if not protocol:
         raise WrongProviderError(
-            f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / klingai / dashscope 系），"
+            f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / klingai / vidu / dashscope 系），"
             "请确认模型 id 与供应商配置"
         )
     adapter = VIDEO_ADAPTERS.get(protocol)
     if adapter is None:
         raise WrongProviderError(f"未知视频协议 {protocol!r}（模型 {model!r}）")
     seed = (params or {}).get("seed")
-    if seed is not None and int(seed) >= 0 and protocol not in {"seedance", "dashscope", "openrouter"}:
+    if seed is not None and int(seed) >= 0 and protocol not in {"seedance", "dashscope", "openrouter", "vidu"}:
         raise ValueError("当前视频接口不支持固定种子，请清除种子或更换模型")
     return adapter.render(
         prompt=prompt, model=model, alias=alias,
