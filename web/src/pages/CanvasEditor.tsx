@@ -61,6 +61,7 @@ import {
   submitCanvasImageEdit,
   type CanvasImageEditSavePayload,
   submitCanvasReversePrompt,
+  submitCanvasTextRevision,
   uploadCanvasMedia,
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
@@ -94,6 +95,7 @@ import { AnimatePresence, cubicBezier, motion } from 'motion/react';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
 import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
+import { codePointRange, type CanvasTextRevisionInput } from '@/components/canvas/canvasTextRevision';
 import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
@@ -3743,6 +3745,57 @@ function CanvasEditorInner({
   ]);
   const reversePrompt = useCallback((node: CanvasContentNode): Promise<void> => queueSubmission(node.id, stillWanted => reversePromptNow(node, stillWanted), undefined), [queueSubmission, reversePromptNow]);
 
+  const submitTextRevisionNow = useCallback(async (
+    nodeId: string,
+    request: CanvasTextRevisionInput,
+    stillWanted: () => boolean,
+  ) => {
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    setError(null);
+    try {
+      if (!await persistNow() || !stillWanted()) return;
+      const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
+      const version = node?.type === 'text' && node.data.current_version_id
+        ? latestDocument.current?.content_versions[node.data.current_version_id]
+        : undefined;
+      if (version?.kind !== 'text' || !version.text.trim()) {
+        setError('请选择一个已有正文的文本节点再改写。');
+        return;
+      }
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasTextRevision(projectId, nodeId, serverRevision.current, {
+        instruction: request.instruction,
+        selection: request.selection ? codePointRange(version.text, request.selection) : null,
+        alias: request.alias,
+        model: request.model,
+      });
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(nodeId);
+        return next;
+      });
+    }
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
+  const submitTextRevision = useCallback((nodeId: string, request: CanvasTextRevisionInput): Promise<void> => queueSubmission(nodeId, stillWanted => submitTextRevisionNow(nodeId, request, stillWanted), undefined), [queueSubmission, submitTextRevisionNow]);
+
   const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
     const current = latestDocument.current;
     const source = current?.nodes.find(node => node.id === sourceNode.id);
@@ -5692,6 +5745,7 @@ function CanvasEditorInner({
     shareResult: shareCanvasResult,
     copyPrompt,
     reversePrompt,
+    submitTextRevision,
     createLayerDecomposition,
     submitLayerDecomposition,
     rerunLayerDecomposition,
@@ -5784,6 +5838,7 @@ function CanvasEditorInner({
     reversePrompt,
     reversePromptConfiguredNodeIds,
     renameNode,
+    submitTextRevision,
     saveNodeToLibrary,
     shareCanvasResult,
     multiSelectionActive,

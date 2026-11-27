@@ -401,7 +401,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/image-edits`
-`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,image-edit,angle,layer-decomposition}`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,text-revision,image-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/cancel`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
@@ -680,6 +680,13 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
 multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 实际输入连接，源图片
 Draft 不读不改；停止复用普通 Run 生命周期。
+
+`POST /canvas/projects/{id}/runs/text-revision` 接受 `surface_node_id + expected_revision + instruction`、
+可选 `selection_start + selection_end`（Unicode 码点，必须成对且非空）与所选文本模型 `alias + model`（`alias`
+为空 = 自动路由）。节点必须有非空正文且没有进行中的 Run。服务端把当前正文与指令冻结进 `final_prompt`，
+Snapshot 记 `text_revision`（基准 Version、指令、选区）；结果节点 = 被改写的节点本身，不新建节点。有选区时
+模型只返回片段，登记前拼回基准正文的选区位置，选区两端空白原样保留；登记时节点当前 Version 已不是基准
+Version（改写期间被手改）则该候选失败、不覆盖。
 
 普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
 `input_modalities`，不按模型名称猜测能力。Chat Completions 在兼容端点分别使用 `image_url`、

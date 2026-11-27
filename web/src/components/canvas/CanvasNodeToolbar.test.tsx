@@ -353,7 +353,7 @@ it('shows plugin image actions only while the plugin is enabled', async () => {
   act(() => setPluginsSnapshot([]));
 });
 
-it('edits text inside the node as one history session', () => {
+it('edits text in the panel content page and keeps the node as a wheel-scrollable preview', () => {
   const text = {
     ...nodes[0],
     data: { ...nodes[0].data, current_version_id: 'version-text' },
@@ -377,6 +377,13 @@ it('edits text inside the node as one history session', () => {
     </CanvasNodeContext.Provider>,
   );
 
+  // 节点只做预览：不挂 xyflow 的 nowheel（它会连捏合缩放一起拦掉），滚轮由预览自己判定。
+  const preview = container.querySelector('[data-canvas-text-preview]');
+  expect(preview).toHaveTextContent('雨夜列车分镜');
+  expect(preview).not.toHaveClass('nowheel');
+  // 有正文默认停在「内容」页。
+  expect(screen.getByRole('radio', { name: '内容' })).toHaveAttribute('data-state', 'on');
+
   const toolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
   fireEvent.click(within(toolbar).getByRole('button', { name: '编辑文本 文本' }));
 
@@ -388,10 +395,11 @@ it('edits text inside the node as one history session', () => {
   fireEvent.change(editor, { target: { value: '雨夜列车最终分镜' } });
   expect(context.updateText).toHaveBeenCalledWith('text', '雨夜列车最终分镜');
   fireEvent.keyDown(editor, { key: 'Escape' });
-  expect(screen.queryByRole('textbox', { name: '编辑 文本 正文' })).not.toBeInTheDocument();
+  expect(editor).not.toHaveFocus();
+  expect(context.setTextEditing).toHaveBeenLastCalledWith('text', false);
 
   fireEvent.doubleClick(container.querySelector('[data-canvas-node-id="text"]')!);
-  expect(screen.getByRole('textbox', { name: '编辑 文本 正文' })).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: '编辑 文本 正文' })).toHaveFocus();
   expect(context.recordHistory).toHaveBeenCalledTimes(2);
   expect(context.previewContent).not.toHaveBeenCalled();
 });
@@ -1237,4 +1245,79 @@ it('ignores host_call image actions from plugins outside the host allowlist', as
   await screen.findByRole('menuitem', { name: '裁剪 图片' });
   expect(screen.queryByRole('menuitem', { name: '冒充宿主' })).toBeNull();
   act(() => setPluginsSnapshot([]));
+});
+
+const TEXT_BODY = '一、调性\n城市夜行\n二、主视觉\n琥珀色液体\n冰镇瓶身';
+const textKeys = [{
+  alias: 'text-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+  capabilities: [], notes: '', created_at: '2026-08-26T00:00:00Z',
+  models: [{ id: 'gpt-5', name: 'GPT 5', modality: 'text', protocol: 'openai' }],
+}] as unknown as CanvasNodeContextValue['keys'];
+
+function revisableText(textBody = TEXT_BODY) {
+  const node = {
+    ...nodes[0],
+    data: {
+      ...nodes[0].data,
+      current_version_id: textBody ? 'version-text' : null,
+      generation_draft: { ...draft, mode: 'text' as const, alias: 'text-key', model: 'gpt-5' },
+    },
+  } as CanvasNode;
+  const context = nodeContext({
+    keys: textKeys,
+    submitTextRevision: vi.fn(async () => undefined),
+    resolveVersion: versionResolver(textBody ? {
+      'version-text': {
+        version_id: 'version-text', kind: 'text', text: textBody,
+        created_at: '2026-08-25T00:00:00Z', sha256: 'c'.repeat(64), origin: { kind: 'user_edit' },
+      },
+    } : {}),
+  });
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: node }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  return context;
+}
+
+it('opens an empty text node on the generate page', () => {
+  revisableText('');
+  expect(screen.getByRole('radio', { name: '生成' })).toHaveAttribute('data-state', 'on');
+  expect(screen.getByRole('region', { name: '文本设置' })).toBeInTheDocument();
+});
+
+it('revises only the selected span through the content page', () => {
+  const context = revisableText();
+  const editor = screen.getByRole('textbox', { name: '编辑 文本 正文' }) as HTMLTextAreaElement;
+  const start = TEXT_BODY.indexOf('琥珀');
+  const end = TEXT_BODY.length;
+  act(() => { editor.focus(); });
+  editor.setSelectionRange(start, end);
+  fireEvent.select(editor);
+  expect(screen.getByText(/选中 9 字/)).toBeInTheDocument();
+
+  const instruction = screen.getByRole('textbox', { name: '改写要求' });
+  act(() => { instruction.focus(); });
+  fireEvent.change(instruction, { target: { value: '更有夏天感' } });
+  fireEvent.click(screen.getByRole('button', { name: '改写' }));
+
+  expect(context.submitTextRevision).toHaveBeenCalledWith('text', {
+    instruction: '更有夏天感', selection: { start, end }, alias: 'text-key', model: 'gpt-5',
+  });
+  // 改写前先记一笔历史：结果写回后 ⌘Z 回到改写前的正文。
+  expect(context.recordHistory).toHaveBeenCalled();
+});
+
+it('revises the whole text when nothing is selected and refuses an empty request', () => {
+  const context = revisableText();
+  const instruction = screen.getByRole('textbox', { name: '改写要求' });
+  fireEvent.keyDown(instruction, { key: 'Enter' });
+  expect(context.submitTextRevision).not.toHaveBeenCalled();
+
+  fireEvent.change(instruction, { target: { value: '整体改短' } });
+  fireEvent.keyDown(instruction, { key: 'Enter' });
+  expect(context.submitTextRevision).toHaveBeenCalledWith('text', {
+    instruction: '整体改短', selection: null, alias: 'text-key', model: 'gpt-5',
+  });
 });

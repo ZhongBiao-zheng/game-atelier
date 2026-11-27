@@ -140,7 +140,7 @@ function existingVersion(node: CanvasNode): CanvasContentVersion {
 }
 
 function expectExistingContent(node: CanvasNode, container: HTMLElement) {
-  if (node.type === 'text') expect(screen.getByText('保留的文本内容')).toBeInTheDocument();
+  if (node.type === 'text') expect(screen.getByText('保留的文本内容', { selector: 'p' })).toBeInTheDocument();
   if (node.type === 'image') expect(container.querySelector('img')).toBeInTheDocument();
   if (node.type === 'video') expect(container.querySelector('video')).toBeInTheDocument();
   if (node.type === 'audio') expect(container.querySelector('audio')).toBeInTheDocument();

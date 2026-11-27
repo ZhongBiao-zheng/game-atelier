@@ -57,7 +57,7 @@ from character_workflow.lib.schemas import (
     CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasCategoriesUpdate, CanvasSpecUpdate, CanvasClassifyRequest, CanvasCategorySuggestion, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
-    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
+    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasTextRevisionCreate,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     ClipboardAttempt,
     CreationAsset, CreationAssetMetadataUpdate, CreationAssetList, CreationAssetUseRequest,
@@ -3699,6 +3699,58 @@ def post_canvas_reverse_prompt(
         )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/text-revision",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_text_revision(
+    project_id: str,
+    payload: CanvasTextRevisionCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        submit_text_revision_run,
+    )
+
+    if (payload.selection_start is None) != (payload.selection_end is None):
+        raise HTTPException(422, detail="选区起止必须同时给出")
+    selection = (
+        (payload.selection_start, payload.selection_end)
+        if payload.selection_start is not None and payload.selection_end is not None else None
+    )
+    if not payload.instruction.strip():
+        raise HTTPException(422, detail="请写下要怎么改")
+    try:
+        job, document = submit_text_revision_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            instruction=payload.instruction,
+            selection=selection,
+            alias=payload.alias,
+            model=payload.model,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或文本节点") from None
     except CanvasRunCommandError as error:
         raise HTTPException(422, detail={
             "code": error.code,

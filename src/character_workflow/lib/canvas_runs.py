@@ -79,6 +79,7 @@ from character_workflow.lib.schemas import (
     CANVAS_UPSCALE_LONG_EDGES,
     CanvasTextNode,
     CanvasTextNodeData,
+    CanvasTextRevision,
     CanvasTextVersion,
     CanvasUserMaskOrigin,
     CanvasVideoNode,
@@ -397,6 +398,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
                 "submit", "reverse_prompt", "mask_edit", "angle", "upscale", "layer_decomposition",
+                "text_revision",
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -1406,6 +1408,7 @@ def _commit_frozen_run(
     additional_versions: list[CanvasContentVersion] | None = None,
     artifacts: list[dict[str, Any]] | None = None,
     job_id: str | None = None,
+    text_revision: CanvasTextRevision | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
     job_id = job_id or new_job_id()
@@ -1414,7 +1417,9 @@ def _commit_frozen_run(
                    and surface.id in current.layer_material_node_ids())
     if edits_layer and canvas_node_has_pending_run(current, surface):
         raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
-    use_surface = (surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
+    # 改写的结果写回被改写的节点本身，不论它已有多少正文。
+    use_surface = text_revision is not None or (
+        surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
@@ -1438,6 +1443,9 @@ def _commit_frozen_run(
         "submitted_at": timestamp,
         "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
     }
+    if text_revision is not None:
+        # 只在改写任务里出现，其余任务的指纹保持不变。
+        snapshot_payload["text_revision"] = text_revision.model_dump(mode="json")
     snapshot = CanvasGenerationSnapshot(
         **snapshot_payload,
         request_fingerprint=_canonical_sha(snapshot_payload),
@@ -1748,6 +1756,146 @@ def submit_reverse_prompt_run(
             allow_surface_reuse=False,
             transaction_kind="reverse_prompt",
         )
+
+
+_TEXT_REVISION_WHOLE_PROMPT = (
+    "请按要求修改下面的文本。只输出修改后的完整文本，不要解释，不要加引号、标题或代码块。"
+    "保持原有的分段、编号和符号格式，除非要求里另有说明。\n\n"
+    "要求：{instruction}\n\n"
+    "文本：\n{text}"
+)
+_TEXT_REVISION_SELECTION_PROMPT = (
+    "请按要求只修改全文中标记为待修改的片段。只输出修改后的片段本身，不要输出片段以外的内容，"
+    "不要解释，不要加引号、标题或代码块。修改后要与上下文衔接，保持原片段的换行、编号和符号格式，"
+    "除非要求里另有说明。\n\n"
+    "要求：{instruction}\n\n"
+    "全文（供理解上下文）：\n{before}【待修改片段开始】{selected}【待修改片段结束】{after}\n\n"
+    "待修改片段：\n{selected}"
+)
+
+
+def text_revision_prompt(text: str, revision: CanvasTextRevision) -> str:
+    """冻结进 final_prompt 的改写请求：有选区只要片段，没有选区要全文。"""
+    instruction = revision.instruction.strip()
+    if revision.selection_start is None or revision.selection_end is None:
+        return _TEXT_REVISION_WHOLE_PROMPT.format(instruction=instruction, text=text)
+    start, end = revision.selection_start, revision.selection_end
+    return _TEXT_REVISION_SELECTION_PROMPT.format(
+        instruction=instruction,
+        before=text[:start],
+        selected=text[start:end],
+        after=text[end:],
+    )
+
+
+def revised_text(base: str, revision: CanvasTextRevision, output: str) -> str:
+    """把模型输出放回原文：全文改写直接替换；选区改写只换选区，选区两端的空白原样保留。"""
+    if revision.selection_start is None or revision.selection_end is None:
+        return output
+    start, end = revision.selection_start, revision.selection_end
+    selected = base[start:end]
+    leading = selected[:len(selected) - len(selected.lstrip())]
+    trailing = selected[len(selected.rstrip()):]
+    return f"{base[:start]}{leading}{output.strip()}{trailing}{base[end:]}"
+
+
+def submit_text_revision_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+    *,
+    instruction: str,
+    selection: tuple[int, int] | None,
+    alias: str | None,
+    model: str,
+) -> tuple[Job, CanvasDocument]:
+    """以文本节点当前正文为输入冻结一次改写，结果写回同一节点。"""
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+        if surface is None:
+            raise KeyError(surface_node_id)
+        version = (
+            current.content_versions.get(surface.data.current_version_id)
+            if isinstance(surface, CanvasTextNode) and surface.data.current_version_id else None
+        )
+        if not isinstance(version, CanvasTextVersion) or not version.text.strip():
+            raise CanvasRunCommandError(
+                "canvas_text_revision_source_missing", "请选择一个已有正文的文本节点再改写。",
+            )
+        if surface.data.active_run_id is not None:
+            raise CanvasRunCommandError(
+                "canvas_text_revision_busy", "这个文本节点正在生成，请稍后再试。",
+            )
+        if selection is not None and not 0 <= selection[0] < selection[1] <= len(version.text):
+            raise CanvasRunCommandError(
+                "canvas_text_revision_selection", "选区已超出当前正文，请重新选择。",
+            )
+        revision = CanvasTextRevision(
+            base_version_id=version.version_id,
+            instruction=instruction.strip(),
+            selection_start=selection[0] if selection else None,
+            selection_end=selection[1] if selection else None,
+        )
+        draft = CanvasGenerationDraft(
+            mode="text", prompt=revision.instruction, model=model, alias=alias,
+            params=JobParams(n=1), updated_at=_now(),
+        )
+        route_order: list[str] = []
+        key, model_spec, kind = _resolve_key_and_model(
+            draft, route_order=route_order, consume_route=True,
+        )
+        normalized, job_params, _ = _normalized_params(draft, 1, key, model_spec)
+        job_params.route_order = route_order or None
+        return _commit_frozen_run(
+            project_id,
+            current,
+            surface,
+            key,
+            model_spec,
+            kind,
+            mode="text",
+            final_prompt=text_revision_prompt(version.text, revision),
+            input_policy="all_connected",
+            normalized=normalized,
+            job_params=job_params,
+            inputs=[],
+            requested_count=1,
+            result_title="改写文本",
+            result_draft=draft,
+            allow_surface_reuse=False,
+            transaction_kind="text_revision",
+            text_revision=revision,
+        )
+
+
+def _revised_candidate_version(
+    current: CanvasDocument,
+    context: CanvasJobContext,
+    version: CanvasContentVersion,
+) -> CanvasContentVersion:
+    """改写任务的产出拼回原文；改写期间节点正文换过版本时不覆盖。"""
+    revision = context.snapshot.text_revision
+    if revision is None or not isinstance(version, CanvasTextVersion):
+        return version
+    base = current.content_versions.get(revision.base_version_id)
+    node = next((item for item in current.nodes if item.id == context.result_node_id), None)
+    if (
+        not isinstance(base, CanvasTextVersion)
+        or not isinstance(node, CanvasTextNode)
+        or node.data.current_version_id != revision.base_version_id
+    ):
+        raise ValueError("改写期间正文被改动，结果没有写回")
+    text = revised_text(base.text, revision, version.text)
+    if len(text) > 40_000:
+        raise ValueError("改写后的正文超过 40000 字")
+    return version.model_copy(update={
+        "text": text,
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    })
 
 
 def submit_layer_decomposition_run(
@@ -2961,7 +3109,9 @@ def _commit_canvas_candidate_attempt(
             version: CanvasContentVersion | None = None
             if output_path is not None:
                 try:
-                    version = _output_version(project_id, job, target, output_path)
+                    version = _revised_candidate_version(
+                        current, context, _output_version(project_id, job, target, output_path),
+                    )
                     completed = target.model_copy(update={
                         "status": "succeeded",
                         "version_id": version.version_id,
@@ -3469,7 +3619,10 @@ def _finalize_canvas_run_under_locks(
             }))
             continue
         try:
-            version = _output_version(project_id, job, candidate, job.output_paths[index])
+            version = _revised_candidate_version(
+                current, context,
+                _output_version(project_id, job, candidate, job.output_paths[index]),
+            )
             versions.append(version)
             candidates.append(candidate.model_copy(update={
                 "status": "succeeded",

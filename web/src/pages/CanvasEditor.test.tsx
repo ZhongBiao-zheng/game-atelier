@@ -1028,6 +1028,8 @@ it.each([false, true])('configures an existing MCP text node with no draft (narr
   try {
     render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'flow-node-mcp-text' }));
+    // 有正文的文本节点默认打开「内容」页，生成设置在「生成」页。
+    fireEvent.click(await screen.findByRole('radio', { name: '生成' }));
     const panel = await screen.findByRole('region', { name: '文本设置' });
     expect(within(panel).getByRole('button', { name: '选择生成模型' })).toHaveTextContent('GPT 5');
     expect(saveCanvasDocument).not.toHaveBeenCalled();
@@ -1160,7 +1162,7 @@ it('loads the immersive editor and stores a manually-authored text node as one c
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
 
   const editor = await addTextNodeWithBody('雨夜列车分镜');
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
 
   expect(screen.getByTestId('flow-minimap')).toBeInTheDocument();
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalled(), { timeout: 1000 });
@@ -1191,7 +1193,7 @@ it('does not autosave during text editing and saves exactly once after exit', as
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
   expect(saveCanvasDocument).not.toHaveBeenCalled();
 
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledOnce(), { timeout: 1000 });
   expect(savedText(lastSavedDocument())).toBe('编辑完成后再保存');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
@@ -1223,7 +1225,7 @@ it('keeps the server-owned content hash when typing continues during a save', as
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
 
   const editor = await addTextNodeWithBody('第一笔');
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await waitFor(() => expect(saveCount).toBe(1), { timeout: 1000 });
   const firstPayload = vi.mocked(saveCanvasDocument).mock.calls[0][1];
   const versionId = firstPayload.nodes[0].type === 'text'
@@ -1276,7 +1278,7 @@ it('undoes a text field edit as one session snapshot', async () => {
   const editor = await addTextNodeWithBody('可以撤销的修改');
   expect(editor).toHaveValue('可以撤销的修改');
 
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
   expect(screen.queryByText('可以撤销的修改')).not.toBeInTheDocument();
@@ -1839,7 +1841,7 @@ it('uses authoritative text hashes before starting the next queued upload batch'
   await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalledTimes(1));
   fireEvent.change(input, { target: { files: [new File(['x'], 'second.png', { type: 'image/png' })] } });
   const editor = await addTextNodeWithBody('上传期间输入的文字');
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await act(async () => { release(); });
   await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(3));
@@ -1874,7 +1876,7 @@ it('surfaces the server detail when an automatic save fails instead of claiming 
   );
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   const editor = await addTextNodeWithBody('会保存失败的内容');
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
 
   // 规格 2.4：先静默退避重试，1.5s 后顶栏胶囊显示「保存重试中…」（原因在胶囊的 Hint 里）。
   expect(await screen.findByText('保存重试中…', {}, { timeout: 3000 })).toBeTruthy();
@@ -2167,7 +2169,7 @@ it('keeps the node context stable while typing and while zooming', async () => {
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-text-one' }));
-  fireEvent.doubleClick(await screen.findByText('雨夜'));
+  fireEvent.doubleClick(await screen.findByText('雨夜', { selector: 'p' }));
   const editor = await screen.findByLabelText('编辑 开场白 正文');
   // 第一次输入会给这个节点建一条本地版本，current_version_id 变了 —— 那是真的结构变化，
   // 图签名跟着失效是对的。从第二次输入开始才是纯内容变化，下面量的是这一段。
@@ -2179,11 +2181,11 @@ it('keeps the node context stable while typing and while zooming', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'simulate live zoom' }));
 
   // 文本确实写进去了，说明上面三次输入不是空转。
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await waitFor(() => expect(savedText(lastSavedDocument())).toBe('雨夜列车进站'), { timeout: 1500 });
   // 而且节点卡确实跟着重渲染了：resolveVersion 是常量引用，卡片的失效完全靠节点对象换引用，
   // 这条断言就是那条不变式的守卫。
-  expect(await screen.findByText('雨夜列车进站')).toBeTruthy();
+  expect(await screen.findByText('雨夜列车进站', { selector: 'p' })).toBeTruthy();
   expect(canvasContextIdentities.length).toBe(before);
 });
 
@@ -2215,7 +2217,7 @@ it('keeps connection objects stable while typing and while hovering an unrelated
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-loner' }));
-  fireEvent.doubleClick(await screen.findByText('旁白初稿'));
+  fireEvent.doubleClick(await screen.findByText('旁白初稿', { selector: 'p' }));
   const editor = await screen.findByLabelText('编辑 旁白 正文');
   // 第一次输入会给这个节点建本地版本，是真的结构变化；从第二次起才是纯内容变化。
   fireEvent.change(editor, { target: { value: '旁白一' } });
@@ -2226,7 +2228,7 @@ it('keeps connection objects stable while typing and while hovering an unrelated
   // 悬停一个不在任何连线上的节点：没有一条连线的 active 会变。
   fireEvent.click(screen.getByRole('button', { name: 'simulate hover loner' }));
 
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await waitFor(
     () => expect(savedTextOf(lastSavedDocument(), 'loner')).toBe('旁白一二三'),
     { timeout: 1500 },
@@ -2936,11 +2938,11 @@ it('edits an inserted prompt text node without creating a generation draft', asy
   }));
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-prompt-source' }));
-  fireEvent.doubleClick(await screen.findByText('原始提示词'));
+  fireEvent.doubleClick(await screen.findByText('原始提示词', { selector: 'p' }));
   const editor = await screen.findByLabelText('编辑 资产正文 正文');
   fireEvent.change(editor, { target: { value: '修改后的提示词' } });
   fireEvent.change(editor, { target: { value: '再次修改提示词' } });
-  fireEvent.keyDown(editor, { key: 'Tab' });
+  act(() => { editor.blur(); });
   await waitFor(() => expect(savedText(lastSavedDocument())).toBe('再次修改提示词'));
   expect(lastSavedDocument()?.nodes[0].data).toMatchObject({ generation_draft: null });
 });

@@ -34,7 +34,7 @@ import { AddIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, Chevron
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
-  type ComponentType, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref,
+  type ComponentType, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref,
   type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
@@ -89,6 +89,10 @@ import {
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import { CanvasPromptInput } from '@/components/canvas/CanvasPromptInput';
+import { CanvasTextContentPanel } from '@/components/canvas/CanvasTextContentPanel';
+import { defaultTextPanelTab, type CanvasTextRevisionInput } from '@/components/canvas/canvasTextRevision';
+import { useTextPreviewWheel } from '@/components/canvas/canvasTextWheel';
+import { useScrollFade } from '@/components/ui/scroll-fade';
 import { compatibleWorkflowValues, workflowReferenceError } from '@/lib/workflowInputs';
 import {
   CanvasMaterialHoverDetail,
@@ -171,7 +175,6 @@ import { SwapLabel } from '@/components/ui/swap-label';
 import { EditableText } from '@/components/ui/editable-text';
 import { Toggle } from '@/components/ui/toggle';
 import { Slider } from '@/components/ui/slider';
-import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
@@ -292,6 +295,8 @@ export interface CanvasNodeContextValue {
   shareResult?: (node: CanvasContentNode) => void;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
+  /** 文本节点「改写」：以当前正文为输入，结果写回本节点。 */
+  submitTextRevision?: (nodeId: string, request: CanvasTextRevisionInput) => Promise<void>;
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
   submitLayerDecomposition: (nodeId: string) => Promise<void>;
   /** 已完成的拆分节点改提示词重拆：新建一个拆分节点并提交。 */
@@ -376,16 +381,15 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const context = useContext(CanvasNodeContext);
   const setTextEditing = context?.setTextEditing;
   const node = data.domain;
-  const [isEditingText, setIsEditingText] = useState(false);
-  const [textDraft, setTextDraft] = useState<string | null>(null);
   const [isEditingInlineText, setIsEditingInlineText] = useState(false);
-  const textEditorRef = useRef<HTMLTextAreaElement>(null);
-  const textEditingExitRequested = useRef(false);
-  const textSelectionRef = useRef<{
-    start: number;
-    end: number;
-    direction: 'forward' | 'backward' | 'none';
-  } | null>(null);
+  // 双击节点 / 工具条「编辑」：把光标交给面板「内容」页的正文。
+  const [textFocusRequest, setTextFocusRequest] = useState(0);
+  const textScrollFadeRef = useScrollFade<HTMLDivElement>();
+  const textWheelRef = useTextPreviewWheel<HTMLDivElement>();
+  const textPreviewRef = useCallback((element: HTMLDivElement | null) => {
+    textScrollFadeRef(element);
+    textWheelRef(element);
+  }, [textScrollFadeRef, textWheelRef]);
   const contentSurfaceRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
@@ -426,36 +430,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const chromeBelow = (generationPanelVisible || editPanelVisible || layerComposerVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!isEditingText) return;
-    const editor = textEditorRef.current;
-    editor?.focus();
-    editor?.setSelectionRange(editor.value.length, editor.value.length);
-    if (editor) rememberTextSelection(editor);
-  }, [isEditingText]);
-  useLayoutEffect(() => {
-    if (!isEditingText || textEditingExitRequested.current) return;
-    const editor = textEditorRef.current;
-    if (!editor || window.document.activeElement === editor) return;
-    // 保存回写可能替换 textarea DOM，旧节点不会再触发 blur。编辑会话仍有效时把焦点
-    // 和选区交给新节点；普通输入时 activeElement 已经是 editor，不会触碰当前选区。
-    editor.focus({ preventScroll: true });
-    restoreTextSelection(editor);
-  }, [isEditingText, node]);
-  useEffect(() => {
-    if (!isEditingText) return;
-    const finishOnOutsidePointer = (event: PointerEvent) => {
-      const surface = contentSurfaceRef.current;
-      if (!surface || !(event.target instanceof Element) || surface.contains(event.target)) return;
-      textEditingExitRequested.current = true;
-      setTextEditing?.(node.id, false);
-      setIsEditingText(false);
-    };
-    // blur 不能代表用户结束编辑：自动保存重渲染、切应用和输入法候选窗都可能让
-    // textarea 短暂失焦。只响应用户明确点到编辑区外的 pointerdown。
-    window.document.addEventListener('pointerdown', finishOnOutsidePointer, true);
-    return () => window.document.removeEventListener('pointerdown', finishOnOutsidePointer, true);
-  }, [isEditingText, node.id, setTextEditing]);
   useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
   useEffect(() => {
     if (!selected && !toolbarOverlayOpen) return;
@@ -581,58 +555,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const compareInputs = node.type === 'compare' ? context.compareInputsByNodeId?.get(node.id) : undefined;
   const hasHideableContent = canvasNodeHasHideableContent(node, content, Boolean(compareInputs?.before || compareInputs?.after));
 
+  // 正文只在面板「内容」页里编辑：节点卡只做预览，长文在小框里读写不便（2026-11-27 试用反馈）。
   function beginTextEditing() {
-    if (!context || node.type !== 'text' || isEditingText) return;
+    if (!context || node.type !== 'text') return;
     context.selectNode(node.id);
-    context.recordHistory();
-    textEditingExitRequested.current = false;
-    textSelectionRef.current = null;
-    // 草稿只在编辑期间生效，每次进入都从文档里的正文开始。
-    setTextDraft(null);
-    setTextEditing?.(node.id, true);
-    setIsEditingText(true);
-  }
-
-  function finishTextEditing(restoreFocus: boolean) {
-    textEditingExitRequested.current = true;
-    setTextEditing?.(node.id, false);
-    setIsEditingText(false);
-    if (restoreFocus) requestAnimationFrame(() => contentSurfaceRef.current?.focus());
-  }
-
-  function restoreTextEditingFocus() {
-    requestAnimationFrame(() => {
-      if (textEditingExitRequested.current) return;
-      const editor = textEditorRef.current;
-      editor?.focus({ preventScroll: true });
-      if (editor) restoreTextSelection(editor);
-    });
-  }
-
-  function rememberTextSelection(editor: HTMLTextAreaElement) {
-    textSelectionRef.current = {
-      start: editor.selectionStart,
-      end: editor.selectionEnd,
-      direction: editor.selectionDirection,
-    };
-  }
-
-  function restoreTextSelection(editor: HTMLTextAreaElement) {
-    const selection = textSelectionRef.current;
-    if (!selection) return;
-    const end = Math.min(selection.end, editor.value.length);
-    const start = Math.min(selection.start, end);
-    editor.setSelectionRange(start, end, selection.direction);
-  }
-
-  function handleTextEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>) {
-    // Tab、辅助技术或弹窗把焦点明确移到另一个控件时结束编辑，避免形成焦点陷阱。
-    // 自动保存替换 DOM、切换应用和输入法候选窗造成的临时失焦通常没有 relatedTarget。
-    if (event.relatedTarget instanceof Element) {
-      finishTextEditing(false);
-      return;
-    }
-    restoreTextEditingFocus();
+    setTextFocusRequest(request => request + 1);
   }
 
   function toggleHidden() {
@@ -976,53 +903,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
                   className="h-full"
                 />
               </div>
-            ) : isEditingText ? (
-              <Textarea variant="bare"
-                ref={textEditorRef}
-                aria-label={`编辑 ${node.title} 正文`}
-                // 显示值取本地草稿：文档值要绕画布文档 → React Flow 节点 → 本组件一圈才回来，
-                // 慢一拍时 React 会先把旧值写回 textarea，当场打断中文输入法的拼音组合。
-                value={textDraft ?? (content?.kind === 'text' ? content.text : '')}
-                disabled={nodeRunState.status === 'loading'}
-                placeholder="输入文本…"
-                className={cn(
-                  'nodrag nowheel block h-full min-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent p-3 leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-                  textScaleClass(node.data.display.scale),
-                )}
-                onChange={event => {
-                  rememberTextSelection(event.target);
-                  setTextDraft(event.target.value);
-                  // 拼音组合中只更新草稿，不让整张画布跟着每个字母重渲染；选字后由 compositionend 提交。
-                  if (!(event.nativeEvent as InputEvent).isComposing) context.updateText(node.id, event.target.value);
-                }}
-                onCompositionEnd={event => context.updateText(node.id, event.currentTarget.value)}
-                onSelect={event => rememberTextSelection(event.currentTarget)}
-                onBlur={handleTextEditorBlur}
-                onPointerDown={event => event.stopPropagation()}
-                onDoubleClick={event => event.stopPropagation()}
-                onKeyDown={event => {
-                  event.stopPropagation();
-                  // 输入法组合中的 Esc / Tab 归输入法（取消拼音、切候选），不算退出编辑。
-                  if (event.nativeEvent.isComposing) return;
-                  if (event.key === 'Tab') {
-                    event.preventDefault();
-                    finishTextEditing(true);
-                    return;
-                  }
-                  if (event.key !== 'Escape') return;
-                  event.preventDefault();
-                  finishTextEditing(true);
-                }}
-              />
             ) : (
-              <p className={cn(
-                'h-full min-h-32 overflow-y-auto whitespace-pre-wrap p-3 leading-relaxed text-foreground',
-                textScaleClass(node.data.display.scale),
-              )}>
-                {content?.kind === 'text' && content.text
-                  ? content.text
-                  : draft ? '双击输入文本，或填写下方生成设置' : '双击输入文本…'}
-              </p>
+              // 预览：指针在正文上时滚轮滚正文（不论是否选中），放得下时交还画布。读全文、改字在面板「内容」页。
+              <div ref={textPreviewRef} data-canvas-text-preview="true" className="scroll-fade-y no-scrollbar h-full min-h-32 overflow-y-auto">
+                <p className={cn(
+                  'whitespace-pre-wrap break-words p-3 leading-relaxed text-foreground',
+                  textScaleClass(node.data.display.scale),
+                )}>
+                  {content?.kind === 'text' && content.text
+                    ? content.text
+                    : draft ? '双击输入文本，或填写下方生成设置' : '双击输入文本…'}
+                </p>
+              </div>
             )
           )}
           {content && content.kind !== 'text' && content.pending_shared_original && (
@@ -1135,12 +1027,22 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
-          <CanvasGenerationComposer
-            node={node}
-            draft={draft}
-            context={context}
-            onClose={() => context.generationPanel.dismiss(node.id)}
-          />
+          {node.type === 'text' ? (
+            <CanvasTextNodePanel
+              node={node}
+              draft={draft}
+              context={context}
+              focusRequest={textFocusRequest}
+              onClose={() => context.generationPanel.dismiss(node.id)}
+            />
+          ) : (
+            <CanvasGenerationComposer
+              node={node}
+              draft={draft}
+              context={context}
+              onClose={() => context.generationPanel.dismiss(node.id)}
+            />
+          )}
         </CanvasNodeFloatingPanel>
       )}
       {editPanelVisible && editSource && context && (
@@ -2392,18 +2294,51 @@ function ImageNodeToolbar({
   );
 }
 
+/** 文本节点的面板：「内容」读全文、改字、让模型改写；「生成」是原来的生成设置。
+ *  有正文默认「内容」，空节点默认「生成」（2026-11-27 飙哥定）。 */
+function CanvasTextNodePanel({ node, draft, context, embedded = false, onClose, focusRequest = 0 }: {
+  node: Extract<CanvasNode, { type: 'text' }>;
+  draft: CanvasGenerationDraft;
+  context: CanvasNodeContextValue;
+  embedded?: boolean;
+  onClose?: () => void;
+  focusRequest?: number;
+}) {
+  const content = context.resolveVersion(node.data.current_version_id);
+  const [tab, setTab] = useState(() => defaultTextPanelTab(content?.kind === 'text' ? content.text : null));
+  useEffect(() => {
+    if (focusRequest) setTab('content');
+  }, [focusRequest]);
+  const header = (
+    <Segmented aria-label="文本面板" className="grid-cols-2">
+      <SegmentedItem value="content" selected={tab === 'content'} onSelect={() => setTab('content')} className="px-4 text-xs">内容</SegmentedItem>
+      <SegmentedItem value="generate" selected={tab === 'generate'} onSelect={() => setTab('generate')} className="px-4 text-xs">生成</SegmentedItem>
+    </Segmented>
+  );
+  return tab === 'content' ? (
+    <CanvasTextContentPanel node={node} draft={draft} context={context} header={header}
+      embedded={embedded} onClose={onClose} focusRequest={focusRequest} />
+  ) : (
+    <CanvasGenerationComposer node={node} draft={draft} context={context} header={header}
+      embedded={embedded} onClose={onClose} />
+  );
+}
+
 export function CanvasGenerationComposer({
   node,
   draft,
   context,
   embedded = false,
   onClose,
+  header,
 }: {
   node: CanvasNode;
   draft: CanvasGenerationDraft;
   context: CanvasNodeContextValue;
   embedded?: boolean;
   onClose?: () => void;
+  /** 面板顶部一行（文本节点的「内容 / 生成」切换）。 */
+  header?: ReactNode;
 }) {
   const editingExistingVideo = draft.mode === 'video'
     && Boolean(context.mentionReferencesByNodeId.get(node.id)?.some(reference => reference.kind === 'video'));
@@ -2651,6 +2586,7 @@ export function CanvasGenerationComposer({
           <CloseIcon aria-hidden="true" />
         </Button>
       )}
+      {header && <div className="mb-2 flex items-center pr-8">{header}</div>}
       {usesVideoFrameSlots && videoCaps ? (
         <CanvasVideoFrameConnections
           node={node}
@@ -3421,13 +3357,23 @@ export function CanvasMobileGenerationPanel({
 }) {
   return (
     <aside className="canvas-mobile-generation-panel absolute z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow">
-      <CanvasGenerationComposer
-        embedded
-        node={node}
-        draft={draft}
-        context={context}
-        onClose={() => context.generationPanel.dismiss(node.id)}
-      />
+      {node.type === 'text' ? (
+        <CanvasTextNodePanel
+          embedded
+          node={node}
+          draft={draft}
+          context={context}
+          onClose={() => context.generationPanel.dismiss(node.id)}
+        />
+      ) : (
+        <CanvasGenerationComposer
+          embedded
+          node={node}
+          draft={draft}
+          context={context}
+          onClose={() => context.generationPanel.dismiss(node.id)}
+        />
+      )}
     </aside>
   );
 }

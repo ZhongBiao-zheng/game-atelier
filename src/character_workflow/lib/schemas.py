@@ -358,6 +358,27 @@ class CanvasSnapshotInput(BaseModel):
     markup_version_id: str | None = None
 
 
+class CanvasTextRevision(BaseModel):
+    """「改写」任务：以节点当前正文为输入，结果写回同一节点。
+
+    选区按 Unicode 码点计（浏览器端从 UTF-16 下标换算）；start/end 都为空 = 改全文。
+    """
+    model_config = ConfigDict(extra="forbid")
+    base_version_id: str
+    instruction: str = Field(min_length=1, max_length=2000)
+    selection_start: int | None = Field(default=None, ge=0)
+    selection_end: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _selection_pair(self):
+        start, end = self.selection_start, self.selection_end
+        if (start is None) != (end is None):
+            raise ValueError("选区起止必须同时给出")
+        if start is not None and end is not None and start >= end:
+            raise ValueError("选区不能为空")
+        return self
+
+
 class CanvasGenerationSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     snapshot_version: Literal[1] = 1
@@ -375,6 +396,7 @@ class CanvasGenerationSnapshot(BaseModel):
     mask_version_id: str | None = None
     submitted_at: str
     submitted_by: CanvasActor
+    text_revision: CanvasTextRevision | None = Field(default=None, exclude_if=lambda v: v is None)
     request_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
@@ -2324,6 +2346,17 @@ class CanvasReversePromptCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
+
+
+class CanvasTextRevisionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    instruction: str = Field(min_length=1, max_length=2000)
+    selection_start: int | None = Field(default=None, ge=0)
+    selection_end: int | None = Field(default=None, ge=0)
+    alias: str | None = Field(default=None, max_length=120)
+    model: str = Field(min_length=1, max_length=240)
 
 
 class CanvasLayerDecompositionCreate(BaseModel):

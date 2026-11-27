@@ -212,6 +212,13 @@ export interface CanvasGenerationSnapshot {
   mask_version_id: string | null;
   submitted_at: string;
   submitted_by: { kind: 'user' | 'agent' | 'plugin'; actor_id: string | null };
+  /** 「改写」任务：以节点当前正文为输入，结果写回同一节点；选区按 Unicode 码点计，缺省 = 全文。 */
+  text_revision?: {
+    base_version_id: string;
+    instruction: string;
+    selection_start?: number | null;
+    selection_end?: number | null;
+  };
   request_fingerprint: string;
 }
 

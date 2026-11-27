@@ -244,6 +244,7 @@ GET /api/canvas/projects/{project_id}/versions/{version_id}/download
 GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
 GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
+POST /api/canvas/projects/{project_id}/runs/text-revision
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/image-edits

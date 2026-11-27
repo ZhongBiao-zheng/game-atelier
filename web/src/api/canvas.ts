@@ -526,6 +526,39 @@ export function submitCanvasReversePrompt(
   );
 }
 
+export interface CanvasTextRevisionRequest {
+  instruction: string;
+  /** Unicode 码点下标（不是 JS 的 UTF-16 下标）；缺省 = 改全文。 */
+  selection: { start: number; end: number } | null;
+  alias: string | null;
+  model: string;
+}
+
+export function submitCanvasTextRevision(
+  projectId: string,
+  surfaceNodeId: string,
+  expectedRevision: number,
+  request: CanvasTextRevisionRequest,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/text-revision`,
+    '改写文本',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        surface_node_id: surfaceNodeId,
+        expected_revision: expectedRevision,
+        instruction: request.instruction,
+        selection_start: request.selection?.start ?? null,
+        selection_end: request.selection?.end ?? null,
+        alias: request.alias,
+        model: request.model,
+      }),
+    },
+  );
+}
+
 export function submitCanvasLayerDecomposition(
   projectId: string,
   surfaceNodeId: string,
