@@ -65,12 +65,13 @@ def group_plan(project_id, group_id, document=None):
             continue
         limit = {"image": 4, "text": 4, "audio": 2, "video": 1}[draft.mode]
         count = max(1, min(limit, draft.params.n or 1))
-        if draft.mode == "image" and image_family(draft.model) == "midjourney":
+        mj_grid = draft.mode == "image" and image_family(draft.model) == "midjourney"
+        if mj_grid:
             count = 4
         estimate = cost.generation_estimate(project_id, node_id, count, [{
             "op": "set_draft", "node_id": node_id, "mode": draft.mode, "model": draft.model,
             "alias": draft.alias, "params": canvas_allowed_draft_params(draft.mode, draft.params),
-        }])
+        }], individual_image_calls=draft.mode == "image" and not mj_grid)
         rows[node_id] = {"node_id": node_id, "name": node.title, "mode": draft.mode, **estimate}
 
     order = []

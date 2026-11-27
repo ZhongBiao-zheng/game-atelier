@@ -55,3 +55,19 @@ def test_empty_material_is_not_an_input_for_an_empty_prompt():
     doc = group_document(edges=[("input", "a")], drafts=["a"])
     doc.nodes[0].data.generation_draft.prompt = ""
     assert plans.group_plan("test", "group", doc)["blocked"][0]["node_id"] == "a"
+
+
+def test_manual_rate_prices_each_image_call_but_mj_grid_is_one_call():
+    from character_workflow.lib import keys
+
+    models = [keys.ModelSpec(id=name, name=name, modality="image", protocol="openai", per_call_cny=0.32)
+              for name in ["gpt-image-1", "midjourney"]]
+    key = keys.KeySpec(alias="local", provider="custom", created_at="now", models=models)
+    keys.write_keys_db(keys.KeysDB(keys=[key], default_alias="local"))
+    doc = group_document(edges=[("a", "b")], drafts=["a", "b"])
+    for node, model in zip(doc.nodes, models):
+        draft = node.data.generation_draft
+        draft.model, draft.alias, draft.params.n = model.id, key.alias, 3
+    plan = plans.group_plan("test", "group", doc)
+    assert [(s["count"], s["estimate_cny"]) for s in plan["steps"]] == [(3, 0.96), (4, 0.32)]
+    assert plan["total_cny"] == 1.28

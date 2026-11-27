@@ -64,23 +64,29 @@ def _draft_from_document(project_id: str, node_id: str) -> dict | None:
             "params": canvas_allowed_draft_params(draft.mode, draft.params)}
 
 
-def _estimate(kind: str, alias: str | None, model: str, params: dict) -> float | None:
+def _estimate(kind: str, alias: str | None, model: str, params: dict, calls: int = 1) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_submission
     from character_workflow.lib.keys import find_by_alias
 
+    # Routing uses the requested batch size. The canvas image runner sends one
+    # request per slot, so price each request with its actual n, including manual prices.
+    billed_params = {**params, "n": 1} if calls > 1 else params
     if alias is None:
         from character_workflow.lib.model_routes import find_route, member_estimate, ordered_members
         try:
             members = ordered_members(find_route(kind, model), params=params)
         except LookupError:
             return None
-        return member_estimate(members[0], kind, params) if members else None
-    key = find_by_alias(alias)
-    return estimate_submission(key, model, kind, params) if key is not None else None
+        unit = member_estimate(members[0], kind, billed_params) if members else None
+    else:
+        key = find_by_alias(alias)
+        unit = estimate_submission(key, model, kind, billed_params) if key is not None else None
+    return None if unit is None else unit * calls
 
 
 def generation_estimate(project_id: str, node_id: str, count: int,
-                        pending_changes: list[dict] | None = None) -> dict[str, Any]:
+                        pending_changes: list[dict] | None = None, *,
+                        individual_image_calls: bool = False) -> dict[str, Any]:
     """{model, alias, count, estimate_cny}；读不到 draft 或没有价格时 estimate_cny 为 None。"""
     draft = _draft_from_changes(node_id, pending_changes or []) \
         or _draft_from_document(project_id, node_id)
@@ -94,7 +100,10 @@ def generation_estimate(project_id: str, node_id: str, count: int,
     if draft["mode"] == "image":
         params["n"] = count
     try:
-        estimate = _estimate(draft["mode"], draft["alias"], draft["model"], params)
+        if individual_image_calls and count > 1:
+            estimate = _estimate(draft["mode"], draft["alias"], draft["model"], params, count)
+        else:
+            estimate = _estimate(draft["mode"], draft["alias"], draft["model"], params)
     except (ValueError, LookupError):
         estimate = None
     return {"model": draft["model"], "alias": draft["alias"], "count": count,
