@@ -9,6 +9,7 @@ export function useLightboxZoom(src: string) {
   const image = useRef<HTMLImageElement>(null);
   const view = useRef({ scale: null as number | null, x: 0, y: 0 });
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+  const [preset, setPreset] = useState<null | 1 | 2 | 'custom'>(null);
   const [percent, setPercent] = useState(100);
   const reported = useRef(100);
 
@@ -45,6 +46,7 @@ export function useLightboxZoom(src: string) {
     if (!size) return;
     const state = view.current;
     const scale = next === null ? null : clamp(next, .25, 4);
+    setPreset(scale === null || scale === 1 || scale === 2 ? scale : 'custom');
     const factor = (scale ?? size.fit) / (state.scale ?? size.fit);
     const x = point ? point.x - size.rect.left - size.rect.width / 2 : 0;
     const y = point ? point.y - size.rect.top - size.rect.height / 2 : 0;
@@ -64,6 +66,7 @@ export function useLightboxZoom(src: string) {
     drag.current = null;
     delete el.dataset.dragging;
     if (plane.current) plane.current.style.removeProperty('transform');
+    setPreset(null);
     reported.current = 100;
     setPercent(100);
     paint();
@@ -87,7 +90,7 @@ export function useLightboxZoom(src: string) {
     delete event.currentTarget.dataset.dragging;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return { viewport, plane, image, percent, paint, zoomTo, zoomBy, handlers: {
+  return { viewport, plane, image, percent, preset, paint, zoomTo, zoomBy, handlers: {
     onClick: (event: React.MouseEvent<HTMLDivElement>) => { if (event.currentTarget.dataset.pannable === 'true') event.stopPropagation(); },
     onDoubleClick: () => zoomTo(view.current.scale === 1 ? null : 1),
     onPointerDown: (event: PointerEvent<HTMLDivElement>) => {

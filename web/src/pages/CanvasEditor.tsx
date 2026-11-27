@@ -1,4 +1,5 @@
 import { copySharedNodes, reproduceFrozen } from '@/api/collabTransfer';
+import { useRetained } from '@/components/ui/retained';
 import { Lightbox } from '@/components/Lightbox';
 import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
@@ -640,7 +641,10 @@ function CanvasEditorInner({
   const saveFailure = useRef<{ since: number; attempts: number } | null>(null);
   const saveRetryTimer = useRef<number | null>(null);
   const saveRetryPhaseTimer = useRef<number | null>(null);
-  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [activePreview, setPreview] = useState<PreviewState | null>(null);
+  const dialogPreview = activePreview?.version.kind === 'image' ? null : activePreview;
+  const retainedDialogPreview = useRetained(dialogPreview);
+  const preview = activePreview ?? retainedDialogPreview;
   const [compareViewId, setCompareViewId] = useState<string | null>(null);
   const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
@@ -6117,7 +6121,7 @@ function CanvasEditorInner({
     void runViewportCommand(() => fitView({ duration: viewportMotionMs(MOTION_DURATION.fast), padding: 0.12 }));
   };
 
-  const canvasFeedbackVisible = !preview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
+  const canvasFeedbackVisible = !activePreview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
     && !shortcutsOpen && !generationPreferencesOpen;
 
   return (
@@ -7019,6 +7023,7 @@ function CanvasEditorInner({
         {preview && <CanvasPreview
           projectId={projectId}
           preview={preview}
+          dialogOpen={Boolean(dialogPreview)}
           onClose={() => setPreview(null)}
           onPrevious={stepPreview(-1)} onNext={stepPreview(1)}
           onEdit={editablePreview ? () => { setPreview(null); openMaskEdit(editablePreview); } : undefined}
@@ -7134,7 +7139,7 @@ function CanvasShortcutList() {
 }
 
 function CanvasPreview({
-  onClose, onPrevious, onNext, onEdit, onReference, feedback, onReproduce,
+  dialogOpen, onClose, onPrevious, onNext, onEdit, onReference, feedback, onReproduce,
   projectId,
   preview,
   job,
@@ -7143,6 +7148,7 @@ function CanvasPreview({
 }: {
   projectId: string;
   preview: PreviewState;
+  dialogOpen: boolean;
   feedback: ReactNode;
   onClose: () => void;
   onPrevious?: () => void;
@@ -7212,7 +7218,7 @@ function CanvasPreview({
         </Button></Hint>
       </>} />;
   }
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+  return <Dialog open={dialogOpen} onOpenChange={open => { if (!open) onClose(); }}>
     <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
       <DialogHeader><DialogTitle>{preview.title}</DialogTitle><DialogDescription>原始内容、来源与生成信息</DialogDescription></DialogHeader>
       {feedback}
