@@ -82,7 +82,7 @@ def test_download_files_and_duplicate_names(client):
 def test_delete_restore_preserves_usage_and_canvas_files(client, namespace):
     from pathlib import Path
     job = seed("job-a", namespace=namespace)
-    result = client.delete("/api/history/job-a").json()
+    result = client.request("DELETE", "/api/history/job-a", json=[0]).json()
     assert client.get("/api/history").json()["items"] == []
     assert (data_root.runtime_dir() / "usage-archive/job-a.json").is_file()
     assert Path(job.output_paths[0]).is_file() == (namespace == "canvas")

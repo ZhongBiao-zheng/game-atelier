@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { deleteHistoryJob, downloadHistory, listHistory, type HistoryItem, type HistoryReference } from '@/api/history';
+import { deleteHistoryOutputs, downloadHistory, listHistory, type HistoryItem, type HistoryReference } from '@/api/history';
 import { HistoryPanel, dayLabel } from './HistoryPanel';
 import { readTeamMedia } from './teamAssetUse';
 
 vi.mock('@/api/history', async original => ({
-  ...await original<typeof import('@/api/history')>(), listHistory: vi.fn(), downloadHistory: vi.fn(), deleteHistoryJob: vi.fn(),
+  ...await original<typeof import('@/api/history')>(), listHistory: vi.fn(), downloadHistory: vi.fn(), deleteHistoryOutputs: vi.fn(),
 }));
 vi.mock('@/lib/uiPrefs', () => ({ loadUiPrefs: async () => ({}), saveUiPref: vi.fn() }));
 vi.mock('./teamAssetUse', () => ({ readTeamMedia: vi.fn() }));
@@ -58,18 +58,19 @@ it('clears selection on search and routes the selected files in history order', 
   await waitFor(() => expect(files.map(file => file.name)).toEqual(['a.png', 'b.png']));
   fireEvent.click(screen.getByRole('button', { name: '搜索' }));
   fireEvent.change(screen.getByRole('textbox', { name: '按提示词搜索' }), { target: { value: '海边' } });
-  expect(await screen.findByText('还没有生成记录')).toBeVisible();
+  expect(await screen.findByText('没有匹配的记录')).toBeVisible();
 });
 
-it('removes the whole selected job once after confirmation', async () => {
+it('deletes selected slots in one job without confirmation', async () => {
   vi.mocked(listHistory).mockResolvedValue({ items: [rows[0], { ...rows[0], output_index: 1 }, rows[1]], next_cursor: null });
+  vi.mocked(deleteHistoryOutputs).mockResolvedValue({ trash_id: 'entry' });
   render(<HistoryPanel onReference={vi.fn()} />);
   const checks = await screen.findAllByRole('checkbox', { name: '选择 a.png' });
   checks.forEach(check => fireEvent.click(check));
   fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: '删除' }));
-  expect(deleteHistoryJob).not.toHaveBeenCalled();
-  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(deleteHistoryOutputs).toHaveBeenCalledWith('a', [0, 1]);
   await waitFor(() => expect(screen.queryAllByRole('checkbox', { name: '选择 a.png' })).toHaveLength(0));
-  expect(deleteHistoryJob).toHaveBeenCalledTimes(1);
+  expect(deleteHistoryOutputs).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('checkbox', { name: '选择 b.png' })).toBeInTheDocument();
 });
