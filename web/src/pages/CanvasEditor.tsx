@@ -3064,16 +3064,14 @@ function CanvasEditorInner({
     const zoom = getZoom();
     const width = size.width * zoom;
     const panel = surface.querySelector<HTMLElement>(`[data-canvas-node-panel-anchor="${CSS.escape(node.id)}"]`);
-    // 面板横向独立夹紧；纵向按实际展开方向为它留出空间。
+    // 面板横向独立夹紧；纵向在节点下方为面板留出空间。
     const left = topLeft.x, right = topLeft.x + width;
     const panelHeight = panel ? panel.offsetHeight + 16 : 0;
-    const above = panel?.dataset.side === 'above';
-    const top = topLeft.y - (above ? panelHeight : 0);
-    const bottom = topLeft.y + size.height * zoom + (above ? 0 : panelHeight);
+    const bottom = topLeft.y + size.height * zoom + panelHeight;
     const delta = (low: number, high: number, min: number, max: number) =>
       low < min ? min - low : Math.min(0, Math.max(min - low, max - high));
     const dx = delta(left, right, bounds.left + 16, bounds.right - 16);
-    const dy = delta(top, bottom, bounds.top + 16, bounds.bottom - 16);
+    const dy = delta(topLeft.y, bottom, bounds.top + 16, bounds.bottom - 16);
     if (dx || dy) {
       const viewport = getViewport();
       void runViewportCommand(() => setViewport({ x: viewport.x + dx, y: viewport.y + dy, zoom },

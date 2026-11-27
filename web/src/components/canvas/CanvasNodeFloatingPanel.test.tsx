@@ -28,7 +28,7 @@ it('follows viewport transforms without React commits or new layout reads', () =
   expect(measure).not.toHaveBeenCalled();
 });
 
-it('publishes each side change once, preserving the first entrance and the user’s focus', async () => {
+it('keeps the initial entrance and focus across pans to and from the bottom edge', async () => {
   const anchor = document.createElement('div');
   vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(350, 40, 320, 176));
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(200);
@@ -39,12 +39,12 @@ it('publishes each side change once, preserving the first entrance and the user�
   const animate = vi.spyOn(motion, 'animate').mockReturnValue({ finished, stop } as unknown as ReturnType<typeof motion.animate>);
   onTestFinished(() => { vi.restoreAllMocks(); });
   markCanvasNodesEntering(['new-image'], 0.92, 'left');
-  const commits = vi.fn(), changed = vi.fn();
+  const commits = vi.fn();
   let store: ReturnType<typeof useStoreApi>;
   function Fixture() {
     store = useStoreApi();
     return <Profiler id="panel" onRender={commits}>
-      <CanvasNodeFloatingPanel nodeId="new-image" anchor={anchor} onSideChange={changed}>
+      <CanvasNodeFloatingPanel nodeId="new-image" anchor={anchor}>
         <div contentEditable aria-label="提示词" />
       </CanvasNodeFloatingPanel>
     </Profiler>;
@@ -54,9 +54,9 @@ it('publishes each side change once, preserving the first entrance and the user�
   </ReactFlowProvider>);
   const move = (y: number) => act(() => store.setState({ transform: [0, y, 1] }));
   const nearBottom = window.innerHeight - 260;
-  expect(changed.mock.calls).toEqual([['below']]);
+  commits.mockClear();
   move(nearBottom);
-  expect(changed.mock.calls).toEqual([['below'], ['above']]);
+  expect(commits).not.toHaveBeenCalled();
   expect(stop).not.toHaveBeenCalled();
   await act(async () => { finish(); await finished; });
   expect(getByLabelText('提示词')).toHaveFocus();
@@ -67,7 +67,7 @@ it('publishes each side change once, preserving the first entrance and the user�
   move(nearBottom + 10);
   expect(commits).not.toHaveBeenCalled();
   move(0);
-  expect(changed.mock.calls).toEqual([['below'], ['above'], ['below']]);
+  expect(commits).not.toHaveBeenCalled();
   expect(animate).toHaveBeenCalledTimes(1);
   expect(other).toHaveFocus();
 });

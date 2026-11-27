@@ -394,7 +394,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const contentSurfaceRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
-  const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const pickTooltipRef = useRef<HTMLSpanElement>(null);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
@@ -428,7 +427,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const layerComposerVisible = nodePanelAllowed && layerComposerOpen
     && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
-  const chromeBelow = (generationPanelVisible || editPanelVisible || layerComposerVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
@@ -610,13 +608,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
       />
-      <header
-        data-canvas-node-chrome={chromeBelow ? 'below' : 'above'}
-        className={cn(
-          'absolute left-0 right-0 flex items-center text-xs text-muted-foreground',
-          chromeBelow ? 'top-full pt-2' : 'bottom-full pb-2',
-        )}
-      >
+      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -653,7 +645,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       </header>
       <NodeToolbar
         isVisible={toolbarPresence.mounted}
-        position={annotationToolbar.annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
+        position={annotationToolbar.annotating ? Position.Bottom : Position.Top}
         align="center"
         offset={annotationToolbar.annotating ? 12 : 32}
         className={cn('nodrag', toolbarPresence.phase === 'shown' ? annotationToolbar.className : fadePresenceClass(toolbarPresence.phase))}
@@ -669,7 +661,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           data-canvas-node-toolbar={node.id}
           className={cn(
             'flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow',
-            canvasDragChromeClass(dragging, chromeBelow ? 'up' : 'down'),
+            canvasDragChromeClass(dragging, 'down'),
           )}
           onFocusCapture={event => {
             const focused = (event.target as HTMLElement).closest<HTMLElement>('button, a[href]');
@@ -1018,7 +1010,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
-          onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
           {node.type === 'text' ? (
@@ -1044,7 +1035,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
-          onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
           <CanvasImageEditPanel node={node} edit={editSource} context={context}
@@ -1056,7 +1046,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
-          onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
           <CanvasLayerStackComposer node={node} context={context} onClose={() => setLayerComposerOpen(false)} />
@@ -1079,18 +1068,15 @@ export interface CanvasPanelRect {
   height: number;
 }
 
-export type CanvasPanelSide = 'below' | 'above';
-
 export interface CanvasPanelPlacement {
   left: number;
   top: number;
   width: number;
   maxHeight: number;
-  /** 面板落在节点下方还是上方。节点自己的标题栏与工具栏据此翻到另一侧，不被面板盖住。 */
-  side: CanvasPanelSide;
+  side: 'below';
 }
 
-/** 默认紧贴节点底边。下方放不下且上方放得下时翻边，其余情况夹紧在可视区内。 */
+/** 面板跟随节点底边，碰到可视区边缘时停在边缘。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
@@ -1102,11 +1088,8 @@ export function placeCanvasGenerationPanel(
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
   const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
   const left = clamp(anchor.left + anchor.width / 2 - width / 2, bounds.left + gap, bounds.right - gap - width);
-  const below = anchor.bottom + gap;
-  const above = anchor.top - gap - height;
-  const side = below + height > bounds.bottom - gap && above >= bounds.top + gap ? 'above' : 'below';
-  const top = clamp(side === 'above' ? above : below, bounds.top + gap, bounds.bottom - gap - height);
-  return { left, top, width, maxHeight, side };
+  const top = clamp(anchor.bottom + gap, bounds.top + gap, bounds.bottom - gap - height);
+  return { left, top, width, maxHeight, side: 'below' };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -1216,12 +1199,10 @@ export function CanvasNodeFloatingPanel({
   nodeId,
   anchor,
   surfaceRef,
-  onSideChange,
   hiddenWhileDragging = false,
   children,
 }: {
   nodeId: string;
-  onSideChange?: (side: CanvasPanelSide) => void;
   hiddenWhileDragging?: boolean;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
@@ -1230,10 +1211,8 @@ export function CanvasNodeFloatingPanel({
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<Pick<CanvasPanelPlacement, 'width' | 'maxHeight' | 'side'> | null>(null);
-  const lastSide = useRef<CanvasPanelSide | null>(null);
+  const [placement, setPlacement] = useState<Pick<CanvasPanelPlacement, 'width' | 'maxHeight'> | null>(null);
   const entranceStarted = useRef(false);
-  const side = placement?.side;
   const innerRef = useRef<HTMLDivElement>(null);
   const [createdFromHandle] = useState(() => isConnectedNodeEntering(nodeId));
   const flowStore = useStoreApi();
@@ -1254,7 +1233,7 @@ export function CanvasNodeFloatingPanel({
     }
     const reduced = prefersReducedMotion();
     const controls = clearOnFinish(animate(inner, reduced ? { opacity: [0, 1] }
-      : { opacity: [0, 1], y: [lastSide.current === 'above' ? 6 : -6, 0] }, {
+      : { opacity: [0, 1], y: [-6, 0] }, {
       delay: createdFromHandle && !reduced ? MOTION_NODE_PANEL_DELAY : 0,
       duration: reduced ? MOTION_DURATION.fast : MOTION_DURATION.base, ease: MOTION_EASE.out,
     }), inner);
@@ -1274,14 +1253,6 @@ export function CanvasNodeFloatingPanel({
     if (!anchor || !panel || hiddenWhileDragging) return;
     // 外层节点不会随进场动效缩放。测量、视口原点和面板尺寸只在布局变化时重读。
     const shell = anchor.closest<HTMLElement>('.react-flow__node') ?? anchor;
-    const publishPlacement = ({ width, maxHeight, side }: CanvasPanelPlacement) => {
-      if (side !== lastSide.current) {
-        lastSide.current = side;
-        onSideChange?.(side);
-      }
-      setPlacement(current => current?.side === side && current.width === width && current.maxHeight === maxHeight
-        ? current : { width, maxHeight, side });
-    };
     const measure = () => {
       const measured = surface && canvasChromeInsetBounds(surface);
       const bounds = measured?.width && measured.height ? measured : {
@@ -1299,7 +1270,8 @@ export function CanvasNodeFloatingPanel({
       panel.style.left = `${base.left - (origin?.left ?? 0)}px`;
       panel.style.top = `${base.top - (origin?.top ?? 0)}px`;
       panel.style.removeProperty('transform');
-      publishPlacement(base);
+      setPlacement(current => current?.width === base.width && current.maxHeight === base.maxHeight
+        ? current : { width: base.width, maxHeight: base.maxHeight });
       return ([x, y, zoom]: readonly number[]) => {
         const scale = zoom / oz;
         const left = fx + x + (rect.left - fx - ox) * scale;
@@ -1308,7 +1280,6 @@ export function CanvasNodeFloatingPanel({
         const moved = placeCanvasGenerationPanel({ left, top, width, height: heightScaled,
           right: left + width, bottom: top + heightScaled }, bounds, height);
         panel.style.transform = `translate3d(${moved.left - base.left}px, ${moved.top - base.top}px, 0)`;
-        if (moved.side !== lastSide.current) publishPlacement(moved);
       };
     };
     let follow = measure();
@@ -1325,15 +1296,14 @@ export function CanvasNodeFloatingPanel({
       observer.disconnect();
       window.removeEventListener('resize', place);
     };
-  }, [anchor, surface, flowStore, geometry, hiddenWhileDragging, onSideChange]);
+  }, [anchor, surface, flowStore, geometry, hiddenWhileDragging]);
 
   return createPortal(
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
-      data-side={side}
       // 平移使用 transform，拖动收起使用独立的 translate。
-      className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
+      className={canvasDragChromeClass(hiddenWhileDragging, 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
         width: placement?.width ?? CANVAS_GENERATION_PANEL_WIDTH,
