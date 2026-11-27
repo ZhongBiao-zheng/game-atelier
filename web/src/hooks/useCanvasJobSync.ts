@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getCanvasDocument, listCanvasJobs } from '@/api/canvas';
+import { HISTORY_CHANGED } from '@/api/history';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import { acceptCanvasJobs, upsertCanvasJob } from '@/pages/canvasEditorModel';
 import type { CanvasDocument } from '@/schema/canvas';
@@ -77,10 +78,6 @@ export function useCanvasJobSync({
   const requestJobSync = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    if (!hasRunningJobs) {
-      requestJobSync.current = () => undefined;
-      return;
-    }
     let cancelled = false;
     const poll = async () => {
       try {
@@ -113,7 +110,7 @@ export function useCanvasJobSync({
           ...completedRuns.map(job => job.canvas_run!.run_id),
           ...jobsWithNewCandidateVersions.map(job => job.canvas_run!.run_id),
         ]);
-        if (completedRuns.length || newCandidateVersionIds.length) {
+        if (hasRunningJobs && (completedRuns.length || newCandidateVersionIds.length)) {
           const remote = await getCanvasDocument(projectId);
           if (cancelled) return;
           // Multi-text slots keep their node IDs and have no active_run_id. Match
@@ -161,12 +158,18 @@ export function useCanvasJobSync({
         }
       }
     };
-    requestJobSync.current = () => void sync();
-    const timer = window.setInterval(() => void sync(), 4000);
-    void sync();
+    // Idle canvases only refresh on an explicit history deletion or undo.
+    window.addEventListener(HISTORY_CHANGED, sync);
+    let timer: number | undefined;
+    if (hasRunningJobs) {
+      requestJobSync.current = sync;
+      timer = window.setInterval(sync, 4000);
+      void sync();
+    }
     return () => {
       cancelled = true;
       requestJobSync.current = () => undefined;
+      window.removeEventListener(HISTORY_CHANGED, sync);
       window.clearInterval(timer);
     };
   }, [hasRunningJobs, mergeRunDocument, onError, projectId]);

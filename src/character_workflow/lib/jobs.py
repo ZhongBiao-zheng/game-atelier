@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import time
 from contextlib import contextmanager
@@ -342,6 +343,9 @@ def output_slots(job: Job) -> list[tuple[int, str]]:
 
     Agent 历史里的 `output:<job_id>:<序号>` 按它解释，旧会话的引用始终指向原图。"""
     removed = removed_output_slots(job)
+    if job.namespace == "canvas":
+        # Immutable project versions still address the complete original path list.
+        return [(slot, path) for slot, path in enumerate(job.output_paths) if slot not in removed]
     slots: list[tuple[int, str]] = []
     slot = 0
     for path in job.output_paths:
@@ -369,6 +373,21 @@ def archive_for_usage(job: Job) -> None:
     还原或清空回收站而变化。调用方持 job_lock。"""
     _usage_archive_dir().mkdir(parents=True, exist_ok=True)
     atomic_write_text(_usage_archive_dir() / f"{job.job_id}.json", _path(job.job_id).read_text("utf-8"))
+
+
+def read_canvas_output_job(project_id: str, job_id: str) -> Job:
+    """Resolve the registered owner of immutable versions, including a trashed generation."""
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", job_id):
+        raise PermissionError("invalid canvas output owner")
+    try:
+        job = read_job(job_id)
+    except FileNotFoundError:
+        job = _load_job(json.loads(read_text_with_retry(_usage_archive_dir() / f"{job_id}.json")))
+        # An exported project must retain the provenance without reviving deleted history rows.
+        job = _with_removed_slots(job, set(range(len(job.output_paths))), job.output_paths)
+    if job.job_id != job_id or job.namespace != "canvas" or job.canvas_project_id != project_id:
+        raise PermissionError("job does not belong to this canvas project")
+    return job
 
 
 def list_usage_archive() -> list[Job]:
@@ -402,7 +421,8 @@ def trash_studio_job(job_id: str, output_path: str | None = None, *,
             if not selected or not selected.issubset(slots):
                 raise LookupError("这份结果不在这一轮里")
             if len(selected) < len(slots):
-                remaining = [path for slot, path in slots.items() if slot not in selected]
+                remaining = (job.output_paths if job.namespace == "canvas" else
+                             [path for slot, path in slots.items() if slot not in selected])
                 updated = _with_removed_slots(job, removed_output_slots(job) | selected, remaining)
                 outputs = [(slot, slots[slot]) for slot in sorted(selected)]
                 meta = {"job_id": job_id, "session_id": job.studio_agent_session_id}
@@ -434,6 +454,10 @@ def trash_studio_job(job_id: str, output_path: str | None = None, *,
 def _reinsert_outputs(job_id: str, outputs: list[tuple[int, str]]) -> None:
     """持 job_lock：一次写回稳定序号；中断恢复时可以再次执行。"""
     job = read_job(job_id)
+    if job.namespace == "canvas":
+        restored = {slot for slot, _ in outputs}
+        _write(_with_removed_slots(job, removed_output_slots(job) - restored, job.output_paths))
+        return
     slots = dict(output_slots(job))
     slots.update(outputs)
     removed = removed_output_slots(job) - slots.keys()

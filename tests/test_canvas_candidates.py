@@ -603,3 +603,39 @@ def test_layer_stack_run_recovery_proof_uses_active_run_without_connections():
     stack.data.active_run_id = "run-stack"
     document.connections = []
     assert canvas_runs._document_has_run(document, "run-stack", "job-stack")
+
+
+def test_recycled_history_keeps_generated_canvas_versions_readable_and_exportable():
+    from character_workflow.lib import trash
+    from character_workflow.lib.canvas_packages import (
+        commit_canvas_package, export_canvas_projects, inspect_canvas_package,
+    )
+    from character_workflow.lib.canvas_projects import resolve_canvas_media
+    from character_workflow.lib.jobs import output_slots, trash_studio_job
+
+    run_id = "run-history-owner"
+    project, _, _ = _project_with_result_node(primary_version_id=None, active_run_id=run_id)
+    candidates = [CanvasResultCandidate(candidate_id=f"candidate-{i}", index=i, status="pending")
+                  for i in range(2)]
+    job = _job(project.project_id, run_id, candidates)
+    paths = [_write_output(project.project_id, job.job_id, f"image-{i}.png") for i in range(2)]
+    save_job(job.model_copy(update={"status": JobStatus.DONE, "output_paths": paths}))
+    finalized, document = finalize_canvas_run(project.project_id, job.job_id)
+    versions = [candidate.version_id for candidate in finalized.canvas_run.candidates]
+    assert document.nodes[0].data.current_version_id in versions
+    first = trash_studio_job(job.job_id, history_slots={0})
+    assert output_slots(read_job(job.job_id)) == [(1, paths[1])]
+    assert all(resolve_canvas_media(project.project_id, v)[0].read_bytes() == PNG for v in versions)
+    whole = trash_studio_job(job.job_id, history_slots={1})
+    trash.purge(whole)
+    trash.purge(first)
+    assert all(resolve_canvas_media(project.project_id, v)[0].read_bytes() == PNG for v in versions)
+    package, _ = export_canvas_projects([project.project_id])
+    try:
+        imported, = commit_canvas_package(inspect_canvas_package(package).token)
+        copy = read_canvas_document(imported.project_id)
+        for version in copy.content_versions.values():
+            assert resolve_canvas_media(imported.project_id, version.version_id)[0].read_bytes() == PNG
+            assert output_slots(read_job(version.origin.job_id)) == []
+    finally:
+        package.unlink()
