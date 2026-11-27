@@ -61,7 +61,7 @@ def test_failure_resume_interrupt_cancel(group, monkeypatch):
     assert runs.list_runs(pid)[0]["status"] == "failed" and submissions == ["a", "b"]
     runs.resume(pid, rid)
     assert tick() == "wait" and submissions == ["a", "b", "b"]
-    runs.interrupt_running(pid)
+    runs.recover_group_runs(pid, resumable=set())
     assert runs.list_runs(pid)[0]["status"] == "interrupted" and tick() == "stop"
     runs.resume(pid, rid)
     assert tick() == "wait" and submissions == ["a", "b", "b"]
@@ -79,6 +79,7 @@ def test_second_execution_freezes_new_output_from_populated_surface(group, monke
     model = keys.ModelSpec(id="gpt-image-1", name="test", modality="image", protocol="openai")
     key = keys.KeySpec(alias="local", provider="openai", created_at="now", models=[model])
     keys.write_keys_db(keys.KeysDB(keys=[key], default_alias="local"))
+    doc.nodes[0].data.generation_draft.params.n = 3
     for node in doc.nodes[:2]:
         node.data.generation_draft.alias = key.alias
         node.data.generation_draft.model = model.id
@@ -87,6 +88,7 @@ def test_second_execution_freezes_new_output_from_populated_surface(group, monke
     first_version = None
     for attempt in range(2):
         plan = runs.group_plan(pid, "group")
+        assert [row["count"] for row in plan["steps"]] == [3, 1]
         run = runs.start(pid, "group", plan["order"], plan["total_cny"])
         rid = run["run_id"]
         upstream_node_id = upstream_version = None
@@ -97,13 +99,23 @@ def test_second_execution_freezes_new_output_from_populated_surface(group, monke
             if index == 1:
                 assert job.canvas_run.snapshot.inputs[0].version_id == upstream_version
                 assert job.canvas_run.snapshot.inputs[0].node_id == upstream_node_id
-            elif attempt == 1:
-                assert job.canvas_run.result_node_id != "a"
-            path = cp.canvas_output_dir(pid, job.job_id) / "image.png"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(PNG)
-            jobs.update_job_status(job.job_id, status=JobStatus.DONE, output_paths=[str(path)])
-            finalized, _ = canvas_runs.finalize_canvas_run(pid, job.job_id)
+            count = (3, 1)[index]
+            assert job.params.n == count
+            assert job.canvas_run.result_node_id == step["node_id"]
+            paths = []
+            for slot in range(count):
+                path = cp.canvas_output_dir(pid, job.job_id) / f"image-{slot}.png"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(PNG)
+                paths.append(str(path))
+            jobs.update_job_status(job.job_id, status=JobStatus.DONE, output_paths=paths)
+            finalized, updated = canvas_runs.finalize_canvas_run(pid, job.job_id)
+            assert updated.nodes[index].data.current_version_id == finalized.canvas_run.candidates[0].version_id
+            assert len(updated.content_versions) == attempt * 4 + (3, 4)[index]
+            assert updated.connections == doc.connections
+            assert [(n.id, n.position, n.size) for n in updated.nodes] == [
+                (n.id, n.position, n.size) for n in doc.nodes]
+            assert updated.nodes[-1].data.member_node_ids == doc.nodes[-1].data.member_node_ids
             if index == 0:
                 upstream_node_id = finalized.canvas_run.result_node_id
                 upstream_version = finalized.canvas_run.candidates[0].version_id

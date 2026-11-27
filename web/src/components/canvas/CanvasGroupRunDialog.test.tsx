@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { CanvasGroupRunDialog } from './CanvasGroupRunDialog';
 
 const plan = {
-  order: ['a', 'b'], steps: [
+  quote_id: 'confirmed-plan', order: ['a', 'b'], steps: [
     {node_id: 'a', name: '背景', model: '模型 A', estimate_cny: 12.4},
     {node_id: 'b', name: '分镜', model: '模型 B', estimate_cny: null},
   ], total_cny: 12.4, unpriced: 1, cycle: false, blocked: [], needs_confirmation: true,
