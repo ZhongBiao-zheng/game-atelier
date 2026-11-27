@@ -117,6 +117,8 @@ _UPSCALE_PROMPT_PRESET_ID = "canvas.upscale"
 _UPSCALE_PROMPT_PRESET_VERSION = 1
 # 只有 Nano Banana 有自动路线（quality 决定分辨率）；8K 超出 Gemini 上限，必须手选模型。
 _UPSCALE_AUTO_QUALITY: dict[str, str] = {"2K": "medium", "4K": "high"}
+# 提示词留空、只连了图片 / 视频 / 音频时发给模型的指令。
+_EMPTY_PROMPT_INSTRUCTION = "请根据参考素材进行创作。"
 _REVERSE_PROMPT = (
     "分析唯一附带的图片，写出一段可以直接用于图像生成模型的中文提示词。"
     "准确描述主体、动作或状态、构图、场景、光线、色彩、材质、镜头视角与画面风格；"
@@ -922,6 +924,12 @@ def _render_final_prompt(
             replacements.setdefault(marker, []).append(label)
     for marker, labels in replacements.items():
         prompt = prompt.replace(marker, "、".join(labels))
+    if not prompt and inputs:
+        # 提示词留空：连上的文本本身就是提示词；只连了媒体时补一句默认指令，模型才知道要做什么。
+        texts = [document.content_versions[item.version_id].text
+                 for item in inputs if item.kind == "text"]
+        prompt = "\n\n".join(texts) if texts else _EMPTY_PROMPT_INSTRUCTION
+        appended_text = []
     prompt = canvas_numbering_prefix(inputs) + prompt
     if appended_text:
         prompt = f"{prompt}\n\n参考文本：\n" + "\n\n".join(appended_text)

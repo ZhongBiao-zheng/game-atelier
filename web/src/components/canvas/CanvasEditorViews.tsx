@@ -2557,6 +2557,7 @@ export function CanvasGenerationComposer({
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
     allowEmptyPrompt: selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt'),
+    connectedInputCount: mentionReferences.length,
   });
   const workflowWithoutPrompt = selectedModel?.workflow_inputs != null
     && !selectedModel.workflow_inputs.some(input => input.type === 'prompt');

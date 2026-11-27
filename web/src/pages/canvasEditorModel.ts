@@ -1762,6 +1762,8 @@ export function canvasGenerateBlock(input: {
   modelSelected: boolean;
   prompt: string;
   allowEmptyPrompt?: boolean;
+  /** 连上且有内容的输入数；有输入时提示词可以留空，连上的内容直接作为输入。 */
+  connectedInputCount?: number;
 }): CanvasGenerateBlock | null {
   if (input.modelChoiceCount === 0) {
     const label = CANVAS_GENERATION_MODE_LABELS[input.mode];
@@ -1775,7 +1777,7 @@ export function canvasGenerateBlock(input: {
   if (!input.alias || !input.modelSelected) {
     return { kind: 'no_model_selected', message: '先在上方选择一个生成模型。' };
   }
-  if (!input.prompt.trim() && !input.allowEmptyPrompt) {
+  if (!input.prompt.trim() && !input.allowEmptyPrompt && !input.connectedInputCount) {
     return { kind: 'no_prompt', message: '先填写提示词。' };
   }
   return null;

@@ -70,6 +70,8 @@ export function CanvasPromptInput({
   const editorRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const composingRef = useRef(false);
+  // 组合期间编辑器里已有拼音字母，但 value 要到 compositionend 才同步；占位文字靠它先藏起来。
+  const [composing, setComposing] = useState(false);
   // 拖动中的 chip 按「引用哪个节点 + 同一节点的第几个」记：拖动期间编辑器可能重建 DOM，不能攥着元素本身。
   const draggedChipRef = useRef<{ nodeId: string; ordinal: number } | null>(null);
   const lastEmittedRef = useRef(value);
@@ -229,7 +231,7 @@ export function CanvasPromptInput({
 
   return (
     <div className="relative min-w-0">
-      {!value && placeholder && (
+      {!value && !composing && placeholder && (
         <span className="pointer-events-none absolute left-3 top-3 text-sm leading-relaxed text-muted-foreground">
           {placeholder}
         </span>
@@ -263,9 +265,11 @@ export function CanvasPromptInput({
         }}
         onCompositionStart={() => {
           composingRef.current = true;
+          setComposing(true);
         }}
         onCompositionEnd={event => {
           composingRef.current = false;
+          setComposing(false);
           syncVariableInput(event.currentTarget, event.target);
           syncFromEditor();
         }}

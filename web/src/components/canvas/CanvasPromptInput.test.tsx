@@ -108,6 +108,22 @@ describe('CanvasPromptInput', () => {
     expect(field).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
+  it('hides the placeholder while an input method is composing', () => {
+    function Harness() {
+      const [value, setValue] = useState('');
+      return <CanvasPromptInput value={value} references={[]} onChange={setValue} placeholder="描述画面" />;
+    }
+    render(<Harness />);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    expect(screen.getByText('描述画面')).toBeInTheDocument();
+    fireEvent.compositionStart(editor);
+    editor.textContent = 'yu';
+    fireEvent.input(editor);
+    expect(screen.queryByText('描述画面')).not.toBeInTheDocument();
+    editor.textContent = '';
+    fireEvent.compositionEnd(editor);
+    expect(screen.getByText('描述画面')).toBeInTheDocument();
+  });
   it('opens a caret menu for @ and inserts a stable node token as an image chip', () => {
     const onChange = vi.fn();
     const { rerender } = render(

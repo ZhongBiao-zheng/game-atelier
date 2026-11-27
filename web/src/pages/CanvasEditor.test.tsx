@@ -1032,10 +1032,6 @@ it.each([false, true])('configures an existing MCP text node with no draft (narr
     expect(within(panel).getByRole('button', { name: '选择生成模型' })).toHaveTextContent('GPT 5');
     expect(saveCanvasDocument).not.toHaveBeenCalled();
     expect(submitCanvasRun).not.toHaveBeenCalled();
-    fireEvent.click(within(panel).getByRole('button', { name: '生成' }));
-    expect(await screen.findByText('先填写提示词。')).toBeInTheDocument();
-    expect(saveCanvasDocument).not.toHaveBeenCalled();
-    expect(submitCanvasRun).not.toHaveBeenCalled();
     const prompt = within(panel).getByRole('combobox', { name: '提示词' });
     fireEvent.input(prompt, { target: { textContent: '扩写这段描述' } });
     await waitFor(() => expect(lastSavedDocument()?.nodes[0]).toMatchObject({

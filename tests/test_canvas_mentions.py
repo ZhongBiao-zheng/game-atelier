@@ -501,3 +501,70 @@ def test_empty_frame_slot_input_names_the_slot_it_belongs_to():
 
     with pytest.raises(ValueError, match="首帧连接的「起始帧」还没有内容"):
         _resolve_inputs(document, surface, surface.data.generation_draft)
+
+
+def _config_with(document: CanvasDocument, *, mode: str, prompt: str, sources: list[str]):
+    surface = next(node for node in document.nodes if node.id == "config")
+    surface.data.generation_draft = surface.data.generation_draft.model_copy(
+        update={"mode": mode, "prompt": prompt})
+    document.connections = [
+        edge for edge in document.connections if edge.source_node_id in sources
+    ]
+    return surface, surface.data.generation_draft
+
+
+def test_empty_prompt_text_mode_sends_connected_text_as_the_message(monkeypatch, tmp_path):
+    document = _document("")
+    _config_with(document, mode="text", prompt="  ", sources=["text-a"])
+    key = KeySpec(alias="chat", provider="openai", access_key="secret", models=[], created_at=NOW)
+    model = ModelSpec(name="Chat", id="gpt-5", modality="text", protocol="openai")
+    captured = {}
+    monkeypatch.setattr(canvas_runs, "canvas_project_dir", lambda _project_id: tmp_path)
+    monkeypatch.setattr(
+        canvas_runs, "canvas_project_lock_path", lambda _project_id: tmp_path / "canvas.lock"
+    )
+    monkeypatch.setattr(canvas_runs, "recover_canvas_transactions_unlocked", lambda _project_id: None)
+    monkeypatch.setattr(canvas_runs, "_read_document_unlocked", lambda _project_id: document)
+    monkeypatch.setattr(canvas_runs, "_resolve_key_and_model",
+                        lambda _draft, **_kwargs: (key, model, JobKind.TEXT))
+    monkeypatch.setattr(canvas_runs, "_normalized_params",
+                        lambda _draft, _count, _key, _model: ({}, JobParams(), 1))
+    monkeypatch.setattr(canvas_runs, "_validate_input_capabilities", lambda *_args: None)
+
+    def capture_commit(*_args, **kwargs):
+        captured.update(kwargs)
+        return None, document
+
+    monkeypatch.setattr(canvas_runs, "_commit_frozen_run", capture_commit)
+    submit_canvas_run(document.project_id, "config", document.revision)
+
+    assert [item.node_id for item in captured["inputs"]] == ["text-a"]
+    # 文本任务的 job.prompt 就是这段 final_prompt，_run_text_job 原样发给模型。
+    assert captured["final_prompt"] == "一列火车驶入雨夜"
+
+
+def test_empty_prompt_uses_connected_text_without_reference_wrapper():
+    document = _document("")
+    surface, draft = _config_with(document, mode="image", prompt="", sources=["image-a", "text-a"])
+    inputs = _resolve_inputs(document, surface, draft)
+    final_prompt = _render_final_prompt(document, draft, inputs)
+    assert final_prompt == (
+        "参考素材编号：图片1。请按这些编号理解提示词中的引用。\n\n一列火车驶入雨夜"
+    )
+
+
+def test_empty_prompt_with_media_only_gets_default_instruction():
+    document = _document("")
+    surface, draft = _config_with(document, mode="image", prompt="", sources=["image-a"])
+    inputs = _resolve_inputs(document, surface, draft)
+    final_prompt = _render_final_prompt(document, draft, inputs)
+    assert final_prompt.endswith(canvas_runs._EMPTY_PROMPT_INSTRUCTION)
+    assert final_prompt.startswith("参考素材编号：图片1。")
+
+
+def test_empty_prompt_without_connections_is_still_rejected():
+    document = _document("")
+    surface, draft = _config_with(document, mode="image", prompt="", sources=[])
+    inputs = _resolve_inputs(document, surface, draft)
+    with pytest.raises(ValueError, match="生成提示词不能为空"):
+        _render_final_prompt(document, draft, inputs)

@@ -3,6 +3,7 @@ import { expect, it, test } from 'vitest';
 import {
   acceptCanvasJobs,
   canvasDeletionBlockedMessage,
+  canvasGenerateBlock,
   canvasCompareHasInput,
   canvasNodeHasHideableContent,
   canvasMediaOperationPlaceholder,
@@ -611,4 +612,14 @@ test('hideable content covers edit, plugin and compare nodes', () => {
   const linked = documentWithNodes([image, compare],
     [{ id: 'c', role: 'input', source_node_id: 'image', target_node_id: 'compare' }]);
   expect(canvasCompareHasInput(linked, 'compare')).toBe(true);
+});
+
+test('connected inputs let an empty prompt through; without them the prompt is required', () => {
+  const base = { mode: 'text' as const, modelChoiceCount: 1, keyCount: 1, alias: 'chat', modelSelected: true, prompt: ' ' };
+  expect(canvasGenerateBlock({ ...base, connectedInputCount: 1 })).toBeNull();
+  expect(canvasGenerateBlock({ ...base, mode: 'image', connectedInputCount: 2 })).toBeNull();
+  expect(canvasGenerateBlock({ ...base, connectedInputCount: 0 })?.kind).toBe('no_prompt');
+  expect(canvasGenerateBlock(base)?.kind).toBe('no_prompt');
+  // 模型没选好时仍先报模型问题，连线不能绕过它。
+  expect(canvasGenerateBlock({ ...base, modelSelected: false, connectedInputCount: 1 })?.kind).toBe('no_model_selected');
 });
