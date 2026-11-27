@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { listHistory, type HistoryItem, type HistoryKind } from '@/api/history';
+import { historyKey, listHistory, type HistoryItem, type HistoryKind } from '@/api/history';
 
 /** Each filter has its own cursor and cancellation scope. Scroll and select-all share pending reads. */
 export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
@@ -7,7 +7,7 @@ export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const state = useRef({ controller: new AbortController(), rows: [] as HistoryItem[],
-    cursor: undefined as string | null | undefined, pending: null as Promise<void> | null });
+    removed: new Set<string>(), cursor: undefined as string | null | undefined, pending: null as Promise<void> | null });
 
   const more = useCallback(async (all = false) => {
     const page = state.current;
@@ -19,10 +19,13 @@ export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
         page.pending = listHistory(kind, query, page.cursor, page.controller.signal).then(result => {
           if (page.controller.signal.aborted) return;
           page.cursor = result.next_cursor;
-          page.rows = [...page.rows, ...result.items];
+          page.rows = [...page.rows, ...result.items.filter(row => !page.removed.has(historyKey(row)))];
           setItems(page.rows);
         }).catch((err: Error) => {
-          if (!page.controller.signal.aborted) setError(err.message);
+          if (!page.controller.signal.aborted) {
+            if (page.cursor === undefined) setItems([]);
+            setError(err.message);
+          }
           throw err;
         }).finally(() => {
           page.pending = null;
@@ -34,17 +37,22 @@ export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
     return page.controller.signal.aborted ? [] : page.rows;
   }, [kind, query]);
 
-  useEffect(() => {
-    const page = { controller: new AbortController(), rows: [], cursor: undefined, pending: null };
+  const reload = useCallback(() => {
+    state.current.controller.abort();
+    const page = { controller: new AbortController(), rows: [], removed: new Set<string>(), cursor: undefined, pending: null };
     state.current = page;
     void more().catch(() => {});
-    return () => page.controller.abort();
   }, [more]);
+  useEffect(() => {
+    reload();
+    return () => state.current.controller.abort();
+  }, [reload]);
 
-  function removeJobs(ids: Set<string>) {
+  function removeOutputs(ids: Set<string>) {
     const page = state.current;
-    page.rows = page.rows.filter(item => !ids.has(item.job_id));
+    for (const id of ids) page.removed.add(id);
+    page.rows = page.rows.filter(item => !ids.has(historyKey(item)));
     setItems(page.rows);
   }
-  return { items, more, removeJobs, loading, error, hasMore: state.current.cursor != null };
+  return { items, more, reload, removeOutputs, loading, error, hasMore: state.current.cursor != null };
 }

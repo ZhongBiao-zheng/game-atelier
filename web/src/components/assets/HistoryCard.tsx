@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { motion } from 'motion/react';
+import { canvasThumbnailWidth } from '@/api/canvas';
 import type { HistoryItem } from '@/api/history';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AddImageIcon, DeleteIcon, DownloadIcon, MoreIcon, PlayIcon } from '@/components/ui/icons';
 import { useWaveform } from '@/components/canvas/CanvasAudioPlayer';
 import { MOTION_DURATION, MOTION_EASE, prefersReducedMotion } from '@/lib/motion';
@@ -40,22 +41,22 @@ export function HistoryCard({ item, selecting, checked, removing, busy, onToggle
   return <motion.div className="overflow-hidden" initial={false}
     animate={removing ? { height: reduced ? 'auto' : 0, opacity: 0 } : { height: 'auto', opacity: 1 }}
     transition={{ duration: MOTION_DURATION.slow, ease: MOTION_EASE.inOut }}>
-    <div className={cn('group relative isolate overflow-hidden rounded-md bg-card media-edge', checked && 'outline -outline-offset-2 outline-primary')}
+    <div className={cn('group relative isolate overflow-hidden rounded-sm bg-card media-edge', checked && 'outline -outline-offset-2 outline-primary')}
       style={{ aspectRatio: historyRatio(item) }}>
       <Button variant="ghost" aria-label={item.prompt || item.filename}
-        className="grid size-full place-items-center overflow-hidden whitespace-normal rounded-none border-0 p-0 text-left font-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+        className="grid size-full place-items-center overflow-hidden whitespace-normal rounded-sm border-0 hover:bg-transparent hover:backdrop-blur-none p-0 text-left font-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
         onClick={event => selecting || event.shiftKey ? onToggle(event.shiftKey) : onPreview()}>
-        {item.kind === 'image' && <img alt="" loading="lazy" src={item.thumbnail_url} className="size-full object-cover" />}
+        {item.kind === 'image' && <img alt="" loading="lazy" src={`${item.thumbnail_url}&width=${canvasThumbnailWidth(200)}`} className="size-full object-cover" />}
         {item.kind === 'video' && <>
           <video src={item.thumbnail_url} muted playsInline preload="metadata" className="size-full object-cover"
             onLoadedMetadata={event => { if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration); }} />
-          <span className="absolute inset-0 grid place-items-center text-white"><PlayIcon /></span>
-          {duration != null && <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-scrim px-1 text-xs tabular-nums text-white">
+          <span className="absolute grid size-7 place-items-center rounded-full bg-scrim text-white"><PlayIcon className="fill-current" /></span>
+        </>}
+        {item.kind === 'text' && <span className="mx-3 mt-8 line-clamp-3 self-start justify-self-start whitespace-pre-line break-words text-sm">{item.text_preview}</span>}
+        {item.kind === 'audio' && <Waveform url={item.url} />}
+        {(item.kind === 'audio' || item.kind === 'video') && duration != null && <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-scrim px-1 text-xs tabular-nums text-white">
             {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
           </span>}
-        </>}
-        {item.kind === 'text' && <span className="line-clamp-3 whitespace-pre-line break-words px-3 text-sm">{item.text_preview}</span>}
-        {item.kind === 'audio' && <Waveform url={item.url} />}
       </Button>
       <div className={cn('absolute inset-x-1.5 top-1.5 flex items-start justify-between pointer-events-none', !selecting && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100')}>
         <Checkbox aria-label={`选择 ${item.filename}`} checked={checked} disabled={busy}
@@ -64,7 +65,9 @@ export function HistoryCard({ item, selecting, checked, removing, busy, onToggle
         {!selecting && <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="更多操作"
           className="pointer-events-auto size-6 rounded-full border-0 bg-scrim text-white"><MoreIcon size="sm" /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end">{historyActions.map(({ key, label, Icon }) =>
-            <DropdownMenuItem key={key} disabled={busy} onSelect={() => onAction(key)}><Icon />{label}</DropdownMenuItem>
+            <Fragment key={key}>{key === 'delete' && <DropdownMenuSeparator />}
+              <DropdownMenuItem destructive={key === 'delete'} disabled={busy} onSelect={() => onAction(key)}><Icon />{label}</DropdownMenuItem>
+            </Fragment>
           )}</DropdownMenuContent></DropdownMenu>}
       </div>
     </div>

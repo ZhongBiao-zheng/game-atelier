@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { deleteHistoryJob, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
+import { deleteHistoryOutputs, HISTORY_CHANGED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
 import { request } from '@/api/http';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { restoreTrash } from '@/api/trash';
+import { useRetained } from '@/components/ui/retained';
 import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -39,6 +40,8 @@ export function dayLabel(value: string, now = new Date()) {
 export function HistoryPanel({ onReference }: { onReference: Reference }) {
   const [position, setPosition] = useState<Position | null>(null);
   const [search, setSearch] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [composing, setComposing] = useState(false);
   const latest = useRef<Position | null>(null);
   const dirty = useRef(false);
   useEffect(() => {
@@ -51,6 +54,7 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
       latest.current = value;
       setPosition(value);
       setSearch(Boolean(value.q));
+      setDraft(value.q);
     });
     return () => {
       active = false;
@@ -63,21 +67,27 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
     latest.current = { kind, q, top: 0 };
     setPosition(latest.current);
   }
+  useEffect(() => {
+    if (!position || composing || draft === position.q) return;
+    const timer = window.setTimeout(() => update(position.kind, draft), 250);
+    return () => window.clearTimeout(timer);
+  }, [draft, position, composing]);
   if (!position) return null;
   return <>
     <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
       <Select value={position.kind} onValueChange={value => update(value as Kind, position.q)}>
-        <SelectTrigger aria-label="类型" className="w-auto gap-2 border-transparent bg-transparent"><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label="类型" className="w-auto gap-2 pl-0 border-transparent bg-transparent"><SelectValue /></SelectTrigger>
         <SelectContent>{Object.entries(labels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
       </Select>
-      {search && <Input autoFocus aria-label="按提示词搜索" placeholder="按提示词搜索" value={position.q}
-        className="h-8 min-w-0 flex-1" onChange={event => update(position.kind, event.target.value)} />}
+      {search && <Input autoFocus aria-label="按提示词搜索" placeholder="按提示词搜索" value={draft}
+        onCompositionStart={() => setComposing(true)} onCompositionEnd={event => { setDraft(event.currentTarget.value); setComposing(false); }}
+        className="h-8 min-w-0 flex-1" onChange={event => setDraft(event.target.value)} />}
       <Button variant="ghost" size="icon" aria-label={search ? '关闭搜索' : '搜索'} className="size-8 shrink-0"
-        onClick={() => { setSearch(!search); if (search && position.q) update(position.kind, ''); }}>
+        onClick={() => { setSearch(!search); if (search) { setDraft(''); setComposing(false); if (position.q) update(position.kind, ''); } }}>
         {search ? <CloseIcon /> : <SearchIcon />}
       </Button>
     </div>
-    <HistoryList key={JSON.stringify([position.kind, position.q])} position={position} onReference={onReference}
+    <HistoryList position={position} onReference={onReference}
       onScrollTop={top => { dirty.current = true; latest.current = { ...position, top }; }} />
   </>;
 }
@@ -85,11 +95,11 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
 function HistoryList({ position, onReference, onScrollTop }: {
   position: Position; onReference: Reference; onScrollTop: (top: number) => void;
 }) {
-  const { items, more, removeJobs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
+  const { items, more, reload, removeOutputs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
   const [selection, setSelection] = useState(new Set<string>());
   const [preview, setPreview] = useState<HistoryItem | null>(null);
   const [text, setText] = useState('');
-  const [confirm, setConfirm] = useState<HistoryItem[]>([]);
+  const shownPreview = useRetained(preview?.kind === 'image' ? null : preview);
   const [removing, setRemoving] = useState(new Set<string>());
   const [busy, setBusy] = useState(false);
   const anchor = useRef<string>();
@@ -106,6 +116,23 @@ function HistoryList({ position, onReference, onScrollTop }: {
     }
     return Array.from(days);
   }, [items]);
+
+  useEffect(() => {
+    clear();
+    restore.current = position.top;
+    if (list.current) list.current.scrollTop = 0;
+  }, [position]);
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === list) return;
+      restore.current = list.current?.scrollTop ?? 0;
+      clear();
+      reload();
+    };
+    window.addEventListener(HISTORY_CHANGED, refresh);
+    return () => window.removeEventListener(HISTORY_CHANGED, refresh);
+  }, [reload]);
 
   useLayoutEffect(() => {
     const el = list.current;
@@ -135,13 +162,13 @@ function HistoryList({ position, onReference, onScrollTop }: {
   useEffect(() => {
     if (!selection.size) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !confirm.length && !busy) {
+      if (event.key === 'Escape' && !busy) {
         event.preventDefault(); event.stopPropagation(); clear();
       }
     };
     window.addEventListener('keydown', escape, true);
     return () => window.removeEventListener('keydown', escape, true);
-  }, [selection.size, confirm.length, busy]);
+  }, [selection.size, busy]);
 
   function toggle(item: HistoryItem, range: boolean) {
     if (busy) return;
@@ -163,9 +190,9 @@ function HistoryList({ position, onReference, onScrollTop }: {
 
   async function action(key: HistoryAction, rows: HistoryItem[]) {
     if (busy || !rows.length) return;
-    if (key === 'delete') { setConfirm(rows); return; }
     setBusy(true);
     try {
+      if (key === 'delete') { await remove(rows); return; }
       if (key === 'download') await downloadHistory(rows);
       else {
         await onReference(rows.map(row => ({
@@ -176,22 +203,39 @@ function HistoryList({ position, onReference, onScrollTop }: {
     } catch (err) { notify.error(errorText(err)); }
     finally { setBusy(false); }
   }
-  async function remove() {
-    const ids = new Set(confirm.map(row => row.job_id));
+  async function remove(rows: HistoryItem[]) {
+    const jobs = new Map<string, number[]>();
+    for (const row of rows) {
+      if (!jobs.has(row.job_id)) jobs.set(row.job_id, []);
+      jobs.get(row.job_id)!.push(row.output_index);
+    }
+    const trashIds: string[] = [];
     const done = new Set<string>();
-    setConfirm([]); setBusy(true);
     try {
-      for (const id of ids) { await deleteHistoryJob(id); done.add(id); }
+      for (const [id, slots] of jobs) {
+        const result = await deleteHistoryOutputs(id, slots);
+        trashIds.push(result.trash_id);
+        for (const slot of slots) done.add(`${id}/${slot}`);
+      }
     } catch (err) { notify.error(errorText(err)); }
+    if (!done.size) return;
     setRemoving(done);
     await new Promise(resolve => setTimeout(resolve, MOTION_DURATION.slow * 1000));
-    removeJobs(done);
-    setSelection(current => new Set(items.filter(row => current.has(historyKey(row)) && !done.has(row.job_id)).map(historyKey)));
-    setRemoving(new Set()); setBusy(false);
+    removeOutputs(done);
+    setSelection(current => new Set([...current].filter(key => !done.has(key))));
+    setRemoving(new Set());
+    window.dispatchEvent(new CustomEvent(HISTORY_CHANGED, { detail: list }));
+    notify.undo(`已删除 ${done.size} 项`, () => {
+      void Promise.allSettled(trashIds.map(id => restoreTrash(id))).then(results => {
+        window.dispatchEvent(new Event(HISTORY_CHANGED));
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure?.status === 'rejected') notify.error(errorText(failure.reason));
+      });
+    });
   }
 
   return <div className="relative flex min-h-0 flex-1 flex-col">
-    <div ref={list} tabIndex={0} role="region" aria-label="生成历史" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-16 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+    <div ref={list} tabIndex={0} role="region" aria-label="生成历史" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-16 rounded-b-xl outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       onScroll={event => {
         const el = event.currentTarget;
         if (!restore.current) onScrollTop(el.scrollTop);
@@ -207,32 +251,30 @@ function HistoryList({ position, onReference, onScrollTop }: {
         <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>
         <AssetMasonry compact items={rows} itemKey={historyKey} ratio={historyRatio}>{row =>
           <HistoryCard item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
-            removing={removing.has(row.job_id)} onToggle={range => toggle(row, range)}
+            removing={removing.has(historyKey(row))} onToggle={range => toggle(row, range)}
             onPreview={() => setPreview(row)} onAction={key => void action(key, [row])} />
         }</AssetMasonry>
       </section>)}
       {loading && <LoadingIcon aria-label="加载中" className="mx-auto my-4 animate-spin text-muted-foreground" />}
       {error && <div role="alert" className="p-3 text-sm">{error}<Button variant="ghost" size="icon" aria-label="重试" onClick={() => void more().catch(() => {})}><RetryIcon /></Button></div>}
-      {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">还没有生成记录</p>}
+      {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
     </div>
     <AnimatePresence>{selection.size > 0 && <motion.div
       className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center"
       initial={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8 }} animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8 }} transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}>
+      exit={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }} transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}>
       <div role="toolbar" aria-label="多选操作" className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-popover px-2 py-1 shell-glow">
-        <span className="px-2 text-xs tabular-nums">已选 <motion.span key={selection.size} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: MOTION_DURATION.fast }}>{selection.size}</motion.span> 项</span>
+        <span className="px-2 text-xs tabular-nums">已选 <motion.span key={selection.size} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}>{selection.size}</motion.span> 项</span>
         {historyActions.map(({ key, label, Icon }) => <Hint key={key} label={label}><Button variant="ghost" size="icon" className="size-8 rounded-full"
           disabled={busy} aria-label={label} onClick={() => void action(key, selected)}><Icon /></Button></Hint>)}
         <Button variant="ghost" size="icon" className="size-8 rounded-full" aria-label="退出多选" disabled={busy} onClick={clear}><CloseIcon /></Button>
       </div>
     </motion.div>}</AnimatePresence>
-    <ConfirmDialog open={Boolean(confirm.length)} title="删除" message={`将 ${new Set(confirm.map(row => row.job_id)).size} 轮生成记录移至回收站`}
-      variant="destructive" confirmText="删除" onConfirm={() => void remove()} onCancel={() => setConfirm([])} />
     {preview?.kind === 'image' && <Lightbox src={preview.url} meta={{ prompt: preview.prompt }} downloadName={preview.filename} onClose={() => setPreview(null)} />}
-    {preview && preview.kind !== 'image' && <Dialog open onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
-      <DialogTitle>{preview.filename}</DialogTitle>
-      {preview.kind === 'video' ? <video controls autoPlay playsInline src={preview.url} className="max-h-[70vh] w-full" />
-        : preview.kind === 'audio' ? <audio controls src={preview.url} className="w-full" />
+    {shownPreview && <Dialog open={Boolean(preview && preview.kind !== 'image')} onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
+      <DialogTitle>{shownPreview.filename}</DialogTitle>
+      {shownPreview.kind === 'video' ? <video controls autoPlay playsInline src={shownPreview.url} className="max-h-[70vh] w-full" />
+        : shownPreview.kind === 'audio' ? <audio controls src={shownPreview.url} className="w-full" />
         : <pre className="max-h-[65vh] overflow-y-auto whitespace-pre-wrap font-sans text-sm">{text}</pre>}
     </DialogContent></Dialog>}
   </div>;

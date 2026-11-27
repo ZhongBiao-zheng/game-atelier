@@ -140,6 +140,7 @@ import {
   isUploadedImageMaterialNode,
   restoreCanvasNodeFocus,
 } from '@/components/canvas/canvasNodePanelInteraction';
+import type { HistoryKind } from '@/api/history';
 import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
   type CreationAssetPanelHandle,
@@ -3247,11 +3248,11 @@ function CanvasEditorInner({
     return node.id;
   }
 
-  function handleUploads(allFiles: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string, historyRow = false) {
+  function handleUploads(allFiles: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string, historyKinds?: ReadonlyMap<File, HistoryKind>) {
     if (!allFiles.length) return;
     // 一次拖进来一批：跳过明显不是图片 / 视频 / 音频的文件，其余照常导入，最后一条汇总（Q11）。
     // 浏览器给不出类型的（空 type）交给服务端判断。
-    const files = allFiles.filter(file => (historyRow && file.type.startsWith('text/')) || !file.type || /^(image|video|audio)\//.test(file.type));
+    const files = allFiles.filter(file => historyKinds?.has(file) || !file.type || /^(image|video|audio)\//.test(file.type));
     const unsupported = allFiles.length - files.length;
     if (!files.length) {
       setError(unsupported === 1 ? '这个文件格式不支持，只能导入图片、视频或音频。' : `${unsupported} 个文件格式都不支持，只能导入图片、视频或音频。`);
@@ -3289,9 +3290,9 @@ function CanvasEditorInner({
               mergeMediaPointerCommand(uploaded.document, target.id, dirtyAtCommand, before);
               added.push(target.id);
             } else {
-              const position = historyRow && menu ? { ...menu, flow: { x: rowX, y: menu.flow.y } } : menu;
+              const position = historyKinds && menu ? { ...menu, flow: { x: rowX, y: menu.flow.y } } : menu;
               let id: string | null;
-              if (historyRow && file.type.startsWith('text/')) {
+              if (historyKinds?.get(file) === 'text') {
                 const text = await file.text();
                 if (latestDocument.current?.project_id !== projectId) return;
                 const versionId = makeId('version');
@@ -3300,10 +3301,10 @@ function CanvasEditorInner({
                   z_index: 0, data: { current_version_id: versionId, generation_draft: null, active_run_id: null, display: { scale: 'sm' } } },
                   position, latestDocument.current, [{ version_id: versionId, kind: 'text', text,
                     created_at: new Date().toISOString(), sha256: CANVAS_LOCAL_VERSION_SHA, origin: { kind: 'user_edit' } }], false);
-              } else id = await uploadMaterial(file, position, historyRow ? position?.flow : undefined);
+              } else id = await uploadMaterial(file, position, historyKinds ? position?.flow : undefined);
               if (id) {
                 added.push(id);
-                if (historyRow) {
+                if (historyKinds) {
                   const current = latestDocument.current;
                   const node = current?.nodes.find(candidate => candidate.id === id);
                   if (node && current) rowX = node.position.x + canvasNodeRenderedSize(node, current.content_versions).width + 32;
@@ -6780,13 +6781,14 @@ function CanvasEditorInner({
               );
             }}
             onHistoryReference={async items => {
-              const files: File[] = [];
-              for (const item of items) files.push(await item.read());
+              const kinds = new Map<File, HistoryKind>();
+              for (const item of items) kinds.set(await item.read(), item.kind);
+              const files = Array.from(kinds.keys());
               if (latestDocument.current?.project_id !== projectId) return;
               const size = { ...CANVAS_DEFAULT_NODE_SIZE, width: files.length * CANVAS_DEFAULT_NODE_SIZE.width + (files.length - 1) * 32 };
               const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(size),
                 ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
-              await handleUploads(files, menu, undefined, '已放到画布', true);
+              await handleUploads(files, menu, undefined, '已放到画布', kinds);
             }}
             onUseTeamMedia={async file => {
               const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(),

@@ -11,6 +11,7 @@ import { formatBeijingTime } from '@/lib/time';
 /** 删一轮里的单张也记成 round，带 `output_slot`：单独标出来，不然和整轮删除长得一样。 */
 function trashKindLabel(entry: TrashEntry): string {
   if (entry.kind === 'round' && typeof entry.meta.output_slot === 'number') return '单张结果';
+  if (entry.kind === 'round' && Array.isArray(entry.meta.outputs)) return `${entry.meta.outputs.length} 项结果`;
   return TRASH_KIND_LABEL[entry.kind] ?? entry.kind;
 }
 

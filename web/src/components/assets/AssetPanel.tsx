@@ -4,7 +4,7 @@ import type { HistoryReference } from '@/api/history';
 import { Button } from '@/components/ui/button';
 import { CloseIcon } from '@/components/ui/icons';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MOTION_DURATION } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 import { loadUiPrefs, saveUiPref } from '@/lib/uiPrefs';
 import { cn } from '@/lib/utils';
 import { CreationAssetPanel, type CreationAssetPanelHandle, type CreationAssetPanelProps } from './CreationAssetPanel';
@@ -52,7 +52,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
       <AnimatePresence initial={false}>
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
-          transition={{ duration: MOTION_DURATION.base }}>
+          transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
           {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
         </motion.div>
       </AnimatePresence>

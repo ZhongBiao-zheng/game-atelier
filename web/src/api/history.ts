@@ -41,6 +41,10 @@ export async function downloadHistory(items: HistoryItem[]) {
   await downloadResponse(response, items.length === 1 ? items[0].filename : 'history.zip');
 }
 
-export function deleteHistoryJob(id: string) {
-  return requestJson<{ trash_id: string }>(`/api/history/${encodeURIComponent(id)}`, '删除', { method: 'DELETE' });
+export function deleteHistoryOutputs(id: string, slots: number[]) {
+  return requestJson<{ trash_id: string }>(`/api/history/${encodeURIComponent(id)}`, '删除', {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slots),
+  });
 }
+
+export const HISTORY_CHANGED = 'atelier:history-changed';

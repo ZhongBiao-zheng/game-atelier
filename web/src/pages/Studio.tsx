@@ -7,6 +7,7 @@ import { useLocation, useSearch } from 'wouter';
 import { ScrollBottomIcon } from '@/components/ui/icons';
 
 import { addStudioResultToCanvas, createStudioJob, deleteStudioRound, findStudioJobByRequest, getStudioJob, newStudioRequestId, requeryStudioJob, resolveImageReferencePaths, submissionRejected, uploadReferenceImage } from '@/api/studio';
+import { HISTORY_CHANGED } from '@/api/history';
 import { restoreTrash } from '@/api/trash';
 import { agentSessionPath } from '@/api/canvas';
 import { notify, clipName, UNDO_DURATION_MS } from '@/lib/notify';
@@ -800,6 +801,11 @@ function StudioFull() {
       return [...updated, ...Array.from(incoming.values()).filter(job => !atStart.has(job.job_id) || retained.has(job.job_id))];
     });
   }, [scopedId]);
+  useEffect(() => {
+    const refresh = () => { void refreshPersistedJobs().catch(() => {}); };
+    window.addEventListener(HISTORY_CHANGED, refresh);
+    return () => window.removeEventListener(HISTORY_CHANGED, refresh);
+  }, [refreshPersistedJobs]);
   const submissions = useMemo(() => {
     if (!session || session.session_id !== scopedId) return null;
     return session.turns.reduce((count, turn) => count + turn.steps.filter(step =>
@@ -1648,7 +1654,7 @@ function StudioFull() {
               if (composer.mode === 'agent') composer.setText(append);
               else { setPromptText(append); setClickPinned(true); }
             }
-            if (added < items.length) setAssetNotice(`只加入了 ${added} 张`);
+            if (added < items.length) setAssetNotice(`只加入了 ${added} ${items.every(item => item.kind === 'image') ? '张' : '项'}`);
           }}
           onUseTeamMedia={(file, entry, key) => {
             const reused = teamReferenceFiles.current.get(key) ?? file;

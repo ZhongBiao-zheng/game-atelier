@@ -74,3 +74,25 @@ it('deletes selected slots in one job without confirmation', async () => {
   expect(deleteHistoryOutputs).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('checkbox', { name: '选择 b.png' })).toBeInTheDocument();
 });
+
+it('waits for composition and keeps the previous page visible until search finishes', async () => {
+  let finish!: (value: { items: HistoryItem[]; next_cursor: null }) => void;
+  vi.mocked(listHistory).mockImplementation(async (_kind, q) => q
+    ? new Promise(resolve => { finish = resolve; }) : { items: rows, next_cursor: null });
+  render(<HistoryPanel onReference={vi.fn()} />);
+  await screen.findByRole('button', { name: 'a' });
+  fireEvent.click(screen.getByRole('button', { name: '搜索' }));
+  const input = screen.getByRole('textbox');
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: 'shan' } });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(listHistory).toHaveBeenCalledTimes(1);
+  fireEvent.change(input, { target: { value: '山' } });
+  fireEvent.compositionEnd(input);
+  expect(listHistory).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(listHistory).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button', { name: 'a' })).toBeVisible();
+  finish({ items: [row('山')], next_cursor: null });
+  expect(await screen.findByRole('button', { name: '山' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'a' })).toBeNull();
+});
