@@ -31,7 +31,7 @@ export function useCanvasGroupRuns(project: string, enabled: boolean) {
   const steps = useMemo(() => {
     const result = new Map<string, GroupRun['steps'][number]>();
     for (const run of latest.values()) {
-      if (run.status === 'cancelled') continue;
+      if (run.status === 'cancelled' || run.status === 'done') continue;
       for (const step of run.steps) if (!result.has(step.node_id)) result.set(step.node_id, step);
     }
     return result;

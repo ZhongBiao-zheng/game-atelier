@@ -1,6 +1,7 @@
 import { requestJson } from './http';
 
 export interface GroupPlan {
+  quote_id: string;
   order: string[];
   steps: {node_id: string; name: string; model: string; estimate_cny: number | null}[];
   total_cny: number;
@@ -14,7 +15,7 @@ export interface GroupRun {
   run_id: string;
   group_id: string;
   status: 'running' | 'failed' | 'interrupted' | 'done' | 'cancelled';
-  steps: {node_id: string; status: 'pending' | 'failed' | 'done'; error: string | null}[];
+  steps: {node_id: string; job_id: string | null; status: 'pending' | 'failed' | 'done'; error: string | null}[];
 }
 
 const base = (project: string) => `/api/canvas/projects/${encodeURIComponent(project)}`;
@@ -27,9 +28,9 @@ export function listGroupRuns(project: string) {
 export function planGroupRun(project: string, id: string) {
   return requestJson<GroupPlan>(group(project, id) + '/run-plan', '读取执行计划', post);
 }
-export function startGroupRun(project: string, id: string, {order, total_cny}: GroupPlan) {
+export function startGroupRun(project: string, id: string, {quote_id, order, total_cny}: GroupPlan) {
   return requestJson<GroupRun>(group(project, id) + '/group-runs', '开始执行',
-    {...post, body: JSON.stringify({order, total_cny})});
+    {...post, body: JSON.stringify({quote_id, order, total_cny})});
 }
 export function updateGroupRun(project: string, runId: string, action: 'resume' | 'cancel') {
   return requestJson<GroupRun>(`${base(project)}/group-runs/${encodeURIComponent(runId)}/${action}`,

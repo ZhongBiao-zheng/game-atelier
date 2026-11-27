@@ -51,6 +51,7 @@ export function pendingResultStack(cover: CanvasNode, jobs: readonly Job[] | und
 } | null {
   if (!isImage(cover) || !jobs?.length) return null;
   const latest = jobs[jobs.length - 1];
+  if (latest.canvas_run?.snapshot?.normalized_params?.group_run) return null;
   const runId = latest.canvas_run?.run_id;
   if (!runId || latest.status === 'pending' || latest.status === 'pending_confirm') return null;
   if (cover.data.result_stack?.run_id === runId) return null;

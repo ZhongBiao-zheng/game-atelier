@@ -557,7 +557,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const candidatePresentation = node.type === 'image'
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
-  const mediaCandidates = candidatePresentation?.current ?? [];
+  const groupOutput = Boolean(nodeJob?.canvas_run?.snapshot?.normalized_params?.group_run);
+  const mediaCandidates = groupOutput ? [] : candidatePresentation?.current ?? [];
   const stackCoverId = context.resultStackOwnerById?.get(node.id) ?? null;
   const nodeRunning = submittingNode || nodeRunState.status === 'loading';
   // 结果组的总张数：已拆成节点的按成员数，最近一次生成还没拆的按这一批成功的张数。
@@ -666,7 +667,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             {layerStackInfo}
           </span>
         )}
-        <CanvasNodeRunBadge state={nodeRunState} />
+        {groupStep?.status !== 'done' && <CanvasNodeRunBadge state={nodeRunState} />}
         {groupStep?.status === 'done' && <CheckIcon size="sm" role="img" aria-label="整体执行已完成" className="content-swap-in ml-1 text-status-done" />}
       </header>
       <NodeToolbar
@@ -1007,7 +1008,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           ? revealedVersionId !== null
           : Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
         holdUntilReady={content?.kind === 'image' && revealedVersionId !== content.version_id}
-        onFailureAction={context.runFailureAction}
+        onFailureAction={groupStep?.job_id === nodeJob?.job_id && nodeJob?.canvas_run?.snapshot?.normalized_params?.group_run
+          && nodeRunState.failureAction?.kind === 'retry' ? undefined : context.runFailureAction}
       />
       {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
         <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
@@ -2723,7 +2725,7 @@ export function CanvasGenerationComposer({
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
       </Collapse>
-      {node.type === 'audio' && (
+      {isCanvasContentNode(node) && (node.type === 'audio' || context.jobsByResultNodeId.get(node.id)?.some(job => job.canvas_run?.snapshot?.normalized_params?.group_run)) && (
         <CandidateHistory
           nodeId={node.id}
           primaryVersionId={node.data.current_version_id}
@@ -3417,7 +3419,11 @@ function CandidateHistory({
   running: boolean;
   submitting: boolean;
 }) {
-  const { current, history } = presentCanvasCandidates(context.jobsByResultNodeId.get(nodeId) ?? []);
+  const jobs = context.jobsByResultNodeId.get(nodeId) ?? [];
+  const { current, history } = presentCanvasCandidates(jobs);
+  const known = new Set([...current, ...history].map(entry => entry.candidate.version_id));
+  const previous = [...new Set(jobs.map(job => job.canvas_run?.snapshot?.normalized_params?.group_run?.previous_version_id))]
+    .filter((id): id is string => !!id && !known.has(id) && !!context.resolveVersion(id));
   if (!current.length && !history.length) return null;
 
   return (
@@ -3430,9 +3436,14 @@ function CandidateHistory({
         primaryVersionId={primaryVersionId}
         actionsDisabled={running || submitting}
       />
-      {history.length > 0 && (
+      {history.length + previous.length > 0 && (
         <details className="mt-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none py-1">历史候选 · {history.length}</summary>
+          <summary className="cursor-pointer select-none py-1">历史候选 · {history.length + previous.length}</summary>
+          {previous.map(id => <Button key={id} size="sm" variant="ghost"
+            disabled={running || submitting || id === primaryVersionId}
+            onClick={() => context.selectCandidate(nodeId, id)}>
+            {new Date(context.resolveVersion(id)!.created_at).toLocaleString()} · 执行前版本
+          </Button>)}
           <CandidateGrid
             label="历史候选结果"
             entries={history}

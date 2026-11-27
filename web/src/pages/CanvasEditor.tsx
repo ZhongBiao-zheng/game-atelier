@@ -79,7 +79,7 @@ import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { canvasEdgeTypes, fadeOutCanvasEdge } from '@/components/canvas/CanvasConnectionEdge';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { flashCanvasEdges, flashCanvasNodes, markCanvasNodesEntering } from '@/components/canvas/canvasNodeAttention';
-import { canvasHistoryAffectedNodes, canvasHistoryHint, canvasRectsIntersect, canvasRemoteNodeChanges, type CanvasHistoryHint } from '@/pages/canvasHistoryAttention';
+import { canvasHistoryAffectedNodes, canvasHistoryHint, canvasRectsIntersect, canvasRemoteNodeChanges, groupResultFrame, withGroupRunResults, type CanvasHistoryHint } from '@/pages/canvasHistoryAttention';
 import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import {
   AddMenuButton,
@@ -854,6 +854,7 @@ function CanvasEditorInner({
     remote: CanvasDocument,
     runIds: ReadonlySet<string>,
     resultNodeIds: ReadonlySet<string> = new Set(),
+    groupResultIds?: ReadonlySet<string>,
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     setDocument(current => {
@@ -897,10 +898,11 @@ function CanvasEditorInner({
         const hasUnsavedContent = activeTextEditingNodeIds.current.has(node.id)
           || (localVersion && (pendingTextVersions.current.get(node.id) === localVersion
             || !remote.content_versions[localVersion]));
+        const frame = groupResultIds?.has(node.id) ? groupResultFrame(node, serverNode, current.content_versions) : {};
         return {
-          ...node,
+          ...node, ...(frame.size ? {size: frame.size} : {}),
           data: {
-            ...node.data,
+            ...node.data, ...(frame.display ? {display: frame.display} : {}),
             current_version_id: hasUnsavedContent ? localVersion : serverNode.data.current_version_id,
             active_run_id: serverNode.data.active_run_id,
           },
@@ -1451,6 +1453,9 @@ function CanvasEditorInner({
 
   const reloadDocumentFromServer = useCallback(async (fromNotification = false) => {
     const remote = await localCanvasTransport.read(projectId);
+    // Read after the document: its Jobs have committed, even when document SSE arrives first.
+    const groupJobs = !sharedOwner && remote.nodes.some(node => node.type === 'group')
+      ? await listCanvasJobs(projectId) : [];
     const before = latestDocument.current;
     const base = serverBaseDocument.current;
     // SSE and the room socket can announce the same edit. A later GET can also finish first.
@@ -1476,12 +1481,13 @@ function CanvasEditorInner({
     serverRevision.current = remote.revision;
     // 别处（多半是 Agent）改了画布：新放上来的节点淡入放大，被改动的节点闪一圈描边（Q15），看得出改了哪里。
     if (sameProject && before) {
-      const { added, changed } = canvasRemoteNodeChanges(before, reloaded);
+      const historyBase = withGroupRunResults(before, reloaded, groupJobs);
+      const { added, changed } = canvasRemoteNodeChanges(historyBase, reloaded);
       markCanvasNodesEntering(added, 0.96);
       flashCanvasNodes(changed);
       if (sharedOwner && base) {
         history.current = rebaseOwnerHistory(history.current,blockedHistory.current,before,base,remoteDocument);
-      } else recordExternalRound(before, reloaded);
+      } else recordExternalRound(historyBase, reloaded);
     }
     latestDocument.current = reloaded;
     setDocument(reloaded);

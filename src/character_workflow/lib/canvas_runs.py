@@ -3122,6 +3122,21 @@ def _uses_incremental_candidates(job: Job) -> bool:
     return image_family(job.model) != "midjourney"
 
 
+def _keep_group_frame(document, node, context):
+    if (not context.snapshot.normalized_params.get("group_run")
+            or node.type not in {"image", "video"} or node.data.display.free_resize):
+        return node
+    # A new aspect ratio must not eject a member from a tightly fitted group.
+    from character_workflow.lib.canvas_agent_layout import DEFAULT_SIZE, node_rect
+    rect = node_rect(node, document)
+    size = node.size
+    if (rect.width, rect.height) != ((size.width, size.height) if size else DEFAULT_SIZE):
+        size = CanvasSize(width=max(1, int(rect.width + 0.5)), height=max(1, int(rect.height + 0.5)))
+    return node.model_copy(update={"size": size, "data": node.data.model_copy(update={
+        "display": node.data.display.model_copy(update={"free_resize": True}),
+    })})
+
+
 def _commit_canvas_candidate_attempt(
     project_id: str,
     job_id: str,
@@ -3223,6 +3238,7 @@ def _commit_canvas_candidate_attempt(
                     and node.data.active_run_id == context.run_id
                     and version is not None and not had_success
                 ):
+                    node = _keep_group_frame(current, node, context)
                     node = node.model_copy(update={
                         "data": node.data.model_copy(update={
                             "current_version_id": version.version_id,
@@ -3721,6 +3737,7 @@ def _finalize_canvas_run_under_locks(
             # run 已终结：active_run_id 归 None（#96），产物挂在 current_version_id 上。
             data_update: dict[str, object] = {"active_run_id": None}
             if should_display_version:
+                node = _keep_group_frame(current, node, context)
                 data_update["current_version_id"] = (
                     text_primary.version_id
                     if job.kind == JobKind.TEXT and text_primary is not None

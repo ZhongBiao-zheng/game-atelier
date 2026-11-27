@@ -252,3 +252,28 @@ def test_group_text_batch_keeps_every_candidate_on_the_original_node(group, monk
     assert len(result.nodes) == len(doc.nodes) and result.connections == doc.connections
     assert result.nodes[0].data.current_version_id == job.canvas_run.candidates[0].version_id
     assert {c.version_id for c in job.canvas_run.candidates} == set(result.content_versions)
+
+
+def test_group_media_preserves_rendered_frame_when_result_aspect_changes():
+    from character_workflow.lib.canvas_agent_layout import node_rect
+    from character_workflow.lib.canvas_runs import _keep_group_frame
+    from character_workflow.lib.schemas import CanvasDocument
+
+    raw = group_document(drafts=["a"]).model_dump(mode="json")
+    node = raw["nodes"][0]
+    node["size"] = {"width": 320, "height": 176}
+    node["data"]["current_version_id"] = "old"
+    image = {"kind": "image", "created_at": "now", "sha256": "a" * 64,
+             "bytes": 10, "mime_type": "image/png", "origin": {"kind": "upload", "upload_id": "x"},
+             "path": "uploads/x.png"}
+    raw["content_versions"] = {
+        "old": {**image, "version_id": "old", "width": 800, "height": 600},
+        "new": {**image, "version_id": "new", "width": 200, "height": 1000},
+    }
+    doc = CanvasDocument.model_validate(raw)
+    original = doc.nodes[0]
+    context = SimpleNamespace(snapshot=SimpleNamespace(normalized_params={"group_run": {"id": "group"}}))
+    result = _keep_group_frame(doc, original, context)
+    result.data.current_version_id = "new"
+    assert node_rect(result, doc) == node_rect(original, doc)
+    assert original.data.current_version_id == "old"

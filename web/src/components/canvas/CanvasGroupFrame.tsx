@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position } from '@xyflow/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { planGroupRun, startGroupRun, updateGroupRun, type GroupPlan } from '@/api/canvasGroupRuns';
 import { CanvasGroupRunDialog } from './CanvasGroupRunDialog';
 import { AddIcon, PlayIcon } from '@/components/ui/icons';
@@ -40,8 +40,15 @@ export function CanvasGroupFrame({ node, context, selected }: {
     } finally { setBusy(false); }
   }
   const failed = run?.steps.findIndex(step => step.status === 'failed') ?? -1;
-  const progress = run?.status === 'failed' ? `第 ${failed + 1} 个失败` : run?.status === 'interrupted' ? '已中断'
-    : run && run.status !== 'cancelled' ? `${run.steps.filter(step => step.status === 'done').length}/${run.steps.length}` : '';
+  const resumable = run?.status === 'failed' || run?.status === 'interrupted';
+  const [completedRun, setCompletedRun] = useState<string | null>(null);
+  useEffect(() => {
+    if (run?.status === 'running') setCompletedRun(run.run_id);
+  }, [run?.status, run?.run_id]);
+  const progress = failed >= 0 && resumable ? `第 ${failed + 1} 个失败`
+    : run?.status === 'interrupted' ? '已中断'
+    : run?.status === 'running' || (run?.status === 'done' && completedRun === run.run_id)
+      ? `${run.steps.filter(step => step.status === 'done').length}/${run.steps.length}` : '';
   return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-xl border-border'}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
@@ -74,22 +81,26 @@ export function CanvasGroupFrame({ node, context, selected }: {
       <EditableText value={node.title} maxLength={120} triggerLabel={`重命名分组 ${node.title}`}
         className="text-muted-foreground hover:text-foreground"
         onSave={title => context.renameNode(node.id, title)} />
-      {progress && <Hint key={progress} label={run?.steps[failed]?.error}>
-        <span role="status" className={`content-swap-in whitespace-nowrap text-xs tabular-nums ${run?.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>{progress}</span>
-      </Hint>}
-      {(run?.status === 'failed' || run?.status === 'interrupted') &&
-        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('resume')}>继续</Button>}
-      {(run?.status === 'failed' || run?.status === 'running') &&
-        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('cancel')}>取消</Button>}
       {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
         className="nodrag nopan flex shrink-0 items-center">
-        <Hint label={hasDraft ? '整体执行' : '组里没有可生成的节点'}><span>
-          <Button size="sm" variant="ghost" className="h-7" disabled={busy || !hasDraft || run?.status === 'running'}
+        <Hint label={resumable ? undefined : hasDraft ? '整体执行' : '组里没有可生成的节点'}>
+          <span className={resumable ? 'invisible' : undefined} aria-hidden={resumable}>
+          <Button size="sm" variant="ghost" className="h-7" disabled={busy || !hasDraft || resumable || run?.status === 'running'}
             onClick={() => void command('plan')}><PlayIcon />整体执行</Button>
-        </span></Hint>
+          </span>
+        </Hint>
         <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`解散分组 ${node.title}`} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
       </div>}
+      {progress && <Hint key={run?.status + progress} label={run?.steps[failed]?.error}>
+        <span role="status" tabIndex={failed >= 0 && resumable ? 0 : undefined}
+          onAnimationEnd={() => { if (run?.status === 'done') setCompletedRun(null); }} className={`${run?.status === 'done' ? 'group-run-finished' : 'content-swap-in'} whitespace-nowrap text-xs tabular-nums ${failed >= 0 && resumable ? 'text-destructive' : 'text-muted-foreground'}`}>{progress}</span>
+      </Hint>}
+      {resumable &&
+        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('resume')}>继续</Button>}
+      {(resumable || run?.status === 'running') &&
+        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('cancel')}>取消</Button>}
     </div>
-    {plan && <CanvasGroupRunDialog plan={plan} busy={busy} onClose={() => setPlan(null)} onStart={() => void command('start')} />}
+    {plan && <CanvasGroupRunDialog plan={plan} busy={busy} onClose={() => setPlan(null)} onStart={() => void command('start')}
+      onLocate={id => { setPlan(null); context.locateNode?.(id); }} />}
   </div>;
 }

@@ -3030,3 +3030,31 @@ it('official plugin descriptions read like the built-in add-menu subtitles', () 
     expect([...manifest.description].length, manifest.id).toBeLessThanOrEqual(10);
   }
 });
+
+it('merges group run steps without offering 撤销本轮 while preserving external edit undo', async ({ onTestFinished }) => {
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/events' ? events.open() : Response.json([])));
+  const undo = vi.spyOn(notify, 'undo');
+  onTestFinished(() => { undo.mockRestore(); state.mockRestore(); vi.unstubAllGlobals(); });
+  const source = imageNode('a', '镜头');
+  const group: CanvasNode = { id: 'group', type: 'group', title: '镜头组', position: {x: 0, y: -50},
+    size: {width: 1200, height: 800}, z_index: 0, data: { member_node_ids: ['a'] } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({nodes: [source, group]}));
+  await renderReadyCanvas();
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith('/events', expect.anything()));
+
+  const done = { job_id: 'job-group', submitted_at: '', status: 'done', params: {}, namespace: 'canvas', kind: 'image',
+    canvas_run: { result_node_id: 'a', run_id: 'run-group-a', snapshot: {normalized_params: {group_run: {id: 'grun_1'}}},
+      candidates: [{index: 0, candidate_id: 'c-1', status: 'succeeded', version_id: 'v-generated'}] } } as Job;
+  vi.mocked(listCanvasJobs).mockResolvedValue([done]);
+  const result = { ...source, data: {...source.data, current_version_id: 'v-generated'} };
+  const landed = documentWith({revision: 8, nodes: [result, group], content_versions: {'v-generated': generatedVersion}});
+  vi.mocked(getCanvasDocument).mockResolvedValue(landed);
+  await act(async () => events.emit('canvas-document-changed', {project_id: 'canvas-one', revision: 8}));
+  expect(undo).not.toHaveBeenCalled();
+  vi.mocked(getCanvasDocument).mockResolvedValue({...landed, revision: 9, nodes: [result, group, imageNode('extra', '外部编辑')]});
+  await act(async () => events.emit('canvas-document-changed', {project_id: 'canvas-one', revision: 9}));
+  await screen.findByRole('button', {name: 'flow-node-extra'});
+  expect(undo).toHaveBeenCalledOnce();
+});
