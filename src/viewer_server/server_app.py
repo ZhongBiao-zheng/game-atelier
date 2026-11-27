@@ -474,6 +474,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(collab_guest_local_router)
     app.include_router(collab_transfer_local_router)
     app.include_router(router)
+    from viewer_server.canvas_group_routes import router as group_router
+    app.include_router(group_router)
     from viewer_server.comfyui_routes import router as comfyui_router
     app.include_router(comfyui_router)
     from viewer_server.http_protocol_routes import router as http_protocol_router

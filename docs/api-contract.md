@@ -403,6 +403,8 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `POST /canvas/projects/{id}/image-edits`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,text-revision,image-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/cancel`
+
+`POST /canvas/projects/{id}/groups/{group_id}/run-plan` 返回按连线和位置排序的 `order`、`steps`（节点名、模型、数量、估价）、`total_cny`、`unpriced` 和 `needs_confirmation`。`blocked` 列出不完整草稿及原因，`cycle_nodes` 只列成环节点。每个可执行草稿提交一次。
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
