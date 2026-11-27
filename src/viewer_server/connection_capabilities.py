@@ -349,6 +349,7 @@ _READ_POSTS = frozenset({
     ("POST", "/api/creation-assets/staleness"),
 })
 MEDIA_ROUTES = frozenset({
+    "/api/history/{job_id}/{output_index}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/previews/{n}/thumb",

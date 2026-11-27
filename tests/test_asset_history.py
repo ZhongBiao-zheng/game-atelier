@@ -104,3 +104,58 @@ def test_real_video_dimensions_and_duration(client):
     save_job(job.model_copy(update={"output_paths": [str(output)]}))
     item = client.get("/api/history?kind=video").json()["items"][0]
     assert item["width"] > 0 and item["height"] > 0 and item["duration"] > 0
+
+
+@pytest.mark.parametrize("namespace", ["studio", "canvas"])
+def test_partial_outputs_can_be_removed_and_restored_in_stable_slots(client, namespace):
+    from pathlib import Path
+    from character_workflow.lib.jobs import output_slots, read_job, removed_output_slots
+
+    job = seed("job-partial", namespace=namespace, status="partial", count=4)
+    url = "/api/history/job-partial"
+    def slots():
+        return [row["output_index"] for row in client.get("/api/history").json()["items"]]
+
+    assert slots() == [0, 1, 2, 3]
+    assert client.request("DELETE", url, json=[1, 8]).status_code == 404
+    assert client.request("DELETE", url, json=[]).status_code == 422
+    selected = client.request("DELETE", url, json=[1, 3, 1]).json()["trash_id"]
+    assert slots() == [0, 2]
+    assert removed_output_slots(read_job(job.job_id)) == {1, 3}
+    assert [Path(path).exists() for path in job.output_paths] == [True, namespace == "canvas"] * 2
+    assert client.request("DELETE", url, json=[1]).status_code == 404
+    whole = client.request("DELETE", url, json=[0, 2]).json()["trash_id"]
+    assert slots() == []
+    assert client.post(f"/api/trash/{selected}/restore").status_code == 409
+    assert client.post(f"/api/trash/{whole}/restore").is_success
+    assert slots() == [0, 2]
+    assert client.post(f"/api/trash/{selected}/restore").is_success
+    assert output_slots(read_job(job.job_id)) == list(enumerate(job.output_paths))
+    assert all(Path(path).is_file() for path in job.output_paths)
+
+
+def test_history_thumbnails_reuse_disk_cache_and_invalidate_on_source_change(client, monkeypatch):
+    from pathlib import Path
+    from character_workflow.lib import canvas_thumbnails
+    path = Path(seed("job-image").output_paths[0])
+    Image.new("RGB", (1024, 768), "blue").save(path)
+    def thumb_url():
+        return client.get("/api/history").json()["items"][0]["thumbnail_url"]
+
+    url = thumb_url()
+    first = client.get(url + "&width=380")
+    assert Image.open(BytesIO(first.content)).size == (512, 384)
+    assert "immutable" in first.headers["cache-control"]
+    cache = data_root.runtime_dir() / "history-thumbnails"
+    assert len(list(cache.rglob("*.webp"))) == 1
+    with monkeypatch.context() as patch:
+        def unexpected(*args):
+            pytest.fail("cache hit decoded original again")
+        patch.setattr(canvas_thumbnails, "_render_thumbnail", unexpected)
+        assert client.get(url + "&width=512").content == first.content
+    Image.new("RGB", (1200, 600), "red").save(path)
+    assert thumb_url() != url
+    assert "immutable" not in client.get(url).headers["cache-control"]
+    updated = client.get(thumb_url() + "&width=512")
+    assert Image.open(BytesIO(updated.content)).size == (512, 256)
+    assert client.get(thumb_url() + "&width=1025").content == path.read_bytes()

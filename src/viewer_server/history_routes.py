@@ -1,7 +1,8 @@
-"""Local generation history. Pagination addresses outputs, deletion addresses a generation."""
+"""Local generation history. Pagination and deletion address stable output slots."""
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import wave
 from datetime import datetime, timezone
@@ -12,11 +13,11 @@ from urllib.parse import urlencode
 from zipfile import ZipFile
 
 from fastapi import APIRouter, Body, HTTPException, Path, Query
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from character_workflow.lib import data_root, trash
-from character_workflow.lib.canvas_thumbnails import _render_thumbnail
+from character_workflow.lib.canvas_thumbnails import cached_image_thumbnail, snap_thumbnail_width
 from character_workflow.lib.jobs import list_jobs, output_slots, read_job, trash_studio_job
 from character_workflow.lib.schemas import JobStatus
 from character_workflow.lib.team_library_share import _media_filename
@@ -33,7 +34,7 @@ class OutputRef(BaseModel):
 
 
 def _visible_job(job, hidden_projects):
-    return (job.namespace in {"studio", "canvas"} and job.status == JobStatus.DONE
+    return (job.namespace in {"studio", "canvas"} and job.status in (JobStatus.DONE, JobStatus.PARTIAL)
             and job.canvas_project_id not in hidden_projects)
 
 
@@ -128,7 +129,8 @@ def history(kind: Kind = "all", q: str = "", cursor: str | None = None,
                 continue
             width, height, duration, preview = _metadata(path, job.kind, stat.st_mtime_ns, stat.st_size)
             url = "/api/raw?" + urlencode({"job_id": job.job_id, "path": raw})
-            thumb = f"/api/history/{job.job_id}/{slot}/thumb" if job.kind == "image" else url
+            version = f"{stat.st_mtime_ns}-{stat.st_size}"
+            thumb = f"/api/history/{job.job_id}/{slot}/thumb?v={version}" if job.kind == "image" else url
             items.append(dict(job_id=job.job_id, output_index=slot, kind=job.kind, url=url,
                               thumbnail_url=thumb, width=width, height=height,
                               duration=duration if duration is not None else job.params.duration, text_preview=preview,
@@ -138,19 +140,30 @@ def history(kind: Kind = "all", q: str = "", cursor: str | None = None,
     return {"items": items, "next_cursor": None}
 
 
-@router.get("/{job_id}/{output_index}/thumb")
-def thumbnail(job_id: JobId, output_index: Annotated[int, Path(ge=0)]):
-    from PIL import Image
+def _thumbnail_dir(job_id, slot):
+    return data_root.runtime_dir() / "history-thumbnails" / job_id / str(slot)
 
+
+@router.get("/{job_id}/{output_index}/thumb")
+def thumbnail(job_id: JobId, output_index: Annotated[int, Path(ge=0)],
+              width: int = Query(256, ge=1), v: str | None = None):
     job, path = _lookup(OutputRef(job_id=job_id, output_index=output_index),
                         *map(set, _read_gallery_hidden_state()))
     if job.kind != "image":
         raise HTTPException(404)
-    try:
-        body = _render_thumbnail(path, 384)
-    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        body = None
-    return Response(body, media_type="image/webp") if body else FileResponse(path)
+    stat = path.stat()
+    version = f"{stat.st_mtime_ns}-{stat.st_size}"
+    headers = {"Cache-Control": "private, max-age=31536000, immutable" if v == version else "no-store"}
+    target = snap_thumbnail_width(width)
+    if target is not None:
+        cached = _thumbnail_dir(job_id, output_index) / f"{version}-{target}.webp"
+        try:
+            thumb = cached_image_thumbnail(cached, path, target)
+        except OSError:
+            thumb = None
+        if thumb:
+            return FileResponse(thumb, media_type="image/webp", headers=headers)
+    return FileResponse(path, headers=headers)
 
 
 @router.post("/download")
@@ -187,10 +200,14 @@ def download(refs: Annotated[list[OutputRef], Body(min_length=1)]):
 
 
 @router.delete("/{job_id}")
-def remove(job_id: JobId):
+def remove(job_id: JobId, slots: Annotated[list[Annotated[int, Field(ge=0)]], Body(min_length=1)]):
     try:
-        return {"trash_id": trash_studio_job(job_id, history=True)}
-    except FileNotFoundError:
-        raise HTTPException(404, "找不到生成记录") from None
+        selected = set(slots)
+        trash_id = trash_studio_job(job_id, history_slots=selected)
+        for slot in selected:
+            shutil.rmtree(_thumbnail_dir(job_id, slot), ignore_errors=True)
+        return {"trash_id": trash_id}
+    except (FileNotFoundError, LookupError):
+        raise HTTPException(404, "找不到生成结果") from None
     except (ValueError, trash.TrashError) as error:
         raise HTTPException(409, str(error)) from error

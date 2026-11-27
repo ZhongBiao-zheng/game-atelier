@@ -379,10 +379,11 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 生成历史（仅本机编辑器）：
 
-- `GET /history?kind=all&q=&cursor=&limit=60` 返回 `{items,next_cursor}`。每个条目对应一份已完成的 Studio 或画布产物，按提交时间降序、同轮产物原顺序排列。游标由服务端返回，最后一页为 null。按完整提示词搜索，沿用画廊的路径和项目隐藏设置。
+- `GET /history?kind=all&q=&cursor=&limit=60` 返回 `{items,next_cursor}`。每个条目对应一份仍有原件的 Studio 或画布产物（DONE、PARTIAL），按提交时间降序、同轮产物原顺序排列。游标由服务端返回，最后一页为 null。按完整提示词搜索，沿用画廊的路径和项目隐藏设置。
 - 条目包含 `job_id,output_index,kind,url,thumbnail_url,filename,width,height,duration,text_preview,prompt,submitted_at`。序号沿用任务稳定产物序号，时长单位为秒，未知元数据为空。提示词最多 120 字。
 - `POST /history/download` 接受 `[{job_id,output_index}]`，单项返回原文件，多项返回 ZIP，同名文件加序号。
-- `DELETE /history/{job_id}` 将整轮记录移进回收站，预先归档用量；画布项目继续持有不可变产物文件。
+- `DELETE /history/{job_id}` 请求体为非空稳定序号数组。只回收所选产出，选中全部剩余产出时回收整轮并归档用量。画布项目继续持有原件。返回 `{trash_id}`，撤销调用回收站还原接口。
+- 图片缩略图 URL 带源文件的修改时间与大小版本，`width` 向上取 256、512、1024 档。版本匹配时允许浏览器私有长缓存。
 
 `GET /gallery/recent` 的 Studio 作品以 Job 登记为准：仅收录 `namespace=studio`、
 `kind=image`、状态为 `done` 或 `partial` 的 `output_paths`，且文件必须存在于 Studio
