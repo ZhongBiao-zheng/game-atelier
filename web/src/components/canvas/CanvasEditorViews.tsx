@@ -1018,8 +1018,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         </Handle>
       ))}
       {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
-        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle canvas-creation-handle" aria-label="连接到此节点">
-          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true"><AddIcon size="sm" /></span>
+        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} data-magnetic-side="left" className="canvas-node-handle canvas-creation-handle" aria-label="连接到此节点">
+          <span className="canvas-magnetic-anchor" aria-hidden="true"><span className={CANVAS_HANDLE_DOT_CLASS}><AddIcon size="sm" /></span></span>
         </Handle>
       )}
       {(canvasNodeProvidesOutput(node) || node.type === 'image_edit' || (node.type === 'layer_stack'
@@ -1028,10 +1028,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           type="source"
           isConnectable={node.type !== 'layer_stack' && node.type !== 'image_edit'}
           position={Position.Right}
+          data-magnetic-side="right"
           className="canvas-node-handle canvas-creation-handle"
           aria-label="从此节点连接"
         >
-          <span className={CANVAS_HANDLE_DOT_CLASS} aria-hidden="true"><AddIcon size="sm" /></span>
+          <span className="canvas-magnetic-anchor" aria-hidden="true"><span className={CANVAS_HANDLE_DOT_CLASS}><AddIcon size="sm" /></span></span>
         </Handle>
       )}
       {generationPanelVisible && draft && (

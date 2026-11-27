@@ -692,15 +692,37 @@
     border-color: var(--primary);
   }
   .canvas-creation-handle .canvas-node-handle-dot svg { display: none; }
-  .canvas-flow-local .canvas-creation-handle.connectable { --handle-offset: calc(20px / var(--canvas-zoom, 1)); }
+  .canvas-flow-local [data-magnetic-side].connectable { --handle-offset: calc(20px / var(--canvas-zoom, 1)); }
   .canvas-flow-local .canvas-creation-handle.connectable.react-flow__handle-left { --handle-offset: calc(-20px / var(--canvas-zoom, 1)); }
-  .canvas-flow-local .canvas-creation-handle.connectable::before {
+  .canvas-flow-local .react-flow__handle[data-magnetic-side].connectable::before {
     left: calc(50% + var(--handle-offset) / 2);
     width: calc(44px / var(--canvas-zoom, 1));
     height: calc(28px / var(--canvas-zoom, 1));
   }
-  .canvas-flow-local .canvas-creation-handle.connectable .canvas-node-handle-dot {
+  .canvas-flow-local .canvas-magnetic-anchor {
+    position: absolute;
+    top: 50%;
+    left: calc(50% + var(--handle-offset, 0px));
+    pointer-events: none;
+  }
+  /* The extra hit area moves with the painted circle. Its events still target
+     the logical Handle, which xyflow uses to snap and validate connections. */
+  .canvas-flow-local [data-magnetic-side].connectable::after,
+  .canvas-flow-local [data-magnetic-side].connectable :is(.canvas-node-handle-dot, .canvas-group-add) {
+    transform: translate(-50%, -50%) translate3d(calc(var(--magnetic-x, 0px) / var(--canvas-zoom, 1)), calc(var(--magnetic-y, 0px) / var(--canvas-zoom, 1)), 0);
+  }
+  .canvas-flow-local [data-magnetic-side].connectable::after {
+    position: absolute;
+    content: '';
+    top: 50%;
     left: calc(50% + var(--handle-offset));
+    width: calc(26px / var(--canvas-zoom, 1));
+    height: calc(26px / var(--canvas-zoom, 1));
+    border-radius: 50%;
+  }
+  .canvas-flow-local .canvas-creation-handle.connectable .canvas-node-handle-dot,
+  .canvas-flow-local .canvas-group-add-handle.connectable .canvas-group-add {
+    left: 50%;
     display: grid;
     place-items: center;
     width: calc(26px / var(--canvas-zoom, 1));
@@ -711,12 +733,12 @@
     transition: color var(--motion-fast) var(--ease-atelier-subtle),
       border-color var(--motion-fast) var(--ease-atelier-subtle), scale var(--motion-fast) var(--ease-atelier-subtle);
   }
-  .canvas-flow-local .canvas-creation-handle.connectable .canvas-node-handle-dot svg {
+  .canvas-flow-local [data-magnetic-side].connectable .canvas-magnetic-anchor svg {
     display: block;
     width: calc(14px / var(--canvas-zoom, 1));
     height: calc(14px / var(--canvas-zoom, 1));
   }
-  .canvas-flow-local .canvas-creation-handle.connectable:is(:hover, .connectingto.valid) .canvas-node-handle-dot {
+  .canvas-flow-local [data-magnetic-side].connectable:is(:hover, .connectingto.valid, [data-magnetic-active]) :is(.canvas-node-handle-dot, .canvas-group-add) {
     border-color: var(--primary);
     color: var(--primary);
   }
@@ -754,6 +776,23 @@
   .canvas-flow .canvas-node-handle:hover .canvas-group-add {
     border-color: var(--primary);
   }
+  .canvas-flow-local:not(.canvas-flow-connecting) .canvas-node-handle:is([data-magnetic-active], [data-magnetic-moving]) {
+    opacity: 1;
+    pointer-events: auto !important;
+  }
+  .canvas-flow-local:not(.canvas-flow-connecting) .react-flow__connectionline,
+  .canvas-flow-local.canvas-flow-connecting .connectingfrom[data-magnetic-side] .canvas-magnetic-anchor {
+    opacity: 0;
+  }
+  .canvas-flow-local .canvas-pending-left [data-magnetic-side='left'],
+  .canvas-flow-local .canvas-pending-right [data-magnetic-side='right'] {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: none;
+  }
+  .canvas-handle-add-ghost { pointer-events: none; }
+  .canvas-handle-add-ghost circle { fill: var(--secondary); stroke: var(--primary); stroke-width: 1; }
+  .canvas-handle-add-ghost path { fill: none; stroke: var(--primary); stroke-width: 1.5; stroke-linecap: round; }
   /* 框选时的拖拽框与框选后的选区框、分组框用同一个圆角。 */
   .canvas-flow .react-flow__selection {
     border-radius: 1rem;

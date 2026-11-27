@@ -2,7 +2,8 @@ import type { CanvasContentVersion } from '@/schema/canvas';
 import { downloadCanvasLayers } from '@/api/canvas';
 import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { useState } from 'react';
+import { Profiler, useState } from 'react';
+import { bindCanvasMagneticHandles } from './canvasMagneticInteraction';
 import { promptVariableToken } from '@/lib/promptVariables';
 
 import {
@@ -45,7 +46,8 @@ vi.mock('@xyflow/react', () => ({
     children?: React.ReactNode;
     isVisible?: boolean;
   } & React.HTMLAttributes<HTMLDivElement>) => isVisible ? <div {...props}>{children}</div> : null,
-  Handle: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+  Handle: ({ children, className, 'data-magnetic-side': side }: { children?: React.ReactNode; className?: string; 'data-magnetic-side'?: string }) =>
+    <span className={className + ' connectable'} data-magnetic-side={side}>{children}</span>,
   Position: { Left: 'left', Right: 'right', Top: 'top' },
 }));
 
@@ -165,6 +167,26 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
   data: { domain: CanvasNode };
   selected: boolean;
 }>;
+
+it('magnetises a selected node from the blank pane without React commits', async () => {
+  const renders = vi.fn();
+  const view = render(<div className="react-flow__renderer">
+    <div className="react-flow__node" data-id="image"><CanvasNodeContext.Provider value={nodeContext()}>
+      <Profiler id="card" onRender={renders}><NodeCard data={{ domain: nodes[1] }} selected /></Profiler>
+    </CanvasNodeContext.Provider></div></div>);
+  const pane = view.container.firstElementChild!;
+  const handle = pane.querySelector<HTMLElement>('[data-magnetic-side="right"]')!;
+  const anchor = handle.querySelector('.canvas-magnetic-anchor')!;
+  vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(350, 300, 0, 0));
+  const stop = bindCanvasMagneticHandles(view.container, 'image');
+  try {
+    renders.mockClear();
+    for (let x = 365; x <= 380; x++) fireEvent(pane, new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: 312 }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); });
+    expect(parseFloat(handle.style.getPropertyValue('--magnetic-x'))).toBeGreaterThan(0);
+    expect(renders).not.toHaveBeenCalled();
+  } finally { stop(); }
+});
 
 it('locates a material parent from its title', () => {
   const source = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'source-image' } } as CanvasNode;
