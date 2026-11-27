@@ -1,4 +1,6 @@
 """Durable serial orchestration on top of the ordinary canvas Job queue."""
+from copy import deepcopy
+
 import json
 import logging
 import re
@@ -16,7 +18,11 @@ from character_workflow.lib.jobs import JobStatus, new_job_id, read_job
 STALE = "组的内容变了，请重新确认"
 BUSY = "这个组正在执行"
 _PENDING = {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}
-_WAIT_SECONDS = 0.35
+_WAIT_SECONDS = 1
+# Only retain the last durable checkpoint while a coordinator is running. If its
+# failure cannot be written, readers still see a stopped run until the next write.
+_checkpoints = {}
+_unwritten_failures = {}
 
 
 def _now():
@@ -34,7 +40,7 @@ def _path(project_id, run_id):
 
 
 def list_runs(project_id):
-    return sorted((json.loads(read_text_with_retry(path))
+    return sorted((_load(project_id, path.stem)
                    for path in _folder(project_id).glob("grun_*.json")),
                   key=lambda run: run["created_at"], reverse=True)
 
@@ -44,7 +50,7 @@ def active_step_jobs():
     jobs = []
     for path in projects.canvas_projects_root().glob("*/group-runs/grun_*.json"):
         try:
-            run = json.loads(read_text_with_retry(path))
+            run = _load(path.parent.parent.name, path.stem)
         except FileNotFoundError:
             continue  # Project removed during the snapshot.
         if run["status"] == "running":
@@ -55,7 +61,13 @@ def active_step_jobs():
 def _save(project_id, run):
     run["updated_at"] = _now()
     run["revision"] += 1
-    atomic_write_json(_path(project_id, run["run_id"]), run)
+    path = _path(project_id, run["run_id"])
+    atomic_write_json(path, run)
+    _unwritten_failures.pop(path, None)
+    if run["status"] == "running":
+        _checkpoints[path] = deepcopy(run)
+    else:
+        _checkpoints.pop(path, None)
 
 
 def _check_idle(project_id, group_id):
@@ -87,7 +99,11 @@ def start(project_id, group_id, order, total_cny, *, confirmed_quote=None):
 
 
 def _load(project_id, run_id):
-    return json.loads(read_text_with_retry(_path(project_id, run_id)))
+    path = _path(project_id, run_id)
+    failure = _unwritten_failures.get(path)
+    if failure is not None:
+        return deepcopy(failure)
+    return json.loads(read_text_with_retry(path))
 
 
 def resume(project_id, run_id):
@@ -123,12 +139,30 @@ def cancel(project_id, run_id):
         return run
 
 
-def interrupt_running(project_id):
+def recover_group_runs(project_id, resumable):
+    """Reattach to reconciled Jobs. An unclaimed next step needs a user's resume."""
+    reattach = []
     with file_lock(projects.canvas_project_lock_path(project_id)):
         for run in list_runs(project_id):
-            if run["status"] == "running":
-                run["status"] = "interrupted"
-                _save(project_id, run)
+            if run["status"] != "running":
+                continue
+            step = next((s for s in run["steps"] if s["status"] != "done"), None)
+            job = None
+            if step and step["job_id"]:
+                try:
+                    job = read_job(step["job_id"])
+                except FileNotFoundError:
+                    pass
+            if step is None or (job and (job.job_id in resumable or job.status == JobStatus.DONE)):
+                _checkpoints[_path(project_id, run["run_id"])] = deepcopy(run)
+                reattach.append(run["run_id"])
+                continue
+            if job and job.status not in _PENDING:
+                step.update(status="failed", error=job.error or "节点生成失败")
+            run["status"] = "interrupted"
+            _save(project_id, run)
+    for run_id in reattach:
+        _launch(project_id, run_id)
 
 
 def _submit_step(project_id, run, step):
@@ -139,33 +173,15 @@ def _submit_step(project_id, run, step):
     fields = ("model", "mode", "alias", "count", "estimate_cny")
     if row is None or any(row[k] != step[k] for k in fields):
         raise ValueError(STALE)
-    finished = {s["node_id"]: s["version_id"] for s in run["steps"] if s["status"] == "done"}
+    finished = {s["node_id"] for s in run["steps"] if s["status"] == "done"}
     surface = next(n for n in doc.nodes if n.id == step["node_id"])
     sources = canvas_runs.canvas_input_sources(doc, surface, surface.data.generation_draft)
     if any(src in run["order"] and src not in finished for _, src, _ in sources):
         raise ValueError(STALE)
-    # A populated surface can produce a new result node. Resolve draft mentions against
-    # the original IDs but freeze the versions produced by this run. Never edit live edges.
-    nodes = [n.model_copy(update={"data": n.data.model_copy(update={
-        "current_version_id": finished[n.id]})}) if n.id in finished else n for n in doc.nodes]
     prepared = canvas_runs.prepare_canvas_generation(
-        project_id, doc.model_copy(update={"nodes": nodes}), surface, step["count"], consume_route=True)
-    # When generation created a separate surface, its ID also belongs on snapshot
-    # references and any new result edges. Keep the user's original draft intact.
-    live_ids = {n.id for n in doc.nodes}
-    result_ids = {s["node_id"]: s["result_node_id"] for s in run["steps"]
-                  if s.get("result_node_id") in live_ids and s["result_node_id"] != s["node_id"]}
-    if result_ids:
-        prompt = prepared.draft.prompt
-        inputs = []
-        for item in prepared.inputs:
-            source = result_ids.get(item.node_id, item.node_id)
-            prompt = prompt.replace(f"@[node:{item.node_id}]", f"@[node:{source}]")
-            inputs.append(item.model_copy(update={"node_id": source}))
-        prepared.inputs = inputs
-        prepared.draft = prepared.draft.model_copy(update={"prompt": prompt})
+        project_id, doc, surface, step["count"], consume_route=True)
     job, _ = canvas_runs.commit_canvas_generation_under_lock(
-        project_id, doc, surface, prepared, job_id=step["job_id"])
+        project_id, doc, surface, prepared, job_id=step["job_id"], group_run_id=run["run_id"])
     return job
 
 
@@ -217,12 +233,43 @@ def _work(project_id, run_id):
                 return
             if action == "wait":
                 wait.wait(_WAIT_SECONDS)
-    except (FileNotFoundError, KeyError):
-        return  # Project removed.
-    except Exception:
-        logging.getLogger(__name__).exception("group runner failed: %s", run_id)
+    except Exception as error:
+        _worker_failed(project_id, run_id, error)
+
+
+def _worker_failed(project_id, run_id, error):
+    log = logging.getLogger(__name__)
+    log.exception("group runner failed: %s", run_id)
+    path = _path(project_id, run_id)
+    def mark_failed(checkpoint):
+        failed = deepcopy(checkpoint)
+        step = next((s for s in failed["steps"] if s["status"] != "done"), None)
+        if step:
+            step.update(status="failed", error=f"整体执行意外停止：{error}")
+        failed["status"] = "failed"
+        return failed
+
+    try:
+        with file_lock(projects.canvas_project_lock_path(project_id)):
+            try:
+                run = _load(project_id, run_id)
+            except FileNotFoundError:
+                _checkpoints.pop(path, None)
+                return
+            except (OSError, ValueError):
+                run = _checkpoints.get(path)
+            if run and run["status"] == "running":
+                _save(project_id, mark_failed(run))
+    except OSError:
+        checkpoint = _checkpoints.pop(path, None)
+        if checkpoint is not None:
+            _unwritten_failures[path] = mark_failed(checkpoint)
+        log.exception("could not persist failed group run: %s", run_id)
 
 
 def _launch(project_id, run_id):
-    threading.Thread(target=_work, args=(project_id, run_id), name=f"canvas-{run_id}",
-                     daemon=True).start()
+    try:
+        threading.Thread(target=_work, args=(project_id, run_id), name=f"canvas-{run_id}",
+                         daemon=True).start()
+    except RuntimeError as error:
+        _worker_failed(project_id, run_id, error)

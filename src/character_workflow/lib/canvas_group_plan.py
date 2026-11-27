@@ -52,6 +52,8 @@ def group_plan(project_id, group_id, document=None):
         try:
             inputs = canvas_input_sources(document, node, draft)
             dependencies[node_id] = {source for _, source, _ in inputs if source in members}
+            if node.type != draft.mode:
+                raise ValueError("该节点不能原位保存此类型的结果")
             if not draft.model.strip():
                 raise ValueError("未选择模型")
             if not draft.prompt.strip() and not any(
@@ -61,7 +63,10 @@ def group_plan(project_id, group_id, document=None):
         except ValueError as error:
             blocked.append({"node_id": node_id, "name": node.title, "reason": str(error)})
             continue
-        count = 4 if draft.mode == "image" and image_family(draft.model) == "midjourney" else 1
+        limit = {"image": 4, "text": 4, "audio": 2, "video": 1}[draft.mode]
+        count = max(1, min(limit, draft.params.n or 1))
+        if draft.mode == "image" and image_family(draft.model) == "midjourney":
+            count = 4
         estimate = cost.generation_estimate(project_id, node_id, count, [{
             "op": "set_draft", "node_id": node_id, "mode": draft.mode, "model": draft.model,
             "alias": draft.alias, "params": canvas_allowed_draft_params(draft.mode, draft.params),

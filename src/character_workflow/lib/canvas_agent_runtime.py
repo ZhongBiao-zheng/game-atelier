@@ -148,10 +148,18 @@ def needs_confirmation(tool: str, mode: str) -> bool:
 def confirmation_required(project_id: str, tool: str, arguments: dict, mode: str) -> bool:
     """一次工具调用要不要停下来等用户确认。审查模式：写操作都确认。
     Auto：只有这里列出的情况确认（新增一种就在这里加一条，别散到别处）：
-    - 生成估价超过确认金额（2026-11-19 定）。删除维持不确认（2026-11-19 飙哥再次确认）。
+    - 生成估价超过确认金额。run_group 首次只读报价，执行按整组总额比较，等于阈值也直接执行。删除维持不确认（2026-11-19 飙哥再次确认）。
     - 插件工具声明了 always_confirm（ADR-0043）：PS 联动的脚本执行，每次都确认（2026-11-19 管理会话定）。"""
     if tool == "run_group":
-        return bool(arguments.get("quote_id"))
+        if not arguments.get("quote_id"):
+            return False
+        try:
+            plan = group_plan(project_id, arguments["group_id"])
+        except (KeyError, FileNotFoundError):
+            return True  # A missing quote cannot authorize an automatic paid submission.
+        if arguments["quote_id"] != quote_id(project_id, arguments["group_id"], plan):
+            return True
+        return mode != "auto" or plan["needs_confirmation"]
     if tool.startswith(PLUGIN_TOOL_PREFIX) and plugin_tools().get(tool, {}).get("always_confirm"):
         return True
     if needs_confirmation(tool, mode):
@@ -543,7 +551,7 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
         "在当前画布上批量改动：add_text / add_media_node / add_asset_node / add_surface / set_text / set_draft / "
         "connect / disconnect / move / remove_node。整批原子提交。同一次调用 add_surface 指定 node_id，后续 set_draft / connect 引用这个 id，不能用标题。新节点 position 填 {x: 0, y: 0}，系统排位。尺寸选固定像素 size 或 ratio（可带 resolution），二选一。已有图直接连线，不复制。多个已有角色或元素都连上，总数不超过 reference_limits.image。库中参考逐个 add_asset_node（team:… 可直接用），复用已有节点和冻结版本，每张都要有可见节点和 input 连线。对比节点只接 before / after 两槽，默认依次填充，指定已占槽会替换。", {}),
     "run_group": ("整体执行画布分组。第一次只传 group_id，返回执行顺序、分项估价和 quote_id。"
-                  "可以执行时，再传同一 group_id 和返回的 quote_id，由确认卡请求授权。",
+                  "可以执行时，再传同一 group_id 和返回的 quote_id，按当前模式和确认金额执行。",
                   {"type": "object", "required": ["group_id"], "properties": {
                       "group_id": {"type": "string"}, "quote_id": {"type": "string"}}}),
     "run_generation": ("在已写好生成配置的图片 / 视频节点上发起生成（付费）。",
@@ -763,6 +771,8 @@ def build_tools() -> list:
                 text = cost.with_submitted_estimate(text, quotes.pop(call_id, []))
                 turn.spend.finish(call_id, text)
                 turn.record_submitted(text)
+            elif name == "run_group" and arguments.get("quote_id"):
+                turn.spend.finish(ctx.tool_call_id, text)
             turn.created_node_ids.update(created)
             return text
 

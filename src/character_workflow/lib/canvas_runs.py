@@ -1443,6 +1443,7 @@ def _commit_frozen_run(
     artifacts: list[dict[str, Any]] | None = None,
     job_id: str | None = None,
     text_revision: CanvasTextRevision | None = None,
+    group_run_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
     job_id = job_id or new_job_id()
@@ -1452,7 +1453,9 @@ def _commit_frozen_run(
     if edits_layer and canvas_node_has_pending_run(current, surface):
         raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
     # 改写的结果写回被改写的节点本身，不论它已有多少正文。
-    use_surface = text_revision is not None or (
+    if group_run_id and canvas_node_has_pending_run(current, surface):
+        raise ValueError("这个节点正在生成，请在完成后继续")
+    use_surface = group_run_id is not None or text_revision is not None or (
         surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
@@ -1477,6 +1480,11 @@ def _commit_frozen_run(
         "submitted_at": timestamp,
         "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
     }
+    if group_run_id:
+        # Snapshot metadata is durable and never enters the provider's JobParams.
+        snapshot_payload["normalized_params"] = {**normalized, "group_run": {
+            "id": group_run_id, "previous_version_id": _current_version_id(surface),
+        }}
     if text_revision is not None:
         # 只在改写任务里出现，其余任务的指纹保持不变。
         snapshot_payload["text_revision"] = text_revision.model_dump(mode="json")
@@ -1681,6 +1689,7 @@ def commit_canvas_generation_under_lock(
     *,
     job_id: str | None = None,
     run_id: str | None = None,
+    group_run_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     """Caller holds the project lock; all generation modes share this transaction boundary."""
     return _commit_frozen_run(
@@ -1698,6 +1707,7 @@ def commit_canvas_generation_under_lock(
         result_draft=prepared.draft,
         allow_surface_reuse=True,
         transaction_kind="submit",
+        group_run_id=group_run_id,
         job_id=job_id,
         run_id=run_id,
     )
@@ -3276,7 +3286,7 @@ def _settle_pending_canvas_candidates(
                 "completed_at": _now(),
                 "canvas_run": context.model_copy(update={"candidates": candidates}),
             })
-            if job.params.image_edit:
+            if job.params.image_edit or context.snapshot.normalized_params.get("group_run"):
                 terminal, _document = _release_result_node(
                     project_id, _read_document_unlocked(project_id), context, updated,
                 )
@@ -3724,6 +3734,7 @@ def _finalize_canvas_run_under_locks(
     if (
         job.kind == JobKind.TEXT
         and result_node is not None
+        and not context.snapshot.normalized_params.get("group_run")
         and len(candidates) > 1
     ):
         node_width = result_node.size.width if result_node.size is not None else 256

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from character_workflow.lib import canvas_group_runs as runs
 
-from character_workflow.lib.canvas_group_plan import group_plan
+from character_workflow.lib.canvas_group_plan import group_plan, quote_id
 
 router = APIRouter(prefix="/api/canvas/projects/{project_id}")
 
@@ -12,7 +12,8 @@ router = APIRouter(prefix="/api/canvas/projects/{project_id}")
 @router.post("/groups/{group_id}/run-plan")
 def plan(project_id: str, group_id: str):
     try:
-        return group_plan(project_id, group_id)
+        result = group_plan(project_id, group_id)
+        return {**result, "quote_id": quote_id(project_id, group_id, result)}
     except (FileNotFoundError, KeyError):
         raise HTTPException(404, "找不到这个画布项目或分组") from None
 
@@ -20,12 +21,13 @@ def plan(project_id: str, group_id: str):
 
 class ConfirmedPlan(BaseModel):
     order: list[str] = Field(max_length=10_000)
+    quote_id: str
     total_cny: float = Field(ge=0, allow_inf_nan=False)
 
 
-def _command(fn, *args):
+def _command(fn, *args, **kwargs):
     try:
-        return fn(*args)
+        return fn(*args, **kwargs)
     except (KeyError, FileNotFoundError):
         raise HTTPException(404, "找不到这个分组或执行记录") from None
     except RuntimeError as error:
@@ -36,7 +38,8 @@ def _command(fn, *args):
 
 @router.post("/groups/{group_id}/group-runs", status_code=201)
 def start(project_id: str, group_id: str, body: ConfirmedPlan):
-    return _command(runs.start, project_id, group_id, body.order, body.total_cny)
+    return _command(runs.start, project_id, group_id, body.order, body.total_cny,
+                    confirmed_quote=body.quote_id)
 
 
 @router.get("/group-runs")

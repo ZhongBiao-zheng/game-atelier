@@ -46,3 +46,28 @@ def test_stale_agent_quote_cannot_start(monkeypatch):
     response, _ = agent.run_tool_safely(pid, "run_group", {"group_id": "group", "quote_id": plan["quote_id"]})
     assert runs.STALE in response
     assert not runs.list_runs(pid)
+
+
+@pytest.mark.parametrize(("mode", "price", "approval"), [
+    ("auto", 3, False), ("auto", 5, False), ("auto", 5.01, True), ("review", 0, True),
+])
+def test_group_approval_compares_total_with_confirmed_limit(monkeypatch, mode, price, approval):
+    pid = create_canvas_project("估价阈值").project_id
+    doc = group_document(pid, [("a", "b")], ["a", "b"])
+    (canvas_project_dir(pid) / "canvas.json").write_text(doc.model_dump_json())
+    monkeypatch.setattr(agent.cost, "_estimate", lambda *args: price)
+    monkeypatch.setattr(agent.ModelScope, "models", lambda self, kind: [
+        {"alias": None, "model": "test-model"}])
+    monkeypatch.setattr(runs, "_launch", lambda *_: None)
+    tool = next(t for t in agent.build_tools() if t.name == "run_group")
+    ctx = SimpleNamespace(context=agent.TurnContext(pid, mode), tool_call_id="group")
+    args = {"group_id": "group"}
+    assert not asyncio.run(tool.needs_approval(ctx, args, "group"))
+    quote = json.loads(asyncio.run(tool.on_invoke_tool(ctx, json.dumps(args))))
+    assert not runs.list_runs(pid)
+    args["quote_id"] = quote["quote_id"]
+    assert asyncio.run(tool.needs_approval(ctx, args, "group")) is approval
+    if not approval:
+        result = json.loads(asyncio.run(tool.on_invoke_tool(ctx, json.dumps(args))))
+        assert result["submitted_estimate_cny"] == 2 * price
+        assert len(runs.list_runs(pid)) == 1

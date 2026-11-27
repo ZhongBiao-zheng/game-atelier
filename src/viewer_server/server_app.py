@@ -282,10 +282,9 @@ async def normal_lifespan(app: FastAPI):
     except OSError as error:
         logging.getLogger(__name__).warning("trash cleanup failed: %s", error)
     canvas_projects = list_canvas_projects()
-    from character_workflow.lib.canvas_group_runs import interrupt_running
+    from character_workflow.lib.canvas_group_runs import recover_group_runs
     for project in canvas_projects:
         recover_canvas_transactions(project.project_id)
-        interrupt_running(project.project_id)
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
@@ -301,6 +300,8 @@ async def normal_lifespan(app: FastAPI):
                  or has_resumable_comfyui_task(job))
         )
     ]
+    for project in canvas_projects:
+        recover_group_runs(project.project_id, set(resumable))
     from character_workflow.lib.collab_guest_runs import recover_staged_results
     recover_staged_results()
     if reconciled:

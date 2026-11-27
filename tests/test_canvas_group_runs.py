@@ -137,3 +137,118 @@ def test_update_and_data_move_wait_between_steps(group):
     assert active_work()["jobs"] == data_root_move_work()["jobs"] == 1
     runs.cancel(pid, run["run_id"])
     assert active_work()["jobs"] == 0
+
+
+@pytest.mark.parametrize("persist_failure", [True, False])
+def test_worker_failure_releases_group_and_update_gate(group, monkeypatch, persist_failure):
+    pid, _, _ = group
+    run = runs.start(pid, "group", list("abcd"), 0)
+
+    def denied(*_):
+        raise PermissionError("checkpoint unavailable")
+    monkeypatch.setattr(runs, "_advance", denied)
+    with monkeypatch.context() as failure:
+        if not persist_failure:
+            failure.setattr(runs, "atomic_write_json", denied)
+        runs._work(pid, run["run_id"])
+        stopped, = runs.list_runs(pid)
+        assert stopped["status"] == "failed"
+        assert "checkpoint unavailable" in stopped["steps"][0]["error"]
+        assert runs.active_step_jobs() == []
+        runs._check_idle(pid, "group")
+    assert runs.resume(pid, run["run_id"])["status"] == "running"
+
+
+def test_changed_model_with_same_price_rejects_web_quote(group):
+    from character_workflow.lib import canvas_projects as cp
+
+    pid, client, base = group
+    quote = client.post(base + "/groups/group/run-plan").json()
+    doc = cp.read_canvas_document(pid)
+    doc.nodes[0].data.generation_draft.model += "-changed"
+    cp.save_canvas_document(pid, doc, doc.revision)
+    response = client.post(base + "/groups/group/group-runs", json=quote)
+    assert response.status_code == 409 and response.json()["detail"] == runs.STALE
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_startup_reconciles_job_before_group_recovery(group, monkeypatch, claimed):
+    from concurrent.futures import Future
+    from threading import Event
+    from character_workflow.lib import canvas_projects as cp, jobs, keys
+
+    pid, client, _ = group
+    doc = group_document(pid, edges=[("a", "b")], drafts=["a", "b"])
+    model = keys.ModelSpec(id="gpt-image-1", name="test", modality="image", protocol="openai")
+    key = keys.KeySpec(alias="local", provider="openai", created_at="now", models=[model])
+    keys.write_keys_db(keys.KeysDB(keys=[key], default_alias="local"))
+    for node in doc.nodes[:2]:
+        node.data.generation_draft.alias = key.alias
+        node.data.generation_draft.model = model.id
+    cp.save_canvas_document(pid, doc, doc.revision)
+    plan = runs.group_plan(pid, "group")
+    rid = runs.start(pid, "group", plan["order"], plan["total_cny"])["run_id"]
+    monkeypatch.setattr(runs.canvas_run_queue, "submit", lambda _: None)
+    assert runs._advance(pid, rid) == "wait"
+    job_id = runs._load(pid, rid)["steps"][0]["job_id"]
+    if claimed:
+        jobs.save_job(jobs.read_job(job_id).model_copy(update={"runner_started_at": runs._now()}))
+
+    launched = []
+    queued = Event()
+    def submit_existing(resumed_id):
+        assert resumed_id == job_id
+        queued.set()
+        future = Future()
+        future.set_result(None)
+        return future
+    monkeypatch.setattr(runs.canvas_run_queue, "submit", submit_existing)
+    monkeypatch.setattr(runs, "_launch", lambda p, r: launched.append((p, r)))
+    with client:
+        recovered = runs._load(pid, rid)
+        assert recovered["steps"][0]["job_id"] == job_id
+        if claimed:
+            assert recovered["status"] == "interrupted"
+            assert recovered["steps"][0]["status"] == "failed"
+            assert "未自动重试以避免重复扣费" in recovered["steps"][0]["error"]
+            assert jobs.read_job(job_id).status == JobStatus.FAILED
+            assert not cp.read_canvas_document(pid).nodes[0].data.active_run_id
+            assert not launched and not queued.is_set()
+        else:
+            assert recovered["status"] == "running" and launched == [(pid, rid)]
+            assert queued.wait(3)
+            assert jobs.read_job(job_id).status == JobStatus.PENDING
+
+
+def test_group_text_batch_keeps_every_candidate_on_the_original_node(group, monkeypatch):
+    from character_workflow.lib import canvas_projects as cp, canvas_runs, jobs, keys
+    from character_workflow.lib.schemas import CanvasDocument
+
+    pid, _, _ = group
+    raw = group_document(pid, drafts=["a"]).model_dump(mode="json")
+    raw["nodes"][0].update(type="text", data={"generation_draft": {
+        "mode": "text", "alias": "local", "model": "gpt-4o-mini", "prompt": "分镜",
+        "params": {"n": 3}, "updated_at": "now"}})
+    doc = CanvasDocument.model_validate(raw)
+    cp.save_canvas_document(pid, doc, doc.revision)
+    model = keys.ModelSpec(id="gpt-4o-mini", name="test", modality="text", protocol="openai-chat")
+    key = keys.KeySpec(alias="local", provider="custom", created_at="now", models=[model])
+    keys.write_keys_db(keys.KeysDB(keys=[key], default_alias="local"))
+    monkeypatch.setattr(runs.canvas_run_queue, "submit", lambda _: None)
+    plan = runs.group_plan(pid, "group")
+    assert plan["steps"][0]["count"] == 3
+    rid = runs.start(pid, "group", plan["order"], plan["total_cny"])["run_id"]
+    assert runs._advance(pid, rid) == "wait"
+    job_id = runs._load(pid, rid)["steps"][0]["job_id"]
+    folder = cp.canvas_output_dir(pid, job_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for slot in range(3):
+        path = folder / f"{slot}.txt"
+        path.write_text(f"分镜 {slot}")
+        paths.append(str(path))
+    jobs.update_job_status(job_id, status=JobStatus.DONE, output_paths=paths)
+    job, result = canvas_runs.finalize_canvas_run(pid, job_id)
+    assert len(result.nodes) == len(doc.nodes) and result.connections == doc.connections
+    assert result.nodes[0].data.current_version_id == job.canvas_run.candidates[0].version_id
+    assert {c.version_id for c in job.canvas_run.candidates} == set(result.content_versions)

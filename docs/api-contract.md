@@ -404,9 +404,9 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,text-revision,image-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/cancel`
 
-`POST /canvas/projects/{id}/groups/{group_id}/run-plan` 返回按连线和位置排序的 `order`、`steps`（节点名、模型、数量、估价）、`total_cny`、`unpriced` 和 `needs_confirmation`。`blocked` 列出不完整草稿及原因，`cycle_nodes` 只列成环节点。每个可执行草稿提交一次。
+`POST /canvas/projects/{id}/groups/{group_id}/run-plan` 返回按连线和位置排序的 `order`、`steps`（节点名、模型、数量、估价）、`total_cny`、`unpriced`、`quote_id` 和 `needs_confirmation`。`blocked` 列出不完整草稿及原因，`cycle_nodes` 只列成环节点。每个可执行草稿提交一次，张数按节点设置（MJ 固定 4）。整体执行把候选登记为原节点的版本，首个结果成为当前版本，下游提交时冻结上游当前版本。Job 快照的 `normalized_params.group_run` 记录组执行 ID 和执行前的版本 ID，供历史切换与界面同步。
 
-`POST /canvas/projects/{id}/groups/{group_id}/group-runs` 接受 `order` 和 `total_cny`，计划过期或已有同组执行返回 409。`GET /canvas/projects/{id}/group-runs` 读执行记录，按创建时间倒序。`POST /canvas/projects/{id}/group-runs/{run_id}/resume` 继续失败或中断的执行，`/cancel` 停止后续提交。进度落盘后 SSE 广播 `canvas-group-run-changed`（`project_id`、`run_id`）。
+`POST /canvas/projects/{id}/groups/{group_id}/group-runs` 接受 `order`、`total_cny` 和 `quote_id`，计划过期或已有同组执行返回 409。`GET /canvas/projects/{id}/group-runs` 读执行记录，按创建时间倒序。`POST /canvas/projects/{id}/group-runs/{run_id}/resume` 继续失败或中断的执行，`/cancel` 停止后续提交。进度落盘后 SSE 广播 `canvas-group-run-changed`（`project_id`、`run_id`）。
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
