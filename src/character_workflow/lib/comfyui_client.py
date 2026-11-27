@@ -26,8 +26,9 @@ class ComfyUIClient:
         self.session.close()
 
     def request(self, method: str, path: str, **kwargs):
+        timeout = kwargs.pop("timeout", (3, 30))
         try:
-            response = self.session.request(method, self.base_url + path, timeout=(3, 30),
+            response = self.session.request(method, self.base_url + path, timeout=timeout,
                                             allow_redirects=False, **kwargs)
         except requests.ConnectionError as error:
             from character_workflow.lib.callers.openai_image import _is_pre_flight_failure

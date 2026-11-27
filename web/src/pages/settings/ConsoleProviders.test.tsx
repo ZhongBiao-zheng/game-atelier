@@ -6,6 +6,11 @@ import { ModelRoutesSection } from './ModelRoutesSection';
 import { ProviderAddPage } from './ProviderAddPage';
 import * as keys from '@/api/keys';
 import * as gateway from '@/api/gateway';
+import * as comfyui from '@/api/comfyui';
+vi.mock('@/api/comfyui', async original => ({
+  ...await original<typeof import('@/api/comfyui')>(),
+  checkComfyUI: vi.fn().mockResolvedValue({ devices: [] }),
+}));
 vi.mock('@/api/keys', async original => ({
   ...await original<typeof import('@/api/keys')>(),
   getChatGPTSubscription: vi.fn().mockResolvedValue({ available: false, email: null, plan: null }),
@@ -154,4 +159,36 @@ it('订阅状态加载失败不冒充未登录', async () => {
 it('订阅供应商列表显示品牌名称', () => {
   render(<ProviderRow row={{ alias: 'chatgpt', provider: 'chatgpt', masked_secret: '', models: [{ id: 'gpt-image-2', name: 'GPT Image' }] }} overdue={false} pending={false} onEdit={vi.fn()} onToggle={vi.fn()} />);
   expect(screen.getByText('ChatGPT（Codex 登录）')).toBeInTheDocument();
+});
+
+it('ComfyUI 供应商行按实时探测结果展示运行中、未启动或检查中，停用优先', () => {
+  const row = { alias: '本机 ComfyUI', provider: 'comfyui', base_url: 'http://127.0.0.1:8188', masked_secret: '',
+    last_used_at: new Date().toISOString(), models: [] };
+  const props = { overdue: false, pending: false, onEdit: vi.fn(), onToggle: vi.fn() };
+  const view = render(<ProviderRow row={row} comfyStatus="checking" {...props} />);
+  expect(screen.getByText('检查中…')).toBeInTheDocument();
+  view.rerender(<ProviderRow row={row} comfyStatus="running" {...props} />);
+  expect(screen.getByText('运行中')).toBeInTheDocument();
+  view.rerender(<ProviderRow row={row} comfyStatus="stopped" {...props} />);
+  expect(screen.getByText('未启动')).toBeInTheDocument();
+  view.rerender(<ProviderRow row={{ ...row, enabled: false }} comfyStatus="stopped" {...props} />);
+  expect(screen.getByText('已停用')).toBeInTheDocument();
+});
+
+it('供应商列表探测已启用的 ComfyUI 并在切回窗口时静默刷新状态', async () => {
+  vi.mocked(comfyui.checkComfyUI).mockReset()
+    .mockRejectedValueOnce(new Error('主机的 ComfyUI 未启动'))
+    .mockResolvedValueOnce({ devices: [{ name: 'RTX 4090', vram_total: 24 * 1024 ** 3 }] });
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [
+    { alias: 'ComfyUI', provider: 'comfyui', base_url: 'http://127.0.0.1:8188', access_key: '', secret_key: null, models: [], capabilities: [], notes: '', created_at: '', enabled: true },
+    { alias: '停用的 ComfyUI', provider: 'comfyui', base_url: 'http://127.0.0.1:8199', access_key: '', secret_key: null, models: [], capabilities: [], notes: '', created_at: '', enabled: false },
+  ] });
+  render(<KeysPage embedded />);
+  await screen.findByText('未启动');
+  expect(comfyui.checkComfyUI).toHaveBeenCalledTimes(1);
+  expect(comfyui.checkComfyUI).toHaveBeenCalledWith('http://127.0.0.1:8188');
+
+  window.dispatchEvent(new Event('focus'));
+  await screen.findByText('运行中');
+  expect(comfyui.checkComfyUI).toHaveBeenCalledTimes(2);
 });

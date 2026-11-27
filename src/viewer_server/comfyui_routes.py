@@ -1,6 +1,7 @@
 """Local-session-only workflow administration (never mounted on the LAN gateway)."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+import requests
 
 from character_workflow.lib import comfyui_workflows as workflows
 from character_workflow.lib.comfyui_client import ComfyUIClient, ComfyUIUnavailableError
@@ -41,7 +42,10 @@ def _call(function, *args, **kwargs):
 def connection(body: Connection):
     def check():
         with ComfyUIClient(local_base_url(body.base_url)) as client:
-            stats = client.get("/system_stats")
+            try:
+                stats = client.get("/system_stats", timeout=(2, 3))
+            except requests.Timeout as error:
+                raise ComfyUIUnavailableError() from error
         return {"devices": [{"name": device.get("name", "未知显卡"),
                              "vram_total": device.get("vram_total", 0)}
                             for device in stats.get("devices", [])]}

@@ -2,6 +2,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { CheckIcon, ChevronRightIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { providerLabel } from '@/lib/providerLabels';
+import type { ComfyStatus } from '@/lib/useComfyStatus';
 import type { KeyRow } from './KeyCard';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -11,19 +12,27 @@ export function providerHost(row: KeyRow) {
   catch { return ''; }
 }
 
-export function ProviderRow({ row, overdue, pending, saved = false, onEdit, onToggle }: {
+export function ProviderRow({ row, overdue, pending, saved = false, comfyStatus, onEdit, onToggle }: {
   row: KeyRow; overdue: boolean; pending: boolean; saved?: boolean;
+  comfyStatus?: ComfyStatus;
   onEdit: () => void; onToggle: (enabled: boolean) => void;
 }) {
   const enabled = row.enabled !== false;
   const elapsed = row.last_used_at ? Math.max(0, Date.now() - Date.parse(row.last_used_at)) : null;
   const days = elapsed === null ? null : Math.floor(elapsed / 86400000);
   const idle = elapsed !== null && elapsed > 30 * 86400000;
+  const comfyLive = row.provider === 'comfyui' && enabled && !overdue ? comfyStatus : undefined;
   const status = !enabled ? '已停用' : overdue ? '欠费'
-    : days === null ? '未用过' : idle ? `${days} 天未用` : '正常';
+    : comfyLive === 'running' ? '运行中'
+      : comfyLive === 'stopped' ? '未启动'
+        : comfyLive === 'checking' ? '检查中…'
+          : days === null ? '未用过' : idle ? `${days} 天未用` : '正常';
   const vendor = providerLabel(row.provider, row.alias);
   const tone = !enabled ? 'text-muted-foreground' : overdue ? 'text-[color:var(--status-failed)]'
-    : days === null || idle ? 'text-muted-foreground' : 'text-[color:var(--status-done)]';
+    : comfyLive === 'running' ? 'text-[color:var(--status-done)]'
+      : comfyLive === 'stopped' ? 'text-[color:var(--status-failed)]'
+        : comfyLive === 'checking' ? 'text-muted-foreground'
+          : days === null || idle ? 'text-muted-foreground' : 'text-[color:var(--status-done)]';
   const used = row.last_used_at ? new Date(row.last_used_at) : null;
   const today = used?.toDateString() === new Date().toDateString();
   const title = row.provider === 'chatgpt' ? vendor : row.alias;

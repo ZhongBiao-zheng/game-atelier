@@ -623,3 +623,24 @@ def test_studio_cancel_requested_before_recovery_stops_last_registered_prompt(ho
     assert jobs.read_job(job.job_id).status.value == "canceled"
     assert host.deleted == ["prompt-2"] and not host.interrupted
     assert len(host.prompts) == 2
+
+
+def test_connection_probe_uses_short_timeout_and_maps_timeout_to_503(monkeypatch):
+    from fastapi import HTTPException
+    import requests
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+    from viewer_server.comfyui_routes import Connection, connection
+
+    captured = {}
+
+    def fake_get(self, path, **kwargs):
+        captured["path"] = path
+        captured["timeout"] = kwargs.get("timeout")
+        raise requests.ReadTimeout("timed out")
+
+    monkeypatch.setattr(ComfyUIClient, "get", fake_get)
+    with pytest.raises(HTTPException) as caught:
+        connection(Connection(base_url="http://127.0.0.1:8188"))
+    assert captured == {"path": "/system_stats", "timeout": (2, 3)}
+    assert caught.value.status_code == 503
+    assert "未启动" in caught.value.detail

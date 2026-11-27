@@ -14,6 +14,7 @@ import { modelBrand, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
+import { localComfyUrl, useComfyStatus } from '@/lib/useComfyStatus';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
 import { GptImage26Fields } from './GptImage26Fields';
@@ -392,6 +393,8 @@ export function PromptInput({
   ).map(model => ({ key: provider!, model }));
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
   const selectedModel = isAgent ? undefined : models.find((item) => item.id === model);
+  const { status: comfyStatus, recheck: recheckComfy } = useComfyStatus(isAgent ? null : localComfyUrl(provider, selectedModel));
+  const comfyStopped = comfyStatus === 'stopped';
   const workflowInputs = selectedModel?.workflow_inputs;
   const fixedWorkflowSeed = workflowInputs?.some(input => input.type === 'seed' && sizeParams.workflow_inputs?.[input.id] != null) ?? false;
   const noWorkflowPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
@@ -1748,10 +1751,25 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
-          {estimateLabel && !workflowReferenceProblem && !lastFrameOnlyBlocked && (
+          {estimateLabel && !workflowReferenceProblem && !lastFrameOnlyBlocked && !comfyStopped && (
             <span data-testid="studio-estimate" className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{estimateLabel}</span>
           )}
           {workflowReferenceProblem && <span role="status" className="text-xs text-muted-foreground">{workflowReferenceProblem}</span>}
+          {!workflowReferenceProblem && !lastFrameOnlyBlocked && comfyStopped && (
+            <Hint label="点击重新检查连接">
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                data-testid="comfy-stopped-hint"
+                onClick={recheckComfy}
+                className="h-auto gap-1.5 px-1.5 py-0.5 font-normal text-[color:var(--status-failed)] hover:text-[color:var(--status-failed)]"
+              >
+                <span aria-hidden className="size-1.5 rounded-full bg-current" />
+                ComfyUI 未启动
+              </Button>
+            </Hint>
+          )}
           {lastFrameOnlyBlocked && (
             <span
               data-testid="frame-block-hint"

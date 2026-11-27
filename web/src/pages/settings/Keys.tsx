@@ -5,6 +5,7 @@ import { Link } from 'wouter';
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { ProviderRow, providerHost } from '@/components/keys/ProviderRow';
 import { providerLabel } from '@/lib/providerLabels';
+import { normalizeComfyUrl, useComfyStatuses } from '@/lib/useComfyStatus';
 import { fetchGatewayMembers } from '@/api/gateway';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { openOnboarding } from '@/lib/onboardingGuide';
@@ -135,6 +136,11 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     }
   };
 
+  const comfyUrls = embedded
+    ? keys.filter(key => key.provider === 'comfyui' && key.enabled !== false).map(key => normalizeComfyUrl(key.base_url))
+    : [];
+  const { statuses: comfyStatuses } = useComfyStatuses(comfyUrls);
+
   const filteredKeys = keys.filter(key => [key.alias, providerLabel(key.provider, key.alias),
     key.provider === 'custom' ? '自定义' : '', providerHost(key)].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   const activeKeys = filteredKeys.filter(key => !closedAliases.has(key.alias));
@@ -142,6 +148,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const closedOpen = showClosed || query.trim() !== '';
   const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key} saved={savedAlias === key.alias}
     overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
+    comfyStatus={key.provider === 'comfyui' && key.enabled !== false ? (comfyStatuses[normalizeComfyUrl(key.base_url)] ?? 'checking') : undefined}
     onToggle={enabled => { void toggleKey(key, enabled); }}
     onEdit={() => openEdit(key)} />;
 

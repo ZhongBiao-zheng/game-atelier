@@ -105,6 +105,7 @@ import {
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
+import { localComfyUrl, useComfyStatus } from '@/lib/useComfyStatus';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
@@ -2435,6 +2436,10 @@ export function CanvasGenerationComposer({
   // 能估价的生成入口在按钮旁显示「约 x¥」（规格 2.5）；估价接口目前只按图片计价。
   const estimate = useGenerationEstimate(draft.alias ?? undefined, draft.model ?? '',
     draft.params as Record<string, unknown>, draft.mode === 'image' && Boolean(selectedModel));
+  const { status: comfyStatus, recheck: recheckComfy } = useComfyStatus(
+    draft.mode === 'image' ? localComfyUrl(selectedKey, selectedModel) : null,
+  );
+  const comfyStopped = comfyStatus === 'stopped';
   // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
   // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
   // 首尾帧连接。selectedModel 取自 context.keys 里的元素，引用本身是稳的。
@@ -2953,7 +2958,21 @@ export function CanvasGenerationComposer({
           />
         )}
         </div>
-        {!running && estimate != null && (
+        {!running && !workflowReferenceProblem && comfyStopped ? (
+          <Hint label="点击重新检查连接">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              data-testid="canvas-comfy-stopped-hint"
+              onClick={recheckComfy}
+              className="h-auto shrink-0 gap-1.5 px-1.5 py-0.5 font-normal text-[color:var(--status-failed)] hover:text-[color:var(--status-failed)]"
+            >
+              <span aria-hidden className="size-1.5 rounded-full bg-current" />
+              ComfyUI 未启动
+            </Button>
+          </Hint>
+        ) : !running && estimate != null && (
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">约 {formatGenerationCost(estimate)}</span>
         )}
         {/* 开始 ↔ 停止同一个按钮壳：底色随状态过渡，图标原位换态，不整块换一个按钮。 */}
