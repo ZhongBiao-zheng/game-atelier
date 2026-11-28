@@ -58,7 +58,7 @@ import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, shakeOnError, use
 import { ReferenceItemMotion, useArrivingKeys, useFileKeys, useLeavingRefs, useSlideOnReorder, withLeaving } from './ReferenceMotion';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { MentionTabs, SubjectFeedback, subjectChip, subjectToken, useSubjects, withSubjectChips } from '@/components/assets/SubjectMentions';
-import { itemUrl } from '@/api/library';
+import { itemThumb } from '@/api/library';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
@@ -1409,7 +1409,7 @@ export function PromptInput({
           {!isAgent && <MentionTabs value={mentionTab} change={setMentionTab} />}
           {subjects.map(s => <Button key={s.id} role="option" aria-selected="false" variant="ghost" className="w-full justify-start"
             onMouseDown={e => e.preventDefault()} onClick={() => insertMention(subjectToken(s))}>
-            {s.cover_item_id && <img src={itemUrl(s.cover_item_id)} className="size-8 rounded-md object-cover" alt="" />}
+            {s.cover_item_id && <img src={itemThumb(s.cover_item_id)} className="size-8 rounded-md object-cover" alt="" />}
             {s.name}<span className="text-xs text-muted-foreground">@{s.handle}</span></Button>)}
           {mentionTab === 'all' && mentionsEnabled && mentionItems.map((item) => (
             <Button variant="bare"

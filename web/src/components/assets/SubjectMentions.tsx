@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { requestJson } from '@/api/http';
-import { itemUrl, LIBRARY_CHANGED, listLibrary, subjectToken, type LibrarySubject } from '@/api/library';
+import { itemThumb, LIBRARY_CHANGED, listLibrary, subjectToken, type LibrarySubject } from '@/api/library';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const subjectPattern = /@\[subject:(sbj_[a-f0-9]{32}):([^\]\n]*)\]/g;
@@ -10,7 +10,7 @@ export function useSubjects(active: boolean) {
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
-    const refresh = () => { void listLibrary(controller.signal).then(c => { if (!controller.signal.aborted) setRows(c.subjects); }).catch(() => {}); };
+    const refresh = () => { void listLibrary(controller.signal).then(c => { if (!controller.signal.aborted) setRows(c.subjects.map(s => s.cover_item_id && c.items[s.cover_item_id]?.kind !== 'image' ? { ...s, cover_item_id: null } : s)); }).catch(() => {}); };
     refresh(); window.addEventListener(LIBRARY_CHANGED, refresh);
     return () => { controller.abort(); window.removeEventListener(LIBRARY_CHANGED, refresh); };
   }, [active]);
@@ -25,7 +25,7 @@ export function subjectChip(token: string, rows: LibrarySubject[]) {
   span.dataset.subjectToken = token;
   span.className = 'mx-0.5 inline-flex items-center gap-1 rounded-md bg-secondary px-1.5 align-middle text-sm text-foreground' + (row ? '' : ' line-through');
   if (row?.cover_item_id) {
-    const image = document.createElement('img'); image.alt = ''; image.src = itemUrl(row.cover_item_id);
+    const image = document.createElement('img'); image.alt = ''; image.src = itemThumb(row.cover_item_id);
     image.className = 'size-5 rounded-sm object-cover'; span.append(image);
   }
   let name = match?.[2] || '';

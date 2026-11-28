@@ -26,7 +26,7 @@ import {
   type CanvasMaterialHoverState,
 } from '@/components/canvas/CanvasMaterialHoverDetail';
 import { MentionTabs, SubjectFeedback, subjectToken, useSubjects, withSubjectChips } from '@/components/assets/SubjectMentions';
-import { itemUrl, type LibrarySubject } from '@/api/library';
+import { itemThumb, type LibrarySubject } from '@/api/library';
 import { Button } from '@/components/ui/button';
 
 type EditorReference = CanvasMentionReference & { subject?: LibrarySubject };
@@ -110,7 +110,7 @@ export function CanvasPromptInput({
     if (!mention) return [];
     const query = mention.query.trim().toLocaleLowerCase();
     const rows: EditorReference[] = subjects.map(s => ({ subject: s, nodeId: s.id, versionId: s.id, kind: 'image',
-      title: '@' + s.handle, label: s.name, previewUrl: s.cover_item_id ? itemUrl(s.cover_item_id) : undefined }));
+      title: '@' + s.handle, label: s.name, previewUrl: s.cover_item_id ? itemThumb(s.cover_item_id) : undefined }));
     if (tab === 'all') rows.unshift(...availableReferences);
     if (!query) return rows;
     return rows.filter(reference => (

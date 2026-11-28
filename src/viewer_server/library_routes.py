@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zipfile import ZipFile
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from character_workflow.lib import library, slug
+from character_workflow.lib import data_root, library, slug
+from character_workflow.lib.canvas_thumbnails import cached_image_thumbnail, snap_thumbnail_width
 from character_workflow.lib.canvas_projects import (
     _ACCEPTED_MIMES, _sniff_media_mime, read_canvas_document, resolve_canvas_media, upload_max_bytes,
 )
@@ -217,9 +218,15 @@ def delete(key: Key):
 
 
 @router.get("/{key}/content")
-def content(key: Key, download: bool = False):
+def content(key: Key, download: bool = False, width: Annotated[int | None, Query(ge=1, le=4096)] = None):
     with errors():
         item, path = library.media(key)
+        if width and item["kind"] == "image" and not download:
+            size = snap_thumbnail_width(width)
+            if size:
+                cached = data_root.runtime_dir() / "library-thumbnails" / f"{item['sha256']}-{size}.webp"
+                if thumbnail := cached_image_thumbnail(cached, path, size):
+                    return FileResponse(thumbnail, media_type="image/webp")
         name = _filename(item, path) if download else None
         mime = "text/plain; charset=utf-8" if item["kind"] == "text" else mimetypes.guess_type(path)[0]
         return FileResponse(path, filename=name, media_type=mime or "application/octet-stream",

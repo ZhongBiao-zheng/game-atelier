@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { requestJson } from '@/api/http';
-import { itemUrl, LIBRARY_CHANGED, type LibrarySubject } from '@/api/library';
+import { itemThumb, LIBRARY_CHANGED, type LibraryItem, type LibrarySubject } from '@/api/library';
 import { Button } from '@/components/ui/button';
 import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
@@ -10,8 +10,8 @@ import { Sheet } from '@/components/ui/sheet';
 import { errorText } from '@/lib/errorText';
 import { LibrarySourcePicker, sourceThumb, sourceTitle, type Source } from './LibrarySourcePicker';
 
-export function SubjectSheet({ open, subject, onClose, onSaved }: {
-  open: boolean; subject?: LibrarySubject; onClose: () => void; onSaved: (id: string) => void;
+export function SubjectSheet({ open, subject, items, onClose, onSaved }: {
+  items: Record<string, LibraryItem>; open: boolean; subject?: LibrarySubject; onClose: () => void; onSaved: (id: string) => void;
 }) {
   const [name, setName] = useState(subject?.name || '');
   const [handle, setHandle] = useState(subject?.handle || '');
@@ -72,7 +72,7 @@ export function SubjectSheet({ open, subject, onClose, onSaved }: {
         <div className={'rounded-md border border-border p-3 ' + (count ? '' : 'grid min-h-36 place-content-center border-dashed')}
           onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); addFiles(Array.from(e.dataTransfer.files)); }}>
           <div className="grid grid-cols-4 gap-1">{[
-            ...(subject?.item_ids || []).map(id => ({ url: itemUrl(id), title: '参考素材' })),
+            ...(subject?.item_ids || []).map(id => ({ url: items[id]?.kind === 'image' ? itemThumb(id) : undefined, title: items[id]?.title || '参考素材' })),
             ...added.map(s => ({ url: sourceThumb(s), title: sourceTitle(s) })),
           ].map((item, i) => <Button key={i} variant="ghost" aria-label={'设为封面 ' + (i + 1)} aria-pressed={cover === i}
             className="relative aspect-square h-auto overflow-hidden rounded-sm p-0" onClick={() => setCover(i)}>

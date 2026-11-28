@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { HistoryReference } from '@/api/history';
-import { downloadLibrary, itemCard, itemUrl, subjectToken, libraryWrite, LIBRARY_CHANGED, listLibrary,
+import { downloadLibrary, itemCard, itemThumb, subjectToken, libraryWrite, LIBRARY_CHANGED, listLibrary,
   type LibraryCatalog, type LibraryFolder, type LibrarySubject } from '@/api/library';
 import { restoreTrash } from '@/api/trash';
 import { Button } from '@/components/ui/button';
@@ -79,7 +79,7 @@ export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubjec
     setForm(null); setLanded(row.id);
   }
   async function add(s: Source) { if (group) await saveSource(group.id, s); }
-  const row = (g: Group, card = false) => <GroupRow key={g.id} group={g} card={card} highlight={landed === g.id}
+  const row = (g: Group, card = false) => <GroupRow key={g.id} group={g} hasImage={'cover_item_id' in g && !!g.cover_item_id && data?.items[g.cover_item_id]?.kind === 'image'} card={card} highlight={landed === g.id}
     onAction={key => void perform(() => action(key, g))} />;
   const section = 'mb-2 text-xs font-medium text-muted-foreground';
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -106,7 +106,7 @@ export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubjec
           <Button variant="ghost" className="flex h-auto w-full justify-start gap-2 p-1" onClick={() => navigate('favorites')}><FavoriteIcon />收藏
             <span className="text-xs text-muted-foreground">{folders.find(f => f.system)?.item_ids.length || 0}</span>
             <span className="ml-auto flex gap-1">{folders.find(f => f.system)?.item_ids.slice(-4).reverse().map(id =>
-              data?.items[id]?.kind === 'image' ? <img key={id} src={itemUrl(id)} alt="" className="size-8 rounded-sm object-cover" /> : <FolderIcon key={id} />)}</span>
+              data?.items[id]?.kind === 'image' ? <img key={id} src={itemThumb(id)} alt="" className="size-8 rounded-sm object-cover" /> : <FolderIcon key={id} />)}</span>
           </Button>
           <section><div className="flex justify-between"><h3 className={section}>主体</h3>{subjects.length > 3 && <Button size="sm" variant="ghost" onClick={() => setAllSubjects(!allSubjects)}>全部</Button>}</div>
             <div className={'flex gap-2 ' + (allSubjects ? 'flex-wrap' : 'overflow-x-auto')}><Button variant="outline" className="size-16 shrink-0 border-dashed" aria-label="新建主体" onClick={() => setEditor({})}><AddIcon /></Button>
@@ -123,11 +123,11 @@ export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubjec
         <Button disabled={!name.trim()}>保存</Button></form></DialogContent></Dialog>
     <FolderPicker open={!!move} root onClose={() => setMove(null)} allowed={f => !f.parent_id && f.id !== move?.id && !folders.some(c => c.parent_id === move?.id)}
       onChoose={async f => { if (move) await libraryWrite(move.id, { parent_id: f.id || null }, 'PATCH'); }} />
-    {retained && <SubjectSheet key={retained.session} open={!!editor} subject={retained.value.subject} onClose={() => setEditor(null)} onSaved={setLanded} />}
+    {retained && <SubjectSheet items={data?.items || {}} key={retained.session} open={!!editor} subject={retained.value.subject} onClose={() => setEditor(null)} onSaved={setLanded} />}
     <LibrarySourcePicker open={!!source} initial={source || 'history'} onClose={() => setSource(null)} onChoose={s => void perform(() => add(s))} />
   </div>;
 }
-function GroupRow({ group, card, highlight, onAction }: { group: Group; card: boolean; highlight: boolean; onAction: (key: Action) => void }) {
+function GroupRow({ group, hasImage, card, highlight, onAction }: { group: Group; hasImage: boolean; card: boolean; highlight: boolean; onAction: (key: Action) => void }) {
   const [menu, setMenu] = useState(false);
   return <motion.div layout={!prefersReducedMotion()} exit={{ opacity: 0, height: prefersReducedMotion() ? 'auto' : 0 }}
     transition={{ duration: MOTION_DURATION.slow, ease: MOTION_EASE.inOut }}
@@ -135,7 +135,7 @@ function GroupRow({ group, card, highlight, onAction }: { group: Group; card: bo
     onContextMenu={e => { e.preventDefault(); setMenu(true); }}>
     <Button variant="ghost" className={card ? 'h-auto w-16 flex-col gap-1 p-0' : 'min-w-0 flex-1 justify-start px-1'} onClick={() => onAction('open')}>
       {card && 'cover_item_id' in group ? <span className="grid size-16 place-items-center overflow-hidden rounded-md bg-secondary">
-        {group.cover_item_id ? <img alt="" className="size-full object-cover" src={itemUrl(group.cover_item_id)} /> : group.name.slice(0, 1)}</span> : <FolderIcon />}
+        {hasImage && group.cover_item_id ? <img alt="" className="size-full object-cover" src={itemThumb(group.cover_item_id)} /> : group.name.slice(0, 1)}</span> : <FolderIcon />}
       <span className="truncate">{group.name}</span>{!card && <span className="ml-auto text-xs text-muted-foreground">{group.item_ids.length}</span>}
     </Button>
     <DropdownMenu open={menu} onOpenChange={setMenu}><DropdownMenuTrigger asChild><Button aria-label={group.name + ' 更多操作'} variant="ghost" size="icon"
