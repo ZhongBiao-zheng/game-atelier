@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { HistoryReference } from '@/api/history';
-import { downloadLibrary, itemCard, itemUrl, libraryWrite, LIBRARY_CHANGED, listLibrary,
+import { downloadLibrary, itemCard, itemUrl, subjectToken, libraryWrite, LIBRARY_CHANGED, listLibrary,
   type LibraryCatalog, type LibraryFolder, type LibrarySubject } from '@/api/library';
 import { restoreTrash } from '@/api/trash';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,8 @@ type Group = LibraryFolder | LibrarySubject;
 type Action = 'open' | 'edit' | 'move' | 'copy' | 'download' | 'delete';
 const position = { top: 0, kind: 'all' as const, q: '' };
 const noop = () => {};
-export function LibraryPanel({ target, onTarget, onReference }: {
+export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubject }: {
+  onCanvas?: (items: HistoryReference[]) => Promise<void>; onSubject?: (token: string) => void;
   target: string | null; onTarget: (id: string | null) => void; onReference: (items: HistoryReference[]) => Promise<void>;
 }) {
   const [data, setData] = useState<LibraryCatalog | null>(null);
@@ -90,6 +91,7 @@ export function LibraryPanel({ target, onTarget, onReference }: {
           <div className="flex items-center gap-1 border-b border-border p-2"><Button variant="ghost" size="icon" aria-label="返回"
             onClick={() => navigate('parent_id' in group ? group.parent_id : null, true)}><BackIcon /></Button>
             <span className="truncate text-sm">素材库 · {group.name}</span>
+            {'handle' in group && onSubject && <Button variant="ghost" size="sm" onClick={() => onSubject(subjectToken(group))}>用作参考</Button>}
             {'handle' in group && <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setEditor({ subject: group })}>编辑</Button>}
           </div>
           <div className="flex flex-wrap gap-1 p-2"><Button variant="ghost" size="sm" onClick={() => input.current?.click()}>本地上传</Button>
@@ -99,7 +101,7 @@ export function LibraryPanel({ target, onTarget, onReference }: {
             <FileInput ref={input} multiple onChange={e => { const files = Array.from(e.target.files || []); e.target.value = '';
               void perform(async () => { for (const file of files) await add({ type: 'upload', file }); }); }} /></div>
           <div className="px-3">{childFolders.map(f => row(f))}</div>
-          <AssetItemList library pages={pages} position={position} onScrollTop={noop} onReference={onReference} />
+          <AssetItemList onCanvas={onCanvas} library pages={pages} position={position} onScrollTop={noop} onReference={onReference} />
         </> : <div className="space-y-6 overflow-y-auto p-4">
           <Button variant="ghost" className="flex h-auto w-full justify-start gap-2 p-1" onClick={() => navigate('favorites')}><FavoriteIcon />收藏
             <span className="text-xs text-muted-foreground">{folders.find(f => f.system)?.item_ids.length || 0}</span>

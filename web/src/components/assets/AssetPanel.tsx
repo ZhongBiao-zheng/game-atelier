@@ -17,7 +17,7 @@ import { HistoryPanel } from './HistoryPanel';
 
 type Tab = 'history' | 'library';
 
-export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps & { onHistoryReference: (items: HistoryReference[]) => Promise<void> }>(function AssetPanel(props, ref) {
+export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps & { onHistoryReference: (items: HistoryReference[], placeOnCanvas?: boolean) => Promise<void>; onSubject?: (token: string) => void }>(function AssetPanel(props, ref) {
   const directed = Boolean(props.saveRequest || props.initialKind === 'team');
   const [tab, setTab] = useState<Tab>(directed ? 'library' : 'history');
   const interacted = useRef(directed);
@@ -74,7 +74,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
-          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <LibraryPanel target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
+          {tab === 'history' ? <HistoryPanel onCanvas={props.projectId ? items => props.onHistoryReference(items, true) : undefined} onReference={props.onHistoryReference} /> : <LibraryPanel onSubject={props.onSubject} onCanvas={props.projectId ? items => props.onHistoryReference(items, true) : undefined} target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
         </motion.div>
       </AnimatePresence>
     </div>

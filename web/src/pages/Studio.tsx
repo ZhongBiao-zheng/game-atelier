@@ -1627,6 +1627,11 @@ function StudioFull() {
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
           onReproduce={requestReproduce}
+          onSubject={token => {
+            if (composer.mode === 'agent') setKind('image');
+            setPromptText(current => [current, token].filter(Boolean).join(' '));
+            setClickPinned(true);
+          }}
           onHistoryReference={async items => {
             let added = 0;
             const texts: string[] = [];

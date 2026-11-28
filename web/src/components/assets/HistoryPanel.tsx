@@ -40,7 +40,7 @@ export function dayLabel(value: string, now = new Date()) {
   return `${year}${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-export function HistoryPanel({ onReference }: { onReference: Reference }) {
+export function HistoryPanel({ onReference, onCanvas }: { onReference: Reference; onCanvas?: Reference }) {
   const [position, setPosition] = useState<Position | null>(null);
   const [search, setSearch] = useState(false);
   const [draft, setDraft] = useState('');
@@ -90,20 +90,20 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
         {search ? <CloseIcon /> : <SearchIcon />}
       </Button>
     </div>
-    <HistoryList position={position} onReference={onReference}
+    <HistoryList onCanvas={onCanvas} position={position} onReference={onReference}
       onScrollTop={top => { dirty.current = true; latest.current = { ...position, top }; }} />
   </>;
 }
 
-function HistoryList({ position, onReference, onScrollTop }: {
-  position: Position; onReference: Reference; onScrollTop: (top: number) => void;
+function HistoryList({ position, onReference, onScrollTop, onCanvas }: {
+  position: Position; onReference: Reference; onCanvas?: Reference; onScrollTop: (top: number) => void;
 }) {
   const pages = useHistoryPages(position.kind, position.q);
-  return <AssetItemList pages={pages} position={position} onReference={onReference} onScrollTop={onScrollTop} />;
+  return <AssetItemList onCanvas={onCanvas} pages={pages} position={position} onReference={onReference} onScrollTop={onScrollTop} />;
 }
 
-export function AssetItemList({ pages, position, onReference, onScrollTop, library = false }: {
-  pages: ReturnType<typeof useHistoryPages>; position: Position; onReference: Reference; onScrollTop: (n: number) => void; library?: boolean;
+export function AssetItemList({ pages, position, onReference, onScrollTop, onCanvas, library = false }: {
+  pages: ReturnType<typeof useHistoryPages>; position: Position; onReference: Reference; onCanvas?: Reference; onScrollTop: (n: number) => void; library?: boolean;
 }) {
   const { items, more, reload, removeOutputs, loading, error, hasMore } = pages;
   const [moving, setMoving] = useState<HistoryItem | null>(null);
@@ -203,7 +203,7 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, libra
     list.current?.focus({ preventScroll: true });
   }
 
-  async function action(key: HistoryAction, rows: HistoryItem[]) {
+  async function action(key: HistoryAction | 'canvas', rows: HistoryItem[]) {
     if (busy || !rows.length) return;
     setBusy(true);
     try {
@@ -215,7 +215,7 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, libra
         else await downloadHistory(rows);
       }
       else {
-        await onReference(rows.map(row => ({
+        await (key === 'canvas' && onCanvas ? onCanvas : onReference)(rows.map(row => ({
           kind: row.kind, read: () => readTeamMedia(row.url, { title: row.filename, mime_type: null }),
         })));
       }
@@ -242,7 +242,7 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, libra
     const done = new Set<string>();
     try {
       for (const [id, slots] of jobs) {
-        const result = library ? await libraryWrite<{ trash_id: string }>(id, undefined, 'DELETE') : await deleteHistoryOutputs(id, slots);
+        const result = library ? await libraryWrite<{ trash_id: string }>(id, undefined, 'DELETE', false) : await deleteHistoryOutputs(id, slots);
         trashIds.push(result.trash_id);
         for (const slot of slots) done.add(`${id}/${slot}`);
       }
@@ -253,7 +253,7 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, libra
     removeOutputs(done);
     setSelection(current => new Set([...current].filter(key => !done.has(key))));
     setRemoving(new Set());
-    window.dispatchEvent(new CustomEvent(HISTORY_CHANGED, { detail: list }));
+    window.dispatchEvent(new CustomEvent(library ? LIBRARY_CHANGED : HISTORY_CHANGED, { detail: list }));
     notify.undo(`已删除 ${done.size} 项`, () => {
       void Promise.allSettled(trashIds.map(id => restoreTrash(id))).then(results => {
         window.dispatchEvent(new Event(library ? LIBRARY_CHANGED : HISTORY_CHANGED));
@@ -279,11 +279,13 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, libra
       {groups.map(([label, rows]) => <section key={label}>
         {label && <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>}
         <AssetMasonry compact items={rows} itemKey={historyKey} ratio={historyRatio}>{row =>
-          <HistoryCard extraMenu={library && <>
+          <HistoryCard extraMenu={<>
+            {onCanvas && <DropdownMenuItem onSelect={() => void action('canvas', [row])}>添加到画布</DropdownMenuItem>}
+            {library && <>
             <DropdownMenuItem onSelect={() => { setNewTitle(row.filename); setRenaming(row); }}>重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving(row)}>移动到…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => { void libraryWrite(row.job_id + '/copy', {}).catch(e => notify.error(errorText(e))); }}>创建副本</DropdownMenuItem>
-            <DropdownMenuSeparator /></>} item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
+            <DropdownMenuSeparator /></>}</>} item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
             removing={removing.has(historyKey(row))} onToggle={range => toggle(row, range)}
             onPreview={() => setPreview(row)} onAction={key => void action(key, [row])} />
         }</AssetMasonry>

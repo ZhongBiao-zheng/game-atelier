@@ -6824,14 +6824,19 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onHistoryReference={async items => {
+            onSubject={selectedNode && selectedDraft ? token => {
+              commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === selectedNode.id
+                ? withGenerationDraftForNode(node, { ...selectedDraft, prompt: [selectedDraft.prompt, token].filter(Boolean).join(' '),
+                  updated_at: new Date().toISOString() }) : node) }), true);
+            } : undefined}
+            onHistoryReference={async (items, placeOnCanvas) => {
               const kinds = new Map<File, HistoryKind>();
               for (const item of items) kinds.set(await item.read(), item.kind);
               const files = Array.from(kinds.keys());
               if (latestDocument.current?.project_id !== projectId) return;
               const size = { ...CANVAS_DEFAULT_NODE_SIZE, width: files.length * CANVAS_DEFAULT_NODE_SIZE.width + (files.length - 1) * 32 };
               const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(size),
-                ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
+                ...(!placeOnCanvas && selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
               await handleUploads(files, menu, undefined, '已放到画布', kinds);
             }}
             onUseTeamMedia={async file => {

@@ -17,11 +17,11 @@ export function listLibrary(signal?: AbortSignal) {
   return requestJson<LibraryCatalog>('/api/library', '读取素材库', { signal });
 }
 export const itemUrl = (id: string) => `/api/library/${encodeURIComponent(id)}/content`;
-export async function libraryWrite<T>(path: string, value?: unknown, method = 'POST') {
+export async function libraryWrite<T>(path: string, value?: unknown, method = 'POST', announce = true) {
   const result = await requestJson<T>(`/api/library/${path}`, '保存素材库', {
     method, headers: { 'Content-Type': 'application/json' }, body: value === undefined ? undefined : JSON.stringify(value),
   });
-  window.dispatchEvent(new Event(LIBRARY_CHANGED));
+  if (announce) window.dispatchEvent(new Event(LIBRARY_CHANGED));
   return result;
 }
 export async function uploadItem(owner: string, file: File) {
