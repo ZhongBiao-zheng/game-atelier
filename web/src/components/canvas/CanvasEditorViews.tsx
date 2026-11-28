@@ -449,6 +449,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   }, [selected]);
   const layerComposerVisible = nodePanelAllowed && layerComposerOpen
     && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
+  // 浮动面板进场由面板自己播；退场在这里留 150ms 淡出再卸载，与节点工具条同一节奏。
+  const generationPanelPresence = useFadePresence(generationPanelVisible && Boolean(draft));
+  const editPanelPresence = useFadePresence(editPanelVisible && Boolean(editSource));
+  const layerComposerPresence = useFadePresence(layerComposerVisible);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const groupStep = context?.groupSteps?.get(node.id);
@@ -1042,12 +1046,13 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           <span className="canvas-magnetic-anchor" aria-hidden="true"><span className={CANVAS_HANDLE_DOT_CLASS}><AddIcon size="sm" /></span></span>
         </Handle>
       )}
-      {generationPanelVisible && draft && (
+      {generationPanelPresence.mounted && draft && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={generationPanelPresence.phase === 'leaving'}
         >
           {node.type === 'text' ? (
             <CanvasTextNodePanel
@@ -1067,23 +1072,25 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           )}
         </CanvasNodeFloatingPanel>
       )}
-      {editPanelVisible && editSource && context && (
+      {editPanelPresence.mounted && editSource && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={editPanelPresence.phase === 'leaving'}
         >
           <CanvasImageEditPanel node={node} edit={editSource} context={context}
             onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}
-      {layerComposerVisible && node.type === 'layer_stack' && context && (
+      {layerComposerPresence.mounted && node.type === 'layer_stack' && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={layerComposerPresence.phase === 'leaving'}
         >
           <CanvasLayerStackComposer node={node} context={context} onClose={() => setLayerComposerOpen(false)} />
         </CanvasNodeFloatingPanel>
@@ -1237,10 +1244,13 @@ export function CanvasNodeFloatingPanel({
   anchor,
   surfaceRef,
   hiddenWhileDragging = false,
+  leaving = false,
   children,
 }: {
   nodeId: string;
   hiddenWhileDragging?: boolean;
+  /** 退场中：150ms 淡出，不再接收指针，播完由父级卸载。 */
+  leaving?: boolean;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
   anchor: HTMLElement | null;
@@ -1340,7 +1350,8 @@ export function CanvasNodeFloatingPanel({
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
       // 平移使用 transform，拖动收起使用独立的 translate。
-      className={canvasDragChromeClass(hiddenWhileDragging, 'up')}
+      className={cn(canvasDragChromeClass(hiddenWhileDragging, 'up'),
+        leaving && 'pointer-events-none opacity-0 transition-opacity duration-150')}
       style={{
         position: surface ? 'absolute' : 'fixed',
         width: placement?.width ?? CANVAS_GENERATION_PANEL_WIDTH,
@@ -2388,6 +2399,8 @@ function CanvasTextNodePanel({ node, draft, context, embedded = false, onClose, 
 }) {
   const content = context.resolveVersion(node.data.current_version_id);
   const [tab, setTab] = useState(() => defaultTextPanelTab(content?.kind === 'text' ? content.text : null));
+  // 改写要求放在这一层：切到「生成」再切回来，写好的要求还在。
+  const [instruction, setInstruction] = useState('');
   useEffect(() => {
     if (focusRequest) setTab('content');
   }, [focusRequest]);
@@ -2399,7 +2412,8 @@ function CanvasTextNodePanel({ node, draft, context, embedded = false, onClose, 
   );
   return tab === 'content' ? (
     <CanvasTextContentPanel node={node} draft={draft} context={context} header={header}
-      embedded={embedded} onClose={onClose} focusRequest={focusRequest} />
+      embedded={embedded} onClose={onClose} focusRequest={focusRequest}
+      instruction={instruction} onInstructionChange={setInstruction} />
   ) : (
     <CanvasGenerationComposer node={node} draft={draft} context={context} header={header}
       embedded={embedded} onClose={onClose} />
@@ -3012,7 +3026,7 @@ export function CanvasGenerationComposer({
             </SwapIcon>
             {generationButtonState === 'stopping' ? '停止中…'
               : generationButtonState === 'running' ? '停止'
-                : generationButtonState === 'queued' ? '排队中'
+                : generationButtonState === 'queued' ? '排队中…'
                   : generationButtonState === 'submitting' ? '提交中…'
                     : '生成'}
           </Button>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 import { CanvasModelPicker, type CanvasModelChoice } from '@/components/canvas/CanvasGenerationControls';
@@ -24,7 +24,9 @@ type TextRange = { start: number; end: number };
 const DOCUMENT_TYPE = 'stable-scroll whitespace-pre-wrap break-words px-2 py-1 text-sm leading-relaxed';
 
 /** 文本节点面板的「内容」页：读全文、直接改字、让模型改选中的一段或全文。 */
-export function CanvasTextContentPanel({ node, draft, context, header, embedded = false, onClose, focusRequest = 0 }: {
+export function CanvasTextContentPanel({
+  node, draft, context, header, embedded = false, onClose, focusRequest = 0, instruction, onInstructionChange,
+}: {
   node: TextNode;
   draft: CanvasGenerationDraft;
   context: CanvasNodeContextValue;
@@ -33,6 +35,9 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
   onClose?: () => void;
   /** 每次变化（双击节点、工具条「编辑」）把光标放进正文末尾。 */
   focusRequest?: number;
+  /** 改写要求由外层保管，切页不丢。 */
+  instruction: string;
+  onInstructionChange: (value: string) => void;
 }) {
   const content = context.resolveVersion(node.data.current_version_id);
   const text = content?.kind === 'text' ? content.text : '';
@@ -44,7 +49,6 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
   const [localText, setLocalText] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const [selection, setSelection] = useState<TextRange | null>(null);
-  const [instruction, setInstruction] = useState('');
   const value = localText ?? text;
   const runState = canvasNodeRunState(node, context.jobsByRunId, context.jobsByResultNodeId);
   const running = runState.status === 'loading';
@@ -61,6 +65,10 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
 
   // 正文换了（改写结果落地、撤销）旧选区下标就不再对应原来那段字。
   useEffect(() => { setSelection(null); }, [text]);
+  // 高亮层在正文失焦那一帧才挂上，先对齐正文已经滚到的位置，不然高亮落在开头。
+  useLayoutEffect(() => {
+    if (mirrorRef.current && editorRef.current) mirrorRef.current.scrollTop = editorRef.current.scrollTop;
+  }, [selection, focused]);
   useEffect(() => {
     if (!focusRequest) return;
     const editor = editorRef.current;
@@ -211,7 +219,7 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
             value={instruction}
             disabled={busy}
             placeholder={selectedCount > 0 ? '这段怎么改？' : '怎么改？'}
-            onChange={event => setInstruction(event.target.value)}
+            onChange={event => onInstructionChange(event.target.value)}
             onKeyDown={event => {
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
               event.preventDefault();
