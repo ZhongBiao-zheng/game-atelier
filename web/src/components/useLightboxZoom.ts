@@ -86,6 +86,16 @@ export function useLightboxZoom(src: string) {
     paint(size);
   }, [paint]);
 
+  /** 现在能不能拖：过渡途中按画面实际大小判断（缩回适配时终点已不可拖，画面却还比视口大）。 */
+  const canPan = useCallback((element: HTMLElement) => {
+    if (element.dataset.pannable === 'true') return true;
+    const size = geometry.current;
+    const visual = animating.current && plane.current ? visualTransform(plane.current) : null;
+    if (!size || !visual) return false;
+    const scale = visual.scale * size.fit;
+    return size.width * scale > size.rect.width + .5 || size.height * scale > size.rect.height + .5;
+  }, []);
+
   const zoomTo = useCallback((next: number | null, point?: { x: number; y: number }, animated = true) => {
     const size = measure();
     if (!size) return;
@@ -157,7 +167,7 @@ export function useLightboxZoom(src: string) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   return { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, zoomStep, handlers: {
-    onClick: (event: React.MouseEvent<HTMLDivElement>) => { if (event.currentTarget.dataset.pannable === 'true') event.stopPropagation(); },
+    onClick: (event: React.MouseEvent<HTMLDivElement>) => { if (canPan(event.currentTarget)) event.stopPropagation(); },
     // 朝双击处放大：想看的那块细节留在指针下。
     onDoubleClick: (event: React.MouseEvent<HTMLDivElement>) =>
       zoomTo(view.current.scale === 1 ? null : 1, { x: event.clientX, y: event.clientY }),
@@ -167,7 +177,7 @@ export function useLightboxZoom(src: string) {
       plane.current.style.removeProperty('transition');
     },
     onPointerDown: (event: PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0 || event.currentTarget.dataset.pannable !== 'true' || drag.current) return;
+      if (event.button !== 0 || !canPan(event.currentTarget) || drag.current) return;
       event.currentTarget.setPointerCapture(event.pointerId);
       event.currentTarget.dataset.dragging = 'true';
       drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };

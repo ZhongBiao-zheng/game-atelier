@@ -65,9 +65,10 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *
  * 可选动作（规格 2.5，不传就不显示，图标按钮 + Hint）：onDownload（优先于 downloadName 的直链下载）、
  * onUseAsReference「设为参考」、onCopyPrompt（返回要复制的提示词，按钮原位换勾）、onDelete。
- * onDelete 由「删除」按钮或 ⌫ / Delete 键触发：先翻到下一张（没有下一张翻上一张，都没有就关闭），
- * 再调 onDelete —— 调用方须按身份（id / src）记当前项、不按下标，删掉的那张从列表里消失后才不会错位；
- * 撤销 toast 由调用方发（notify.undo）。
+ * onDelete 由「删除」按钮或 ⌫ / Delete 键触发，随后翻到下一张（没有下一张翻上一张，都没有就关闭）——
+ * 调用方须按身份（id / src）记当前项、不按下标，删掉的那张从列表里消失后才不会错位；撤销 toast 由调用方发（notify.undo）。
+ * onDelete 返回 Promise<boolean> 时等服务端受理（true）才翻页；deleting 为真时删除按钮与快捷键都不响应，
+ * 连按不会出现「翻了页却没删」。
  *
  * portal 到 body 是硬要求，不是洁癖：`backdrop-filter` 会给 fixed 后代造一个 containing block，
  * 挂在输入壳（bg-glass backdrop-blur-glass）里的 fixed inset-0 会缩到壳那一小条里。
@@ -79,7 +80,7 @@ export function Lightbox({
   onPrevious,
   onNext,
   downloadName, details, meta, counter, preloadSrcs,
-  onDownload, onUseAsReference, onCopyPrompt, onDelete,
+  onDownload, onUseAsReference, onCopyPrompt, onDelete, deleting = false,
 }: {
   src: string;
   sourceRect?: DOMRect | null;
@@ -100,7 +101,10 @@ export function Lightbox({
   onUseAsReference?: () => void;
   /** 返回当前这张的提示词；由 Lightbox 写剪贴板并原位换勾。 */
   onCopyPrompt?: () => string;
-  onDelete?: () => void;
+  /** 返回 Promise 时，resolve(true) 表示已受理，才翻页。 */
+  onDelete?: () => void | Promise<boolean>;
+  /** 调用方的删除还在进行：删除按钮禁用，⌫ / Delete 不响应。 */
+  deleting?: boolean;
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
@@ -124,6 +128,8 @@ export function Lightbox({
   onPreviousRef.current = onPrevious;
   onNextRef.current = onNext;
   onDeleteRef.current = onDelete;
+  const deletingRef = useRef(deleting);
+  deletingRef.current = deleting;
   const [copyState, copy] = useCopyFeedback();
 
   const requestClose = useCallback(() => {
@@ -140,11 +146,13 @@ export function Lightbox({
 
   const deleteCurrent = useCallback(() => {
     const remove = onDeleteRef.current;
-    if (!remove || closingRef.current) return;
+    if (!remove || closingRef.current || deletingRef.current) return;
+    // 翻页目标按删除前这一帧取：删掉的那张还在列表里，邻居就是它前后的那张。
     const advance = onNextRef.current ?? onPreviousRef.current;
-    if (advance) advance();
-    else requestClose();
-    remove();
+    const move = () => { if (advance) advance(); else requestClose(); };
+    const result = remove();
+    if (result instanceof Promise) void result.then(accepted => { if (accepted && !closingRef.current) move(); });
+    else move();
   }, [requestClose]);
 
   useEffect(() => {
@@ -450,7 +458,7 @@ export function Lightbox({
                 )}
                 {onDelete && (
                   <Hint label="删除（⌫）">
-                    <Button variant="ghost" size="icon" type="button" aria-label="删除" onClick={deleteCurrent} className="ml-auto size-8 text-muted-foreground hover:text-destructive">
+                    <Button variant="ghost" size="icon" type="button" aria-label="删除" disabled={deleting} onClick={deleteCurrent} className="ml-auto size-8 text-muted-foreground hover:text-destructive">
                       <DeleteIcon size="sm" aria-hidden />
                     </Button>
                   </Hint>
@@ -510,7 +518,7 @@ export function Lightbox({
           </a>
         </Hint>}
         {onDelete && <Hint label="删除（⌫）">
-          <Button variant="ghost" size="icon" type="button" aria-label="删除" onClick={deleteCurrent} className={ACTION_CLASS}>
+          <Button variant="ghost" size="icon" type="button" aria-label="删除" disabled={deleting} onClick={deleteCurrent} className={ACTION_CLASS}>
             <DeleteIcon size="lg" aria-hidden />
           </Button>
         </Hint>}
