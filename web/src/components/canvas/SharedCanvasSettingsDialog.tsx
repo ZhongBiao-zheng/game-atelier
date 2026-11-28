@@ -8,11 +8,29 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SecretInput } from '@/components/ui/secret-input';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
+import { CheckIcon, CopyIcon } from '@/components/ui/icons';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { Collapse } from '@/components/ui/collapse';
+import { useRetained } from '@/components/ui/retained';
 import { errorText } from '@/lib/errorText';
+import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import type { CollabCard, CollabMode } from '@/schema/collab';
 
-export function SharedCanvasSettingsDialog({ projectId, name, share, onClose, onSaved }: {
-  projectId: string; name: string; share?: CollabCard; onClose: () => void; onSaved: () => void;
+function CopyAddress({ address }: { address: string }) {
+  const [state, copy] = useCopyFeedback();
+  return <span className="flex items-center gap-1">
+    <span className="select-text truncate font-mono text-xs text-muted-foreground">{address}</span>
+    <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={state === 'copied' ? '已复制' : '复制 ' + address}
+      onClick={() => copy(address)}>
+      <SwapIcon swapKey={state === 'copied'} variant="pop">{state === 'copied' ? <CheckIcon /> : <CopyIcon />}</SwapIcon>
+    </Button>
+  </span>;
+}
+
+export function SharedCanvasSettingsDialog({ open = true, projectId, name, share, onClose, onSaved }: {
+  /** 不传时一直打开（调用方条件挂载）；受控时关闭能播退场。 */
+  open?: boolean; projectId: string; name: string; share?: CollabCard; onClose: () => void; onSaved: () => void;
 }) {
   const [displayName, setDisplayName] = useState('');
   const [needsName, setNeedsName] = useState<boolean | null>(null);
@@ -22,6 +40,7 @@ export function SharedCanvasSettingsDialog({ projectId, name, share, onClose, on
   const [passcode, setPasscode] = useState('');
   const [addresses, setAddresses] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const shownError = useRetained(error || null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
@@ -51,7 +70,7 @@ export function SharedCanvasSettingsDialog({ projectId, name, share, onClose, on
     finally { setBusy(false); }
   }
 
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+  return <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
     <DialogContent aria-describedby={undefined}>
       <DialogHeader><DialogTitle>{share ? '共享设置' : '共享画布'} · {name}</DialogTitle></DialogHeader>
       <form autoComplete="off" onSubmit={submit} className="grid gap-4">
@@ -75,10 +94,11 @@ export function SharedCanvasSettingsDialog({ projectId, name, share, onClose, on
           <Checkbox id="collab-borrow" checked={borrow} disabled={mode === 'view'} onCheckedChange={value => setBorrow(value === true)} />
           <Label htmlFor="collab-borrow">允许访客借用我的供应商</Label>
         </div>
-        {addresses.length > 0 && <p className="select-text text-xs text-muted-foreground">连接地址　{addresses.join('、')}</p>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {addresses.length > 0 && <div className="grid gap-1"><span className="text-xs text-muted-foreground">连接地址</span>
+          {addresses.map(address => <CopyAddress key={address} address={address} />)}</div>}
+        <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
         <DialogFooter><Button type="submit" disabled={busy || needsName === null || (needsName && !displayName.trim())}>
-          {busy ? '保存中…' : share ? '保存设置' : '开始共享'}
+          <SwapLabel active={busy} on="保存中…" off={share ? '保存设置' : '开始共享'} />
         </Button></DialogFooter>
       </form>
     </DialogContent>

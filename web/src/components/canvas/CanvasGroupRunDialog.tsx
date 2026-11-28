@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { GroupPlan } from '@/api/canvasGroupRuns';
 
@@ -30,7 +31,7 @@ export function CanvasGroupRunDialog({ plan, busy, onClose, onStart, onLocate }:
       <DialogFooter>
         <Button variant="outline" disabled={busy} onClick={onClose}>取消</Button>
         <Button className="tabular-nums" disabled={busy || plan.cycle || !!plan.blocked.length || !plan.order.length} onClick={onStart}>
-          {plan.needs_confirmation ? `确认花费 ${total} 并执行` : '开始执行'}
+          <SwapLabel active={busy} on="执行中…" off={plan.needs_confirmation ? `确认花费 ${total} 并执行` : '开始执行'} />
         </Button>
       </DialogFooter>
     </DialogContent>

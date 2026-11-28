@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { connectCollabPeer, listCollabPeers, remoteProjectPath, stopCollabShare } from '@/api/collab';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LockIcon, ShareIcon } from '@/components/ui/icons';
 import { RevealImage } from '@/components/ui/reveal-image';
+import { useRetainedSession } from '@/components/ui/retained';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { errorText } from '@/lib/errorText';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING } from '@/lib/motion';
 import { COLLAB_PROTOCOL_VERSION, type CollabCard } from '@/schema/collab';
 import { SharedCanvasSettingsDialog } from './SharedCanvasSettingsDialog';
 
@@ -17,12 +21,20 @@ export function useSharedCanvases() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const generation = useRef(0);
+  // 卡片位置按第一次出现的顺序固定：有人在编辑也不往前跳，新上线的接在末尾。
+  const order = useRef(new Map<string, number>());
   const refresh = useCallback(async () => {
     const call = ++generation.current;
     try {
       const peers = await listCollabPeers();
       if (call !== generation.current) return;
-      setCards([...peers].sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+      const seen = order.current;
+      [...peers].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).forEach(card => {
+        const key = card.peer_key + '/' + card.project_id;
+        if (!seen.has(key)) seen.set(key, seen.size);
+      });
+      const rank = (card: CollabCard) => seen.get(card.peer_key + '/' + card.project_id) ?? 0;
+      setCards([...peers].sort((a, b) => rank(a) - rank(b)));
       setError('');
     } catch (reason) { if (call === generation.current) setError(errorText(reason)); }
     finally { if (call === generation.current) setLoading(false); }
@@ -41,9 +53,16 @@ export function SharedStatusButton({shares, refresh}: {shares: CollabCard[]; ref
   const [config, setConfig] = useState<CollabCard | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  async function stop() {
+  const [confirmAll, setConfirmAll] = useState(false);
+  const shownConfig = useRetainedSession(config);
+  async function stop(projectId?: string) {
     setBusy(true);
-    try { await stopCollabShare(); refresh(); setOpen(false); }
+    setConfirmAll(false);
+    try {
+      await stopCollabShare(projectId);
+      refresh();
+      if (!projectId || shares.length <= 1) setOpen(false);
+    }
     catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   }
@@ -55,14 +74,22 @@ export function SharedStatusButton({shares, refresh}: {shares: CollabCard[]; ref
       <DialogContent aria-describedby={undefined}>
         <DialogHeader><DialogTitle>我共享的画布</DialogTitle></DialogHeader>
         <div className="grid max-h-80 gap-1 overflow-y-auto">{shares.map(card =>
-          <Button key={card.project_id} variant="ghost" className="justify-between" onClick={() => { setOpen(false); setConfig(card); }}>
-            <span className="truncate">{card.name}</span><span className="text-xs text-muted-foreground">共享设置</span>
-          </Button>)}</div>
+          <div key={card.project_id} className="flex items-center gap-1">
+            <Button variant="ghost" className="min-w-0 flex-1 justify-between" onClick={() => { setOpen(false); setConfig(card); }}>
+              <span className="truncate">{card.name}</span><span className="text-xs text-muted-foreground">共享设置</span>
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void stop(card.project_id)}>停止共享</Button>
+          </div>)}</div>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <DialogFooter><Button variant="outline" disabled={busy} onClick={() => void stop()}>全部停止共享</Button></DialogFooter>
+        {shares.length > 1 && <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={() => setConfirmAll(true)}>全部停止共享</Button>
+        </DialogFooter>}
       </DialogContent>
     </Dialog>
-    {config && <SharedCanvasSettingsDialog projectId={config.project_id} name={config.name} share={config}
+    <ConfirmDialog open={confirmAll} title={`停止全部 ${shares.length} 个共享？`} message="正在协作的成员会断开连接。"
+      confirmText="全部停止" variant="destructive" onConfirm={() => void stop()} onCancel={() => setConfirmAll(false)} />
+    {shownConfig && <SharedCanvasSettingsDialog key={shownConfig.session} open={Boolean(config)} projectId={shownConfig.value.project_id}
+      name={shownConfig.value.name} share={shownConfig.value}
       onClose={() => setConfig(null)} onSaved={() => { setConfig(null); refresh(); }} />}
   </>;
 }
@@ -105,12 +132,15 @@ export function SharedCanvasList({cards, error, loading, refresh, onOpen}: {
       {query || owner ? '没有匹配的共享画布' : '尚未发现局域网内的共享画布'}
     </p>}
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
-      {filtered.map(card => {
+      <AnimatePresence initial={false}>{filtered.map(card => {
         const compatible = card.protocol_version === COLLAB_PROTOCOL_VERSION;
         const cover = card.cover_version_id && (card.is_self
           ? canvasMediaUrl(card.project_id, card.cover_version_id, 360)
           : !card.requires_passcode && remoteProjectPath(card.peer_key, card.project_id) + '/cover');
-        return <Button key={card.peer_key + '/' + card.project_id} variant="outline"
+        return <motion.div key={card.peer_key + '/' + card.project_id} layout
+          initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0, transition:{duration:MOTION_DURATION.fast, ease:MOTION_EASE.subtle}}}
+          transition={{layout:MOTION_SPRING.snappy, opacity:{duration:MOTION_DURATION.base, ease:MOTION_EASE.subtle}}}>
+        <Button variant="outline"
           className="block h-auto w-full overflow-hidden whitespace-normal rounded-xl p-0 text-left"
           disabled={!compatible} onClick={() => onOpen(card)}>
           <div className="grid aspect-[16/10] place-items-center overflow-hidden border-b border-border bg-secondary/30">
@@ -123,8 +153,8 @@ export function SharedCanvasList({cards, error, loading, refresh, onOpen}: {
               ? [card.is_self ? '我的共享' : card.display_name, card.mode === 'view' ? '仅查看' : '可协作', `${card.online_count} 人在线`].join(' · ')
               : '对方版本不兼容，请更新'}</p>
           </div>
-        </Button>;
-      })}
+        </Button></motion.div>;
+      })}</AnimatePresence>
     </div>
     <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
       <DialogContent>
