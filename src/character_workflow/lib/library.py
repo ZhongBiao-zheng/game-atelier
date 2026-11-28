@@ -224,7 +224,10 @@ def save_subject(key, revision, name, handle, description, additions, cover_inde
         name = _title(name)
         updated = tx.put({**row, "name": name, "description": description, "handle": _handle(name, handle, key)})
         for source in additions:
-            _insert(tx, updated["id"], *source)
+            if isinstance(source, str):
+                _copy_item(tx, source, updated["id"])
+            else:
+                _insert(tx, updated["id"], *source)
         result = tx.get(updated["id"])
         if cover_index is not None:
             if not 0 <= cover_index < len(result["item_ids"]):

@@ -52,6 +52,7 @@ export function SubjectSheet({ open, subject, onClose, onSaved }: {
       let fileIndex = 0;
       const additions = added.map(s => {
         if (s.type === 'upload') { body.append('files', s.file); return { upload: fileIndex++ }; }
+        if (s.type === 'library') return { item_id: s.item.id };
         if (s.type === 'canvas') return { project_id: s.project, version_id: s.version };
         return { job_id: s.row.job_id, output_index: s.row.output_index };
       });

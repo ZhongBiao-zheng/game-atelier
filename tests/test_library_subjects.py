@@ -55,3 +55,29 @@ def test_submit_to_local_fake_model(client, monkeypatch):
     assert captured["prompt"] == "阿橙：橙色短发少女。\n阿橙站在海边"
     assert captured["subjects"][0]["item_ids"] == ids
     print(captured)
+
+
+def test_canvas_reproduce_restores_chip_and_refreezes_only_subject_images():
+    from character_workflow.lib.canvas_projects import canvas_project_lock_path, create_canvas_project, read_canvas_document
+    from character_workflow.lib.canvas_runs import commit_canvas_generation_under_lock, prepare_canvas_generation
+    from character_workflow.lib.file_lock import file_lock
+    from character_workflow.lib.generation_recipe import recipe_params
+    from tests.test_canvas_reproduce import _asset, _config, _configure_keys, _reproduce, _REF_A
+
+    _configure_keys()
+    token, ids = seed_subject("阿橙", "橙色短发", 1)
+    project_id = create_canvas_project("主体复刻").project_id
+    original = JobParams()
+    expanded = expand(token, original, "gpt-image-2")
+    params = recipe_params(original.model_dump(mode="json", exclude_none=True))
+    asset = _asset([(_REF_A, "reference")], draft_prompt=token, final_prompt=expanded, params=params)
+    _reproduce(project_id, asset.asset_id)
+    document = read_canvas_document(project_id)
+    config = _config(document)
+    assert config.data.generation_draft.prompt == token
+    prepared = prepare_canvas_generation(project_id, document, config)
+    with file_lock(canvas_project_lock_path(project_id)):
+        job, _ = commit_canvas_generation_under_lock(project_id, document, config, prepared)
+    assert job.prompt.count("橙色短发") == 1
+    assert job.params.subjects[0].item_ids == ids
+    assert len(job.params.reference_images) == 2

@@ -156,6 +156,10 @@ def _canvas_source(ref):
     return title, path.read_bytes(), version.kind, path.suffix.lower(), source
 
 
+class ItemSource(BaseModel):
+    item_id: Key
+
+
 class UploadSource(BaseModel):
     upload: int = Field(ge=0, lt=20)
 
@@ -164,7 +168,7 @@ class SubjectForm(Subject):
     id: Key | None = None
     revision: int | None = None
     cover_index: int | None = Field(default=None, ge=0, lt=20)
-    additions: list[UploadSource | OutputRef | CanvasRef] = Field(default_factory=list, max_length=20)
+    additions: list[UploadSource | OutputRef | CanvasRef | ItemSource] = Field(default_factory=list, max_length=20)
 
 
 @router.post("/subject-editor")
@@ -177,6 +181,8 @@ def save_subject(payload: Annotated[str, Form()], files: Annotated[list[UploadFi
                 if not files or source.upload >= len(files):
                     raise ValueError("缺少上传的参考素材")
                 additions.append(_upload_source(files[source.upload]))
+            elif isinstance(source, ItemSource):
+                additions.append(source.item_id)
             elif isinstance(source, OutputRef):
                 additions.append(_history_source(source))
             else:

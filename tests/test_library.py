@@ -86,3 +86,22 @@ def test_capacity_and_failed_copy_do_not_publish_orphans():
         library.duplicate(before["subjects"][0]["item_ids"][0], owner)
     assert library.catalog() == before
     assert len(list((library.root() / "items").iterdir())) == 20
+
+
+def test_subject_editor_copies_a_local_item_once_and_checks_revision(client):
+    import json
+
+    folder = library.folder("源")
+    item = library.insert(folder["id"], "文本", b"reference", "text", ".txt", {})
+    form = {"name": "主体", "additions": [{"item_id": item["id"]}], "cover_index": 0}
+    response = client.post("/api/library/subject-editor", files={"payload": (None, json.dumps(form))})
+    assert response.is_success, response.text
+    subject = response.json()
+    copy = subject["cover_item_id"]
+    assert copy != item["id"] and library.media(copy)[1].read_bytes() == b"reference"
+    library.update(subject["id"], {"description": "新版本"})
+    response = client.post("/api/library/subject-editor", files={"payload": (None, json.dumps({
+        **form, "id": subject["id"], "revision": subject["revision"],
+    }))})
+    assert response.status_code == 422
+    assert library._read(subject["id"])["item_ids"] == [copy]
