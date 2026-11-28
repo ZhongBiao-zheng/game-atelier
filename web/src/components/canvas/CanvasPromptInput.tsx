@@ -611,7 +611,7 @@ function promptNodes(
   mentionsEnabled = true,
   subjects: LibrarySubject[] = [],
 ): Node[] {
-  return variablePromptNodes(value, text => withSubjectChips(text, subjects, part => mentionNodes(part, references, mentionsEnabled)));
+  return variablePromptNodes(value, text => withSubjectChips(text, subjects, 'canvas', part => mentionNodes(part, references, mentionsEnabled)));
 }
 
 function mentionNodes(value: string, references: ReadonlyMap<string, CanvasMentionReference>, mentionsEnabled: boolean): Node[] {

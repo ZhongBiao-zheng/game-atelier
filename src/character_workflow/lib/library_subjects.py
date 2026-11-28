@@ -13,6 +13,13 @@ from character_workflow.lib.schemas import JobParams, SubjectSnapshot
 _TOKEN = re.compile(r"@\[subject:(sbj_[a-f0-9]{32}):([^\]\n]*)\]")
 
 
+def display_prompt(job) -> str:
+    if job.params.subject_prompt is None:
+        return job.prompt
+    names = {subject.id: subject.name for subject in job.params.subjects or []}
+    return _TOKEN.sub(lambda match: "@" + names.get(match[1], unquote(match[2])), job.params.subject_prompt)
+
+
 def expand(prompt: str, params: JobParams, model: str, *, mode: str = "image", preview=False) -> str:
     # Ignore any snapshots in the request. Only the editor tokens select local subjects.
     params.subjects = None

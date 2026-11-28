@@ -1,3 +1,4 @@
+import { displaySubjectPrompt } from '@/components/assets/SubjectMentions';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, useAnimateOnChange } from '@/lib/motion';
 import { getCanvasAgentBatchItems, agentSessionPath } from '@/api/canvas';
@@ -174,7 +175,7 @@ function GenerationPlanCard({ jobs }: { jobs: Job[] }) {
         <ul className="space-y-2">
           {jobs.map(job => (
             <li key={job.job_id} className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
-              <span className="min-w-0 flex-1 truncate">{job.prompt}</span>
+              <span className="min-w-0 flex-1 truncate">{displaySubjectPrompt(job.params.subject_prompt ?? job.prompt)}</span>
               <span className="flex shrink-0 items-center gap-1 tabular-nums text-foreground/80">
                 <AiIcon size="sm" />
                 {job.params?.n ?? 1}

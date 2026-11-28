@@ -43,7 +43,8 @@ def _read(key):
 
 
 def _all(kind):
-    return [json.loads(read_text_with_retry(path)) for path in sorted((root() / kind).glob("*.json"))]
+    rows = (json.loads(read_text_with_retry(path)) for path in (root() / kind).glob("*.json"))
+    return sorted(rows, key=lambda row: (row["created_at"], row["id"]))
 
 
 def _now():
@@ -210,17 +211,26 @@ def update(key, fields):
         return tx.put(row)
 
 
-def save_subject(key, revision, name, handle, description, additions, cover_index):
+class SubjectConflict(ValueError):
+    pass
+
+
+def save_subject(key, revision, name, handle, description, additions, cover_index, removed=()):
     with transaction() as tx:
         if key and not key.startswith("sbj_"):
             raise ValueError("请选择主体")
         row = tx.get(key) if key else dict(id=_new("sbj"), item_ids=[], cover_item_id=None)
         if key and row["revision"] != revision:
-            raise ValueError("主体已更新，请重新打开")
-        if len(row["item_ids"]) + len(additions) > 20:
+            raise SubjectConflict("主体已更新，请重新打开")
+        remaining = [item for item in row["item_ids"] if item not in removed]
+        if len(row["item_ids"]) - len(remaining) != len(removed):
+            raise ValueError("请选择主体已有的素材")
+        if len(remaining) + len(additions) > 20:
             raise ValueError("一个主体最多添加 20 个素材")
         name = _title(name)
-        updated = tx.put({**row, "name": name, "description": description, "handle": _handle(name, handle, key)})
+        updated = tx.put({**row, "item_ids": remaining,
+                          "cover_item_id": row["cover_item_id"] if row["cover_item_id"] in remaining else next(iter(remaining), None),
+                          "name": name, "description": description, "handle": _handle(name, handle, key)})
         for source in additions:
             if isinstance(source, str):
                 _copy_item(tx, source, updated["id"])
@@ -231,6 +241,13 @@ def save_subject(key, revision, name, handle, description, additions, cover_inde
             if not 0 <= cover_index < len(result["item_ids"]):
                 raise ValueError("请选择封面素材")
             result = tx.put({**result, "cover_item_id": result["item_ids"][cover_index]})
+        if removed:
+            meta = {"owner": key, "removed": [[i, item] for i, item in enumerate(row["item_ids"]) if item in removed],
+                    "cover": row.get("cover_item_id")}
+            def commit():
+                tx.commit()
+                tx.rows.clear()
+            trash.move_to_trash("library", name, [_path(item).parent for item in removed], meta, commit=commit)
         return result
 
 
@@ -409,7 +426,16 @@ def _restore(entry, restore_files):
             raise trash.TrashConflict("原主体的 @标识已被使用")
         if meta.get("parent_id") and tx.get(parent).get("parent_id"):
             raise trash.TrashConflict("原文件夹超过两层")
-        if meta.get("owner"):
+        if "removed" in meta:
+            owner = tx.get(parent)
+            ids = owner["item_ids"].copy()
+            if len(ids) + len(meta["removed"]) > 20:
+                raise trash.TrashConflict("主体的参考素材已满")
+            for index, item in meta["removed"]:
+                ids.insert(index, item)
+            cover = meta["cover"] if any(item == meta["cover"] for _, item in meta["removed"]) else owner["cover_item_id"]
+            tx.put({**owner, "item_ids": ids, "cover_item_id": cover})
+        elif meta.get("owner"):
             owner = tx.get(parent)
             ids = list(owner["item_ids"])
             if meta["key"] not in ids:

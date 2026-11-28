@@ -9,18 +9,18 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { errorText } from '@/lib/errorText';
 import type { CanvasProject } from '@/schema/canvas';
 import { useHistoryPages } from './useHistoryPages';
-import { type LibraryItem, type LibraryCatalog, uploadItem, libraryWrite, listLibrary, itemUrl } from '@/api/library';
+import { type LibraryItem, type LibraryCatalog, uploadItem, libraryWrite, listLibrary, itemThumb } from '@/api/library';
 
 export type Source = { type: 'history'; row: HistoryItem } |
-  { type: 'canvas'; project: string; version: string; title: string; url: string; kind: string } |
+  { type: 'canvas'; project: string; version: string; title: string; url: string; kind: string; text?: string } |
   { type: 'library'; item: LibraryItem } |
   { type: 'upload'; file: File; url?: string };
 export function sourceTitle(s: Source) {
   if (s.type === 'library') return s.item.title;
-  return s.type === 'history' ? s.row.filename : s.type === 'upload' ? s.file.name : s.title;
+  return s.type === 'history' ? (s.row.title || s.row.prompt || s.row.filename) : s.type === 'upload' ? s.file.name : s.title;
 }
 export function sourceThumb(s: Source) {
-  if (s.type === 'library') return s.item.kind === 'image' ? itemUrl(s.item.id) : undefined;
+  if (s.type === 'library') return s.item.kind === 'image' ? itemThumb(s.item.id) : undefined;
   if (s.type === 'history') return s.row.kind === 'image' ? s.row.thumbnail_url : undefined;
   if (s.type === 'upload') return s.file.type.startsWith('image/') ? s.url : undefined;
   return s.kind === 'image' ? s.url : undefined;
@@ -32,13 +32,41 @@ export function saveSource(owner: string, s: Source) {
     : libraryWrite<LibraryItem>(owner + '/canvas', { project_id: s.project, version_id: s.version });
 }
 type Tab = 'history' | 'canvas';
-export function LibrarySourcePicker({ open, initial, onClose, onChoose }: {
-  open: boolean; initial: Tab; onClose: () => void; onChoose: (s: Source) => void;
+function sourceKey(s: Source) {
+  if (s.type === 'history') return 'history/' + s.row.job_id + '/' + s.row.output_index;
+  if (s.type === 'canvas') return 'canvas/' + s.project + '/' + s.version;
+  return s.type === 'library' ? s.item.id : s.url;
+}
+
+interface Selection {
+  onChoose: (s: Source) => void;
+  selected: Source[];
+}
+
+function SourceTile({ item, selected, onChoose }: Selection & { item: Source }) {
+  const thumb = sourceThumb(item);
+  const text = item.type === 'history' ? item.row.text_preview : item.type === 'library' ? item.item.text_preview :
+    item.type === 'canvas' ? item.text : undefined;
+  const checked = selected.some(s => sourceKey(s) === sourceKey(item));
+  return <Button variant="ghost" aria-pressed={checked} className="grid h-auto min-w-0 grid-cols-1 content-start gap-1 p-1 text-left aria-pressed:bg-primary/15"
+    onClick={() => onChoose(item)}>
+    <span className="relative grid aspect-square w-full place-items-center overflow-hidden rounded-sm bg-secondary">
+      {thumb ? <img src={thumb} alt="" className="absolute inset-0 size-full object-cover" /> :
+        <span className="line-clamp-2 whitespace-pre-line px-2 text-xs">{text || sourceTitle(item)}</span>}
+    </span>
+    <span className="w-full truncate text-xs">{sourceTitle(item)}</span>
+  </Button>;
+}
+
+export function LibrarySourcePicker({ open, initial, onClose, onChoose, limit }: {
+  open: boolean; initial: Tab; onClose: () => void; onChoose: (items: Source[]) => void; limit?: number;
 }) {
+  const [selected, setSelected] = useState<Source[]>([]);
   const [scope, setScope] = useState('mine');
   const [source, setSource] = useState<Tab | 'library'>(initial);
-  useEffect(() => { if (open) { setSource(initial); setScope('mine'); } }, [open, initial]);
-  const choose = (s: Source) => { onChoose(s); onClose(); };
+  useEffect(() => { if (open) { setSource(initial); setScope('mine'); setSelected([]); } }, [open, initial]);
+  const choose = (s: Source) => setSelected(current => current.some(item => sourceKey(item) === sourceKey(s))
+    ? current.filter(item => sourceKey(item) !== sourceKey(s)) : [...current, s]);
   return <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}><DialogContent>
     <DialogTitle>选择素材</DialogTitle>
     <Tabs value={scope} onValueChange={setScope}><TabsList aria-label="素材范围">
@@ -48,11 +76,13 @@ export function LibrarySourcePicker({ open, initial, onClose, onChoose }: {
       <Select value={source} onValueChange={v => setSource(v as typeof source)}><SelectTrigger aria-label="素材来源"><SelectValue /></SelectTrigger>
         <SelectContent><SelectItem value="history">历史</SelectItem><SelectItem value="canvas">画布</SelectItem>
           <SelectItem value="library">我的文件夹</SelectItem></SelectContent></Select>
-      {open && (source === 'library' ? <FolderSources onChoose={choose} /> : <SourceList tab={source} onChoose={choose} />)}
+      {open && (source === 'library' ? <FolderSources onChoose={choose} selected={selected} /> : <SourceList tab={source} onChoose={choose} selected={selected} />)}
     </>}
+    <Button disabled={!selected.length || (limit !== undefined && selected.length > limit)}
+      onClick={() => { onChoose(selected); onClose(); }}>添加 {selected.length} 项</Button>
   </DialogContent></Dialog>;
 }
-function FolderSources({ onChoose }: { onChoose: (s: Source) => void }) {
+function FolderSources({ onChoose, selected }: Selection) {
   const [catalog, setCatalog] = useState<LibraryCatalog | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -67,13 +97,10 @@ function FolderSources({ onChoose }: { onChoose: (s: Source) => void }) {
     <div className="grid max-h-[55vh] grid-cols-3 gap-1 overflow-auto">
       {catalog?.folders.filter(f => f.parent_id === folder).map(f => <Button variant="ghost" key={f.id}
         className="h-auto flex-col p-2" onClick={() => setFolder(f.id)}><FolderIcon />{f.name}</Button>)}
-      {current?.item_ids.map(id => { const item = catalog!.items[id]; return <Button variant="ghost" key={id}
-        className="h-auto flex-col overflow-hidden p-1" onClick={() => onChoose({ type: 'library', item })}>
-        {item.kind === 'image' && <img src={itemUrl(id)} alt="" className="aspect-square w-full rounded-sm object-cover" />}
-        <span className="w-full truncate text-xs">{item.title}</span></Button>; })}
+      {current?.item_ids.map(id => <SourceTile key={id} item={{ type: 'library', item: catalog!.items[id] }} selected={selected} onChoose={onChoose} />)}
     </div></>;
 }
-function SourceList({ tab, onChoose }: { tab: Tab; onChoose: (s: Source) => void }) {
+function SourceList({ tab, onChoose, selected }: Selection & { tab: Tab }) {
   const history = useHistoryPages('all', '');
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [project, setProject] = useState('');
@@ -92,9 +119,13 @@ function SourceList({ tab, onChoose }: { tab: Tab; onChoose: (s: Source) => void
     setVersions([]); setError('');
     getCanvasDocument(project).then(doc => {
       if (!active) return;
-      setVersions(Object.values(doc.content_versions).map(v => ({ type: 'canvas', project, version: v.version_id, kind: v.kind,
-        title: doc.nodes.find(n => 'current_version_id' in n.data && n.data.current_version_id === v.version_id)?.title || v.version_id,
-        url: canvasMediaUrl(project, v.version_id) })));
+      setVersions(doc.nodes.flatMap(node => {
+        const id = 'current_version_id' in node.data && node.data.current_version_id;
+        const v = id && doc.content_versions[id];
+        if (!v) return [];
+        return [{ type: 'canvas' as const, project, version: v.version_id, kind: v.kind, title: node.title,
+          text: v.kind === 'text' ? v.text : undefined, url: canvasMediaUrl(project, v.version_id, 128) }];
+      }));
     }).catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
   }, [project, tab]);
@@ -104,10 +135,8 @@ function SourceList({ tab, onChoose }: { tab: Tab; onChoose: (s: Source) => void
       <SelectItem key={p.project_id} value={p.project_id}>{p.name}</SelectItem>)}</SelectContent></Select>}
     {(error || history.error) && <p role="alert">{error || history.error}</p>}
     <div className="grid max-h-[55vh] grid-cols-3 gap-1 overflow-y-auto">
-      {rows.map((s, i) => <Button variant="ghost" key={i} className="h-auto flex-col overflow-hidden p-1" onClick={() => onChoose(s)}>
-        {sourceThumb(s) && <img src={sourceThumb(s)} alt="" className="aspect-square w-full rounded-sm object-cover" />}
-        <span className="w-full truncate text-xs">{sourceTitle(s)}</span>
-      </Button>)}
+      {rows.map(s => <SourceTile key={sourceKey(s)} item={s} selected={selected} onChoose={onChoose} />)}
+      {tab === 'canvas' && !versions.length && !error && <p className="col-span-3 py-6 text-center text-sm text-muted-foreground">还没有内容</p>}
     </div>{tab === 'history' && history.hasMore && <Button variant="ghost" onClick={() => void history.more().catch(() => {})}>加载更多</Button>}
   </>;
 }

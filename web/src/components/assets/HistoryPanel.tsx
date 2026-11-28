@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { deleteHistoryOutputs, HISTORY_CHANGED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
 import { downloadLibrary, libraryWrite, LIBRARY_CHANGED, OPEN_FOLDER, type LibraryFolder } from '@/api/library';
+import { CanvasIcon, EditIcon, MoveIcon, CopyIcon } from '@/components/ui/icons';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { FolderPicker } from './FolderPicker';
 import { request } from '@/api/http';
@@ -279,13 +280,12 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
       {groups.map(([label, rows]) => <section key={label}>
         {label && <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>}
         <AssetMasonry compact items={rows} itemKey={historyKey} ratio={historyRatio}>{row =>
-          <HistoryCard extraMenu={<>
-            {onCanvas && <DropdownMenuItem onSelect={() => void action('canvas', [row])}>添加到画布</DropdownMenuItem>}
-            {library && <>
-            <DropdownMenuItem onSelect={() => { setNewTitle(row.filename); setRenaming(row); }}>重命名</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setMoving(row)}>移动到…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => { void libraryWrite(row.job_id + '/copy', {}).catch(e => notify.error(errorText(e))); }}>创建副本</DropdownMenuItem>
-            <DropdownMenuSeparator /></>}</>} item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
+          <HistoryCard showTitle={library} canvasMenu={onCanvas && <DropdownMenuItem onSelect={() => void action('canvas', [row])}><CanvasIcon />添加到画布</DropdownMenuItem>}
+            extraMenu={library && <><DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => { setNewTitle(row.filename); setRenaming(row); }}><EditIcon />重命名</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setMoving(row)}><MoveIcon />移动到…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { void libraryWrite(row.job_id + '/copy', {}).catch(e => notify.error(errorText(e))); }}><CopyIcon />创建副本</DropdownMenuItem>
+              <DropdownMenuSeparator /></>} item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
             removing={removing.has(historyKey(row))} onToggle={range => toggle(row, range)}
             onPreview={() => setPreview(row)} onAction={key => void action(key, [row])} />
         }</AssetMasonry>

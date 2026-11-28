@@ -18,7 +18,7 @@ from character_workflow.lib.canvas_projects import (
     _ACCEPTED_MIMES, _sniff_media_mime, read_canvas_document, resolve_canvas_media, upload_max_bytes,
 )
 from character_workflow.lib.team_library_share import _media_filename
-from viewer_server.history_routes import OutputRef, _lookup
+from viewer_server.history_routes import OutputRef, _lookup, output_title
 from viewer_server.routes import _read_gallery_hidden_state
 
 router = APIRouter(prefix="/api/library")
@@ -61,6 +61,8 @@ def errors():
         yield
     except (FileNotFoundError, KeyError) as e:
         raise HTTPException(404, "找不到素材或原位置") from e
+    except library.SubjectConflict as e:
+        raise HTTPException(409, str(e)) from e
     except (ValueError, PermissionError) as e:
         raise HTTPException(422, str(e)) from e
 
@@ -137,7 +139,7 @@ def from_history(owner: Key, ref: OutputRef):
 
 def _history_source(ref):
     job, path = _lookup(ref, *map(set, _read_gallery_hidden_state()))
-    return path.name, path.read_bytes(), job.kind, path.suffix.lower(), {"kind": "history", **ref.model_dump()}
+    return output_title(job, ref.output_index, path), path.read_bytes(), job.kind, path.suffix.lower(), {"kind": "history", **ref.model_dump()}
 
 
 @router.post("/{owner}/canvas")
@@ -171,6 +173,7 @@ class SubjectForm(Subject):
     id: Key | None = None
     revision: int | None = None
     cover_index: int | None = Field(default=None, ge=0, lt=20)
+    removed: list[Key] = Field(default_factory=list, max_length=20)
     additions: list[UploadSource | OutputRef | CanvasRef | ItemSource] = Field(default_factory=list, max_length=20)
 
 
@@ -191,7 +194,7 @@ def save_subject(payload: Annotated[str, Form()], files: Annotated[list[UploadFi
             else:
                 additions.append(_canvas_source(source))
         return library.save_subject(form.id, form.revision, form.name, form.handle,
-                                    form.description, additions, form.cover_index)
+                                    form.description, additions, form.cover_index, form.removed)
 
 
 @router.patch("/{key}")
@@ -237,7 +240,7 @@ def content(key: Key, download: bool = False, width: Annotated[int | None, Query
 
 def _filename(item, path):
     name = _media_filename(item["title"])
-    return name if Path(name).suffix else name + path.suffix
+    return name if name.casefold().endswith(path.suffix.casefold()) else name + path.suffix
 
 
 @router.post("/download")

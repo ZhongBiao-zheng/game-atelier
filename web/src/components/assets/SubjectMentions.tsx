@@ -5,6 +5,21 @@ import { itemThumb, LIBRARY_CHANGED, listLibrary, subjectToken, type LibrarySubj
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export const subjectPattern = /@\[subject:(sbj_[a-f0-9]{32}):([^\]\n]*)\]/g;
+function savedName(encoded: string) {
+  try { return decodeURIComponent(encoded); } catch { return encoded; }
+}
+export function displaySubjectPrompt(value: string) {
+  return value.replace(subjectPattern, (_, _id, name: string) => '@' + savedName(name));
+}
+export function SavedSubjectText({ text }: { text: string }) {
+  const parts = [];
+  let offset = 0;
+  for (const match of text.matchAll(subjectPattern)) {
+    parts.push(text.slice(offset, match.index), <span key={match.index} className="inline-flex items-center text-primary">@{savedName(match[2])}</span>);
+    offset = match.index! + match[0].length;
+  }
+  return <>{parts}{text.slice(offset)}</>;
+}
 export function useSubjects(active: boolean) {
   const [rows, setRows] = useState<LibrarySubject[]>([]);
   useEffect(() => {
@@ -16,28 +31,27 @@ export function useSubjects(active: boolean) {
   }, [active]);
   return rows;
 }
-export function subjectChip(token: string, rows: LibrarySubject[]) {
+export function subjectChip(token: string, rows: LibrarySubject[], editor: 'studio' | 'canvas') {
   const match = Array.from(token.matchAll(subjectPattern))[0];
   const row = rows.find(s => s.id === match?.[1]);
   const span = document.createElement('span');
   span.setAttribute('contenteditable', 'false');
   span.tabIndex = 0;
   span.dataset.subjectToken = token;
-  span.className = 'mx-0.5 inline-flex items-center gap-1 rounded-md bg-secondary px-1.5 align-middle text-sm text-foreground' + (row ? '' : ' line-through');
+  span.className = (editor === 'studio' ? 'inline-flex select-none items-center gap-1 align-middle text-primary cursor-default' :
+    'mx-0.5 inline-flex h-7 max-w-40 items-center gap-1 overflow-hidden rounded-md border border-border bg-secondary px-1.5 align-middle text-xs leading-none text-foreground') + (row ? '' : ' line-through');
   if (row?.cover_item_id) {
     const image = document.createElement('img'); image.alt = ''; image.src = itemThumb(row.cover_item_id);
-    image.className = 'size-5 rounded-sm object-cover'; span.append(image);
+    image.className = editor === 'studio' ? 'size-4.5 rounded-sm object-cover' : 'size-5 shrink-0 rounded object-cover'; span.append(image);
   }
-  let name = match?.[2] || '';
-  try { name = decodeURIComponent(name); } catch { /* display the saved label */ }
-  span.append(document.createTextNode('@' + (row?.name || name)));
+  span.append(document.createTextNode('@' + (row?.name || savedName(match?.[2] || ''))));
   return span;
 }
-export function withSubjectChips(value: string, rows: LibrarySubject[], plain: (part: string) => Node[]) {
+export function withSubjectChips(value: string, rows: LibrarySubject[], editor: 'studio' | 'canvas', plain: (part: string) => Node[]) {
   const nodes: Node[] = [];
   let start = 0;
   for (const match of value.matchAll(subjectPattern)) {
-    nodes.push(...plain(value.slice(start, match.index)), subjectChip(match[0], rows));
+    nodes.push(...plain(value.slice(start, match.index)), subjectChip(match[0], rows, editor));
     start = match.index! + match[0].length;
   }
   return [...nodes, ...plain(value.slice(start))];
@@ -67,15 +81,15 @@ export function SubjectFeedback({ prompt, model, explicit, rows, mode = 'image',
     const over = (e: Event) => {
       const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-subject-token]') : null;
       const row = el && rows.find(s => el.dataset.subjectToken?.startsWith('@[subject:' + s.id + ':'));
-      if (el && row) { const r = el.getBoundingClientRect(); setHover({ row, x: r.left, y: r.top - 6 }); } else setHover(null);
+      if (el && row) { const r = el.getBoundingClientRect(); setHover({ row, x: r.left + r.width / 2, y: r.top - 6 }); } else setHover(null);
     };
     const out = (e: MouseEvent) => { if (!(e.relatedTarget instanceof Element && e.relatedTarget.closest('[data-subject-token]'))) setHover(null); };
     document.addEventListener('mouseover', over); document.addEventListener('mouseout', out);
     return () => { document.removeEventListener('mouseover', over); document.removeEventListener('mouseout', out); };
   }, [rows, prompt]);
   return <>{warnings.map(v => <p key={v} className="text-xs text-muted-foreground">{v}</p>)}
-    {hover && createPortal(<div role="tooltip" className="pointer-events-none fixed z-50 max-w-64 -translate-y-full rounded-md border border-border bg-popover p-2 text-xs"
-      style={{ left: hover.x, top: hover.y }}><p className="line-clamp-2">{hover.row.description}</p>
+    {hover && createPortal(<div role="tooltip" className="pointer-events-none fixed z-50 max-w-64 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-card p-2 text-xs"
+      style={{ left: hover.x, top: hover.y }}><p className="line-clamp-2 whitespace-pre-line">{hover.row.description}</p>
       <span className="text-muted-foreground">{hover.row.item_ids.length} 个素材</span></div>, document.body)}
   </>;
 }

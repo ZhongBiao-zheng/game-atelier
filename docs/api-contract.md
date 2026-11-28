@@ -1715,12 +1715,12 @@ GET /{key}/content 返回素材正文，POST /download 接受 ID 数组并打包
 撤销走通用回收站还原接口，恢复素材顺序、归属和封面。
 
 POST /subject-editor 用 multipart 同时保存主体、封面和新增参考。payload 带名称、描述、可选 handle、
-已有主体的 id 和 revision、从零计数的 cover_index，以及 additions。每个来源使用上传文件序号、
+已有主体的 id 和 revision、从零计数的 cover_index、additions 和待移入回收站的素材 ID 数组 removed。封面序号对应移除后再追加的最终顺序。版本冲突返回 409。每个来源使用上传文件序号、
 job_id + output_index、project_id + version_id 或已有 item_id。任一来源无效时整次保存失败。
 
 编辑器以稳定主体 ID 引用素材。POST /subject-preview 与两端提交共用展开逻辑。任务在
 params.subjects 记录本次主体的 id、名称、revision 和实际选中的 item_ids，params.subject_prompt
-保留编辑器原文。主体删除后，已提交任务的参考文件仍可读取。
+保留编辑器原文。记录流与历史使用提交时保存的名称展示 @主体，历史搜索使用同一文本。从历史加入素材时默认取前 16 字为标题，后续产出带序号。主体删除后，已提交任务的参考文件仍可读取。
 
 首次启动将旧个人库导入「旧素材」。项目引用、团队采用记录和生成配方由 project-references/
 保留原 ID，导入进度登记在 .runtime/library-import.json，完成后将原目录整体移入回收站。

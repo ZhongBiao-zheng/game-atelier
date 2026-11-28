@@ -41,8 +41,8 @@ export function FolderPicker({ open, onClose, onChoose, allowed, root = false }:
     <DialogTitle>选择文件夹</DialogTitle>
     <div className="max-h-[55vh] overflow-y-auto">
       {root && <Button variant="ghost" className="w-full justify-start" onClick={() => void select({ id: '', name: '我的文件夹', item_ids: [], parent_id: null })}>我的文件夹</Button>}
-      {folders.filter(f => !f.system && (!allowed || allowed(f))).map(f => <Button key={f.id} variant="ghost" disabled={busy}
-        className="w-full justify-start" onClick={() => void select(f)}><FolderIcon />{f.parent_id ? folders.find(p => p.id === f.parent_id)?.name + ' / ' : ''}{f.name}</Button>)}
+      {folders.filter(f => !f.system && !f.parent_id).flatMap(parent => [parent, ...folders.filter(f => f.parent_id === parent.id)]).filter(f => !allowed || allowed(f)).map(f => <Button key={f.id} variant="ghost" disabled={busy}
+        className={f.parent_id ? "w-full justify-start pl-8" : "w-full justify-start"} onClick={() => void select(f)}><FolderIcon />{f.name}</Button>)}
       {creating ? <form autoComplete="off" className="flex gap-2" onSubmit={event => { event.preventDefault(); void select(); }}>
         <Input autoFocus aria-label="文件夹名称" value={name} onChange={e => setName(e.target.value)} maxLength={160}/>
         <Button disabled={busy || !name.trim()}>创建</Button>
