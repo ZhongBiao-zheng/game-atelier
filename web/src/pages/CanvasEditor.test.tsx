@@ -1716,7 +1716,7 @@ it('opens the shared section in the new asset library', async () => {
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-  expect(await screen.findByText('暂无共享素材')).toBeVisible();
+  await waitFor(() => expect(screen.getByText('暂无共享素材')).toBeVisible());
 });
 
 function mockFileUpload(file: File, revision: number) {
@@ -2877,7 +2877,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
-  expect(await screen.findByText('我的文件夹')).toBeVisible();
+  await waitFor(() => expect(screen.getByText('我的文件夹')).toBeVisible());
   fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
   expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '关闭创作资产' }));
@@ -2907,7 +2907,7 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   vi.mocked(listRelatedTeamAssets).mockClear();
   fireEvent.click(screen.getByRole('button', { name: '看看' }));
   expect(await screen.findByRole('tab', { name: '素材库' })).toHaveAttribute('aria-selected', 'true');
-  expect(await screen.findByText('暂无共享素材')).toBeVisible();
+  await waitFor(() => expect(screen.getByText('暂无共享素材')).toBeVisible());
 });
 
 it('edits annotations in place, creates an annotated input and refreshes its composite before submitting', async ({ onTestFinished }) => {
