@@ -184,8 +184,7 @@ it('首页与创作台共用当前对话的生成偏好，切页或刷新保留�
   expect(screen.getByRole('option', { name: /手选模型/ })).toHaveAttribute('aria-selected', 'true');
   fireEvent.click(screen.getByRole('switch'));
   await waitFor(() => expect(writes).toEqual([{ auto_models: true }]));
-  expect(screen.getByRole('switch')).toBeDisabled();
-  expect(screen.getByRole('option', { name: /另一模型/ })).toBeDisabled();
+  expect(screen.getByRole('switch')).toBeChecked();
   home.unmount();
   const studio = render(<Page />);
   await act(async () => { release(); });

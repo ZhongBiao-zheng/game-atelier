@@ -82,7 +82,7 @@ export function CanvasAgentModelPicker({ models, alias, model, triggerClassName,
         />
         <div role="listbox" aria-label="对话模型列表" className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1">
           {!models && <p className="px-3 py-3 text-xs text-muted-foreground">加载中…</p>}
-          {models && models.models.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">没有可用的对话模型，请在 Key 设置里启用文本模型</p>}
+          {models && models.models.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">没有可用的对话模型</p>}
           {models && models.models.length > 0 && matches.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">没有匹配的模型</p>}
           {groups.map(([groupAlias, items]) => {
             const head = items[0];

@@ -5,6 +5,7 @@ import { ApiError } from '@/api/http';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
+import { errorText } from '@/lib/errorText';
 import type { CanvasAgentSkill } from '@/schema/canvas';
 import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
@@ -14,10 +15,6 @@ import { Button } from '@/components/ui/button';
 /** 文件夹选择器给的是相对路径（含选中的那层目录名），服务端以 SKILL.md 所在目录为根。 */
 function relativePath(file: File): string {
   return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, direction = 'up', disabled, onSelect, onChanged, label }: {
@@ -79,7 +76,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
       });
       onChanged();
     } catch (error) {
-      setNotice({ text: messageOf(error), error: true });
+      setNotice({ text: errorText(error), error: true });
     } finally {
       setBusy(false);
     }
@@ -93,7 +90,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
       await deleteCanvasAgentSkill(name);
       onChanged();
     } catch (error) {
-      setNotice({ text: messageOf(error), error: true });
+      setNotice({ text: errorText(error), error: true });
     } finally {
       setBusy(false);
     }

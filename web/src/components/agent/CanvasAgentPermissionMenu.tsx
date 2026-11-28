@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import { NumberInput } from '@/components/ui/number-input';
 import { Hint } from '@/components/ui/tooltip';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
+import { formatGenerationCost } from '@/lib/generationCost';
 import { cn } from '@/lib/utils';
 
 /** 与服务端 canvas_agent_cost.MAX_CONFIRM_ABOVE_CNY 一致。 */
@@ -40,7 +42,7 @@ export function CanvasAgentPermissionMenu({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const hint = auto
-    ? `Auto${confirmAbove === null ? '' : `：超过 ${confirmAbove}¥ 的生成先确认`}`
+    ? `Auto${confirmAbove === null ? '' : `：超过 ${formatGenerationCost(confirmAbove)} 先确认`}`
     : '审查：每一步都先确认';
   return (
     <>
@@ -74,7 +76,8 @@ export function CanvasAgentPermissionMenu({
         aria-label="权限模式"
         className="flex w-64 flex-col gap-2 rounded-xl border border-border bg-card p-2"
       >
-        <div role="radiogroup" aria-label="权限模式" className="flex flex-col gap-1 rounded-lg bg-popover p-1">
+        <div role="radiogroup" aria-label="权限模式" className="relative isolate flex flex-col gap-1 rounded-lg bg-popover p-1">
+          <SelectionHighlight className="rounded-lg" />
           {PERMISSION_OPTIONS.map(({ mode, label, description, Icon }) => {
             const selected = (mode === 'auto') === auto;
             return (
@@ -87,7 +90,7 @@ export function CanvasAgentPermissionMenu({
                 onClick={() => onModeChange(mode)}
                 className={cn(
                   'h-auto w-full items-start justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left font-normal hover:bg-secondary/60',
-                  selected && 'bg-secondary ring-1 ring-inset ring-primary/60 hover:bg-secondary',
+                  selected && 'hover:bg-transparent',
                 )}
               >
                 <Icon size="md" className={cn('mt-0.5 shrink-0', selected && mode === 'auto' ? 'text-primary' : 'text-muted-foreground')} />
@@ -103,7 +106,7 @@ export function CanvasAgentPermissionMenu({
         <Collapse open={auto && confirmAbove !== null}>
           {confirmAbove !== null && (
             <div className="flex items-center justify-between gap-2 border-t border-border px-1.5 pt-2 text-xs text-muted-foreground">
-              <span>超额确认阈值</span>
+              <span>超过此金额先确认</span>
               <NumberInput
                 aria-label="确认金额"
                 value={confirmAbove}
