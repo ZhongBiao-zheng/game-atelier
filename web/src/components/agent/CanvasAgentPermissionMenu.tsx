@@ -21,8 +21,7 @@ const PERMISSION_OPTIONS: {
 ];
 
 /**
- * 权限：审查 = 每一步都先确认；Auto = 直接执行，只有单次估价超过确认金额的生成先确认
- * （服务端 canvas_agent_runtime.generation_over_threshold，未计价的不拦）。
+ * Auto 模式下，服务端在本轮已提交、已预留与本次的合计估价超过确认金额时询问。
  */
 export function CanvasAgentPermissionMenu({
   auto, confirmAbove, triggerClassName, direction = 'up', showLabel = false, disabled,
