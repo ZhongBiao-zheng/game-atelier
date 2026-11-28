@@ -154,6 +154,37 @@ let cachedGenerationModels: CanvasAgentGenerationModel[] | null = null;
 let cachedSkills: CanvasAgentSkill[] | null = null;
 let cachedConfirmAbove: number | null = null;
 
+/** 还没落盘的设置写入（原始请求，失败会 reject），跨 hook 实例共享：关掉面板再打开、首页与创作台切换后，
+ *  新实例发送时同样要等它们，任一失败就不发。会话设置按「工作区 + 会话」记，确认金额是全局设置，所有发送都依赖。 */
+const settingWrites = new Map<string, Set<Promise<unknown>>>();
+const GLOBAL_SETTING_KEY = '*';
+const settingKey = (projectId: string | null, sessionId: string) => `${projectId ?? ''}\u0000${sessionId}`;
+
+function trackSettingWrite(key: string, request: Promise<unknown>) {
+  const writes = settingWrites.get(key) ?? new Set<Promise<unknown>>();
+  settingWrites.set(key, writes);
+  writes.add(request);
+  const done = () => {
+    writes.delete(request);
+    if (!writes.size && settingWrites.get(key) === writes) settingWrites.delete(key);
+  };
+  request.then(done, done);
+}
+
+/** 这次发送依赖的写入：目标会话的设置与确认金额；还没有会话（发送时才建）时依赖本工作区全部会话设置写入。 */
+function settingWritesFor(projectId: string | null, sessionId: string | null): Promise<unknown>[] {
+  const prefix = `${projectId ?? ''}\u0000`;
+  const keys = [...settingWrites.keys()].filter(key => key === GLOBAL_SETTING_KEY
+    || (sessionId === null ? key.startsWith(prefix) : key === settingKey(projectId, sessionId)));
+  return keys.flatMap(key => [...(settingWrites.get(key) ?? [])]);
+}
+
+/** 确认金额读写共用的顺序号：读取开始之后又有写入、或还有写入在路上，这份读数就过期了，
+ *  不改显示、缓存与回滚基准（否则会回滚到比服务端还低的旧金额）。 */
+let confirmAboveSeq = 0;
+let lastConfirmAboveWriteSeq = 0;
+let confirmAboveWritesInFlight = 0;
+
 export function clearWorkspaceAgentControlsCache() {
   cachedChatModels = null;
   cachedGenerationModels = null;
@@ -184,8 +215,6 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [confirmAbove, setConfirmAbove] = useState<number | null>(() => CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
   // 设置类修改（模型、权限、自动、确认金额）本地先生效，写入排队进行，不进 pending：输入壳不置灰、不抢焦点。
   const settingsWrite = useRef<Promise<unknown>>(Promise.resolve());
-  // 还没落盘的设置写入（原始请求，失败会 reject）：发送时等它们，任一失败就不发。
-  const inflightWrites = useRef(new Set<Promise<unknown>>());
   const [pendingSettings, setPendingSettings] = useState<readonly PendingSetting[]>([]);
   const savedConfirmAbove = useRef<number | null>(CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
   const confirmAboveWrites = useRef(0);
@@ -344,11 +373,12 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   useEffect(() => {
     if (!loadControls) return;
     let active = true;
+    const seq = ++confirmAboveSeq;
     getCanvasAgentSettings().then(settings => {
-      if (!active) return;
+      if (!active || lastConfirmAboveWriteSeq > seq || confirmAboveWritesInFlight > 0) return;
       cachedConfirmAbove = settings.confirm_above_cny;
       savedConfirmAbove.current = settings.confirm_above_cny;
-      if (confirmAboveWrites.current === 0) setConfirmAbove(settings.confirm_above_cny);
+      setConfirmAbove(settings.confirm_above_cny);
     }, loadError => { if (active) setError(errorText(loadError)); });
     return () => { active = false; };
   }, [loadControls]);
@@ -423,13 +453,11 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   }, []);
 
   /** 设置写入按顺序排队；失败时由 rollback 退回，报错并记一次失败。 */
-  const saveSetting = useCallback(<T,>(write: () => Promise<T>, rollback: () => void): Promise<T | undefined> => {
+  const saveSetting = useCallback(<T,>(key: string, write: () => Promise<T>, rollback: () => void): Promise<T | undefined> => {
     setError(null);
     const request = settingsWrite.current.catch(() => undefined).then(write);
     settingsWrite.current = request;
-    inflightWrites.current.add(request);
-    const done = () => { inflightWrites.current.delete(request); };
-    request.then(done, done);
+    trackSettingWrite(key, request);
     return request.catch((writeError: unknown) => {
       rollback();
       const message = errorText(writeError);
@@ -503,7 +531,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     // 失败：只拿掉这一条待定修改，显示回到确认值加其余待定修改；有会话再读一次服务端为准。
     const rollback = () => { if (session) void loadSession(session.session_id).catch(() => undefined); };
     if (preferenceTarget) {
-      const request = saveSetting(async () => {
+      const request = saveSetting(settingKey(null, preferenceTarget), async () => {
         try {
           const updated = await updateCanvasAgentSession(null, preferenceTarget, update);
           settle();
@@ -531,7 +559,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       return request;
     }
     const sessionId = session!.session_id;
-    return saveSetting(async () => {
+    return saveSetting(settingKey(projectId, sessionId), async () => {
       try {
         const updated = await updateCanvasAgentSession(projectId, sessionId, update);
         settle();
@@ -561,7 +589,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     const claim = (target: CanvasAgentSession | StudioAgentSession) => setOutgoing(current => current?.id === id
       ? { ...current, sessionId: target.session_id, revision: target.revision } : current);
     // 点发送这一刻还在写入的设置：这一轮依赖它们。任一写入失败就不发，草稿由调用方填回。
-    const dependsOn = [...inflightWrites.current];
+    const dependsOn = settingWritesFor(projectId, session?.session_id ?? null);
     return run(async () => {
       try {
         const writes = await Promise.allSettled(dependsOn);
@@ -571,7 +599,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         setOutgoing(current => current?.id === id ? null : current);
       }
     });
-  }, [run, session]);
+  }, [projectId, run, session]);
 
   const send = useCallback((text: string, nodeIds: string[], skill: string | null) => waitingForSession
     ? rejectWaiting()
@@ -661,13 +689,19 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const updateConfirmAbove = useCallback((value: number) => {
     const write = ++confirmAboveWrites.current;
+    lastConfirmAboveWriteSeq = ++confirmAboveSeq;
+    confirmAboveWritesInFlight += 1;
     setConfirmAbove(value);
-    return saveSetting(async () => {
-      const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
-      savedConfirmAbove.current = saved.confirm_above_cny;
-      cachedConfirmAbove = saved.confirm_above_cny;
-      if (write === confirmAboveWrites.current) setConfirmAbove(saved.confirm_above_cny);
-      return saved;
+    return saveSetting(GLOBAL_SETTING_KEY, async () => {
+      try {
+        const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
+        savedConfirmAbove.current = saved.confirm_above_cny;
+        cachedConfirmAbove = saved.confirm_above_cny;
+        if (write === confirmAboveWrites.current) setConfirmAbove(saved.confirm_above_cny);
+        return saved;
+      } finally {
+        confirmAboveWritesInFlight -= 1;
+      }
     }, () => {
       if (write === confirmAboveWrites.current) setConfirmAbove(savedConfirmAbove.current);
     });
