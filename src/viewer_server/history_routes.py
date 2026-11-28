@@ -63,7 +63,8 @@ def output_title(job, slot, path):
     prompt = " ".join(display_prompt(job).split())[:16]
     if not prompt:
         return path.name
-    return f"{prompt} · {slot + 1}" if slot else prompt
+    multiple = slot > 0 or len(job.output_paths) > 1 or (job.params.n or 1) > 1
+    return f"{prompt} · {slot + 1}" if multiple else prompt
 
 
 def _download_name(path):

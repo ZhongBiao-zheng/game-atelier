@@ -139,6 +139,7 @@ def test_history_subject_display_search_and_library_download_share_saved_title(c
     job.params.subjects = [SubjectSnapshot(id=key, name="阿橙", revision=1, item_ids=[])]
     save_job(job)
     rows = client.get("/api/history", params={"q": "@阿橙"}).json()["items"]
+    assert [row["title"] for row in rows] == ["@阿橙在海边 · 1", "@阿橙在海边 · 2"]
     assert [row["prompt"] for row in rows] == ["@阿橙在海边"] * 2
     assert client.get("/api/history", params={"q": "模型用的主体描述"}).json()["items"] == []
     result = client.post("/api/library/favorites/history", json={"job_id": job.job_id, "output_index": 1}).json()
