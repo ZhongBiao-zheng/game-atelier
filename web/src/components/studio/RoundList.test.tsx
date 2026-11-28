@@ -792,7 +792,7 @@ describe('RoundList reference assets', () => {
     expect(stack.children).toHaveLength(4);
     expect(stack.querySelector('img')?.getAttribute('src')).toContain('job_id=job-mj-refs');
     expect(stack.querySelector('img')?.getAttribute('src')).toContain('/api/raw');
-    fireEvent.click(stack);
+    fireEvent.click(screen.getByRole('button', { name: '复用这组参考素材' }));
     expect(onReuseReferences).toHaveBeenCalledWith(round.config, 'job-mj-refs');
     expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--v 6 --chaos 10');
     expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('oss.example');

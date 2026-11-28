@@ -322,6 +322,9 @@ function StudioFull() {
     target: CollabCard; needsName: boolean; jobId: string; index: number;
   } | null>(null);
   const shownSharedAuth = useRetainedSession(sharedAuth);
+  // 当前仍打开的那次口令会话：关闭或换目标后，旧会话晚到的鉴权结果既不关新弹窗，也不分享素材。
+  const activeSharedAuth = useRef(sharedAuth);
+  activeSharedAuth.current = sharedAuth;
   const roundCanvasOptions = useMemo<CanvasTarget[]>(() => [
     ...canvasTargetOptions, ...sharedTargets.map(card => ({
       projectId: card.peer_key + '/' + card.project_id, name: card.name, sharedBy: card.display_name,
@@ -1412,6 +1415,7 @@ function StudioFull() {
         peerKey={shownSharedAuth.value.target.peer_key}
         projectId={shownSharedAuth.value.target.project_id} name={shownSharedAuth.value.target.name} needsName={shownSharedAuth.value.needsName}
         needsCode={shownSharedAuth.value.target.requires_passcode} onClose={() => setSharedAuth(null)} onEntered={() => {
+          if (activeSharedAuth.current !== shownSharedAuth.value) return;
           const { jobId, index, target } = shownSharedAuth.value;
           setSharedAuth(null);
           void shareStudioResult(jobId, index, target.peer_key, target.project_id)

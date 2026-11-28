@@ -27,16 +27,26 @@ const TURN_REF_HOVER_SCALE = 1.02;
 const EXECUTING_HOLD_MS = 600;
 
 function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: string }[]; onLightbox: (src: string) => void }) {
-  const [hover, setHover] = useState(false);
+  // 散开时每张多让出的距离（px）。0 = 收起。
+  const [spread, setSpread] = useState(0);
   const [active, setActive] = useState<number | null>(null);
   if (urls.length === 0) return null;
+  const gaps = Math.max(0, urls.length - 1);
+  // 收起宽度参与布局；散开以右端为锚向左展开，只靠子项位移，同一行文字不重排。
+  // 左边空间不够时少散开一些，最左一张不出视口。
+  const expand = (element: HTMLElement) => {
+    if (!gaps) return;
+    const room = Math.max(0, element.getBoundingClientRect().left - 8);
+    setSpread(Math.min(TURN_REF_OVERLAP_REST - TURN_REF_OVERLAP_HOVER, room / gaps));
+  };
+  const step = TURN_REF_W - TURN_REF_OVERLAP_REST + spread;
+  const shift = spread * gaps;
   return (
     <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => { setHover(false); setActive(null); }}
-      // 宽度固定为散开后的宽度：散开只靠子项位移，同一行的文字不跟着每帧重排。
+      onMouseEnter={event => expand(event.currentTarget)}
+      onMouseLeave={() => { setSpread(0); setActive(null); }}
       style={{
-        width: TURN_REF_W + Math.max(0, urls.length - 1) * (TURN_REF_W - TURN_REF_OVERLAP_HOVER),
+        width: TURN_REF_W + gaps * (TURN_REF_W - TURN_REF_OVERLAP_REST),
         height: TURN_REF_H,
       }}
       className="relative z-20 flex shrink-0 items-center"
@@ -60,7 +70,7 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
               left: 0,
               top: 0,
               zIndex: isActive ? 30 : i,
-              transform: `translateX(${i * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST))}px) rotate(${angle}deg) scale(${scale})`,
+              transform: `translateX(${i * step - shift}px) rotate(${angle}deg) scale(${scale})`,
               transformOrigin: 'center',
             }}
             className="absolute block cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0 transition-transform duration-200 ease-in-out"
