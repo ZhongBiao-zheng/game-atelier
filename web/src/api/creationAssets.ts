@@ -251,4 +251,3 @@ export function classifyCreationAssets(projectId: string, assetIds: string[], se
     body: JSON.stringify({ asset_ids: assetIds, model_alias: selection?.alias, model: selection?.model }),
   });
 }
-

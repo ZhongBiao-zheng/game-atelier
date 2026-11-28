@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import uuid
 from pathlib import Path
 
@@ -51,7 +50,7 @@ def _import_catalog(source, catalog):
             tx.put(dict(id=folder, name="旧素材", parent_id=None, item_ids=[]))
         for asset in catalog.assets:
             # Project references and adopted team entries retain their IDs for existing clients.
-            if not re.fullmatch(r"[A-Za-z0-9_-]+", asset.asset_id):
+            if asset.asset_id in {".", ".."} or any(c in asset.asset_id for c in ("/", "\\", ":")):
                 raise ValueError("旧素材标识无效")
             preserve = bool(asset.project_ids or asset.category or asset.adopted_from or asset.kind == "generation")
             entries = []

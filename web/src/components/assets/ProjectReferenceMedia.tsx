@@ -22,4 +22,3 @@ export function MediaPreview({ assetId, content, alt, className, onZoom }: {
   if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
   return null;
 }
-

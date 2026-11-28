@@ -69,4 +69,3 @@ export interface CreationAssetPanelHandle {
   requestClose: () => void;
   requestTransition: (action: () => void) => void;
 }
-

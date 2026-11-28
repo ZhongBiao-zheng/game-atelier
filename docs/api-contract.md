@@ -1743,3 +1743,14 @@ POST /{owner}/upload、/history、/canvas 从上传、可见的稳定产出序�
 POST /{key}/copy（可选 target）、/favorite 均创建独立素材，/move 只改变归属。
 GET /{key}/content 返回素材正文，POST /download 接受 ID 数组并打包。DELETE /{key} 返回 trash_id，
 撤销走通用回收站还原接口，恢复素材顺序、归属和封面。
+
+POST /subject-editor 用 multipart 同时保存主体、封面和新增参考。payload 带名称、描述、可选 handle、
+已有主体的 id 和 revision、从零计数的 cover_index，以及 additions。每个来源使用上传文件序号、
+job_id + output_index、project_id + version_id 或已有 item_id。任一来源无效时整次保存失败。
+
+编辑器以稳定主体 ID 引用素材。POST /subject-preview 与两端提交共用展开逻辑。任务在
+params.subjects 记录本次主体的 id、名称、revision 和实际选中的 item_ids，params.subject_prompt
+保留编辑器原文。主体删除后，已提交任务的参考文件仍可读取。
+
+首次启动将旧个人库导入「旧素材」。项目引用、团队采用记录和生成配方由 project-references/
+保留原 ID，导入进度登记在 .runtime/library-import.json，完成后将原目录整体移入回收站。

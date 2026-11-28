@@ -27,6 +27,11 @@ export function FolderPicker({ open, onClose, onChoose, allowed, root = false }:
     setBusy(true);
     try {
       const chosen = folder ?? await libraryWrite<LibraryFolder>('folders', { name });
+      if (!folder) {
+        setFolders(current => [...current, chosen]);
+        setCreating(false);
+        setName('');
+      }
       await onChoose(chosen);
       onClose();
     } catch (e) { notify.error(errorText(e)); }
