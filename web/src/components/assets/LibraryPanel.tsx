@@ -91,7 +91,7 @@ export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubjec
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
     {error && <p role="alert" className="p-3 text-sm">{error}<Button variant="ghost" onClick={reload}>重试</Button></p>}
     <AnimatePresence initial={false}>
-      <motion.div key={group?.id || 'home'} initial={{ opacity: 0, x: reduced ? 0 : direction * 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, pointerEvents: 'none', transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+      <motion.div key={group?.id || 'home'} initial={{ opacity: 0, x: reduced ? 0 : direction * 12 }} animate={{ opacity: 1, x: 0, pointerEvents: 'auto' }} exit={{ opacity: 0, pointerEvents: 'none', transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
         transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }} className="absolute inset-0 flex min-h-0 flex-col bg-panel">
         {group ? <>
           <div className="flex items-center gap-1 p-2"><Button variant="ghost" size="icon" aria-label="返回"

@@ -66,7 +66,7 @@ export function AssetPanel(props: CreationAssetPanelProps) {
     <div className="relative min-h-0 flex-1">
       <AnimatePresence initial={false}>
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1, pointerEvents: 'auto' }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
           {tab === 'history' ? <HistoryPanel onCanvas={props.projectId ? items => props.onHistoryReference(items, true) : undefined} onReference={props.onHistoryReference} /> : <LibraryPanel onSubject={props.onSubject} onCanvas={props.projectId ? items => props.onHistoryReference(items, true) : undefined} target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
         </motion.div>
