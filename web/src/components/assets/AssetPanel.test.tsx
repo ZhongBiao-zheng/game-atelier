@@ -9,7 +9,7 @@ vi.mock('@/api/history', async importOriginal => ({
   listHistory: vi.fn(async () => ({ items: [], next_cursor: null })),
 }));
 vi.mock('./LibraryPanel', () => ({ LibraryPanel: () => <div>我的文件夹</div> }));
-const props = { onHistoryReference: vi.fn(), onClose: vi.fn(), onUseMedia: vi.fn(), onUsePrompt: vi.fn() };
+const props = { onHistoryReference: vi.fn(), onClose: vi.fn() };
 
 it('opens history by default and remembers the library tab', async () => {
   vi.mocked(loadUiPrefs).mockResolvedValue({});
@@ -27,6 +27,6 @@ it('restores the tab and keeps direct save operations in the library', async () 
   await waitFor(() => expect(screen.getByRole('tab', { name: '素材库' })).toHaveAttribute('aria-selected', 'true'));
   view.unmount();
   vi.mocked(loadUiPrefs).mockResolvedValue({ 'asset-panel': 'history' });
-  render(<AssetPanel {...props} initialKind="team" />);
+  render(<AssetPanel {...props} openLibrary />);
   expect(screen.getByRole('tab', { name: '素材库' })).toHaveAttribute('aria-selected', 'true');
 });

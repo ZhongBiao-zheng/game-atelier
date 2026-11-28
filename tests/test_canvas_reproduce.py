@@ -1,6 +1,7 @@
 """画布复刻：从生成资产建输入节点 + 生成配置节点 + 连线，不自动 Run。"""
 from __future__ import annotations
 
+from tests.project_reference_fixtures import remove_fixture_record
 import io
 
 import pytest
@@ -152,14 +153,13 @@ def test_reproduce_marks_asset_used_in_the_canvas_project():
 
 
 def test_reproduce_survives_asset_deleted_before_marking_used(monkeypatch):
-    from character_workflow.lib.project_reference_assets import delete_creation_asset
 
     project = create_canvas_project("复刻")
     asset = _asset([(_REF_A, "reference")])
     real_mark = canvas_reproduce.mark_creation_asset_used
 
     def delete_then_mark(asset_id, project_id=None):
-        delete_creation_asset(asset_id)
+        remove_fixture_record(asset_id)
         return real_mark(asset_id, project_id)
 
     monkeypatch.setattr(canvas_reproduce, "mark_creation_asset_used", delete_then_mark)

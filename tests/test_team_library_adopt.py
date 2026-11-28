@@ -440,10 +440,10 @@ def _adopt_from_index(mount, entry_id):
 
 
 def test_staleness_unknown_for_local_asset(isolated_data_root):
-    from character_workflow.lib.project_reference_assets import create_prompt_asset
+    from tests.project_reference_fixtures import seed_prompt
     from character_workflow.lib.team_library_adopt import adoption_staleness
 
-    asset = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
+    asset = seed_prompt("猫", [{"kind": "text", "text": "像素猫"}], [])
     assert adoption_staleness(asset) == "unknown"
 
 
@@ -780,7 +780,7 @@ def test_readopt_errors_are_distinguishable(isolated_data_root, tmp_path):
 
     from character_workflow.lib import team_library as tl
     from character_workflow.lib import team_library_index as idx
-    from character_workflow.lib.project_reference_assets import create_prompt_asset
+    from tests.project_reference_fixtures import seed_prompt
     from character_workflow.lib.team_library_adopt import (
         TeamAssetNotAdopted,
         TeamAssetWithdrawn,
@@ -788,7 +788,7 @@ def test_readopt_errors_are_distinguishable(isolated_data_root, tmp_path):
         readopt_team_asset,
     )
 
-    local = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
+    local = seed_prompt("猫", [{"kind": "text", "text": "像素猫"}], [])
     with pytest.raises(TeamAssetNotAdopted):
         readopt_team_asset(local.asset_id)
     with pytest.raises(KeyError):
@@ -857,7 +857,7 @@ def test_staleness_batch_reads_each_library_once_and_skips_missing_ids(
     isolated_data_root, tmp_path, monkeypatch
 ):
     from character_workflow.lib import team_library_index as idx
-    from character_workflow.lib.project_reference_assets import create_prompt_asset
+    from tests.project_reference_fixtures import seed_prompt
     from character_workflow.lib.team_library_adopt import adoption_staleness_batch
 
     folder, mount = _registered_mount(tmp_path)
@@ -865,7 +865,7 @@ def test_staleness_batch_reads_each_library_once_and_skips_missing_ids(
     (folder / "castle.png").write_bytes(_PNG)
     generation = _adopt_from_index(mount, _ID)
     raw = _adopt_from_index(mount, idx.raw_entry_id("castle.png"))
-    local = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
+    local = seed_prompt("猫", [{"kind": "text", "text": "像素猫"}], [])
     _rewrite_asset_json(asset_dir, lambda data: data.update(updated_at="2026-09-21T00:00:00Z"))
     scan_and_cache(mount)
 

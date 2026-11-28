@@ -1,4 +1,5 @@
 """提示词效果图通过团队文件夹自包含地分享、采用和重新采用。"""
+from tests.project_reference_fixtures import seed_prompt, seed_previews
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
@@ -33,8 +34,8 @@ def shared(tmp_path):
     folder.mkdir()
     project = create_canvas_project('分享者')
     mount = mount_library(project_id=project.project_id, path=str(folder), name='参考', created_by='林晓')
-    asset = assets.create_prompt_asset('山谷', [{'kind': 'text', 'text': '夕照'}], ['场景'])
-    asset = assets.add_prompt_previews(asset.asset_id, [(png('red'), 'image/png'), (png('blue'), 'image/png')])
+    asset = seed_prompt('山谷', [{'kind': 'text', 'text': '夕照'}], ['场景'])
+    asset = seed_previews(asset.asset_id, [(png('red'), 'image/png'), (png('blue'), 'image/png')])
     team = share_creation_asset(mount, asset_id=asset.asset_id, title=asset.title, tags=asset.tags, author='林晓')
     entry = scan_and_cache(mount).entries[0]
     return mount, asset, team, entry
@@ -60,7 +61,7 @@ def test_round_trip_between_two_data_roots_is_self_contained(shared, tmp_path, m
     assert copied.content.preview_images == original.content.preview_images
     assert copied.adopted_from.source_preview_fingerprint
     shutil.rmtree(folder)
-    assert assets.prompt_preview_bytes(copied.asset_id, copied.content.preview_images[0].file) == (png('red'), 'image/png')
+    assert assets.prompt_preview_snapshot(copied.asset_id)[1][copied.content.preview_images[0].file] == png('red')
     assert not (recipient / 'project-references' / 'blobs').exists()
 
 
@@ -82,7 +83,7 @@ def test_legacy_manifest_and_index_without_previews_still_read_and_adopt(shared)
 def test_source_preview_order_changes_are_stale_even_with_same_timestamp(shared):
     mount, _, _, entry = shared
     copied = adopt(mount, entry)
-    assets.add_prompt_previews(copied.asset_id, [(png('green'), 'image/png')])
+    seed_previews(copied.asset_id, [(png('green'), 'image/png')])
     assert adoption_staleness(assets.get_creation_asset(copied.asset_id)) == 'fresh'
     manifest = idx.shared_asset_dir(mount, entry) / 'asset.json'
     data = json.loads(manifest.read_text())
@@ -128,8 +129,8 @@ def test_adopt_and_readopt_catalog_failure_leave_files_unchanged(shared, monkeyp
     directory = assets._preview_dir(copied.asset_id)
     before = {p.name: p.read_bytes() for p in directory.iterdir()}
     # 来源多一张新图；失败必须回滚新文件，旧图片和 catalog 均原样保留。
-    source = assets.create_prompt_asset('新效果图', [{'kind': 'text', 'text': '测试'}], [])
-    source = assets.add_prompt_previews(source.asset_id, [(png('green'), 'image/png')])
+    source = seed_prompt('新效果图', [{'kind': 'text', 'text': '测试'}], [])
+    source = seed_previews(source.asset_id, [(png('green'), 'image/png')])
     preview = source.content.preview_images[0]
     folder = idx.shared_asset_dir(mount, entry)
     (folder / 'previews' / preview.file).write_bytes(png('green'))

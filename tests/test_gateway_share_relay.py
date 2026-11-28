@@ -1,4 +1,5 @@
 """三个独立数据目录，经真实回环网关发布、浏览、使用、停止。"""
+from tests.project_reference_fixtures import seed_prompt, seed_previews
 from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
@@ -250,8 +251,8 @@ def test_unchanged_second_sync_does_not_open_media_or_previews(trio, monkeypatch
     p = trio
     with p['at']('publisher'):
         folder = Path(p['mount'].mount_path)
-        prompt = creation_assets.create_prompt_asset('提示词', [{'kind': 'text', 'text': '山谷'}], [])
-        creation_assets.add_prompt_previews(prompt.asset_id, [((folder / 'one.png').read_bytes(), 'image/png')])
+        prompt = seed_prompt('提示词', [{'kind': 'text', 'text': '山谷'}], [])
+        seed_previews(prompt.asset_id, [((folder / 'one.png').read_bytes(), 'image/png')])
         share_creation_asset(p['mount'], asset_id=prompt.asset_id, title=prompt.title, tags=[], author='作者')
         media = creation_assets.create_media_asset_from_bytes(title='素材', body=(folder / 'two.png').read_bytes(),
             filename='stored.png', mime_type='image/png', tags=[])

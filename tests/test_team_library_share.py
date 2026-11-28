@@ -1,6 +1,7 @@
 """分享 lib：Studio 结果与创作资产写进团队库作者目录；编辑 / 撤回只动作者自己的资产。"""
 from __future__ import annotations
 
+from tests.project_reference_fixtures import seed_prompt
 import hashlib
 import io
 import json
@@ -18,7 +19,6 @@ from character_workflow.lib.project_reference_assets import (
     blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,
-    create_prompt_asset,
     creation_asset_input_path,
     store_media_blob,
 )
@@ -396,7 +396,7 @@ def test_share_media_named_like_reserved_file_keeps_both(isolated_data_root, mou
 
 
 def test_share_prompt_creation_asset(isolated_data_root, mount):
-    asset = create_prompt_asset(
+    asset = seed_prompt(
         "城墙",
         [
             {"kind": "text", "text": "一只"},
@@ -457,7 +457,7 @@ def test_share_unknown_creation_asset_is_not_found(isolated_data_root, mount):
 
 
 def _shared(mount) -> TeamAssetFile:
-    asset = create_prompt_asset("t", [{"kind": "text", "text": "x"}], [])
+    asset = seed_prompt("t", [{"kind": "text", "text": "x"}], [])
     return share_creation_asset(mount, asset_id=asset.asset_id, title="旧名", tags=["a"], author=_AUTHOR)
 
 
@@ -482,7 +482,7 @@ def test_author_updates_title_and_tags(isolated_data_root, mount, monkeypatch):
 
 
 def test_category_is_written_on_share_and_replaced_or_cleared_on_update(isolated_data_root, mount):
-    asset = create_prompt_asset("t", [{"kind": "text", "text": "x"}], [])
+    asset = seed_prompt("t", [{"kind": "text", "text": "x"}], [])
     shared = share_creation_asset(
         mount, asset_id=asset.asset_id, title="弹窗底", tags=[], author=_AUTHOR, category="弹窗",
     )
@@ -783,7 +783,7 @@ def test_invalid_metadata_fails_before_any_io(
     ref = _write_upload(isolated_data_root, "r.png", _png((95, 95, 95)))
     job = _studio_job(outputs=[("1.png", _png((96, 96, 96)))], params={"reference_images": [str(ref)]})
     monkeypatch.setattr(share, "LARGE_REFS_BYTES", 1)
-    prompt = create_prompt_asset("p", [{"kind": "text", "text": "x"}], [])
+    prompt = seed_prompt("p", [{"kind": "text", "text": "x"}], [])
 
     for call in (
         lambda: share_job_output(mount, job_id=job.job_id, output_index=0, title=title,
