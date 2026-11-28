@@ -1001,3 +1001,11 @@ describe('history parameter buttons', () => {
     expect(specChips('round-spec-meta')).toHaveLength(1);
   });
 });
+
+it('shows a saved subject name in the record even after the subject has gone', () => {
+  const prompt = '@[subject:sbj_' + 'a'.repeat(32) + ':%E9%98%BF%E6%A9%99] 站在海边';
+  render(<RoundList rounds={[{ kind: 'done', shareable: true, jobId: 'job-name', submittedAt: new Date().toISOString(),
+    imagePaths: ['studio/v1.png'], config: { prompt, model: 'gpt-image-2', kind: 'image', referenceImages: [] } }]} />);
+  expect(screen.getByTestId('round-prompt-container')).toHaveTextContent('@阿橙 站在海边');
+  expect(screen.getByTestId('round-prompt-container')).not.toHaveTextContent('@[subject:');
+});

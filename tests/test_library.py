@@ -103,5 +103,45 @@ def test_subject_editor_copies_a_local_item_once_and_checks_revision(client):
     response = client.post("/api/library/subject-editor", files={"payload": (None, json.dumps({
         **form, "id": subject["id"], "revision": subject["revision"],
     }))})
-    assert response.status_code == 422
+    assert response.status_code == 409
     assert library._read(subject["id"])["item_ids"] == [copy]
+
+
+def test_catalog_preserves_creation_order(monkeypatch):
+    keys = iter(["fld_" + char * 32 for char in "cba"])
+    monkeypatch.setattr(library, "_new", lambda prefix: next(keys))
+    ids = [library.folder(name)["id"] for name in ("甲", "乙", "丙")]
+    assert [row["id"] for row in library.catalog()["folders"] if not row.get("system")] == ids
+
+
+def test_editor_removes_saved_items_together_and_restores_original_order():
+    subject = library.subject("青山")["id"]
+    ids = [library.insert(subject, name, b"content", "text", ".txt", {})["id"] for name in "甲乙丙"]
+    old = library._read(subject)
+    saved = library.save_subject(subject, old["revision"], "青山", old["handle"], "", [], 0, [ids[0], ids[2]])
+    assert saved["item_ids"] == [ids[1]] and saved["cover_item_id"] == ids[1]
+    for key in (ids[0], ids[2]):
+        assert not library._path(key).exists()
+    entry, = trash.list_trash()
+    trash.restore(entry.trash_id)
+    restored = library._read(subject)
+    assert restored["item_ids"] == ids and restored["cover_item_id"] == ids[0]
+
+
+def test_history_subject_display_search_and_library_download_share_saved_title(client):
+    from character_workflow.lib.jobs import save_job
+    from character_workflow.lib.schemas import SubjectSnapshot
+
+    job = seed("job-display", count=2)
+    key = "sbj_" + "a" * 32
+    job.prompt = "模型用的主体描述。\n阿橙在海边"
+    job.params.subject_prompt = f"@[subject:{key}:%E9%98%BF%E6%A9%99]在海边"
+    job.params.subjects = [SubjectSnapshot(id=key, name="阿橙", revision=1, item_ids=[])]
+    save_job(job)
+    rows = client.get("/api/history", params={"q": "@阿橙"}).json()["items"]
+    assert [row["prompt"] for row in rows] == ["@阿橙在海边"] * 2
+    assert client.get("/api/history", params={"q": "模型用的主体描述"}).json()["items"] == []
+    result = client.post("/api/library/favorites/history", json={"job_id": job.job_id, "output_index": 1}).json()
+    assert result["title"] == rows[1]["title"] == "@阿橙在海边 · 2"
+    with ZipFile(BytesIO(client.post("/api/library/download", json=[result["id"]]).content)) as zipped:
+        assert zipped.namelist() == ["@阿橙在海边 · 2.png"]
