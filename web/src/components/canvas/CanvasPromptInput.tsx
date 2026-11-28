@@ -25,7 +25,11 @@ import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
 } from '@/components/canvas/CanvasMaterialHoverDetail';
+import { MentionTabs, SubjectFeedback, subjectToken, useSubjects, withSubjectChips } from '@/components/assets/SubjectMentions';
+import { itemUrl, type LibrarySubject } from '@/api/library';
 import { Button } from '@/components/ui/button';
+
+type EditorReference = CanvasMentionReference & { subject?: LibrarySubject };
 
 interface MentionState {
   query: string;
@@ -39,6 +43,7 @@ interface CanvasPromptInputProps {
   value: string;
   references: readonly CanvasMentionReference[];
   mentionsEnabled?: boolean;
+  subjectModel?: string;
   disabledMentionHint?: string;
   onChange: (value: string) => void;
   /** ⌘↵ / Ctrl+↵ 提交（D5）；Enter 仍是换行，输入法组合期间的 Enter 不处理。 */
@@ -57,6 +62,7 @@ export function CanvasPromptInput({
   value,
   references,
   mentionsEnabled = true,
+  subjectModel,
   disabledMentionHint,
   onChange,
   onSubmit,
@@ -82,6 +88,8 @@ export function CanvasPromptInput({
   const editingRef = useRef(false);
   const editingChangeRef = useRef(onEditingChange);
   const [mention, setMention] = useState<MentionState | null>(null);
+  const [tab, setTab] = useState('all');
+  const subjects = useSubjects(subjectModel != null && (!!mention || value.includes('@[subject:')));
   const [activeIndex, setActiveIndex] = useState(0);
   const [hoveredReference, setHoveredReference] = useState<CanvasMaterialHoverState | null>(null);
   const showDisabledMentionHint = Boolean(
@@ -97,17 +105,20 @@ export function CanvasPromptInput({
   );
   const referenceSignature = availableReferences
     .map(reference => `${reference.nodeId}:${reference.versionId}:${reference.label}:${reference.title}`)
-    .join('|');
+    .join('|') + subjects.map(s => s.id + s.revision).join('|');
   const candidates = useMemo(() => {
     if (!mention) return [];
     const query = mention.query.trim().toLocaleLowerCase();
-    if (!query) return [...availableReferences];
-    return availableReferences.filter(reference => (
+    const rows: EditorReference[] = subjects.map(s => ({ subject: s, nodeId: s.id, versionId: s.id, kind: 'image',
+      title: '@' + s.handle, label: s.name, previewUrl: s.cover_item_id ? itemUrl(s.cover_item_id) : undefined }));
+    if (tab === 'all') rows.unshift(...availableReferences);
+    if (!query) return rows;
+    return rows.filter(reference => (
       `${reference.label} ${reference.title} ${mentionKindLabel(reference.kind)} ${reference.text ?? ''}`
         .toLocaleLowerCase()
         .includes(query)
     ));
-  }, [availableReferences, mention]);
+  }, [availableReferences, mention, subjects, tab]);
 
   useEffect(() => {
     previewRef.current = onPreviewReference;
@@ -142,7 +153,7 @@ export function CanvasPromptInput({
       && referenceSignature === lastReferenceSignatureRef.current
     ) return;
     setHoveredReference(null);
-    editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled));
+    editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled, subjects));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
     if (!focusVariables) return;
@@ -158,20 +169,21 @@ export function CanvasPromptInput({
     };
     focusWhenVisible();
     return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
-  }, [autoFocusVariables, mentionsEnabled, referenceById, referenceSignature, value]);
+  }, [autoFocusVariables, mentionsEnabled, referenceById, referenceSignature, value, subjects]);
 
   useEffect(() => {
-    if (!mentionsEnabled) closeMention();
-  }, [mentionsEnabled]);
+    if (!mentionsEnabled && subjectModel == null) closeMention();
+  }, [mentionsEnabled, subjectModel]);
 
   function closeMention() {
     setMention(null);
+    setTab('all');
     setActiveIndex(0);
   }
 
   function syncMention() {
     const editor = editorRef.current;
-    if (!mentionsEnabled || !editor || variableInput(document.activeElement) || !availableReferences.length) {
+    if (!editor || variableInput(document.activeElement) || (subjectModel == null && (!mentionsEnabled || !availableReferences.length))) {
       closeMention();
       return;
     }
@@ -215,15 +227,15 @@ export function CanvasPromptInput({
     syncMention();
   }
 
-  function insertReference(reference: CanvasMentionReference) {
+  function insertReference(reference: EditorReference) {
     const editor = editorRef.current;
     if (!editor || !mention) return;
     const current = serializePromptEditor(editor);
-    const token = `${canvasMentionToken(reference.nodeId)} `;
+    const token = `${reference.subject ? subjectToken(reference.subject) : canvasMentionToken(reference.nodeId)} `;
     const next = `${current.slice(0, mention.start)}${token}${current.slice(mention.end)}`;
     const caretOffset = mention.start + token.length;
     const marked = `${next.slice(0, caretOffset)}\uFEFF${next.slice(caretOffset)}`;
-    editor.replaceChildren(...promptNodes(marked, referenceById, mentionsEnabled));
+    editor.replaceChildren(...promptNodes(marked, referenceById, mentionsEnabled, subjects));
     placeCaretAtMarker(editor);
     closeMention();
     emit(next);
@@ -444,20 +456,22 @@ export function CanvasPromptInput({
             editor.replaceChildren(...promptNodes(
               lastEmittedRef.current,
               referenceById,
-              mentionsEnabled,
+              mentionsEnabled, subjects,
             ));
           }
           window.setTimeout(closeMention, 120);
           setEditing(false);
         }}
       />
+      {subjectModel != null && <SubjectFeedback prompt={value} model={subjectModel} explicit={references.filter(r => r.kind === 'image').length} rows={subjects} />}
       {showDisabledMentionHint && (
         <span className="pointer-events-none absolute bottom-2 left-3 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
           {disabledMentionHint}
         </span>
       )}
-      {mention && candidates.length > 0 && (
+      {mention && (candidates.length > 0 || subjects.length > 0) && (
         <CanvasMentionMenu
+          tabs={subjectModel != null && <MentionTabs value={tab} change={v => { setTab(v); setActiveIndex(0); }} />}
           anchor={mention.rect}
           menuId={menuId}
           references={candidates}
@@ -471,12 +485,14 @@ export function CanvasPromptInput({
 }
 
 function CanvasMentionMenu({
+  tabs,
   anchor,
   menuId,
   references,
   activeIndex,
   onSelect,
 }: {
+  tabs: React.ReactNode;
   anchor: DOMRect | null;
   menuId: string;
   references: readonly CanvasMentionReference[];
@@ -526,6 +542,7 @@ function CanvasMentionMenu({
       style={{ left, top }}
       onPointerDown={(event: PointerEvent<HTMLDivElement>) => event.stopPropagation()}
     >
+      {tabs}
       <div
         id={menuId}
         role="listbox"
@@ -588,8 +605,9 @@ function promptNodes(
   value: string,
   references: ReadonlyMap<string, CanvasMentionReference>,
   mentionsEnabled = true,
+  subjects: LibrarySubject[] = [],
 ): Node[] {
-  return variablePromptNodes(value, text => mentionNodes(text, references, mentionsEnabled));
+  return variablePromptNodes(value, text => withSubjectChips(text, subjects, part => mentionNodes(part, references, mentionsEnabled)));
 }
 
 function mentionNodes(value: string, references: ReadonlyMap<string, CanvasMentionReference>, mentionsEnabled: boolean): Node[] {
@@ -664,6 +682,7 @@ function serializeNodes(nodes: NodeListOf<ChildNode>): string {
       value += node.dataset.promptVariable;
       return;
     }
+    if (node.dataset.subjectToken) { value += node.dataset.subjectToken; return; }
     if (node.dataset.canvasMentionToken) {
       value += node.dataset.canvasMentionToken;
       return;

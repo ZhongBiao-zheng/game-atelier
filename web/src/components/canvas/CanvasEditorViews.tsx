@@ -2695,6 +2695,7 @@ export function CanvasGenerationComposer({
         value={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt') ? '' : draft.prompt}
         references={mentionReferences}
         mentionsEnabled={mentionsEnabled}
+        subjectModel={draft.model}
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
         className="max-h-[50vh]"
         onSubmit={running || submitting || queued ? undefined : submitGeneration}
