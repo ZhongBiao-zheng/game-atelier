@@ -593,7 +593,7 @@ def test_replace_adopted_asset_rejects_local_missing_and_blobless(isolated_data_
             adopted_from=adopted.adopted_from,
         )
     ghost = content.model_copy(update={
-        "sha256": "e" * 64, "path": f"creation-assets/blobs/{'e' * 64}.png",
+        "sha256": "e" * 64, "path": f"project-references/blobs/{'e' * 64}.png",
     })
     with pytest.raises(FileNotFoundError):
         replace_adopted_asset(
