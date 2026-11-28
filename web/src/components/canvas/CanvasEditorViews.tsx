@@ -54,6 +54,7 @@ import {
   canvasMediaUrlAtWidth,
   canvasThumbnailWidth,
   downloadCanvasLayers,
+  estimateCanvasUpscale,
   type CanvasLayerExportFormat,
 } from '@/api/canvas';
 import { CanvasGroupFrame } from './CanvasGroupFrame';
@@ -118,7 +119,6 @@ import { formatGenerationCost } from '@/lib/generationCost';
 import { CANVAS_SAVE_ASSET_TEXT, CANVAS_SHARE_TEXT, CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
-import { supportsImageQuality } from '@/lib/modelFamily';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
   videoReferenceLimitLabel,
@@ -1960,60 +1960,46 @@ const MATTING_UNAVAILABLE_TOOL_IDS: ReadonlySet<CanvasImageQuickToolId> = new Se
 const DELETE_KEY_HINT = /Mac/i.test(navigator.userAgent) ? '⌫' : 'Delete';
 
 /** AI高清某一档会用哪个模型：指定了就用指定的，否则按服务端同一规则自动选 Nano Banana。 */
-function upscaleChoice(context: CanvasNodeContextValue, target: CanvasUpscaleTarget) {
-  const tier = context.canvasUiPreferences.upscale.tiers[target];
-  const selection = tier?.selection;
+function upscaleModelName(context: CanvasNodeContextValue, target: CanvasUpscaleTarget): string | null {
+  const selection = context.canvasUiPreferences.upscale.tiers[target]?.selection;
   const providers = context.generationProviders ?? context.keys;
   if (selection) {
     const key = providerForAlias(providers, selection.alias);
-    const name = key?.models.find(model => model.id === selection.model)?.name ?? selection.model;
-    return { key, alias: selection.alias ?? undefined, model: selection.model, name, quality: tier.quality };
+    return key?.models.find(model => model.id === selection.model)?.name ?? selection.model;
   }
-  const autoQuality = CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.autoQuality;
-  const auto = autoQuality ? canvasUpscaleAutoChoice(context.keys) : null;
-  return auto ? {
-    key: auto.key, alias: auto.key.alias, model: auto.model.id,
-    name: auto.model.name || auto.model.id, quality: tier?.quality ?? autoQuality,
-  } : null;
+  const auto = CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.autoQuality
+    ? canvasUpscaleAutoChoice(context.keys)
+    : null;
+  return auto ? auto.model.name || auto.model.id : null;
 }
 
-/** 估价用的参数，与服务端提交（canvas_runs.submit_upscale_run → `_upscale_size_params`）逐项对齐：
- *  原图作为一张参考图随请求发出（有的渠道按参考图张数计价）；比例取渠道支持的最近比例；
- *  OpenRouter 带分辨率档；比例族只带质量；像素族按档位长边等比放大。 */
-function upscaleEstimateParams(
-  choice: NonNullable<ReturnType<typeof upscaleChoice>>,
-  target: CanvasUpscaleTarget,
-  width: number,
-  height: number,
-): Record<string, unknown> {
-  const caps = selectionImageCaps(choice.key, choice.model);
-  const params: Record<string, unknown> = { n: 1, reference_images: ['source'] };
-  const ratios = caps.ratios.filter(ratio => ratio.includes(':'));
-  if (width && height && ratios.length) {
-    const aspect = Math.log(width / height);
-    const distance = (ratio: string) => { const [a, b] = ratio.split(':').map(Number); return Math.abs(aspect - Math.log(a / b)); };
-    params.ratio = ratios.reduce((best, ratio) => distance(ratio) < distance(best) ? ratio : best);
-  }
-  if (choice.quality && supportsImageQuality(choice.model)) params.quality = choice.quality;
-  if (choice.key?.provider === 'openrouter') {
-    return (caps.resolutions as readonly string[]).includes(target) ? { ...params, resolution: target } : params;
-  }
-  if (caps.sizeKind !== 'pixels' || !width || !height) return params;
-  const scale = (CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.longEdge ?? 0) / Math.max(width, height);
-  return { ...params, size_mode: 'custom', size: `${Math.max(1, Math.round(width * scale))}x${Math.max(1, Math.round(height * scale))}` };
-}
-
-/** 一档 AI高清的估价，与生成面板同一个估价接口；拿不到为 null。 */
-function useUpscaleCost(
-  context: CanvasNodeContextValue,
-  target: CanvasUpscaleTarget,
-  width: number,
-  height: number,
-  enabled: boolean,
-) {
-  const choice = upscaleChoice(context, target);
-  return useGenerationEstimate(choice?.alias, choice?.model ?? '',
-    choice ? upscaleEstimateParams(choice, target, width, height) : {}, enabled && Boolean(choice));
+/** AI高清各档的预计费用，由服务端按提交时同一套源图、模型与尺寸解析算出（不建任务）。
+ *  返回 null 表示还在问；某档为 null 表示未计价。档位偏好变了重新问。 */
+function useUpscaleEstimates(
+  projectId: string,
+  nodeId: string,
+  versionId: string | undefined,
+  targets: readonly CanvasUpscaleTarget[],
+  preferences: CanvasNodeContextValue['canvasUiPreferences']['upscale'],
+): Partial<Record<CanvasUpscaleTarget, number | null>> | null {
+  const request = versionId && targets.length
+    ? JSON.stringify({ projectId, nodeId, versionId, targets, preferences })
+    : null;
+  const [result, setResult] = useState<{ request: string | null; estimates: Partial<Record<CanvasUpscaleTarget, number | null>> }>(
+    { request: null, estimates: {} });
+  useEffect(() => {
+    if (!request) return;
+    const asked = JSON.parse(request) as { projectId: string; nodeId: string; targets: CanvasUpscaleTarget[] };
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      estimateCanvasUpscale(asked.projectId, { surface_node_id: asked.nodeId, targets: asked.targets }, controller.signal)
+        .then(response => { if (active) setResult({ request, estimates: response.estimates }); })
+        .catch(() => { if (active) setResult({ request, estimates: {} }); });
+    }, 300);
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [request]);
+  return request && result.request === request ? result.estimates : null;
 }
 
 type ImageToolbarAction = {
@@ -2082,15 +2068,11 @@ function ImageNodeToolbar({
   const resizeUnlocked = node.data.display.free_resize;
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
-  const sourceWidth = imageContent?.width ?? 0;
-  const sourceHeight = imageContent?.height ?? 0;
-  const upscalePriced = (target: CanvasUpscaleTarget) => Boolean(currentVersionId)
-    && (CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.longEdge ?? 0) > Math.max(sourceWidth, sourceHeight);
-  const upscaleCosts: Record<CanvasUpscaleTarget, number | null> = {
-    '2K': useUpscaleCost(context, '2K', sourceWidth, sourceHeight, upscalePriced('2K')),
-    '4K': useUpscaleCost(context, '4K', sourceWidth, sourceHeight, upscalePriced('4K')),
-    '8K': useUpscaleCost(context, '8K', sourceWidth, sourceHeight, upscalePriced('8K')),
-  };
+  const sourceLongEdge = Math.max(imageContent?.width ?? 0, imageContent?.height ?? 0);
+  const upscaleTargets = useMemo(() => CANVAS_UPSCALE_TARGETS.filter(target => target.longEdge > sourceLongEdge)
+    .map(target => target.id), [sourceLongEdge]);
+  const upscaleCosts = useUpscaleEstimates(context.projectId, node.id, currentVersionId, upscaleTargets,
+    context.canvasUiPreferences.upscale);
   // 本机不支持抠图时不列抠图，后面的工具顺延（默认顺延出裁剪）。
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids)
     .filter(definition => definition.id !== 'removeBackground' || context.mattingAvailable !== false);
@@ -2151,13 +2133,14 @@ function ImageNodeToolbar({
         run: () => undefined,
         // 一次点击即提交计费重绘：菜单上写清用哪个模型、花多少钱。
         menu: targets.map(target => {
-          const cost = upscaleCosts[target.id];
-          const price = cost != null ? formatGenerationCost(cost) : '未计价';
-          const model = upscaleChoice(context, target.id)?.name;
+          const cost = upscaleCosts?.[target.id];
+          // 还在问价时只写模型；问到了写价格，未计价明说。
+          const price = upscaleCosts === null ? null : cost != null ? formatGenerationCost(cost) : '未计价';
+          const model = upscaleModelName(context, target.id);
           return {
             id: target.id,
             title: target.id,
-            detail: model ? `${model} · ${price}` : `长边 ${target.longEdge}px`,
+            detail: model ? [model, price].filter(Boolean).join(' · ') : `长边 ${target.longEdge}px`,
             onSelect: () => context.upscaleImage(node, target.id),
           };
         }),

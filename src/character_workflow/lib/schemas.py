@@ -2426,6 +2426,19 @@ class CanvasUpscaleRunCreate(BaseModel):
     target: CanvasUpscaleTarget
 
 
+class CanvasUpscaleEstimateRequest(BaseModel):
+    """AI高清菜单的纯估价：与 CanvasUpscaleRunCreate 同一个源图节点，一次问几档；不建任务、不计费。"""
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    targets: list[CanvasUpscaleTarget] = Field(min_length=1, max_length=3)
+
+
+class CanvasUpscaleEstimateResponse(BaseModel):
+    """每档的预计费用（元，与 /api/pricing/estimate 同口径）；未计价或这一档提交会被拒绝时为 null。"""
+    model_config = ConfigDict(extra="forbid")
+    estimates: dict[CanvasUpscaleTarget, float | None]
+
+
 class CanvasRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job: Job
