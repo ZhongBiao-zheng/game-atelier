@@ -54,21 +54,11 @@ export function canvasNodeSaveRequest({ node, version, projectId, previewUrl, re
     };
   }
   if (!isVisualVersion(version)) return null;
-  // 画布媒体 URL 不带后缀（托管模式还带 media_token），类型必须显式给。
-  if (version.origin.kind === 'job_output') {
-    return {
-      libraryMode: 'assets',
-      request: {
-        requestId, kind: 'media', title: node.title, previewUrl, mediaKind: version.kind, projectId,
-        source: canvasResultSource(node, version, projectId),
-      },
-    };
-  }
   return {
     libraryMode: 'assets',
     request: {
-      requestId, kind: 'media', title: node.title, sourcePath: `canvases/${projectId}/${version.path}`,
-      previewUrl, mediaKind: version.kind, projectId,
+      requestId, kind: 'media', title: node.title, previewUrl, mediaKind: version.kind, projectId,
+      source: canvasResultSource(node, version, projectId),
     },
   };
 }
