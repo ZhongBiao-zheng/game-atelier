@@ -14,16 +14,15 @@ import { clearStudioDraft, readStudioDraft, updateStudioView, writeStudioDraft, 
 import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
 import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
 
-// 透传真实面板，只记下 Studio 传进来的 props：复刻入口的按钮在面板里（另一个 Task），
-// Studio 侧只需验证拿到 onReproduce 之后怎么填输入框。
+// 保留真实素材面板，记录页面传入的文件夹保存与参考接口。
 const assetPanelProps = vi.hoisted(() => ({ current: null as null | Record<string, any> }));
 vi.mock('@/components/assets/AssetPanel', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/assets/AssetPanel')>();
-  const { createElement, forwardRef } = await import('react');
-  const Recording = forwardRef<unknown, Record<string, any>>((props, ref) => {
+  const { createElement } = await import('react');
+  function Recording(props: React.ComponentProps<typeof actual.AssetPanel>) {
     assetPanelProps.current = props;
-    return createElement(actual.AssetPanel as any, { ...props, ref });
-  });
+    return createElement(actual.AssetPanel, props);
+  }
   return { ...actual, AssetPanel: Recording };
 });
 import * as connection from '@/api/connection';
@@ -2295,24 +2294,34 @@ function mockPanelEndpoints(keys?: unknown, inputResponse?: (order: number) => P
   return fetchMock;
 }
 
-async function openPanelAndReproduce(asset: CreationAsset) {
-  fireEvent.click(screen.getByLabelText('打开创作资产'));
-  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-  await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
-  await act(async () => { await assetPanelProps.current!.onReproduce(asset); });
+async function reproduceViaTeamAction(asset: CreationAsset) {
+  const fetchMock = vi.mocked(globalThis.fetch);
+  const fallback = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url, init) => {
+    if (url === '/api/team-libraries/lib-art/assets/ta_1/adopt') return Promise.resolve(Response.json({ asset, created: true }));
+    if (url === '/api/creation-assets/gen-1/use') return Promise.resolve(Response.json(asset));
+    return fallback(url, init);
+  });
+  await act(async () => { expect(dispatchTeamAssetAction({ action: 'reproduce', library_id: 'lib-art', asset_id: 'ta_1' })).toBe(true); });
+}
+
+async function addPanelReferences(files: File[]) {
+  await act(async () => {
+    await assetPanelProps.current!.onHistoryReference(files.map(file => ({ kind: 'image', read: async () => file })));
+  });
 }
 
 describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () => {
-  it('团队库的图当参考后被移除：来源标题一起清空', async () => {
+  it('素材库的图当参考后被移除：来源标题一起清空', async () => {
     mockPanelEndpoints();
     renderStudio();
     await screen.findByText('Volcengine Ark');
     fireEvent.click(screen.getByLabelText('打开创作资产'));
     fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-    await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
-    const file = new File(['png'], 'rain.png', { type: 'image/png' });
-    act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '雨夜电影感', mime_type: 'image/png' } as never, 'lib:e1'); });
-    await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle).toBe('雨夜电影感'));
+    await waitFor(() => expect(assetPanelProps.current?.onHistoryReference).toBeTypeOf('function'));
+    const file = new File(['png'], '雨夜电影感.png', { type: 'image/png' });
+    await addPanelReferences([file]);
+    await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle).toBe('雨夜电影感.png'));
 
     const [item] = screen.getAllByTestId('reference-stack-item');
     fireEvent.mouseEnter(item);  // 移除按钮只在悬停的缩略图右上角出现
@@ -2334,12 +2343,12 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     await screen.findByText('Volcengine Ark');
     fireEvent.click(screen.getByLabelText('打开创作资产'));
     fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-    await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
+    await waitFor(() => expect(assetPanelProps.current?.onHistoryReference).toBeTypeOf('function'));
     const heic = new File(['heic'], 'photo.heic', { type: 'image/heic' });
-    act(() => { assetPanelProps.current!.onUseTeamMedia(heic, { title: '窗边的猫', mime_type: 'image/heic' } as never, 'lib:e3'); });
+    await addPanelReferences([heic]);
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/raw?'))).toBe(true));
     await waitFor(() => expect(readStudioDraft()?.referenceImages?.[0]?.name).toBe('photo.jpg'));  // 已换成 JPEG
-    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗边的猫');
+    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('photo.heic');
 
     const [item] = screen.getAllByTestId('reference-stack-item');
     fireEvent.mouseEnter(item);
@@ -2347,23 +2356,7 @@ describe('Studio 来源标题跟着来源对象走（Windows 实测 W3）', () =
     await waitFor(() => expect(readStudioDraft()?.promptAssetSourceTitle ?? null).toBeNull());
   });
 
-  it('来自提示词资产的来源标题：移除参考图不受影响', async () => {
-    mockPanelEndpoints();
-    renderStudio();
-    await screen.findByText('Volcengine Ark');
-    fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-    await waitFor(() => expect(assetPanelProps.current?.onUseTeamPrompt).toBeTypeOf('function'));
-    act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
-    const file = new File(['png'], 'other.png', { type: 'image/png' });
-    act(() => { assetPanelProps.current!.onUseTeamMedia(file, { title: '别的图', mime_type: 'image/png' } as never, 'lib:e2'); });
-    act(() => { assetPanelProps.current!.onUseTeamPrompt('窗台上的猫', { title: '窗台橘猫' } as never); });
-    const [item] = screen.getAllByTestId('reference-stack-item');
-    fireEvent.mouseEnter(item);
-    fireEvent.click(screen.getByRole('button', { name: '移除参考素材 1' }));
-    await waitFor(() => expect(screen.queryAllByTestId('reference-stack-item')).toHaveLength(0));
-    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗台橘猫');
-  });
+
 });
 
 describe('Studio 复刻生成资产', () => {
@@ -2372,7 +2365,7 @@ describe('Studio 复刻生成资产', () => {
     renderStudio();
     await screen.findByText('Volcengine Ark');
 
-    await openPanelAndReproduce(generationAsset(recipe()));
+    await reproduceViaTeamAction(generationAsset(recipe()));
 
     const editor = screen.getByLabelText('生图 prompt');
     await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
@@ -2392,7 +2385,7 @@ describe('Studio 复刻生成资产', () => {
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
-    await openPanelAndReproduce(generationAsset(recipe()));
+    await reproduceViaTeamAction(generationAsset(recipe()));
     await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
     expect(editor.textContent).not.toContain('我正在写的');
     expect(screen.queryByText('覆盖当前输入？')).not.toBeInTheDocument();
@@ -2409,7 +2402,7 @@ describe('Studio 复刻生成资产', () => {
     renderStudio();
     await screen.findByText('Volcengine Ark');
 
-    await openPanelAndReproduce(generationAsset(recipe({
+    await reproduceViaTeamAction(generationAsset(recipe({
       model: 'seedream-9',
       provider: 'seedream',
       alias: 'far-away',
@@ -2446,7 +2439,7 @@ describe('Studio 复刻生成资产', () => {
     renderStudio();
     await screen.findByLabelText('选择模型');
 
-    await openPanelAndReproduce(generationAsset(recipe({
+    await reproduceViaTeamAction(generationAsset(recipe({
       mode: 'video',
       model: 'seedance-2.0-mini',
       provider: 'tokendance',
@@ -2596,7 +2589,7 @@ describe('Studio 复刻：边界', () => {
     mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
     renderStudio();
     await waitFor(() => expect(screen.getByLabelText('选择模型')).not.toHaveTextContent('未配置模型'));
-    await openPanelAndReproduce(generationAsset(recipe({ model: 'doubao-seedream-4-5-251128', provider: 'seedream', alias: 'volc' })));
+    await reproduceViaTeamAction(generationAsset(recipe({ model: 'doubao-seedream-4-5-251128', provider: 'seedream', alias: 'volc' })));
     expect(await screen.findByTestId('studio-replaced-notice')).toHaveTextContent('已替换当前输入');
   });
 
@@ -2612,7 +2605,7 @@ describe('Studio 复刻：边界', () => {
     });
     renderStudio();
     await screen.findByText('Volcengine Ark');
-    await openPanelAndReproduce(generationAsset(recipe({
+    await reproduceViaTeamAction(generationAsset(recipe({
       inputs: [
         { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
         { order: 1, role: 'mask', kind: 'image', sha256: 'c'.repeat(64), mime_type: 'image/png' },
@@ -2633,7 +2626,7 @@ describe('Studio 复刻：边界', () => {
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
-    await openPanelAndReproduce(generationAsset(recipe()));
+    await reproduceViaTeamAction(generationAsset(recipe()));
     expect(await screen.findByText(/取回复刻参考素材失败/)).toBeInTheDocument();
     expect(editor.textContent).toContain('我正在写的');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite');
@@ -2649,10 +2642,8 @@ describe('Studio 复刻：边界', () => {
     });
     renderStudio();
     const reEditButton = await screen.findByRole('button', { name: '重新编辑' });
-    fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-    await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
-    act(() => { assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
+    await reproduceViaTeamAction(generationAsset(recipe()));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/inputs/0')).toBe(true));
 
     fireEvent.click(reEditButton);
     const editor = screen.getByLabelText('生图 prompt');
@@ -2669,7 +2660,7 @@ describe('Studio 复刻：边界', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/keys')).toBe(true));
     await screen.findByLabelText('选择模型');
 
-    await openPanelAndReproduce(generationAsset(recipe()));
+    await reproduceViaTeamAction(generationAsset(recipe()));
 
     const editor = screen.getByLabelText('生图 prompt');
     await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
@@ -2682,7 +2673,7 @@ describe('Studio 复刻：边界', () => {
   it('模型列表还没加载时不判缺模型，也先不填', async () => {
     const fetchMock = mockPanelEndpoints('never');
     renderStudio();
-    await openPanelAndReproduce(generationAsset(recipe()));
+    await reproduceViaTeamAction(generationAsset(recipe()));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByLabelText('生图 prompt').textContent).toBe('');
     expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
@@ -2694,7 +2685,7 @@ describe('Studio 复刻：边界', () => {
     renderStudio();
     await screen.findByText('Volcengine Ark');
 
-    await openPanelAndReproduce(generationAsset(recipe({
+    await reproduceViaTeamAction(generationAsset(recipe({
       mode: 'video',
       model: 'seedance-3.0-pro',
       provider: 'far',
@@ -2754,7 +2745,7 @@ describe('Studio 生成结果保存为创作资产', () => {
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
     fireEvent.click(await screen.findByLabelText('保存生成结果 2 到资产'));
-    expect(assetPanelProps.current!.initialKind).toBe('media');
+    expect(assetPanelProps.current!.openLibrary).toBe(true);
     fireEvent.click(await screen.findByRole('button', { name: '包装终稿' }));
 
     await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
@@ -2847,7 +2838,7 @@ describe('Studio 响应团队资产动作', () => {
     expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('「看看」：团队栏落在挂载该库的画布和该库上', async () => {
+  it('「看看」：已挂载的团队库打开素材库共享区域', async () => {
     mockTeamEndpoints();
     renderStudio();
     await screen.findByText('Volcengine Ark');
@@ -2855,7 +2846,7 @@ describe('Studio 响应团队资产动作', () => {
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
     expect(await screen.findByText('暂无共享素材')).toBeVisible();
-    expect(assetPanelProps.current).toMatchObject({ initialTeamProjectId: 'canvas-2', initialTeamLibraryId: 'lib-art' });
+    expect(assetPanelProps.current!.openLibrary).toBe(true);
   });
 
   it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
@@ -3114,32 +3105,21 @@ describe('历史参数不可用原因', () => {
   });
 });
 
-it('团队使用连续追加并按来源复用 File，满额不覆盖，也不写个人资产', async () => {
+it('素材库多选参考连续追加，满额后保留已有文件', async () => {
   mockCompletedBatchAndKeys();
   mockPanelEndpoints();
   renderStudio();
   await screen.findByText('Volcengine Ark');
   fireEvent.click(screen.getByLabelText('打开创作资产'));
-  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-  await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
-  const entry = { id: 'ta-first', kind: 'media', title: '一.png', mime_type: 'image/png' };
-  const first = new File(['1'], 'one.png', { type: 'image/png' });
-  const second = new File(['2'], 'two.png', { type: 'image/png' });
-  act(() => {
-    assetPanelProps.current!.onUseTeamMedia(first, entry, 'lib:one');
-    assetPanelProps.current!.onUseTeamMedia(second, { ...entry, id: 'ta-second' }, 'lib:two');
-  });
-  await waitFor(() => expect(readStudioDraft()?.referenceImages).toEqual([first, second]));
-  act(() => assetPanelProps.current!.onUseTeamMedia(new File(['1'], 'one.png', { type: 'image/png' }), entry, 'lib:one'));
-  expect(await screen.findByText('已在参考图中')).toBeInTheDocument();
-  expect(readStudioDraft()?.referenceImages).toHaveLength(2);
-  act(() => {
-    for (let n = 0; n < 50; n++) assetPanelProps.current!.onUseTeamMedia(new File([String(n)], `${n}.png`, { type: 'image/png' }), entry, `lib:extra-${n}`);
-  });
-  expect(await screen.findByText('参考图已满')).toBeInTheDocument();
+  await waitFor(() => expect(assetPanelProps.current?.onHistoryReference).toBeTypeOf('function'));
+  const files = Array.from({ length: 50 }, (_, i) => new File([String(i)], i + '.png', { type: 'image/png' }));
+  await addPanelReferences(files.slice(0, 2));
+  await waitFor(() => expect(readStudioDraft()?.referenceImages).toEqual(files.slice(0, 2)));
+  await addPanelReferences(files.slice(2));
   const full = readStudioDraft()!.referenceImages;
-  expect(full.slice(0, 2)).toEqual([first, second]);
-  act(() => assetPanelProps.current!.onUseTeamMedia(new File(['last'], 'last.png', { type: 'image/png' }), entry, 'lib:last'));
+  expect(full.length).toBeLessThan(files.length);
+  expect(full).toEqual(files.slice(0, full.length));
+  await addPanelReferences([files.at(-1)!]);
   expect(readStudioDraft()!.referenceImages).toEqual(full);
   const requests = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
   expect(requests.filter(([url, init]) => (String(url).includes('/adopt') || String(url).includes('/creation-assets')) && init?.method && init.method !== 'GET')).toEqual([]);
