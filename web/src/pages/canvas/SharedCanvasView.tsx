@@ -223,9 +223,21 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   const selectedNode = selectedIds.length === 1 ? doc?.nodes.find(node=>node.id === selectedIds[0]) : undefined;
   const selectedVersion = doc && selectedNode ? nodeVersion(selectedNode,doc) : undefined;
   // 编辑弹窗只看 tool：断线、节点被删都不卸掉正在写的内容；关闭期间沿用最后一份播完退场。
-  const toolSession = useRetainedSession(tool && selectedNode ? tool + ':' + selectedNode.id : null);
+  // 会话号按选中 id 记：重新鉴权期间 doc 暂时为空，也不能把弹窗当成新开的一次重挂。
+  const toolSession = useRetainedSession(tool && selectedIds.length === 1 ? tool + ':' + selectedIds[0] : null);
   const toolNode = useRetained(tool ? selectedNode : null);
   const toolVersion = useRetained(tool ? selectedVersion : null);
+  // 房主重启后要重新鉴权，期间 room 为空、doc 消失：编辑弹窗照旧用最后一份画布，草稿不丢，提交因断线禁用。
+  const editDoc = useRetained(doc);
+  const undoTop = useRef(liveRoom.undoTop);
+  undoTop.current = liveRoom.undoTop;
+  const undoRef = useRef(liveRoom.undo);
+  undoRef.current = liveRoom.undo;
+  const deleteToast = useRef<{id:string | number; opId:string} | null>(null);
+  useEffect(() => {
+    const toast = deleteToast.current;
+    if (toast && liveRoom.undoTop !== toast.opId) { notify.dismiss(toast.id); deleteToast.current = null; }
+  }, [liveRoom.undoTop]);
   const shownTool = toolSession?.value.split(':')[0];
   const deletable = editable && selectedIds.length > 0 && selectedIds.every(id =>
     doc?.nodes.find(node => node.id === id)?.created_by_client === liveRoom.clientId);
@@ -348,10 +360,13 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     const result = await transport.saveImageEdit(projectId,payload,submission.mask);
     liveRoom.recordCommand(result);setSelectedIds([result.node_id]); setTool(null); return true;
   }
-  /** 删除等房主确认后再给撤销提示：被拒时撤销栈顶还是上一步，提前给会撤错。 */
+  /** 删除等房主确认后再给撤销提示，并绑定这次删除：撤销只撤栈顶，栈顶换了（之后又做了别的、或已撤销）就收起提示，不撤错。 */
   function removeWithUndo(op:Parameters<typeof liveRoom.submitAndWait>[0], message:string) {
-    const {undo} = liveRoom;
-    liveRoom.submitAndWait(op).then(() => notify.undo(message, undo), reason => notify.error(errorText(reason)));
+    liveRoom.submitAndWait(op).then(({opId}) => {
+      if (deleteToast.current) notify.dismiss(deleteToast.current.id);
+      const id = notify.undo(message, () => { if (undoTop.current === opId) undoRef.current(); });
+      deleteToast.current = {id, opId};
+    }, reason => notify.error(errorText(reason)));
   }
   function removeSelection() {
     if (selectedEdge) {
@@ -448,8 +463,8 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     </div>}
     </div>
     {selectedEdge && canEdit && <Button className="absolute bottom-3 left-3" size="sm" disabled={offline} onClick={removeSelection}>删除连线</Button>}
-    {toolSession && toolNode && doc && <>
-      {shownTool === 'edit' && <SharedNodeEdit key={toolSession.session} open={tool === 'edit'} node={toolNode} doc={doc} room={liveRoom} close={()=>setTool(null)}/>}
+    {toolSession && toolNode && editDoc && <>
+      {shownTool === 'edit' && <SharedNodeEdit key={toolSession.session} open={tool === 'edit'} node={toolNode} doc={editDoc} room={liveRoom} close={()=>setTool(null)}/>}
       {shownTool === 'annotation' && toolNode.type === 'image' && toolVersion?.kind === 'image' &&
         <SharedAnnotation key={toolSession.session} open={tool === 'annotation'} node={toolNode} version={toolVersion}
           url={transport.mediaUrl(projectId,toolVersion.version_id)} room={liveRoom} close={()=>setTool(null)}/>}

@@ -22,7 +22,7 @@ function state(title: string, text: string, revision: number) {
 
 describe('共享节点编辑', () => {
   it.each([false, true])('保留同时收到的正文，更改标题=%s', async editTitle => {
-    const room = { connected: true, submitAndWait: vi.fn(async () => {}) };
+    const room = { connected: true, submitAndWait: vi.fn(async () => ({ opId: 'op', revision: 3 })) };
     const close = vi.fn();
     const editor = (text: string, revision: number) =>
       <SharedNodeEdit open {...state('原标题', text, revision)} room={room} close={close} />;
@@ -33,7 +33,7 @@ describe('共享节点编辑', () => {
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
     if (editTitle) expect(room.submitAndWait).toHaveBeenCalledWith({
       kind: 'node_update', node_id: 'note', patch: { title: '新标题' }, text_versions: [],
-    }, 1);
+    }, 1, expect.any(String));
     else expect(room.submitAndWait).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { listKeys, modelModality } from '@/api/keys';
+import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { remoteProjectPath } from '@/api/collab';
 import { ApiError, requestJson } from '@/api/http';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
@@ -15,7 +15,8 @@ import { useRetained } from '@/components/ui/retained';
 import type { CanvasFrozenGeneration, CanvasNode } from '@/schema/canvas';
 import { supportsLayerDecomposition } from './canvasLayerDecomposition';
 import { isEditModel } from './imageEditGeometry';
-import { formatGenerationCost } from '@/lib/generationCost';
+import { estimateGenerationCostForSubmission, formatGenerationCost } from '@/lib/generationCost';
+import type { JobParams } from '@/schema/jobs';
 import { errorText } from '@/lib/errorText';
 import { shakeOnError } from '@/lib/motion';
 
@@ -25,6 +26,8 @@ interface Choice {
   cost_unit?: string; unit_cost_cny?: number | null;
   supported_operations?: ('inpaint' | 'outpaint' | 'layer_decomposition')[];
   input_cny_per_m?: number | null; output_cny_per_m?: number | null;
+  /** 自己的供应商：留着密钥配置，按最终提交参数本地估价。 */
+  key?: KeyView;
 }
 
 type Source = 'local' | 'borrowed';
@@ -93,7 +96,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
           if (operation === 'layer_decomposition') return supportsLayerDecomposition(key, model);
           return !operation || isEditModel(model, key, operation);
         }).map(model => ({
-          channel_id: key.alias, model: model.id, name: model.name, provider: key.provider, provider_label: key.alias, mode, icon: key.icon,
+          channel_id: key.alias, model: model.id, name: model.name, provider: key.provider, provider_label: key.alias, mode, icon: key.icon, key,
         })))),
       allowBorrow ? requestJson<{models: Choice[]}>(base + '/borrowable-models', '读取房主供应商').then(
         result => result.models.filter(model => model.mode === mode && (!operation || model.supported_operations?.includes(operation)))) : Promise.resolve([]),
@@ -117,6 +120,11 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const original = draft?.model || frozen?.model_id || (node.type === 'layer_stack' ? node.data.model : null);
   const choice = chosen ? choices.find(item => value(item) === chosen)
     : choices.find(item => item.model === original) ?? (!original ? choices[0] : undefined);
+  // 总价只按最终提交参数估（自己的供应商）。房主目录价是示例规格（视频 5 秒 720p），不当总价显示，单价留在模型菜单里。
+  const estimate = choice?.key && (mode === 'image' || mode === 'video')
+    ? estimateGenerationCostForSubmission(choice.key, choice.model, mode,
+      {...(frozen?.params ?? {}), ...(draft?.params ?? {}), n: count} as JobParams)
+    : null;
   async function submit() {
     if (!choice || submitting.current) return;
     submitting.current = true;
@@ -193,7 +201,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       {source === 'borrowed' && <p className="text-sm">本次生成使用房主（{owner}）的供应商</p>}
       <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
       <div className="flex items-center justify-end gap-3">
-        {choice?.cost_cny != null && <span className="text-xs tabular-nums text-muted-foreground">约 {formatGenerationCost(choice.cost_cny * count)}</span>}
+        {estimate != null && <span className="text-xs tabular-nums text-muted-foreground">约 {formatGenerationCost(estimate)}</span>}
         <Button ref={submitButton} disabled={loading || pending || !choice} onClick={() => void submit()}>
           <SwapLabel active={pending} on="提交中…" off="生成" />
         </Button>
