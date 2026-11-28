@@ -59,7 +59,7 @@ _MEDIA_SIZE_LIMITS = {
     "video": 500 * 1024 * 1024,
 }
 _MEDIA_SIZE_LABELS = {"image": "图片", "audio": "音频", "video": "视频"}
-_BLOB_DIR = Path("creation-assets") / "blobs"
+_BLOB_DIR = Path("project-references") / "blobs"
 _SHA256_RE = re.compile(r"[a-f0-9]{64}")
 
 
@@ -83,7 +83,7 @@ def _now() -> str:
 
 
 def _catalog_path() -> Path:
-    return data_root.creation_assets_dir() / "catalog.json"
+    return data_root.project_references_dir() / "catalog.json"
 
 
 def _catalog_lock_path() -> Path:
@@ -93,7 +93,7 @@ def _catalog_lock_path() -> Path:
 def _archived_path() -> Path:
     """归档清单（D13）：{asset_id: 归档时间}。单独一份 sidecar 而不是资产上的字段——资产库的
     schema 是 extra=forbid，加字段会让降级后的旧版整库读不出；旧版读不到这份清单，只是把归档的也列出来。"""
-    return data_root.creation_assets_dir() / "archived.json"
+    return data_root.project_references_dir() / "archived.json"
 
 
 def _read_archived_unlocked() -> dict[str, str]:
@@ -321,7 +321,7 @@ def _blob_relative_path(sha256: str, mime_type: str) -> Path:
 
 
 def blob_path_for(sha256: str, mime_type: str) -> Path:
-    """按内容寻址的 blob 路径：creation-assets/blobs/<sha256><suffix>（不保证文件存在）。"""
+    """按内容寻址的 blob 路径：project-references/blobs/<sha256><suffix>（不保证文件存在）。"""
     return data_root.resolve_data_root() / _blob_relative_path(sha256, mime_type)
 
 
@@ -415,7 +415,7 @@ def _preview_asset(catalog: CreationAssetCatalog, asset_id: str) -> CreationAsse
 def _preview_dir(asset_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_-]+", asset_id):
         raise ValueError("资产编号无效")
-    root = data_root.resolve_data_root() / "creation-assets" / "prompt-previews"
+    root = data_root.project_references_dir() / "prompt-previews"
     target = root / asset_id
     if root.is_symlink() or target.is_symlink():
         raise ValueError("效果图目录无效")
@@ -1097,7 +1097,7 @@ def _media_blob_path(content: CreationMediaAssetContent) -> Path:
     root = data_root.resolve_data_root().resolve()
     path = (root / content.path).resolve()
     try:
-        path.relative_to(root / "creation-assets" / "blobs")
+        path.relative_to(root / _BLOB_DIR)
     except ValueError as error:
         raise CreationAssetStateError("媒体资产路径越出创作资产目录") from error
     return path
