@@ -2708,12 +2708,16 @@ def estimate_upscale_cost(project_id: str, surface_node_id: str, target: str) ->
     """AI高清一档的预计费用（与 /api/pricing/estimate 同口径）。
 
     与提交走同一份 `_plan_upscale_unlocked`：源图算一张参考图、档位尺寸、模型与路由解析都一样；
-    不建任务、不计费，也不推进自动路由的轮转（consume=False）。拿不到价格返回 None。
+    不建任务、不计费，也不推进自动路由的轮转（consume=False）。拿不到价格返回 None；
+    项目或节点不存在抛 KeyError。
     """
     from character_workflow.lib.generation_pricing import estimate_submission
 
     with file_lock(canvas_project_lock_path(project_id)):
         current = _read_document_unlocked(project_id)
+        # 节点不存在是 404（契约）；节点在但不能放大（没内容、无需放大、没配模型）才是「这一档无价」。
+        if not any(node.id == surface_node_id for node in current.nodes):
+            raise KeyError(surface_node_id)
         _, _, key, model, _, job_params = _plan_upscale_unlocked(
             project_id, current, surface_node_id, target, route_order=None, consume=False,
         )

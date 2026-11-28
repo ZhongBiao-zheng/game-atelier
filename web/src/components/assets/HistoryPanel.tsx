@@ -130,6 +130,8 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
   const [text, setText] = useState('');
   const shownPreview = useRetained(preview?.kind === 'image' ? null : preview);
   const [removing, setRemoving] = useState(new Set<string>());
+  // 大图里正在删除（请求中）的那几张：立即退出翻页候选，失败再放回。
+  const [lightboxDeleting, setLightboxDeleting] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const anchor = useRef<string>();
   const list = useRef<HTMLDivElement>(null);
@@ -380,8 +382,16 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
     <FolderPicker open={pickRows !== null} onClose={() => setPickRows(null)} onChoose={f => addTo(pickRows || [], f)} />
     {preview?.kind === 'image' && <HistoryLightbox item={preview} items={items} sourceRect={previewRect}
       onNavigate={row => { setPreviewRect(null); setPreview(row); }} onClose={() => setPreview(null)}
-      deleting={busy} onReference={row => void action('reference', [row])}
-      onDelete={row => new Promise<boolean>(resolve => { void action('delete', [row], resolve); })} />}
+      deleting={busy} excluded={new Set([...lightboxDeleting, ...removing])} onReference={row => void action('reference', [row])}
+      onDelete={row => new Promise<boolean>(resolve => {
+        const key = historyKey(row);
+        setLightboxDeleting(current => new Set(current).add(key));
+        // 回执到了就撤下：受理成功时同一刻 removing 接手（收起中），失败则放回翻页候选。
+        void action('delete', [row], ok => {
+          setLightboxDeleting(current => new Set([...current].filter(item => item !== key)));
+          resolve(ok);
+        });
+      })} />}
     {shownPreview && <Dialog open={Boolean(preview && preview.kind !== 'image')} onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
       <DialogTitle>{shownPreview.filename}</DialogTitle>
       {shownPreview.kind === 'video' ? <video controls autoPlay playsInline src={shownPreview.url} className="max-h-[70vh] w-full" />
@@ -392,12 +402,15 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
 }
 
 /** 历史里的大图：只在图片之间翻页，带「用作参考」「删除」，从被点的卡片飞入。 */
-function HistoryLightbox({ item, items, sourceRect, deleting, onNavigate, onClose, onReference, onDelete }: {
+function HistoryLightbox({ item, items, sourceRect, deleting, excluded, onNavigate, onClose, onReference, onDelete }: {
   item: HistoryItem; items: HistoryItem[]; sourceRect: DOMRect | null; deleting: boolean;
+  /** 正在删除或收起中的条目：不作为上一张 / 下一张（当前这张除外，用来定位邻居）。 */
+  excluded: ReadonlySet<string>;
   onNavigate: (item: HistoryItem) => void; onClose: () => void;
   onReference: (item: HistoryItem) => void; onDelete: (item: HistoryItem) => Promise<boolean>;
 }) {
-  const images = items.filter(row => row.kind === 'image');
+  const images = items.filter(row => row.kind === 'image'
+    && (!excluded.has(historyKey(row)) || historyKey(row) === historyKey(item)));
   const index = images.findIndex(row => historyKey(row) === historyKey(item));
   const previous = index > 0 ? images[index - 1] : undefined;
   const next = index >= 0 ? images[index + 1] : undefined;

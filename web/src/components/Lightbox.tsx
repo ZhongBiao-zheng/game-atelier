@@ -130,6 +130,8 @@ export function Lightbox({
   onDeleteRef.current = onDelete;
   const deletingRef = useRef(deleting);
   deletingRef.current = deleting;
+  const srcRef = useRef(src);
+  srcRef.current = src;
   const [copyState, copy] = useCopyFeedback();
 
   const requestClose = useCallback(() => {
@@ -147,12 +149,18 @@ export function Lightbox({
   const deleteCurrent = useCallback(() => {
     const remove = onDeleteRef.current;
     if (!remove || closingRef.current || deletingRef.current) return;
-    // 翻页目标按删除前这一帧取：删掉的那张还在列表里，邻居就是它前后的那张。
-    const advance = onNextRef.current ?? onPreviousRef.current;
-    const move = () => { if (advance) advance(); else requestClose(); };
+    const move = (advance: (() => void) | undefined) => { if (advance) advance(); else requestClose(); };
+    const deleted = srcRef.current;
     const result = remove();
-    if (result instanceof Promise) void result.then(accepted => { if (accepted && !closingRef.current) move(); });
-    else move();
+    // 异步删除：受理后只在仍停在被删那张时才推进；等待期间已经翻走就不打扰。邻居按此刻的列表取。
+    if (result instanceof Promise) {
+      void result.then(accepted => {
+        if (accepted && !closingRef.current && srcRef.current === deleted) move(onNextRef.current ?? onPreviousRef.current);
+      });
+      return;
+    }
+    // 同步删除：翻页目标按删除前这一帧取，删掉的那张还在列表里，邻居就是它前后的那张。
+    move(onNextRef.current ?? onPreviousRef.current);
   }, [requestClose]);
 
   useEffect(() => {
