@@ -16,6 +16,7 @@ from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_sessi
 from character_workflow.lib.canvas_projects import read_canvas_document
 from viewer_server.server_app import build_app
 
+from tests.canvas_agent_approval_helpers import confirmation_required
 from tests.local_client import LocalTestClient
 
 IMAGE_KEY = keys.KeySpec(alias="img", provider="openai", access_key="test-only-not-a-real-key",
@@ -111,16 +112,16 @@ def test_auto_mode_judges_the_batch_by_its_total(client, fake_estimate):
     project_id = _project(client)
     _surfaces(project_id, {"a": "seedream", "b": "seedream", "c": "unknown"})
     # 单项 6 元都没超过 10 元，合计 12 元超过。
-    assert runtime.confirmation_required(project_id, "run_generation",
+    assert confirmation_required(project_id, "run_generation",
                                          {"surface_node_id": "a"}, "auto") is False
-    assert runtime.confirmation_required(project_id, "run_generations",
+    assert confirmation_required(project_id, "run_generations",
                                          _batch(("a", 1), ("b", 1)), "auto") is True
     # 未计价的项不计入合计，也不单独拦。
-    assert runtime.confirmation_required(project_id, "run_generations",
+    assert confirmation_required(project_id, "run_generations",
                                          _batch(("a", 1), ("c", 4)), "auto") is False
-    assert runtime.confirmation_required(project_id, "run_generations",
+    assert confirmation_required(project_id, "run_generations",
                                          _batch(("c", 4)), "auto") is False
-    assert runtime.confirmation_required(project_id, "run_generations",
+    assert confirmation_required(project_id, "run_generations",
                                          _batch(("c", 1)), "review") is True
 
 

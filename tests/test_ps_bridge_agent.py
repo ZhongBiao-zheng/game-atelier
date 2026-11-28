@@ -14,6 +14,7 @@ from character_workflow.lib import data_root, plugin_server
 from character_workflow.lib.canvas_projects import create_canvas_project
 from character_workflow.lib.canvas_tool_common import CanvasToolError
 from character_workflow.lib.private_json import read_private_json
+from tests.canvas_agent_approval_helpers import confirmation_required
 from tests.local_client import LocalTestClient
 from tests.test_ps_bridge_plugin import PLUGIN_ID, ps  # noqa: F401  (fixture)
 from viewer_server.server_app import build_app
@@ -101,9 +102,9 @@ def test_the_switch_is_also_checked_inside_the_plugin(agent_ps):
 def test_execute_always_needs_confirmation_and_shows_the_whole_script(agent_ps):
     allow_scripts(True)
     project_id = create_canvas_project("PS").project_id
-    assert runtime.confirmation_required(project_id, EXECUTE, {"code": SCRIPT}, "auto") is True
-    assert runtime.confirmation_required(project_id, "plugin_ps_bridge_import", {"scope": "merged"}, "auto") is False
-    assert runtime.confirmation_required(project_id, "plugin_ps_bridge_inspect", {}, "review") is False
+    assert confirmation_required(project_id, EXECUTE, {"code": SCRIPT}, "auto") is True
+    assert confirmation_required(project_id, "plugin_ps_bridge_import", {"scope": "merged"}, "auto") is False
+    assert confirmation_required(project_id, "plugin_ps_bridge_inspect", {}, "review") is False
     summary = runtime.summarize_call(EXECUTE, {"code": SCRIPT})
     assert summary.endswith(SCRIPT) and summary.startswith("（插件：PS 联动）")
 

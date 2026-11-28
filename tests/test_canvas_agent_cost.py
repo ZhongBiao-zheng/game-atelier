@@ -14,6 +14,7 @@ from character_workflow.lib import canvas_agent_runtime as runtime
 from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_session
 from viewer_server.server_app import build_app
 
+from tests.canvas_agent_approval_helpers import confirmation_required
 from tests.local_client import LocalTestClient
 
 PRICED = keys.KeySpec(alias="chat", provider="tokendance", base_url="https://chat.invalid/v1",
@@ -144,9 +145,10 @@ def test_confirm_amount_defaults_to_ten_and_survives_a_broken_file(isolated_data
     ("get_canvas", "review", True, False),
 ])
 def test_confirmation_rules(monkeypatch, tool, mode, over, expected):
-    monkeypatch.setattr(runtime, "generation_over_threshold", lambda *_args: over)
+    monkeypatch.setattr(runtime, "generation_prices", lambda *_args: [11 if over else 0])
     remove = {"changes": [{"op": "remove_node", "node_id": "cat-1"}]}
-    assert runtime.confirmation_required("canvas-aaaaaaaa", tool, remove, mode) is expected
+    args = {"surface_node_id": "cat-1"} if tool == "run_generation" else remove
+    assert confirmation_required("canvas-aaaaaaaa", tool, args, mode) is expected
 
 
 @pytest.mark.parametrize(("estimate", "expected"), [
@@ -220,12 +222,12 @@ def test_auto_mode_confirms_generation_only_above_the_amount(isolated_data_root,
     with _client(isolated_data_root) as client:
         project_id = _project(client)
         _image_node(project_id, "seedream")
-        assert runtime.generation_over_threshold(project_id, {"surface_node_id": "cat-1"}) is True
+        assert confirmation_required(project_id, "run_generation", {"surface_node_id": "cat-1"}, "auto") is True
         cost.write_confirm_above_cny(20)
-        assert runtime.generation_over_threshold(project_id, {"surface_node_id": "cat-1"}) is False
+        assert confirmation_required(project_id, "run_generation", {"surface_node_id": "cat-1"}, "auto") is False
         _image_node(project_id, "unknown")
         cost.write_confirm_above_cny(0)
-        assert runtime.generation_over_threshold(project_id, {"surface_node_id": "cat-1"}) is False
+        assert confirmation_required(project_id, "run_generation", {"surface_node_id": "cat-1"}, "auto") is False
 
 
 def test_approval_callback_applies_the_amount_in_auto_mode(isolated_data_root, fake_estimate):
