@@ -222,13 +222,28 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   }, [collapsedMembers]);
   const selectedNode = selectedIds.length === 1 ? doc?.nodes.find(node=>node.id === selectedIds[0]) : undefined;
   const selectedVersion = doc && selectedNode ? nodeVersion(selectedNode,doc) : undefined;
+  // 连到选中节点的输入素材类型：共享生成提交时房主会带上它们，估价要知道有没有时长未知的视频、音频。
+  const selectedInputKinds = useMemo(() => doc && selectedNode ? doc.connections.flatMap(edge => {
+    if (edge.target_node_id !== selectedNode.id || edge.role !== 'input') return [];
+    const source = doc.nodes.find(node => node.id === edge.source_node_id);
+    const kind = source && nodeVersion(source, doc)?.kind;
+    return kind ? [kind] : [];
+  }) : [], [doc, selectedNode]);
   // 编辑弹窗只看 tool：断线、节点被删都不卸掉正在写的内容；关闭期间沿用最后一份播完退场。
   // 会话号按选中 id 记：重新鉴权期间 doc 暂时为空，也不能把弹窗当成新开的一次重挂。
   const toolSession = useRetainedSession(tool && selectedIds.length === 1 ? tool + ':' + selectedIds[0] : null);
   const toolNode = useRetained(tool ? selectedNode : null);
-  const toolVersion = useRetained(tool ? selectedVersion : null);
+  // 打开编辑器时固定源节点与图片版本：之后别人换图、断线重连都不改它，蒙版和笔画只属于打开时那张图。
+  const pinnedTool = useRef<{session:number; nodeId:string; versionId:string | null; swapConfirmed:boolean} | null>(null);
+  if (toolSession && selectedNode && pinnedTool.current?.session !== toolSession.session) {
+    pinnedTool.current = {session:toolSession.session, nodeId:selectedNode.id, versionId:selectedVersion?.version_id ?? null, swapConfirmed:false};
+  }
   // 房主重启后要重新鉴权，期间 room 为空、doc 消失：编辑弹窗照旧用最后一份画布，草稿不丢，提交因断线禁用。
   const editDoc = useRetained(doc);
+  // 弹窗收起后仍挂着（退场、后台补发）：节点内容始终取最新快照，不用收起那一刻的旧节点。
+  const liveToolNode = (editDoc && toolNode && editDoc.nodes.find(node => node.id === toolNode.id)) || toolNode;
+  const pinnedVersionId = pinnedTool.current?.versionId;
+  const toolVersion = useRetained(pinnedVersionId && editDoc ? editDoc.content_versions[pinnedVersionId] : null);
   const undoTop = useRef(liveRoom.undoTop);
   undoTop.current = liveRoom.undoTop;
   const undoRef = useRef(liveRoom.undo);
@@ -351,11 +366,19 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   }
   async function saveImageEdit(submission:CanvasMaskEditSubmission) {
     if (!editable) throw new Error(offline ? '连接已断开，重连后再保存' : '当前为仅查看');
-    if (!doc || !selectedNode || !selectedVersion) return false;
+    const pin = pinnedTool.current;
+    const source = pin && doc?.nodes.find(node => node.id === pin.nodeId);
+    if (!doc || !pin || !pin.versionId) return false;
+    if (!source) throw new Error('节点已被删除');
+    // 重连后发现节点换了图：蒙版是按打开时那张画的，先让用户知道，再点一次才按原图保存。
+    if (nodeVersion(source, doc)?.version_id !== pin.versionId && !pin.swapConfirmed) {
+      pin.swapConfirmed = true;
+      throw new Error('节点图片已被他人更换，再次保存将基于打开时的原图');
+    }
     const payload:CanvasImageEditSavePayload = {
       expected_revision:doc.revision,options:submission.options,editor_state:submission.editorState,
       generation_draft:submission.draft,reference_node_id:submission.referenceNodeId,reference_version_id:submission.referenceVersionId,
-      ...(selectedNode.type === 'image_edit' ? {node_id:selectedNode.id} : {source_node_id:selectedNode.id,source_version_id:selectedVersion.version_id}),
+      ...(source.type === 'image_edit' ? {node_id:source.id} : {source_node_id:source.id,source_version_id:pin.versionId}),
     };
     const result = await transport.saveImageEdit(projectId,payload,submission.mask);
     liveRoom.recordCommand(result);setSelectedIds([result.node_id]); setTool(null); return true;
@@ -463,17 +486,17 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     </div>}
     </div>
     {selectedEdge && canEdit && <Button className="absolute bottom-3 left-3" size="sm" disabled={offline} onClick={removeSelection}>删除连线</Button>}
-    {toolSession && toolNode && editDoc && <>
-      {shownTool === 'edit' && <SharedNodeEdit key={toolSession.session} open={tool === 'edit'} node={toolNode} doc={editDoc} room={liveRoom} close={()=>setTool(null)}/>}
-      {shownTool === 'annotation' && toolNode.type === 'image' && toolVersion?.kind === 'image' &&
-        <SharedAnnotation key={toolSession.session} open={tool === 'annotation'} node={toolNode} version={toolVersion}
+    {toolSession && liveToolNode && editDoc && <>
+      {shownTool === 'edit' && <SharedNodeEdit key={toolSession.session} open={tool === 'edit'} node={liveToolNode} doc={editDoc} room={liveRoom} close={()=>setTool(null)}/>}
+      {shownTool === 'annotation' && liveToolNode.type === 'image' && toolVersion?.kind === 'image' &&
+        <SharedAnnotation key={toolSession.session} open={tool === 'annotation'} node={liveToolNode} version={toolVersion}
           url={transport.mediaUrl(projectId,toolVersion.version_id)} room={liveRoom} close={()=>setTool(null)}/>}
       {(shownTool === 'inpaint' || shownTool === 'outpaint') && toolVersion?.kind === 'image' &&
-        <SharedImageEdit key={toolSession.session} open={tool === shownTool} node={toolNode} version={toolVersion}
+        <SharedImageEdit key={toolSession.session} open={tool === shownTool} node={liveToolNode} version={toolVersion}
           url={transport.mediaUrl(projectId,toolVersion.version_id)} mode={shownTool} save={saveImageEdit} close={()=>setTool(null)}/>}
-      {shownTool === 'layers' && toolNode.type === 'layer_stack' &&
+      {shownTool === 'layers' && liveToolNode.type === 'layer_stack' &&
         <Dialog open={tool === 'layers'} onOpenChange={open=>{if (!open) setTool(null);}}><DialogContent aria-describedby={undefined}><DialogHeader>
-          <DialogTitle>图层顺序</DialogTitle></DialogHeader><SharedLayerOrder room={liveRoom} node={toolNode}/></DialogContent></Dialog>}
+          <DialogTitle>图层顺序</DialogTitle></DialogHeader><SharedLayerOrder room={liveRoom} node={liveToolNode}/></DialogContent></Dialog>}
     </>}
     {!doc && !error && !challenge && <p role="status" className="delayed-reveal absolute top-1/2 w-full text-center text-sm text-muted-foreground">加载中…</p>}
     {doc && zoomDock}
@@ -484,7 +507,8 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
       className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-lg border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
       {canEdit && selectedNode && room && <SharedCanvasGenerate key={selectedNode.id} disabled={offline}
         peerKey={peerKey} projectId={projectId} node={selectedNode} revision={doc.revision}
-        frozen={selectedVersion?.frozen_generation} owner={room.owner_display_name} allowBorrow={liveRoom.allowBorrow} />}
+        frozen={selectedVersion?.frozen_generation} owner={room.owner_display_name} allowBorrow={liveRoom.allowBorrow}
+        inputKinds={selectedInputKinds} />}
       <SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} className="contents" />
       {canEdit && selectedNode && <Button size="sm" variant="ghost" disabled={offline} onClick={()=>setTool('edit')}>编辑节点</Button>}
       {selectedIds.length === 1 && <Button size="sm" variant="ghost" onClick={() => showDetails(selectedIds[0])}>节点详情</Button>}
