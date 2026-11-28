@@ -20,6 +20,7 @@ import { authenticateCollab, listCollabPeers } from '@/api/collab';
 import { shareStudioResult } from '@/api/collabTransfer';
 import { COLLAB_PROTOCOL_VERSION, type CollabCard } from '@/schema/collab';
 import { SharedCanvasPasscodeDialog } from '@/components/canvas/SharedCanvasPasscodeDialog';
+import { useRetainedSession } from '@/components/ui/retained';
 import { takeSharedStudioInput } from './sharedStudioInput';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { loadTokenDancePrices } from '@/api/usage';
@@ -320,6 +321,7 @@ function StudioFull() {
   const [sharedAuth, setSharedAuth] = useState<{
     target: CollabCard; needsName: boolean; jobId: string; index: number;
   } | null>(null);
+  const shownSharedAuth = useRetainedSession(sharedAuth);
   const roundCanvasOptions = useMemo<CanvasTarget[]>(() => [
     ...canvasTargetOptions, ...sharedTargets.map(card => ({
       projectId: card.peer_key + '/' + card.project_id, name: card.name, sharedBy: card.display_name,
@@ -1406,10 +1408,11 @@ function StudioFull() {
       className="relative h-full overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
-      {sharedAuth && <SharedCanvasPasscodeDialog peerKey={sharedAuth.target.peer_key}
-        projectId={sharedAuth.target.project_id} name={sharedAuth.target.name} needsName={sharedAuth.needsName}
-        needsCode={sharedAuth.target.requires_passcode} onClose={() => setSharedAuth(null)} onEntered={() => {
-          const { jobId, index, target } = sharedAuth;
+      {shownSharedAuth && <SharedCanvasPasscodeDialog key={shownSharedAuth.session} open={Boolean(sharedAuth)}
+        peerKey={shownSharedAuth.value.target.peer_key}
+        projectId={shownSharedAuth.value.target.project_id} name={shownSharedAuth.value.target.name} needsName={shownSharedAuth.value.needsName}
+        needsCode={shownSharedAuth.value.target.requires_passcode} onClose={() => setSharedAuth(null)} onEntered={() => {
+          const { jobId, index, target } = shownSharedAuth.value;
           setSharedAuth(null);
           void shareStudioResult(jobId, index, target.peer_key, target.project_id)
             .then(() => setAssetNotice(`已加入画布「${clipName(target.name)}」`)).catch(e => notify.error(errorText(e)));
