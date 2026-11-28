@@ -100,3 +100,24 @@ def test_paste_twice_after_source_deletion_keeps_media_draft_and_internal_edges(
         edges.add(edge["id"])
     assert client.post(path, json=center, headers={"If-Match": "0"}).status_code == 409
     assert len(projects.read_canvas_document(target).nodes) == 6
+
+
+def test_agent_lists_and_adds_a_template_through_registered_tools():
+    import asyncio
+    from types import SimpleNamespace
+    from character_workflow.lib import canvas_agent_runtime as agent
+
+    source, _ = source_group()
+    saved = templates.save_template(source, "group", "卡面")
+    target = projects.create_canvas_project("目标").project_id
+    ctx = SimpleNamespace(context=agent.TurnContext(target, "review"), tool_call_id="templates")
+    tools = {tool.name: tool for tool in agent.build_tools()}
+    listing, add = tools["list_templates"], tools["add_template"]
+    assert listing.needs_approval is False
+    items = json.loads(asyncio.run(listing.on_invoke_tool(ctx, "{}")))["templates"]
+    assert items == [{"id": saved["id"], "name": "卡面", "owner": "mine", "online": True, "node_count": 2}]
+    args = {"template_id": saved["id"]}
+    assert asyncio.run(add.needs_approval(ctx, args, "templates"))
+    result = json.loads(asyncio.run(add.on_invoke_tool(ctx, json.dumps(args))))
+    group = next(n for n in projects.read_canvas_document(target).nodes if n.id == result["group_id"])
+    assert ctx.context.created_node_ids == {group.id, *group.data.member_node_ids}

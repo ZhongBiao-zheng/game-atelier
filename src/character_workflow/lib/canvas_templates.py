@@ -14,11 +14,11 @@ from tempfile import TemporaryDirectory
 from character_workflow.lib import data_root, trash
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.canvas_paste import paste_from_document
-from character_workflow.lib.canvas_agent_layout import DEFAULT_SIZE
+from character_workflow.lib.canvas_agent_layout import DEFAULT_SIZE, node_rect
 from character_workflow.lib.schemas import CanvasPoint, CanvasDocument
 from character_workflow.lib.canvas_projects import (
     _now, _read_canvas_document_unlocked, _recover_canvas_transactions_unlocked,
-    _resolve_canvas_media_version, canvas_project_lock_path,
+    _resolve_canvas_media_version, canvas_project_lock_path, read_canvas_document,
 )
 from character_workflow.lib.file_lock import file_lock
 
@@ -220,7 +220,7 @@ def _remap_bindings(value, ids):
                 _remap_bindings(item, ids)
 
 
-def paste_template(project_id: str, template_id: str, center: CanvasPoint, revision: int):
+def paste_template(project_id: str, template_id: str, center: CanvasPoint | None, revision: int):
     with _locked(template_id) as directory:
         record = _read(directory)
         payload = record["payload"]
@@ -228,6 +228,12 @@ def paste_template(project_id: str, template_id: str, center: CanvasPoint, revis
         ids = {node["id"]: f"{node['type']}-{secrets.token_hex(12)}" for node in nodes}
         group = next(node for node in nodes if node["type"] == "group")
         size = group.get("size") or {"width": DEFAULT_SIZE[0], "height": DEFAULT_SIZE[1]}
+        if center is None:
+            target = read_canvas_document(project_id)
+            rects = [node_rect(node, target) for node in target.nodes]
+            left = max((rect.right for rect in rects), default=-48) + 48
+            top = min((rect.y for rect in rects), default=0)
+            center = CanvasPoint(x=left + size["width"] / 2, y=top + size["height"] / 2)
         dx = center.x - group["position"]["x"] - size["width"] / 2
         dy = center.y - group["position"]["y"] - size["height"] / 2
         group["title"] = record["name"]

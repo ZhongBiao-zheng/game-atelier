@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
 from character_workflow.lib.agent_instructions import CORE
-from character_workflow.lib import agent_context, agent_usage
+from character_workflow.lib import agent_context, agent_usage, canvas_templates
 from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_group_runs as group_runs
@@ -41,7 +41,7 @@ from character_workflow.lib.canvas_agent_sessions import (
 )
 from character_workflow.lib.canvas_projects import read_canvas_document
 from character_workflow.lib.schemas import (
-    CanvasAgentApproval, CanvasAgentMessageCreate, CanvasAgentReference, CanvasAgentSession,
+    CanvasAgentApproval, CanvasAgentMessageCreate, CanvasAgentReference, CanvasAgentSession, CanvasPoint,
     redact_canvas_agent_private_text as redact,
 )
 from character_workflow.lib.canvas_tool_common import CanvasToolError
@@ -55,7 +55,7 @@ TOOL_OUTPUT_LIMIT = 20_000
 DELTA_FLUSH_SECONDS = 0.15
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
-READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "read_media",
+READ_TOOLS = frozenset({"get_canvas", "list_templates", "list_models", "get_run", "check_run", "read_media",
                         "read_video_frames",
                         "load_skill",
                         "read_skill_file", "wait_for_run", "wait_for_runs", "read_spec",
@@ -317,6 +317,27 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
         return canvas_view(project_id, arguments.get("node_ids")), []
+    if tool == "list_templates":
+        tools.authorize(LOCAL, project_id, "canvas_read")
+        return {"templates": [{"id": row["id"], "name": row["name"], "node_count": row["node_count"],
+                               "owner": "mine", "online": True} for row in canvas_templates.list_templates()]}, []
+    if tool == "add_template":
+        tools.authorize(LOCAL, project_id, "canvas_edit")
+        center = CanvasPoint.model_validate(arguments["center"]) if "center" in arguments else None
+
+        def insert(revision):
+            try:
+                gid, doc = canvas_templates.paste_template(project_id, arguments["template_id"], center, revision)
+            except FileNotFoundError:
+                raise CanvasToolError("INVALID_TARGET", "找不到模板或其媒体", 404) from None
+            except RuntimeError as error:
+                if not str(error).startswith("revision_conflict:"):
+                    raise
+                raise CanvasToolError("DOCUMENT_CONFLICT", "画布已更新", 409) from error
+            members = next(n.data.member_node_ids for n in doc.nodes if n.id == gid)
+            return {"group_id": gid, "node_ids": [gid, *members]}
+        result = _with_fresh_revision(project_id, insert)
+        return {"group_id": result["group_id"]}, result["node_ids"]
     if tool == "list_models":
         payload = CanvasListModelsInput(project_id=project_id, mode=arguments.get("mode", "image"))
         tools.authorize(LOCAL, payload.project_id, "canvas_read")
@@ -513,6 +534,11 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "apply_changes": (
         "在当前画布上批量改动：add_text / add_media_node / add_asset_node / add_surface / set_text / set_draft / "
         "connect / disconnect / move / remove_node。整批原子提交。同一次调用 add_surface 指定 node_id，后续 set_draft / connect 引用这个 id，不能用标题。新节点 position 填 {x: 0, y: 0}，系统排位。尺寸选固定像素 size 或 ratio（可带 resolution），二选一。已有图直接连线，不复制。多个已有角色或元素都连上，总数不超过 reference_limits.image。库中参考逐个 add_asset_node（team:… 可直接用），复用已有节点和冻结版本，每张都要有可见节点和 input 连线。对比节点只接 before / after 两槽，默认依次填充，指定已占槽会替换。", {}),
+    "list_templates": ("列出模板的编号、名称、归属、节点数与在线状态。", {"type": "object", "properties": {}}),
+    "add_template": ("将模板作为新组加入当前画布，返回 group_id。可指定中心坐标，默认放在已有节点右侧。",
+                     {"type": "object", "required": ["template_id"], "properties": {
+                         "template_id": {"type": "string", "pattern": canvas_templates.TEMPLATE_ID},
+                         "center": CanvasPoint.model_json_schema()}}),
     "run_group": ("整体执行画布分组。第一次只传 group_id，返回执行顺序、分项估价和 quote_id。"
                   "可以执行时，再传同一 group_id 和返回的 quote_id，按当前模式和确认金额执行。",
                   {"type": "object", "required": ["group_id"], "properties": {
@@ -604,6 +630,11 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
     """写操作的参数先按真实入参模型校验：不合格的调用不打扰用户，直接把校验错误回给模型去改。"""
     from pydantic import ValidationError
     try:
+        if tool == "add_template":
+            if not re.fullmatch(canvas_templates.TEMPLATE_ID, arguments.get("template_id", "")):
+                return False
+            if "center" in arguments:
+                CanvasPoint.model_validate(arguments["center"])
         if tool == "append_lesson":
             canvas_specs.validate_lesson(arguments.get("text"))
         if tool == "apply_changes":
@@ -840,7 +871,7 @@ def _arguments(raw: str | None) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
+READ_LABELS = {"list_templates": "查看模板", "get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
                "read_video_frames": "查看视频画面", "check_run": "核对生成结果",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
                "wait_for_runs": "等待多个生成结果", "update_plan": "更新待办",
@@ -1010,6 +1041,8 @@ def summarize_call(tool: str, arguments: dict, titles: dict[str, str] | None = N
     if tool == "read_skill_file":
         # 只显示文件名：带目录的相对路径会被落盘前的隐私替换当成本机路径藏掉。
         return f"{arguments.get('name', '')} · {PurePosixPath(str(arguments.get('path', ''))).name}"
+    if tool == "add_template":
+        return "将模板添加到当前画布"
     if tool in READ_LABELS:
         return READ_LABELS[tool]
     if tool.startswith(PLUGIN_TOOL_PREFIX):
