@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cancelCanvasAgentTurn,
   deleteCanvasAgentSession,
@@ -120,9 +120,12 @@ function withOutgoing<T extends CanvasAgentSession | StudioAgentSession>(session
   return { ...session, messages: [...session.messages, message] };
 }
 
-/** 还在排队写入的设置并进服务端返回的会话：前一次写入的回包不会把后一次的本地修改冲掉。 */
+/** 还在写入的设置。sessionId 为 null 时改的是还没有会话的草稿。 */
+interface PendingSetting { sessionId: string | null; update: CanvasAgentSessionUpdate }
+
+/** 显示值 = 最近一次服务端确认的会话，按字段叠上还在写入的修改；某次写入失败只是把它从列表里拿掉。 */
 function withQueuedSettings<T extends CanvasAgentSession | StudioAgentSession>(
-  session: T, queued: readonly { sessionId: string; update: CanvasAgentSessionUpdate }[],
+  session: T, queued: readonly PendingSetting[],
 ): T {
   return queued.reduce((current, { sessionId, update }) => {
     if (sessionId !== current.session_id) return current;
@@ -181,7 +184,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [confirmAbove, setConfirmAbove] = useState<number | null>(() => CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
   // 设置类修改（模型、权限、自动、确认金额）本地先生效，写入排队进行，不进 pending：输入壳不置灰、不抢焦点。
   const settingsWrite = useRef<Promise<unknown>>(Promise.resolve());
-  const queuedSettings = useRef<{ sessionId: string; update: CanvasAgentSessionUpdate }[]>([]);
+  // 还没落盘的设置写入（原始请求，失败会 reject）：发送时等它们，任一失败就不发。
+  const inflightWrites = useRef(new Set<Promise<unknown>>());
+  const [pendingSettings, setPendingSettings] = useState<readonly PendingSetting[]>([]);
   const savedConfirmAbove = useRef<number | null>(CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
   const confirmAboveWrites = useRef(0);
   // 设置写入失败：count 供调用方抖动设置控件，message 用来区分报错来自设置还是发送。
@@ -202,8 +207,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const acceptSession = useCallback((updated: CanvasAgentSession | StudioAgentSession) => {
     if (sessionIdRef.current !== updated.session_id) return;
-    setSession(current => current?.session_id === updated.session_id && current.revision > updated.revision
-      ? current : withQueuedSettings(updated, queuedSettings.current));
+    setSession(current => current?.session_id === updated.session_id && current.revision > updated.revision ? current : updated);
   }, []);
 
   const refreshList = useCallback(async () => {
@@ -423,6 +427,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     setError(null);
     const request = settingsWrite.current.catch(() => undefined).then(write);
     settingsWrite.current = request;
+    inflightWrites.current.add(request);
+    const done = () => { inflightWrites.current.delete(request); };
+    request.then(done, done);
     return request.catch((writeError: unknown) => {
       rollback();
       const message = errorText(writeError);
@@ -432,9 +439,13 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     });
   }, []);
 
+  const effectiveSession = useMemo(() => session && withQueuedSettings(session, pendingSettings), [session, pendingSettings]);
+  const effectiveDraft = useMemo(() => pendingSettings.reduce<CanvasAgentSessionUpdate>(
+    (current, item) => (item.sessionId === null ? { ...current, ...item.update } : current), draft), [draft, pendingSettings]);
+
   /** 新会话沿用当前会话的模型 / 思考 / 权限；没有当前会话时用上次选过的模型。 */
   const createSession = useCallback(async (title = '新对话') => {
-    const settings: CanvasAgentSessionUpdate = session ? carriedSettings(session) : draft;
+    const settings: CanvasAgentSessionUpdate = effectiveSession ? carriedSettings(effectiveSession) : effectiveDraft;
     let created = projectId === null ? await createCanvasAgentSession(null, title, settings)
       : await createCanvasAgentSession(projectId, '新对话');
     if (projectId !== null && Object.keys(settings).length) {
@@ -447,12 +458,12 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     setStreaming('');
     void refreshList().catch(() => undefined);
     return created;
-  }, [draft, projectId, refreshList, session]);
+  }, [effectiveDraft, effectiveSession, projectId, refreshList]);
 
   /** 新对话只清空面板，设置沿用当前会话；真正的会话在发第一条消息时才建。 */
   const newSession = useCallback(() => {
     explicitDraft.current = true;
-    if (session) setDraft(carriedSettings(session));
+    if (effectiveSession) setDraft(carriedSettings(effectiveSession));
     if (projectId === null) updateStudioView({ activeSessionId: null });
     setRestoring(false);
     setSelecting(false);
@@ -463,7 +474,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     setStreaming('');
     setTool(null);
     setError(null);
-  }, [projectId, session]);
+  }, [effectiveSession, projectId]);
 
   const updateSettings = useCallback((update: CanvasAgentSessionUpdate) => {
     if (update.model && update.model_alias) {
@@ -485,22 +496,12 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       setDraft(current => ({ ...current, ...update }));
       return Promise.resolve(undefined);
     }
-    // 先在本地生效：有会话就叠到会话上，首页还没有会话就改草稿。
-    const previous = session;
-    const previousDraft = draft;
-    const queued = session ? { sessionId: session.session_id, update } : null;
-    if (queued) {
-      queuedSettings.current = [...queuedSettings.current, queued];
-      setSession(current => current?.session_id === queued.sessionId ? withQueuedSettings(current, [queued]) : current);
-    } else setDraft(current => ({ ...current, ...update }));
-    const settle = () => { if (queued) queuedSettings.current = queuedSettings.current.filter(item => item !== queued); };
-    const rollback = () => {
-      if (!previous) { setDraft(previousDraft); return; }
-      // 回到写入前的值（之后排队的修改照样叠上去），再读一次服务端为准。
-      setSession(current => current?.session_id === previous.session_id && current.revision === previous.revision
-        ? withQueuedSettings(previous, queuedSettings.current) : current);
-      void loadSession(previous.session_id).catch(() => undefined);
-    };
+    // 先在本地生效：作为待定修改叠在确认值上（有会话叠会话，首页还没有会话叠草稿）。
+    const item: PendingSetting = { sessionId: session?.session_id ?? null, update };
+    setPendingSettings(list => [...list, item]);
+    const settle = () => setPendingSettings(list => list.filter(entry => entry !== item));
+    // 失败：只拿掉这一条待定修改，显示回到确认值加其余待定修改；有会话再读一次服务端为准。
+    const rollback = () => { if (session) void loadSession(session.session_id).catch(() => undefined); };
     if (preferenceTarget) {
       const request = saveSetting(async () => {
         try {
@@ -529,7 +530,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       });
       return request;
     }
-    const sessionId = previous!.session_id;
+    const sessionId = session!.session_id;
     return saveSetting(async () => {
       try {
         const updated = await updateCanvasAgentSession(projectId, sessionId, update);
@@ -559,10 +560,12 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     setOutgoing({ id, text, title, clientId, sessionId: session?.session_id ?? null, revision: session?.revision ?? null });
     const claim = (target: CanvasAgentSession | StudioAgentSession) => setOutgoing(current => current?.id === id
       ? { ...current, sessionId: target.session_id, revision: target.revision } : current);
+    // 点发送这一刻还在写入的设置：这一轮依赖它们。任一写入失败就不发，草稿由调用方填回。
+    const dependsOn = [...inflightWrites.current];
     return run(async () => {
       try {
-        // 刚改的设置还在写入：等它落盘再发，这一轮按新设置跑。
-        await settingsWrite.current.catch(() => undefined);
+        const writes = await Promise.allSettled(dependsOn);
+        if (writes.some(result => result.status === 'rejected')) throw new Error('设置没有保存，消息未发送');
         return await action(claim);
       } finally {
         setOutgoing(current => current?.id === id ? null : current);
@@ -672,9 +675,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const clearError = useCallback(() => setError(null), []);
 
-  const displayedSession = withOutgoing(session, outgoing);
+  const displayedSession = withOutgoing(effectiveSession, outgoing);
   return {
-    sessions, session: displayedSession, draft, streaming, tool, models, generationModels, skills, error, pending: pending || selecting,
+    sessions, session: displayedSession, draft: effectiveDraft, streaming, tool, models, generationModels, skills, error, pending: pending || selecting,
     settingsFailures: settingsFailure.count, settingsError: settingsFailure.message,
     usage: usage && usage.sessionId === session?.session_id ? usage.value : null,
     plan: plan && plan.sessionId === session?.session_id ? plan.value : null,
