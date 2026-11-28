@@ -1174,8 +1174,6 @@ def test_readopt_race_and_adopt_errors(client, monkeypatch, error, status, code)
 
 @pytest.mark.parametrize(("method", "path", "capability"), [
     ("POST", "/api/team-libraries/lib_x/share", "edit"),
-    ("POST", "/api/creation-assets/generation/from-job", "edit"),
-    ("POST", "/api/creation-assets/generation/from-canvas", "edit"),
     ("POST", "/api/creation-assets/staleness", "read"),
     ("POST", "/api/creation-assets/ca_x/readopt", "edit"),
     ("POST", "/api/canvas/projects/cp_x/creation-assets/ca_x/reproduce", "edit"),

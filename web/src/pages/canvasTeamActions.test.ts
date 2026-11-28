@@ -78,7 +78,7 @@ describe('canvasNodeSaveRequest', () => {
     })).toEqual({
       libraryMode: 'assets',
       request: {
-        requestId: 'r2', kind: 'media', title: '城堡', sourcePath: 'canvases/canvas-one/uploads/video.bin',
+        requestId: 'r2', kind: 'media', title: '城堡', source: { kind: 'canvas_result', canvas_project_id: 'canvas-one', node_id: 'node-image', version_id: 'v-video' },
         previewUrl: '/media', mediaKind: 'video', projectId: 'canvas-one',
       },
     });

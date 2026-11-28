@@ -9,8 +9,6 @@ from character_workflow.lib.schemas import (
     CanvasReproduceResponse,
     CreationAssetStalenessBatch,
     CreationAssetStalenessBatchRequest,
-    CreationGenerationFromCanvas,
-    CreationGenerationFromJob,
     TeamLibraryChangeEvent,
     TeamLibraryIndexEntry,
     TeamShareCanvasResult,
@@ -98,50 +96,6 @@ def test_change_event_rejects_unknown_change_and_status():
         TeamLibraryChangeEvent.model_validate({**base, "change": "renamed"})
     with pytest.raises(ValidationError):
         TeamLibraryChangeEvent.model_validate({**base, "status": "broken"})
-
-
-def test_generation_from_job_bounds_and_forbids_extra():
-    ok = CreationGenerationFromJob(job_id="j1", output_index=0, title="封面")
-    assert ok.tags == []
-    assert ok.project_id is None
-
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="j1", output_index=-1, title="封面")
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="", output_index=0, title="封面")
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="j" * 161, output_index=0, title="封面")
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="j1", output_index=0, title="")
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="j1", output_index=0, title="t" * 121)
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob(job_id="j1", output_index=0, title="封面", tags=["t"] * 21)
-    with pytest.raises(ValidationError):
-        CreationGenerationFromJob.model_validate(
-            {"job_id": "j1", "output_index": 0, "title": "封面", "character_id": "x"}
-        )
-
-
-def test_generation_from_canvas_bounds_and_forbids_extra():
-    ok = CreationGenerationFromCanvas(
-        canvas_project_id="cp", node_id="n", version_id="v", title="封面"
-    )
-    assert ok.tags == []
-
-    base = {"canvas_project_id": "cp", "node_id": "n", "version_id": "v", "title": "封面"}
-    for field in ("canvas_project_id", "node_id", "version_id"):
-        with pytest.raises(ValidationError):
-            CreationGenerationFromCanvas.model_validate({**base, field: ""})
-        with pytest.raises(ValidationError):
-            CreationGenerationFromCanvas.model_validate({**base, field: "x" * 161})
-    with pytest.raises(ValidationError):
-        CreationGenerationFromCanvas.model_validate({**base, "title": "t" * 121})
-    with pytest.raises(ValidationError):
-        CreationGenerationFromCanvas.model_validate({**base, "tags": ["t"] * 21})
-    # project_id 取 canvas_project_id，请求里不收。
-    with pytest.raises(ValidationError):
-        CreationGenerationFromCanvas.model_validate({**base, "project_id": "cp"})
 
 
 def test_staleness_batch_request_bounds():
