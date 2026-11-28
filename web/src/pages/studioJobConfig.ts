@@ -64,7 +64,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   // 记录统一后更多 job 流经此处（含 skill 出图 / 乐观提交回包），params 缺省给 {} 兜底，免渲染期崩溃。
   const p = job.params ?? {};
   return {
-    prompt: job.prompt ?? '',
+    prompt: p.subject_prompt ?? job.prompt ?? '',
     ...(p.workflow_inputs != null ? { workflowInputs: p.workflow_inputs } : {}),
     kind: isVideo ? 'video' : 'image',
     alias: job.alias,
@@ -88,7 +88,10 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ...(typeof p.frame_duration_ms === 'number' ? { frame_duration_ms: p.frame_duration_ms } : {}),
     } : {}),
     ...(p.background === 'transparent' ? { background: 'transparent' as const } : {}),
-    referenceImages: referenceImagesFor(job),
+    referenceImages: referenceImagesFor(p.subjects?.length ? {
+      ...job, params: { ...p, reference_images: p.reference_images?.slice(0,
+        Math.max(0, p.reference_images.length - p.subjects.reduce((count, s) => count + s.item_ids.length, 0))) },
+    } : job),
     sourceAssetTitle: typeof p.creation_asset_source_title === 'string'
       ? p.creation_asset_source_title
       : undefined,

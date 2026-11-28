@@ -206,6 +206,9 @@ def _job_ref_paths(job: Job) -> list[tuple[RecipeInputRole, Path]]:
     for field, role in _JOB_REF_FIELDS:
         value = getattr(job.params, field)
         values = [value] if isinstance(value, str) else list(value or [])
+        if field == "reference_images" and job.params.subjects:
+            count = sum(len(s.item_ids) for s in job.params.subjects)
+            values = values[:-count] if count else values
         refs.extend((role, _shareable_file(item)) for item in values)
     return refs
 
@@ -219,7 +222,7 @@ def recipe_from_job_output(job_id: str, output_index: int) -> RecipeSource:
     cost_cny, cost_basis = _job_cost(job)
     recipe = GenerationRecipe(
         mode=job.kind.value, model=job.model, provider=job.provider, alias=job.alias,
-        final_prompt=job.prompt, draft_prompt=None,
+        final_prompt=job.prompt, draft_prompt=job.params.subject_prompt,
         params=recipe_params(job.params.model_dump(mode="json", exclude_none=True)),
         inputs=inputs, cost_cny=cost_cny, cost_basis=cost_basis, submitted_at=job.submitted_at,
     )

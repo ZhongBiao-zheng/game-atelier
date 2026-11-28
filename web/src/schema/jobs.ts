@@ -22,6 +22,8 @@ export type JobKind = 'text' | 'image' | 'video' | 'audio';
 export type Namespace = 'studio' | 'canvas' | 'assist';
 
 export interface JobParams {
+  subjects?: { id: string; name: string; revision: number; item_ids: string[] }[] | null;
+  subject_prompt?: string | null;
   collab_guest_name?: string | null;
   collab_guest_client?: string | null;
   collab_borrow_channel?: string | null;

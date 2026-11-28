@@ -2354,6 +2354,12 @@ def _create_user_job(
             raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
         params.n = image_count
 
+    from character_workflow.lib.library_subjects import expand
+    try:
+        prompt = expand(prompt, params, model_id)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
     job = Job(
         job_id=job_id or new_job_id(),
         studio_agent_session_id=studio_agent_session_id,

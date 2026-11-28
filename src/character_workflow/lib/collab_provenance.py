@@ -92,7 +92,7 @@ def build_frozen_from_job(
     return CanvasFrozenGeneration(
         source_kind=job.namespace, mode=snapshot.mode if snapshot else job.kind.value,
         prompt=(snapshot.draft_prompt if snapshot.draft_prompt is not None else _clean_canvas_prompt(snapshot))
-        if snapshot else job.prompt,
+        if snapshot else (job.params.subject_prompt or job.prompt),
         params=public_params(params, model.workflow_inputs if model else ()), inputs=inputs or [], duration_s=duration,
         cost_cny=job.params.actual_cost_cny if job.params.actual_cost_cny is not None
         else job.params.estimated_cost_cny,

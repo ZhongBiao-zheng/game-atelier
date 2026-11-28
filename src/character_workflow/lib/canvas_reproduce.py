@@ -141,7 +141,7 @@ def _draft(recipe: GenerationRecipe, title: str, model: str | None, alias: str |
     return CanvasGenerationDraft(
         mode=recipe.mode,
         # 画布 Run 补的编号前缀已由 generation_recipe 建配方时精确去掉，这里原样写入。
-        prompt=recipe.final_prompt,
+        prompt=recipe.params.get("subject_prompt") or recipe.final_prompt,
         input_policy="all_connected",
         model=model or "",
         alias=alias,
