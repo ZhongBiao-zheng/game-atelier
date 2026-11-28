@@ -35,7 +35,7 @@ it('keeps the last snapshot read-only while offline and resumes only after a fre
   expect(result.current.submit({kind:'node_delete',node_ids:['n']})).toBe(true);
   act(()=>first.close());
   expect(result.current.connected).toBe(false);
-  expect(result.current.closed).toContain('已离线');
+  expect(result.current.reconnecting).toBe(true);
   expect(result.current.document?.revision).toBe(2);
   expect(result.current.submit({kind:'node_delete',node_ids:['n']})).toBe(false);
   act(()=>{vi.advanceTimersByTime(1000);});
@@ -89,7 +89,7 @@ it('shows editing controls only while the host authorizes edits and stays connec
   expect(screen.getByRole('button',{name:'上传素材'})).toBeEnabled();
   expect(screen.getByRole('button',{name:'添加节点'})).toBeEnabled();
   act(()=>ws.close());
-  expect(screen.queryByRole('button',{name:'上传素材'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'上传素材'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'返回共享画布'})).toBeEnabled();
   unmount();
 });

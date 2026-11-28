@@ -43,6 +43,11 @@ type OpAction =
 
 interface HistoryEntry { opId: string; revision: number; touched: string[] }
 type Stack = 'past' | 'future';
+interface Settle { resolve: () => void; reject: (error: Error) => void }
+interface PendingOp { stack: Stack | null; entry?: HistoryEntry; settle?: Settle }
+
+/** 等房主确认一次操作的上限；超时按失败处理，调用方保留弹窗内容。 */
+const OP_ACK_TIMEOUT_MS = 10_000;
 
 /** Inverses live on the host, including incident edges and original authorship. */
 export class PerUserUndoStack {
@@ -76,28 +81,35 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
   const [borrow, setBorrow] = useState(false);
   const [connected, setConnected] = useState(false);
   const [closed, setClosed] = useState('');
+  const [reconnecting, setReconnecting] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const latest = useRef<CanvasDocument | null>(null);
   const [,setHistoryTick] = useState(0);
   const history = useRef(new PerUserUndoStack());
-  const pending = useRef(new Map<string, {stack:Stack | null; entry?:HistoryEntry}>());
+  const pending = useRef(new Map<string, PendingOp>());
   const presence = useRef({selected_node_ids:[] as string[], positions:{} as Record<string, CanvasPoint>});
   const presenceTimer = useRef<number>();
   const onUpdate = useRef(onRevision);
   onUpdate.current = onRevision;
 
   useEffect(() => {
-    if (!path) { setConnected(false); setMembers([]); setDocument(null); setClosed(''); return; }
+    if (!path) { setConnected(false); setMembers([]); setDocument(null); setClosed(''); setReconnecting(false); return; }
     let active = true;
     let retry: number;
     let socket: WebSocket;
     let self = '';
     let tries = 0;
+    let roomClosed = false;
     history.current = new PerUserUndoStack();
     latest.current = null;
     setDocument(null);
     setClosed('');
+    setReconnecting(false);
     const pendingOps = pending.current;
+    function dropPending() {
+      pendingOps.forEach(item => item.settle?.reject(new Error('连接已断开，重连后再保存')));
+      pendingOps.clear();
+    }
     function connect() {
       if (!active || !path) return;
       const url = new URL(path, window.location.origin);
@@ -112,19 +124,22 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
           tries = 0;
           self = event.client_id;
           setClientId(self); setMode(event.mode); setBorrow(event.allow_borrow_provider);
-          setConnected(true); setClosed(''); setMembers(event.members);
+          roomClosed = false;
+          setConnected(true); setClosed(''); setReconnecting(false); setMembers(event.members);
           latest.current = event.document;
           setDocument(event.document);
           socket.send(JSON.stringify({type:'presence_update', ...presence.current}));
         } else if (event.type === 'presence_state') setMembers(event.members);
         else if (event.type === 'room_policy_changed') { setMode(event.mode); setBorrow(event.allow_borrow_provider); }
-        else if (event.type === 'room_closed') { setClosed(event.reason); setConnected(false); }
+        else if (event.type === 'room_closed') { roomClosed = true; setClosed(event.reason); setReconnecting(false); setConnected(false); }
         else if (event.type === 'conflict_notice') notify.info(`该节点已由 ${event.by} 更新`);
         else if (event.type === 'op_rejected') {
           const item = pendingOps.get(event.op_id);
           pendingOps.delete(event.op_id);
           if (item?.entry && item.stack && !String(event.detail).includes('他人')) history.current[item.stack].push(item.entry);
-          notify.error(String(event.detail));
+          // 等结果的调用方（弹窗）在原处显示原因，不再另弹提示。
+          if (item?.settle) item.settle.reject(new Error(String(event.detail)));
+          else notify.error(String(event.detail));
         } else if (event.type === 'op_applied' || event.type === 'document_sync') {
           const before = latest.current;
           let next: CanvasDocument;
@@ -135,6 +150,7 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
           if (event.client_id === self) {
             const item = pendingOps.get(event.op_id);
             if (item) history.current.applied({opId:event.op_id, revision:event.revision, touched:event.touched_node_ids}, item.stack);
+            item?.settle?.resolve();
             pendingOps.delete(event.op_id);
           } else if (event.touched_node_ids) history.current.changed(event.touched_node_ids, event.revision);
           else if (before) {
@@ -152,8 +168,9 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
         if (!active) return;
         ws.current = null;
         setConnected(false); setMembers([]);
-        setClosed(previous => previous || '房主已离线，画布已切换为只读');
-        pendingOps.clear();
+        // 只有房主明确关房才说离线；其余断线都在重连，界面只降为不可编辑。
+        if (!roomClosed) setReconnecting(true);
+        dropPending();
         retry = window.setTimeout(connect, Math.min(1000 * 2 ** tries++, 8000));
       };
     }
@@ -163,19 +180,39 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
       window.clearTimeout(retry); window.clearTimeout(presenceTimer.current);
       presenceTimer.current = undefined;
       ws.current = null;
+      // 离开画布：等结果的调用方也一起卸了，不再回调（避免离开时弹「已断开」）。
       pendingOps.clear();
       socket?.close();
     };
   }, [path]);
 
-  const submit = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry) => {
+  const send = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry, settle?:Settle) => {
     const socket = ws.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !latest.current || !connected || mode !== 'edit') return false;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !latest.current || !connected || mode !== 'edit') return null;
     const opId = crypto.randomUUID();
-    pending.current.set(opId, {stack, entry});
+    pending.current.set(opId, {stack, entry, settle});
     socket.send(JSON.stringify({type:'submit_op', op:{...op, op_id:opId, base_revision:baseRevision ?? latest.current.revision}}));
-    return true;
+    return opId;
   }, [connected, mode]);
+  const submit = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry) =>
+    send(op, baseRevision, stack, entry) !== null, [send]);
+  /** 提交并等房主确认：applied 时 resolve；被拒、断线或超时 reject，调用方据此保留编辑内容。 */
+  const submitAndWait = useCallback((op: OpAction, baseRevision?:number) => new Promise<void>((resolve, reject) => {
+    let timer = 0;
+    const settle: Settle = {
+      resolve: () => { window.clearTimeout(timer); resolve(); },
+      reject: error => { window.clearTimeout(timer); reject(error); },
+    };
+    const opId = send(op, baseRevision, null, undefined, settle);
+    if (!opId) { reject(new Error('连接已断开，重连后再保存')); return; }
+    timer = window.setTimeout(() => {
+      // 记录留着：迟到的确认照样进撤销栈，只是不再回调。已离开画布（记录清空）就不再报。
+      const item = pending.current.get(opId);
+      if (!item) return;
+      item.settle = undefined;
+      reject(new Error('房主未响应，请重试'));
+    }, OP_ACK_TIMEOUT_MS);
+  }), [send]);
 
   const restore = (stack:Stack) => {
     if (!connected || mode !== 'edit') return;
@@ -196,7 +233,7 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
     history.current.applied({opId:result.op_id,revision:result.revision,touched:result.touched_node_ids},null);
     setHistoryTick(value=>value+1);
   }
-  return {recordCommand,document, members, clientId, mode, allowBorrow:borrow, connected, closed, submit, updatePresence,
+  return {recordCommand,document, members, clientId, mode, allowBorrow:borrow, connected, closed, reconnecting, submit, submitAndWait, updatePresence,
     undo:() => restore('past'), redo:() => restore('future'), canUndo:history.current.available('past'),
     canRedo:history.current.available('future')};
 }

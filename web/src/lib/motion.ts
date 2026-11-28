@@ -36,6 +36,11 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** 视口平移 / 缩放的时长（xyflow 收毫秒）。减弱动态效果时直接跳到位。 */
+export function viewportMotionMs(seconds: number) {
+  return prefersReducedMotion() ? 0 : seconds * 1000;
+}
+
 /** value 变化时（首次挂载与 StrictMode 重跑都不算）跑一次 run。
  *  减弱动态效果时默认跳过；只动透明度的动画传 keepWhenReduced，由 run 按第三个参数去掉位移与缩放。 */
 export function useAnimateOnChange<T>(

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { Background, Handle, Position, ReactFlow, useReactFlow, type Node, type NodeProps } from '@xyflow/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { authenticateCollab, listCollabPeers } from '@/api/collab';
 import { AnnotationLayer } from '@/components/canvas/annotation/AnnotationLayer';
 import { ResultStackChrome } from '@/components/canvas/CanvasEditorViews';
@@ -12,7 +13,7 @@ import { useCollabRoom, type RoomMember } from './useCollabRoom';
 import { RoomPresence, memberColor } from './RoomPresence';
 import { dragPositions, groupSharedNodes, newSharedNode, sharedNodeNames, type SharedNodeKind } from './sharedGraph';
 import { FileInput } from '@/components/ui/file-input';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { notify } from '@/lib/notify';
 import type { CanvasImageEditSavePayload } from '@/api/canvas';
 import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
@@ -29,7 +30,12 @@ import { SharedCanvasActions } from '@/components/canvas/SharedCanvasActions';
 import { SharedCanvasPasscodeDialog } from '@/components/canvas/SharedCanvasPasscodeDialog';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { AddIcon, BackIcon, RedoIcon, UndoIcon, UploadIcon } from '@/components/ui/icons';
+import { AddIcon, BackIcon, LoadingIcon, MoreIcon, RedoIcon, UndoIcon, UploadIcon } from '@/components/ui/icons';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { Hint } from '@/components/ui/tooltip';
+import { useRetained, useRetainedSession } from '@/components/ui/retained';
+import { markCanvasNodesEntering, playCanvasNodeEntrance } from '@/components/canvas/canvasNodeAttention';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, prefersReducedMotion, shakeOnError, viewportMotionMs } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { errorText } from '@/lib/errorText';
 import type { CanvasContentVersion, CanvasDocument, CanvasNode, CanvasPoint, JsonValue } from '@/schema/canvas';
@@ -54,8 +60,16 @@ function nodeVersion(node: CanvasNode, document: CanvasDocument) {
   return id ? document.content_versions[id] : undefined;
 }
 
+/** 连接点：沿用主画布的 canvas-node-handle，悬停或选中才淡入；不可编辑时不挂 connectable，一直藏着。 */
+function SharedHandle(props: ComponentProps<typeof Handle>) {
+  return <Handle {...props} className="canvas-node-handle"><span className="canvas-node-handle-dot" aria-hidden="true" /></Handle>;
+}
+
 function SharedNodeCard({data, selected}: NodeProps<SharedNode>) {
   const { node, version, url, member, editable, doc, mediaUrl, projectId } = data;
+  const shell = useRef<HTMLDivElement>(null);
+  // 别人新加、或重连后才出现的节点：和主画布一样从略小处淡入，只在挂载那一次。
+  useLayoutEffect(() => { if (shell.current) playCanvasNodeEntrance(node.id, shell.current); }, [node.id]);
   const inputs = node.type === 'compare' ? Object.fromEntries(doc.connections.flatMap(edge => {
     if (edge.target_node_id !== node.id || edge.role !== 'input' || !isCanvasCompareSlot(edge.slot)) return [];
     const source = doc.nodes.find(n => n.id === edge.source_node_id);
@@ -63,7 +77,7 @@ function SharedNodeCard({data, selected}: NodeProps<SharedNode>) {
   })) : {};
   const parts = node.type === 'layer_stack' ? orderedLayerStackParts(node).filter(part=>part.visible) : [];
   const annotation = node.type === 'image' && node.data.annotation?.visible ? node.data.annotation : null;
-  return <div className={cn('relative h-full w-full rounded-lg border border-border bg-card', selected && 'ring-2 ring-primary',
+  return <div ref={shell} className={cn('relative h-full w-full rounded-lg border border-border bg-card', selected && 'ring-2 ring-primary',
     node.type === 'group' && 'border-dashed bg-transparent')} style={member ? {outline:'2px solid '+memberColor(member)} : undefined}>
     {member && <span className="absolute bottom-full right-0 z-10 rounded bg-card px-1 text-xs" style={{color:memberColor(member)}}>{member.display_name}</span>}
     <div className="absolute inset-x-0 bottom-full truncate pb-1 text-sm font-medium">{node.title}</div>
@@ -85,10 +99,10 @@ function SharedNodeCard({data, selected}: NodeProps<SharedNode>) {
     {annotation && version?.kind === 'image' && <AnnotationLayer elements={annotation.elements} imageWidth={version.width ?? 1024}
       imageHeight={version.height ?? 1024} className="pointer-events-none absolute inset-0 size-full" />}
     {node.type === 'compare' ? (['before','after'] as const).map((slot,i) =>
-      <Handle key={slot} type="target" id={slot} position={Position.Left} isConnectable={editable}
-        style={{top:i === 0 ? '33%' : '66%'}} title={slot} className={editable ? '' : 'pointer-events-none opacity-0'} />)
-      : <Handle type="target" position={Position.Left} isConnectable={editable} className={editable ? '' : 'pointer-events-none opacity-0'} />}
-    <Handle type="source" position={Position.Right} isConnectable={editable} className={editable ? '' : 'pointer-events-none opacity-0'} />
+      <SharedHandle key={slot} type="target" id={slot} position={Position.Left} isConnectable={editable}
+        style={{top:i === 0 ? '33%' : '66%'}} aria-label={slot === 'before' ? '连接到 Before' : '连接到 After'} />)
+      : <SharedHandle type="target" position={Position.Left} isConnectable={editable} aria-label="连接到此节点" />}
+    <SharedHandle type="source" position={Position.Right} isConnectable={editable} aria-label="从此节点连接" />
   </div>;
 }
 
@@ -108,12 +122,18 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   const connected = useRef(false);
   connected.current = liveRoom.connected;
   const editable = Boolean(room && liveRoom.connected && liveRoom.mode === 'edit');
+  // 编辑入口跟着房主授权走，断线只把它们禁用：抖一下网不让整排按钮消失又弹回。
+  const canEdit = Boolean(room && liveRoom.mode === 'edit');
+  const offline = !liveRoom.connected;
   const [tool, setTool] = useState<'edit'|'annotation'|'inpaint'|'outpaint'|'layers'|null>(null);
+  const [uploading, setUploading] = useState(0);
+  const [connecting, setConnecting] = useState(false);
+  const uploadButton = useRef<HTMLButtonElement>(null);
   const [dragging, setDragging] = useState<Record<string,CanvasPoint>>({});
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const region = useRef<HTMLElement>(null);
-  const {screenToFlowPosition, fitView} = useReactFlow();
+  const {screenToFlowPosition, flowToScreenPosition, setCenter, getZoom} = useReactFlow();
   const {updatePresence, submit, members, clientId} = liveRoom;
   const dragRevision = useRef<number>();
   useEffect(() => { updatePresence(selectedIds); }, [selectedIds,updatePresence]);
@@ -172,6 +192,17 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   }, [transport, peerKey, projectId, attempt]);
 
   const doc = room ? liveRoom.document ?? room.document : undefined;
+  // 首帧快照之后才出现的节点（别人新加、自己新加、重连补上的）点名进场；节点卡片挂载时播。
+  const knownNodeIds = useRef<Set<string> | null>(null);
+  if (doc) {
+    const ids = doc.nodes.map(node => node.id);
+    const known = knownNodeIds.current;
+    if (known) {
+      const fresh = ids.filter(id => !known.has(id));
+      if (fresh.length) markCanvasNodesEntering(fresh);
+    }
+    if (!known || ids.length !== known.size || ids.some(id => !known.has(id))) knownNodeIds.current = new Set(ids);
+  }
   const [expandedStacks, setExpandedStacks] = useState<Set<string>>(() => new Set());
   const owners = useMemo(() => resultStackOwners(doc?.nodes ?? []), [doc?.nodes]);
   const collapsedMembers = useMemo(() => new Map(
@@ -191,13 +222,20 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
   }, [collapsedMembers]);
   const selectedNode = selectedIds.length === 1 ? doc?.nodes.find(node=>node.id === selectedIds[0]) : undefined;
   const selectedVersion = doc && selectedNode ? nodeVersion(selectedNode,doc) : undefined;
+  // 编辑弹窗只看 tool：断线、节点被删都不卸掉正在写的内容；关闭期间沿用最后一份播完退场。
+  const toolSession = useRetainedSession(tool && selectedNode ? tool + ':' + selectedNode.id : null);
+  const toolNode = useRetained(tool ? selectedNode : null);
+  const toolVersion = useRetained(tool ? selectedVersion : null);
+  const shownTool = toolSession?.value.split(':')[0];
   const deletable = editable && selectedIds.length > 0 && selectedIds.every(id =>
     doc?.nodes.find(node => node.id === id)?.created_by_client === liveRoom.clientId);
   const nodes = useMemo(() => doc?.nodes.map<SharedNode>(node => {
     const version = nodeVersion(node, doc);
     const others = members.filter(member=>member.client_id !== clientId);
-    const position = dragging[node.id] ?? others.find(member=>member.positions?.[node.id])?.positions[node.id] ?? node.position;
+    const remote = dragging[node.id] ? undefined : others.find(member=>member.positions?.[node.id])?.positions[node.id];
+    const position = dragging[node.id] ?? remote ?? node.position;
     return { id: node.id, type: 'shared', position, hidden:collapsedMembers.has(node.id),
+      className: remote ? 'shared-remote-moving' : undefined,
       draggable:editable && !owners.has(node.id), zIndex: node.type === 'group' ? -1 : node.z_index,
       style: canvasNodeRenderedSize(node, doc.content_versions), selected: selectedIds.includes(node.id),
       data: {node,version,editable,doc,projectId,
@@ -215,7 +253,9 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     return [{id:edge.id, source, target, selected:edge.id === selectedEdge,
       targetHandle:edge.role === 'input' && isCanvasCompareSlot(edge.slot) ? edge.slot : undefined}];
   }) ?? [], [doc,selectedEdge,collapsedMembers]);
-  const detailNode = doc?.nodes.find(node => node.id === detailId);
+  // 详情弹窗关闭的退场里沿用最后一个节点，不在 150ms 里变空。
+  const shownDetailId = useRetained(detailId);
+  const detailNode = doc?.nodes.find(node => node.id === shownDetailId);
   const detail = doc && detailNode && nodeVersion(detailNode, doc);
 
   useEffect(() => {
@@ -249,7 +289,18 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     }
     if (!liveRoom.submit({kind:'node_add',node,text_versions:versions})) return;
     setSelectedIds([node.id]); setSelectedEdge(null);
-    window.setTimeout(() => void fitView({nodes:[{id:node.id}],maxZoom:1}),200);
+    reveal(node);
+  }
+  /** 和主画布一样：新节点已在视口里就不动；不在时保持缩放、平移到它的中心。 */
+  function reveal(node:CanvasNode) {
+    if (!doc || !region.current) return;
+    const size = canvasNodeRenderedSize(node, doc.content_versions);
+    const box = region.current.getBoundingClientRect();
+    const start = flowToScreenPosition(node.position);
+    const end = flowToScreenPosition({x:node.position.x+size.width,y:node.position.y+size.height});
+    if (start.x >= box.left && start.y >= box.top && end.x <= box.right && end.y <= box.bottom) return;
+    void setCenter(node.position.x+size.width/2, node.position.y+size.height/2,
+      {zoom:getZoom(), duration:viewportMotionMs(MOTION_DURATION.slow)});
   }
   async function addPlugin(plugin:PluginPackageLock, contribution:PluginNodeContribution) {
     if (!doc) return;
@@ -274,17 +325,21 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
         base_visible:true,base_z_index:0,layers:[],active_run_id:null,error:null}});
   }
   async function upload(files:FileList | null, at:CanvasPoint) {
-    if (!files || !editable) return;
+    if (!files?.length || !editable) return;
     let offset = 0;
-    for (const file of Array.from(files)) {
-      try {
-        const result = await transport.upload(projectId,file,{x:at.x+offset,y:at.y+offset});
-        liveRoom.recordCommand(result);setSelectedIds([result.node_id]); offset += 32;
-      } catch (reason) {notify.error(errorText(reason));}
-    }
+    setUploading(count => count + 1);
+    try {
+      for (const file of Array.from(files)) {
+        try {
+          const result = await transport.upload(projectId,file,{x:at.x+offset,y:at.y+offset});
+          liveRoom.recordCommand(result);setSelectedIds([result.node_id]); offset += 32;
+        } catch (reason) {notify.error(errorText(reason)); shakeOnError(uploadButton.current);}
+      }
+    } finally { setUploading(count => count - 1); }
   }
   async function saveImageEdit(submission:CanvasMaskEditSubmission) {
-    if (!editable || !doc || !selectedNode || !selectedVersion) return false;
+    if (!editable) throw new Error(offline ? '连接已断开，重连后再保存' : '当前为仅查看');
+    if (!doc || !selectedNode || !selectedVersion) return false;
     const payload:CanvasImageEditSavePayload = {
       expected_revision:doc.revision,options:submission.options,editor_state:submission.editorState,
       generation_draft:submission.draft,reference_node_id:submission.referenceNodeId,reference_version_id:submission.referenceVersionId,
@@ -293,10 +348,20 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     const result = await transport.saveImageEdit(projectId,payload,submission.mask);
     liveRoom.recordCommand(result);setSelectedIds([result.node_id]); setTool(null); return true;
   }
+  /** 删除等房主确认后再给撤销提示：被拒时撤销栈顶还是上一步，提前给会撤错。 */
+  function removeWithUndo(op:Parameters<typeof liveRoom.submitAndWait>[0], message:string) {
+    const {undo} = liveRoom;
+    liveRoom.submitAndWait(op).then(() => notify.undo(message, undo), reason => notify.error(errorText(reason)));
+  }
   function removeSelection() {
-    if (selectedEdge) { liveRoom.submit({kind:'connection_delete',connection_id:selectedEdge}); setSelectedEdge(null); }
-    else if (deletable) {liveRoom.submit({kind:'node_delete',node_ids:selectedIds});setSelectedIds([]);}
-    else if (selectedIds.length) notify.info('仅房主可删除他人创建的节点');
+    if (selectedEdge) {
+      removeWithUndo({kind:'connection_delete',connection_id:selectedEdge}, '已删除连线');
+      setSelectedEdge(null);
+    } else if (deletable) {
+      removeWithUndo({kind:'node_delete',node_ids:selectedIds},
+        selectedIds.length === 1 ? '已删除节点' : `已删除 ${selectedIds.length} 个节点`);
+      setSelectedIds([]);
+    } else if (selectedIds.length) notify.info('仅房主可删除他人创建的节点');
   }
   useEffect(() => {
     if (!editable || tool || detailId) return;
@@ -310,6 +375,7 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     window.addEventListener('keydown',shortcuts);
     return () => window.removeEventListener('keydown',shortcuts);
   });
+  const shownChallenge = useRetainedSession(challenge);
   function showDetails(id: string) {
     if (!selectedIds.includes(id)) setSelectedIds([id]);
     setDetailId(id);
@@ -320,7 +386,7 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
     {doc && <ReactFlow<SharedNode> nodes={nodes} edges={edges} nodeTypes={nodeTypes} proOptions={proOptions}
       nodesDraggable={editable} nodesConnectable={editable} edgesReconnectable={false} deleteKeyCode={null}
       multiSelectionKeyCode={['Shift','Meta','Control']} selectionKeyCode={null}
-      className="canvas-flow" fitView fitViewOptions={{maxZoom: 1}} zoomOnDoubleClick={false} minZoom={0.08} maxZoom={5}
+      className={cn('canvas-flow canvas-flow-shared', connecting && 'canvas-flow-connecting')} fitView fitViewOptions={{maxZoom: 1}} zoomOnDoubleClick={false} minZoom={0.08} maxZoom={5}
       onPaneClick={() => {setSelectedIds([]);setSelectedEdge(null);}}
       onNodesChange={changes=>{
         const selections = changes.filter(change=>change.type === 'select');
@@ -337,75 +403,99 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
       onNodeDragStop={(_,node,moved)=>{liveRoom.submit({kind:'node_move_batch',positions:dragPositions(doc,moved.length ? moved : [node])},dragRevision.current);
         setDragging({});updatePresence(selectedIds);}}
       onEdgeClick={(_,edge)=>{if (editable) {setSelectedEdge(edge.id);setSelectedIds([]);}}}
+      onConnectStart={()=>setConnecting(true)} onConnectEnd={()=>setConnecting(false)}
       isValidConnection={edge=>canCreateCanvasInputConnection(doc,edge)}
       onConnect={edge=>{if (editable && canCreateCanvasInputConnection(doc,edge)) liveRoom.submit({kind:'connection_add',connection:{
         id:'edge-'+crypto.randomUUID(),role:'input',source_node_id:edge.source,target_node_id:edge.target,
         slot:isCanvasCompareSlot(edge.targetHandle) ? edge.targetHandle : null}});}}
       onNodeDoubleClick={(_, node) => showDetails(node.id)}
-      onNodeContextMenu={(event, node) => { event.preventDefault(); showDetails(node.id); }}>
+      onNodeContextMenu={event => event.preventDefault()}>
       <Background />
     </ReactFlow>}
-    <header className="absolute left-3 top-3 z-10 flex max-w-full items-center gap-2 rounded-xl border border-border bg-glass p-1.5 pr-3 backdrop-blur-glass shell-glow">
+    {/* 与本地画布同一顶栏容器：桌面版避开红绿灯与窗口拖动区，失焦时一起降对比度；状态条在下方同列。 */}
+    <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-start gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
+    <header className="pointer-events-auto flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-border bg-glass p-1.5 pr-3 backdrop-blur-glass shell-glow">
       <Button variant="ghost" size="icon" aria-label="返回共享画布" onClick={onBack}><BackIcon /></Button>
       <h1 className="truncate text-sm font-medium">{room?.name ?? '共享画布'}</h1>
-      {room && <span className="truncate text-xs text-muted-foreground">{room.owner_display_name} · {editable ? '协作中' : '仅查看'}</span>}
+      {room && <span className="truncate text-xs text-muted-foreground">{room.owner_display_name} · {canEdit ? '协作中' : '仅查看'}</span>}
       <RoomPresence members={liveRoom.members}/>
-      {editable && doc && <>
-        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="添加节点"><AddIcon/></Button></DropdownMenuTrigger>
+      {canEdit && doc && <motion.div layout transition={{layout: MOTION_SPRING.snappy}} className="flex items-center gap-2">
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="添加节点" disabled={offline}><AddIcon/></Button></DropdownMenuTrigger>
           <DropdownMenuContent>{(Object.keys(sharedNodeNames) as SharedNodeKind[]).map(type =>
             <DropdownMenuItem key={type} onSelect={()=>add(newSharedNode(type,doc,center()))}>{sharedNodeNames[type]}</DropdownMenuItem>)}
             {plugins.flatMap(plugin=>plugin.contributes.nodes.map(contribution=><DropdownMenuItem key={plugin.id+contribution.type}
               onSelect={()=>void addPlugin(plugin,contribution).catch(reason=>notify.error(errorText(reason)))}>{contribution.title}</DropdownMenuItem>))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button size="icon" variant="ghost" aria-label="上传素材" onClick={()=>uploadRef.current?.click()}><UploadIcon/></Button>
+        <Button ref={uploadButton} size="icon" variant="ghost" aria-label="上传素材" aria-busy={uploading > 0}
+          disabled={offline || uploading > 0} onClick={()=>uploadRef.current?.click()}>
+          <SwapIcon swapKey={uploading > 0}>{uploading > 0 ? <LoadingIcon className="animate-spin"/> : <UploadIcon/>}</SwapIcon>
+        </Button>
         <FileInput ref={uploadRef} aria-label="选择共享画布素材" multiple accept="image/*,video/*,audio/*"
           onChange={event=>{void upload(event.target.files,center());event.target.value='';}}/>
-        <Button size="icon" variant="ghost" aria-label="撤销我的操作" disabled={!liveRoom.canUndo} onClick={liveRoom.undo}><UndoIcon/></Button>
-        <Button size="icon" variant="ghost" aria-label="重做我的操作" disabled={!liveRoom.canRedo} onClick={liveRoom.redo}><RedoIcon/></Button>
-      </>}
+        <Button size="icon" variant="ghost" aria-label="撤销我的操作" disabled={offline || !liveRoom.canUndo} onClick={liveRoom.undo}><UndoIcon/></Button>
+        <Button size="icon" variant="ghost" aria-label="重做我的操作" disabled={offline || !liveRoom.canRedo} onClick={liveRoom.redo}><RedoIcon/></Button>
+      </motion.div>}
     </header>
-    {room && liveRoom.closed && !error && <p role="status" className="absolute left-3 top-16 rounded-lg border bg-card p-2 text-sm">{liveRoom.closed}</p>}
-    {selectedEdge && editable && <Button className="absolute bottom-3 left-3" size="sm" onClick={removeSelection}>删除连线</Button>}
-    {editable && selectedNode && tool === 'edit' && doc && <SharedNodeEdit key={selectedNode.id} node={selectedNode} doc={doc} room={liveRoom} close={()=>setTool(null)}/>}
-    {editable && selectedNode?.type === 'image' && selectedVersion?.kind === 'image' && tool === 'annotation' &&
-      <SharedAnnotation node={selectedNode} version={selectedVersion} url={transport.mediaUrl(projectId,selectedVersion.version_id)}
-        room={liveRoom} close={()=>setTool(null)}/>}
-    {editable && selectedNode && selectedVersion?.kind === 'image' && (tool === 'inpaint' || tool === 'outpaint') &&
-      <SharedImageEdit node={selectedNode} version={selectedVersion} url={transport.mediaUrl(projectId,selectedVersion.version_id)}
-        mode={tool} save={saveImageEdit} close={()=>setTool(null)}/>}
-    {editable && selectedNode?.type === 'layer_stack' && tool === 'layers' &&
-      <Dialog open onOpenChange={open=>{if (!open) setTool(null);}}><DialogContent aria-describedby={undefined}><DialogHeader>
-        <DialogTitle>图层顺序</DialogTitle></DialogHeader><SharedLayerOrder room={liveRoom} node={selectedNode}/></DialogContent></Dialog>}
-    {error && <div role="alert" className="absolute left-3 top-20 flex items-center gap-2 rounded-lg bg-card p-3 text-sm">
+    {/* 断线 400ms 后才出现：一闪即连上的抖动不出声；连上后 150ms 淡出。 */}
+    <AnimatePresence>{room && !error && (liveRoom.closed || liveRoom.reconnecting) && <motion.p key="link-status" role="status"
+      className="delayed-reveal rounded-lg border bg-card p-2 text-sm" style={{'--reveal-delay':'400ms'} as CSSProperties}
+      exit={{opacity:0, transition:{duration:MOTION_DURATION.fast, ease:MOTION_EASE.subtle}}}>
+      {liveRoom.closed || '恢复连接中…'}
+    </motion.p>}</AnimatePresence>
+    {error && <div role="alert" className="pointer-events-auto flex items-center gap-2 rounded-lg bg-card p-3 text-sm">
       {error}<Button size="sm" variant="outline" onClick={() => setAttempt(n => n + 1)}>重试</Button>
     </div>}
-    {!doc && !error && !challenge && <p role="status" className="absolute top-1/2 w-full text-center text-sm text-muted-foreground">读取共享画布中…</p>}
+    </div>
+    {selectedEdge && canEdit && <Button className="absolute bottom-3 left-3" size="sm" disabled={offline} onClick={removeSelection}>删除连线</Button>}
+    {toolSession && toolNode && doc && <>
+      {shownTool === 'edit' && <SharedNodeEdit key={toolSession.session} open={tool === 'edit'} node={toolNode} doc={doc} room={liveRoom} close={()=>setTool(null)}/>}
+      {shownTool === 'annotation' && toolNode.type === 'image' && toolVersion?.kind === 'image' &&
+        <SharedAnnotation key={toolSession.session} open={tool === 'annotation'} node={toolNode} version={toolVersion}
+          url={transport.mediaUrl(projectId,toolVersion.version_id)} room={liveRoom} close={()=>setTool(null)}/>}
+      {(shownTool === 'inpaint' || shownTool === 'outpaint') && toolVersion?.kind === 'image' &&
+        <SharedImageEdit key={toolSession.session} open={tool === shownTool} node={toolNode} version={toolVersion}
+          url={transport.mediaUrl(projectId,toolVersion.version_id)} mode={shownTool} save={saveImageEdit} close={()=>setTool(null)}/>}
+      {shownTool === 'layers' && toolNode.type === 'layer_stack' &&
+        <Dialog open={tool === 'layers'} onOpenChange={open=>{if (!open) setTool(null);}}><DialogContent aria-describedby={undefined}><DialogHeader>
+          <DialogTitle>图层顺序</DialogTitle></DialogHeader><SharedLayerOrder room={liveRoom} node={toolNode}/></DialogContent></Dialog>}
+    </>}
+    {!doc && !error && !challenge && <p role="status" className="delayed-reveal absolute top-1/2 w-full text-center text-sm text-muted-foreground">加载中…</p>}
     {doc && zoomDock}
-    {doc && selectedIds.length > 0 && !detailId && <div className="absolute bottom-3 left-3 max-w-full rounded-lg border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-      {editable && selectedNode && room && <SharedCanvasGenerate key={selectedNode.id}
+    <AnimatePresence>{doc && selectedIds.length > 0 && !detailId && <motion.div key="selection-bar" role="toolbar" aria-label="节点操作"
+      initial={{opacity:0, y:prefersReducedMotion() ? 0 : 4}} animate={{opacity:1, y:0}}
+      exit={{opacity:0, y:prefersReducedMotion() ? 0 : 4, transition:{duration:MOTION_DURATION.fast, ease:MOTION_EASE.subtle}}}
+      transition={{duration:MOTION_DURATION.fast, ease:MOTION_EASE.subtle}}
+      className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-lg border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+      {canEdit && selectedNode && room && <SharedCanvasGenerate key={selectedNode.id} disabled={offline}
         peerKey={peerKey} projectId={projectId} node={selectedNode} revision={doc.revision}
         frozen={selectedVersion?.frozen_generation} owner={room.owner_display_name} allowBorrow={liveRoom.allowBorrow} />}
-      <SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} />
-      {editable && <>
-        {selectedNode && <Button size="sm" variant="ghost" onClick={()=>setTool('edit')}>编辑节点</Button>}
-        {selectedNode?.type === 'image' && selectedVersion?.kind === 'image' && <>
-          <Button size="sm" variant="ghost" onClick={()=>setTool('annotation')}>标注</Button>
-          <Button size="sm" variant="ghost" onClick={()=>setTool('inpaint')}>局部修改</Button>
-          <Button size="sm" variant="ghost" onClick={()=>setTool('outpaint')}>扩图</Button>
-          <Button size="sm" variant="ghost" onClick={addLayers}>图层拆分</Button></>}
-        {selectedNode?.type === 'image_edit' && <Button variant="ghost" size="sm" onClick={()=>setTool(selectedNode.data.options.mode)}>编辑配置</Button>}
-        {selectedNode?.type === 'layer_stack' && selectedNode.data.layers.length > 0 && <Button variant="ghost" size="sm" onClick={()=>setTool('layers')}>图层顺序</Button>}
-        {selectedIds.length > 1 && <Button size="sm" variant="ghost" onClick={addGroup}>分组</Button>}
-        <Button size="sm" variant="ghost" disabled={!deletable} title={deletable ? '删除节点' : '仅房主可删除他人创建的节点'} onClick={removeSelection}>删除</Button>
-      </>}
+      <SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} className="contents" />
+      {canEdit && selectedNode && <Button size="sm" variant="ghost" disabled={offline} onClick={()=>setTool('edit')}>编辑节点</Button>}
       {selectedIds.length === 1 && <Button size="sm" variant="ghost" onClick={() => showDetails(selectedIds[0])}>节点详情</Button>}
-    </div>}
-    {doc && detail?.kind === 'image' && <Lightbox src={transport.mediaUrl(projectId, detail.version_id)} onClose={() => setDetailId(null)}
+      {/* 低频动作收进「更多」，窄屏也不折行；删除放最下。他人创建的节点点了会说明原因。 */}
+      {canEdit && <DropdownMenu><Hint label="更多"><DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" className="size-8" aria-label="更多操作" disabled={offline}><MoreIcon/></Button>
+      </DropdownMenuTrigger></Hint>
+        <DropdownMenuContent side="top" align="start">
+          {selectedNode?.type === 'image' && selectedVersion?.kind === 'image' && <>
+            <DropdownMenuItem onSelect={()=>setTool('annotation')}>标注</DropdownMenuItem>
+            <DropdownMenuItem onSelect={()=>setTool('inpaint')}>局部修改</DropdownMenuItem>
+            <DropdownMenuItem onSelect={()=>setTool('outpaint')}>扩图</DropdownMenuItem>
+            <DropdownMenuItem onSelect={addLayers}>图层拆分</DropdownMenuItem></>}
+          {selectedNode?.type === 'image_edit' && <DropdownMenuItem onSelect={()=>setTool(selectedNode.data.options.mode)}>编辑配置</DropdownMenuItem>}
+          {selectedNode?.type === 'layer_stack' && selectedNode.data.layers.length > 0 && <DropdownMenuItem onSelect={()=>setTool('layers')}>图层顺序</DropdownMenuItem>}
+          {selectedIds.length > 1 && <DropdownMenuItem onSelect={addGroup}>分组</DropdownMenuItem>}
+          {(selectedVersion?.kind === 'image' || selectedNode?.type === 'image_edit' || selectedNode?.type === 'layer_stack' || selectedIds.length > 1) && <DropdownMenuSeparator />}
+          <DropdownMenuItem destructive onSelect={removeSelection}>删除</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>}
+    </motion.div>}</AnimatePresence>
+    {doc && detailId && detail?.kind === 'image' && <Lightbox src={transport.mediaUrl(projectId, detail.version_id)} onClose={() => setDetailId(null)}
       meta={{title: detailNode?.title, frozenGeneration: detail.frozen_generation
         ? {generation: detail.frozen_generation, mediaUrl: id => transport.mediaUrl(projectId, id)} : undefined}}
       details={<SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} />} />}
-    <Dialog open={Boolean(detailNode && detail?.kind !== 'image')} onOpenChange={open => { if (!open) setDetailId(null); }}>
+    <Dialog open={Boolean(detailId && detailNode && detail?.kind !== 'image')} onOpenChange={open => { if (!open) setDetailId(null); }}>
       <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto" aria-describedby={undefined}>
         <DialogHeader><DialogTitle>{detailNode?.title}</DialogTitle></DialogHeader>
         {detail && (detail.kind === 'video' ? <video controls src={transport.mediaUrl(projectId, detail.version_id)} className="max-h-96 w-full" />
@@ -415,7 +505,7 @@ export function SharedCanvasView({ transport, projectId, onBack, zoomDock }: {
         {doc && <SharedCanvasActions peerKey={peerKey} projectId={projectId} document={doc} nodeIds={selectedIds} />}
       </DialogContent>
     </Dialog>
-    {challenge && <SharedCanvasPasscodeDialog {...challenge} peerKey={peerKey} projectId={projectId} onClose={onBack}
-      onEntered={() => { setChallenge(null); setAttempt(n => n + 1); }} />}
+    {shownChallenge && <SharedCanvasPasscodeDialog key={shownChallenge.session} open={Boolean(challenge)} {...shownChallenge.value}
+      peerKey={peerKey} projectId={projectId} onClose={onBack} onEntered={() => { setChallenge(null); setAttempt(n => n + 1); }} />}
   </section>;
 }

@@ -22,18 +22,18 @@ function state(title: string, text: string, revision: number) {
 
 describe('共享节点编辑', () => {
   it.each([false, true])('保留同时收到的正文，更改标题=%s', async editTitle => {
-    const room = { connected: true, submit: vi.fn() };
+    const room = { connected: true, submitAndWait: vi.fn(async () => {}) };
     const close = vi.fn();
     const editor = (text: string, revision: number) =>
-      <SharedNodeEdit {...state('原标题', text, revision)} room={room} close={close} />;
+      <SharedNodeEdit open {...state('原标题', text, revision)} room={room} close={close} />;
     const { rerender } = render(editor('原文', 1));
     if (editTitle) fireEvent.change(screen.getByLabelText('标题'), { target: { value: '新标题' } });
     rerender(editor('对方刚保存的正文', 2));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
-    if (editTitle) expect(room.submit).toHaveBeenCalledWith({
+    if (editTitle) expect(room.submitAndWait).toHaveBeenCalledWith({
       kind: 'node_update', node_id: 'note', patch: { title: '新标题' }, text_versions: [],
     }, 1);
-    else expect(room.submit).not.toHaveBeenCalled();
+    else expect(room.submitAndWait).not.toHaveBeenCalled();
   });
 });

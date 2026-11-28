@@ -100,7 +100,7 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { AnimatePresence, cubicBezier, motion } from 'motion/react';
-import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, type AnimationPlaybackControls } from '@/lib/motion';
+import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, viewportMotionMs, type AnimationPlaybackControls } from '@/lib/motion';
 import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { codePointRange, type CanvasTextRevisionInput } from '@/components/canvas/canvasTextRevision';
@@ -540,8 +540,10 @@ export function CanvasEditor(props: {
 
 function ReadOnlyZoomDock() {
   const flow = useReactFlow();
-  return <CanvasZoomDock assetControl={null} minimapToggle={null} onZoomIn={() => void flow.zoomIn()}
-    onZoomOut={() => void flow.zoomOut()} onResetZoom={() => void flow.zoomTo(1)} onFitView={() => void flow.fitView()} />;
+  const viewportMotion = () => ({ duration: viewportMotionMs(MOTION_DURATION.fast) });
+  return <CanvasZoomDock assetControl={null} minimapToggle={null} onZoomIn={() => void flow.zoomIn(viewportMotion())}
+    onZoomOut={() => void flow.zoomOut(viewportMotion())} onResetZoom={() => void flow.zoomTo(1, viewportMotion())}
+    onFitView={() => void flow.fitView({ ...viewportMotion(), padding: 0.12 })} />;
 }
 
 function CanvasEditorInner({
@@ -7966,9 +7968,4 @@ function DelayedCanvasLoading() {
 function flashShortcutButton(button: Element | null | undefined) {
   if (!button || !motionAvailable() || prefersReducedMotion()) return;
   clearOnFinish(animate(button, { scale: [1, 0.94, 1] }, { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }), button, ['transform']);
-}
-
-/** 视口平移 / 缩放的时长（xyflow 收毫秒）。减弱动态效果时直接跳到位。 */
-function viewportMotionMs(seconds: number) {
-  return prefersReducedMotion() ? 0 : seconds * 1000;
 }
