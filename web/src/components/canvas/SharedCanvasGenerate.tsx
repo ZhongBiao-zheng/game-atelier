@@ -42,10 +42,12 @@ interface SubmissionAttempt {
   refreshRevision?: boolean;
 }
 
-/** 打开过、还没提交的弹窗草稿（按 画布 + 节点）：房主重启要重新鉴权时操作条会卸载，重新打开时照原样恢复。
- *  只有用户关闭弹窗或提交成功才清。 */
-interface OpenDraft { prompt: string; prefill: string; count: number; source: Source; chosen: string }
+/** 打开过、还没提交的提示词草稿（键含房主、项目、节点）：房主重启要重新鉴权时操作条会卸载，重新打开时恢复文字。
+ *  每次打开一个会话号，关闭或提交成功只清自己那一份，旧回执不会清掉新稿。
+ *  渠道与模型不进草稿：一律等目录加载完，按上次提交记录或默认值选，不静默换渠道。 */
+interface OpenDraft { session: number; prompt: string; prefill: string; count: number }
 const openDrafts = new Map<string, OpenDraft>();
+let draftSessions = 0;
 
 function pendingAttempt(key: string): SubmissionAttempt | null {
   const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null');
@@ -66,14 +68,14 @@ function priceLabel(model: Choice) {
   return '';
 }
 
-export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revision, owner, allowBorrow, disabled = false, inputKinds = [] }: {
+export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revision, owner, allowBorrow, disabled = false, hasInputs = false }: {
   peerKey: string; projectId: string; node: CanvasNode; frozen?: CanvasFrozenGeneration | null; revision: number; owner: string; allowBorrow: boolean;
   disabled?: boolean;
-  /** 连到这个节点的输入素材类型：提交时房主会带上它们，估价也要算进去。 */
-  inputKinds?: readonly string[];
+  /** 节点有连线输入（含分组）：提交时房主会展开带上，估价算不准，不显示总价。 */
+  hasInputs?: boolean;
 }) {
   const storageKey = 'shared-generation:' + JSON.stringify([peerKey, projectId, node.id]);
-  const restored = useRef<OpenDraft | undefined>(undefined);
+  const session = useRef(0);
   const [open, setOpen] = useState(false);
   const draft = 'generation_draft' in node.data ? node.data.generation_draft : null;
   const mode = draft?.mode ?? (node.type === 'layer_stack' || node.type === 'image_edit' ? 'image' : node.type);
@@ -95,10 +97,10 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const base = remoteProjectPath(peerKey, projectId);
   // 打开期间随改随记；卸载（重新鉴权）不清。
   useEffect(() => {
-    if (open) openDrafts.set(storageKey, {prompt, prefill, count, source, chosen});
-  }, [open, prompt, prefill, count, source, chosen, storageKey]);
+    if (open) openDrafts.set(storageKey, {session: session.current, prompt, prefill, count});
+  }, [open, prompt, prefill, count, storageKey]);
   function changeOpen(next: boolean) {
-    if (!next) openDrafts.delete(storageKey);
+    if (!next && openDrafts.get(storageKey)?.session === session.current) openDrafts.delete(storageKey);
     setOpen(next);
   }
   useEffect(() => {
@@ -125,9 +127,6 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       const failure = [mineResult, hostResult].find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') setError(errorText(failure.reason));
       setMine(local); setHost(remote);
-      const kept = restored.current;
-      restored.current = undefined;
-      if (kept) { setSource(kept.source); setChosen(kept.chosen); return; }
       const saved = pendingAttempt(storageKey);
       setSource(saved?.source ?? (!local.length && remote.length ? 'borrowed' : 'local'));
       setChosen(saved ? JSON.stringify([saved.body.channel_id ?? saved.body.alias, saved.body.model]) : '');
@@ -141,14 +140,11 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const original = draft?.model || frozen?.model_id || (node.type === 'layer_stack' ? node.data.model : null);
   const choice = chosen ? choices.find(item => value(item) === chosen)
     : choices.find(item => item.model === original) ?? (!original ? choices[0] : undefined);
-  // 总价只按最终提交参数估（自己的供应商），连线输入一并算：接了视频或音频（时长未知）就不显示。
+  // 总价只在没有任何连线输入、且是自己的供应商时按最终提交参数估；视频缺时长就不估。
   // 房主目录价是示例规格，不当总价显示，单价留在模型菜单里。
-  const unpricedInputs = inputKinds.some(kind => kind === 'video' || kind === 'audio');
-  const estimate = choice?.key && (mode === 'image' || mode === 'video') && !unpricedInputs
-    ? estimateGenerationCostForSubmission(choice.key, choice.model, mode, {
-      ...(frozen?.params ?? {}), ...(draft?.params ?? {}), n: count,
-      ...(mode === 'image' && inputKinds.includes('image') ? {image_edit: {}} : {}),
-    } as JobParams)
+  const params = {...(frozen?.params ?? {}), ...(draft?.params ?? {}), n: count} as JobParams;
+  const estimate = choice?.key && !hasInputs && (mode === 'image' || (mode === 'video' && params.duration != null))
+    ? estimateGenerationCostForSubmission(choice.key, choice.model, mode, params)
     : null;
   async function submit() {
     if (!choice || submitting.current) return;
@@ -174,7 +170,8 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       await requestJson(base + '/runs/' + source, '提交共享生成', {
         method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body),
       });
-      sessionStorage.removeItem(storageKey);
+      // 只清自己这次的提交记录：期间若有新的提交，它的记录留着，重试才能沿用同一个 request_id。
+      if (pendingAttempt(storageKey)?.body.request_id === body.request_id) sessionStorage.removeItem(storageKey);
       changeOpen(false);
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409 && attempt) {
@@ -188,8 +185,10 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   }
   return <>
     <Button size="sm" disabled={disabled} onClick={() => {
+      session.current = ++draftSessions;
+      // 目录没回来之前提交一直禁用。
+      setLoading(true);
       const kept = openDrafts.get(storageKey);
-      restored.current = kept;
       if (kept) { setPrompt(kept.prompt); setPrefill(kept.prefill); setCount(kept.count); setOpen(true); return; }
       const saved = pendingAttempt(storageKey)?.body;
       const initialPrompt = saved?.prompt ?? (draft?.prompt || frozen?.prompt || (node.type === 'layer_stack' ? node.data.prompt : ''));
