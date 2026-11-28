@@ -2,11 +2,12 @@ import { Button } from '@/components/ui/button';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { GroupPlan } from '@/api/canvasGroupRuns';
+import { formatGenerationCost } from '@/lib/generationCost';
 
 export function CanvasGroupRunDialog({ plan, busy, onClose, onStart, onLocate }: {
   plan: GroupPlan; busy: boolean; onClose: () => void; onStart: () => void; onLocate?: (nodeId: string) => void;
 }) {
-  const total = '¥' + plan.total_cny.toFixed(2);
+  const total = formatGenerationCost(plan.total_cny);
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
     <DialogContent aria-describedby={undefined}>
       <DialogHeader><DialogTitle>整体执行 {plan.steps.length} 个节点</DialogTitle></DialogHeader>
@@ -18,7 +19,7 @@ export function CanvasGroupRunDialog({ plan, busy, onClose, onStart, onLocate }:
             <span className="tabular-nums text-muted-foreground">{index + 1}</span>
             <span className="break-words">{step.name}</span>
             <span className="break-all text-xs text-muted-foreground">{step.model}</span>
-            <span className={`text-right tabular-nums ${step.estimate_cny === null ? 'text-muted-foreground' : ''}`}>{step.estimate_cny === null ? '未计价' : '¥' + step.estimate_cny.toFixed(2)}</span>
+            <span className={`text-right tabular-nums ${step.estimate_cny === null ? 'text-muted-foreground' : ''}`}>{step.estimate_cny === null ? '未计价' : formatGenerationCost(step.estimate_cny)}</span>
           </div>)}
         </div>
         {plan.blocked.map(row => <Button key={row.node_id} variant="ghost" size="sm"

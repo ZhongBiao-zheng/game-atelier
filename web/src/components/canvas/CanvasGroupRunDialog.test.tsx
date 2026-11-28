@@ -14,7 +14,7 @@ it('shows ordered prices, unpriced nodes and the confirmed amount', () => {
   render(<CanvasGroupRunDialog plan={plan} busy={false} onStart={start} onClose={vi.fn()} />);
   expect(screen.getByRole('dialog')).toHaveAccessibleName('整体执行 2 个节点');
   expect(screen.getByText('未计价')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', {name: '确认花费 ¥12.40 并执行'}));
+  fireEvent.click(screen.getByRole('button', {name: '确认花费 12.4¥ 并执行'}));
   expect(start).toHaveBeenCalledOnce();
 });
 
