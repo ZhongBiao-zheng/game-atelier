@@ -129,7 +129,7 @@ interface Props {
   submitErrorKey?: string | number | null;
   /** 从记录里带进来的内容落在哪：每个新 id 让那一块闪一次主题色描边。 */
   flashRequest?: InputFlashRequest | null;
-  /** 提交按钮旁常显的估价（「4 张 · 约 ¥1.40」）；null = 未计价，不显示。 */
+  /** 提交按钮旁常显的估价（「4 张 · 约 1.4¥」）；null = 未计价，不显示。 */
   estimateLabel?: string | null;
   /** 输入壳上方的状态条：一次选的参考超过上限时说明只加入了几张。 */
   onNotice?: (text: string) => void;

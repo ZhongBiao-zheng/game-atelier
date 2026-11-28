@@ -1,6 +1,6 @@
 import type { KeyView } from '@/api/keys';
 import { MAX_REF_IMAGES } from '@/components/studio/VideoReferenceAssets';
-import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
+import { estimateGenerationCostForSubmission, formatGenerationCost } from '@/lib/generationCost';
 import { MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { imageSizeMode } from '@/lib/imageSizeMode';
 import { maxReferenceImages } from '@/lib/referenceLimits';
@@ -8,9 +8,9 @@ import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoContr
 import type { JobParams } from '@/schema/jobs';
 import { clampImageCount } from './studioJobConfig';
 
-/** 估价文案：「约 ¥1.40」。 */
+/** 估价文案：「约 1.4¥」，金额写法与画布、用量同一个 formatGenerationCost。 */
 export function costLabel(amount: number): string {
-  return amount > 0 && amount < 0.01 ? '约 ¥<0.01' : `约 ¥${amount.toFixed(2)}`;
+  return `约 ${formatGenerationCost(amount)}`;
 }
 
 /** 本次提交真正会发出的参考图张数上限；null = 这一栏不按通用参考图计（Agent、MJ、首尾帧）。
@@ -28,7 +28,7 @@ export function referenceImageLimit({ agent, kind, videoMode, imageCaps, videoCa
   return imageCaps.family === 'midjourney' ? null : imageCaps.maxRefImages ?? maxReferenceImages(model);
 }
 
-/** 提交按钮旁常显的估价（D7）：「4 张 · 约 ¥1.40」；未计价、自动尺寸时返回 null。 */
+/** 提交按钮旁常显的估价（D7）：「4 张 · 约 1.4¥」；未计价、自动尺寸时返回 null。 */
 export function studioEstimateLabel(input: {
   key: KeyView | undefined;
   modelId: string;

@@ -28,7 +28,7 @@ def test_group_quote_then_real_approval(mode, monkeypatch):
     assert not runs.list_runs(pid)
     workspace = agent.CanvasWorkspace(pid, "session-test")
     summary = workspace.summary("run_group", args, [])
-    assert "¥14.50" in summary and summary.count("¥7.25") == 2
+    assert "14.5¥" in summary and summary.count("7.25¥") == 2
     session = SimpleNamespace(creation_mode="all", auto_models=True, created_node_ids=[])
     approval = SimpleNamespace(tool="run_group", arguments=json.dumps(args))
     response, _, _ = workspace.execute_approved(session, approval, set(), frozenset())

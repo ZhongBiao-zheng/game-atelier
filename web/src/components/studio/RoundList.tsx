@@ -351,7 +351,7 @@ export function RoundList({
   onUsePrompt?: (config: RoundConfig) => void;
   reuseParameter?: ParameterReuse;
   onRegenerate?: RegenerateHandler;
-  /** 「再次生成」按钮的提示：模型名 · 约 ¥x。 */
+  /** 「再次生成」按钮的提示：模型名 · 约 x¥。 */
   regenerateHint?: (config: RoundConfig) => string;
   onDeleteBatch?: (jobId: string) => void | Promise<void>;
   /** 删一张结果（多张的一轮里只删这张；只剩一张时等同删这一轮）。 */

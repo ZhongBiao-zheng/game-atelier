@@ -1319,11 +1319,11 @@ class CanvasWorkspace:
                 plan = group_plan(self.project_id, group_id)
                 if arguments.get("quote_id") != quote_id(self.project_id, group_id, plan):
                     return group_runs.STALE
-                lines = [f"整体执行 {len(plan['order'])} 个节点 · 合计 ¥{plan['total_cny']:.2f}"]
+                lines = [f"整体执行 {len(plan['order'])} 个节点 · 合计 {_money(plan['total_cny'])}"]
                 if plan["unpriced"]:
                     lines[0] += f" · {plan['unpriced']} 个未计价"
                 for i, row in enumerate(plan["steps"], 1):
-                    price = "未计价" if row["estimate_cny"] is None else f"¥{row['estimate_cny']:.2f}"
+                    price = "未计价" if row["estimate_cny"] is None else _money(row['estimate_cny'])
                     lines.append(f"{i}. {_one_line(row['name'])} · {_one_line(row['model'])} · {price}")
                 return "\n".join(lines)
             except (KeyError, ValueError, FileNotFoundError):
