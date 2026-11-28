@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CollapseIcon } from '@/components/ui/icons';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { motionAvailable, prefersReducedMotion } from '@/lib/motion';
@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 
 type FullscreenProps = AnnotationToolbarProps & {
   title: string; src: string; width: number; height: number; onCollapse: () => void;
+  /** 顶栏右侧缩放比例前的额外操作（共享画布的手动保存）。 */
+  actions?: ReactNode;
 };
 
 /** 鼠标滚轮一格（deltaY≈100）约合 22% 的缩放；一次跳到位显得生硬，分几帧走完（约 180ms），每帧取剩余的 35%。
@@ -30,7 +32,7 @@ export function AnnotationFullscreen({ open, ...props }: FullscreenProps & { ope
   </Dialog>;
 }
 
-function AnnotationFullscreenBody({ title, src, width, height, onCollapse, ...toolbar }: FullscreenProps) {
+function AnnotationFullscreenBody({ title, src, width, height, onCollapse, actions, ...toolbar }: FullscreenProps) {
   const viewport = useEditorViewport({ width, height });
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -73,7 +75,10 @@ function AnnotationFullscreenBody({ title, src, width, height, onCollapse, ...to
         <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
         <span className="text-xs tabular-nums text-muted-foreground">{width} × {height}</span>
       </div>
-      <span className="text-xs tabular-nums text-muted-foreground" aria-label="标注缩放">{Math.round(viewport.scale * 100)}%</span>
+      <div className="flex items-center gap-3">
+        {actions}
+        <span className="text-xs tabular-nums text-muted-foreground" aria-label="标注缩放">{Math.round(viewport.scale * 100)}%</span>
+      </div>
     </header>
     <div ref={measureStage} className="desktop-clear-top absolute inset-x-0 bottom-24 top-16 overflow-hidden touch-none"
       style={{ cursor: dragging ? 'grabbing' : toolbar.editor.panning ? 'grab' : undefined }}

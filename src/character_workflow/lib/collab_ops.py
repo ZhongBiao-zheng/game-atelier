@@ -48,6 +48,8 @@ class NodeUpdate(_Operation):
     patch: dict[str, Any]
     base_payload: dict | None = None
     text_versions: list[CanvasTextVersion] = Field(default_factory=list, max_length=1)
+    # 正文写入基于的版本：当前版本已不是它（期间被别人改过）就拒绝，不静默覆盖。
+    base_version_id: str | None = Field(default=None, max_length=200)
 
 
 class NodeMoves(_Operation):
@@ -170,6 +172,16 @@ def _text_versions(doc, op, node):
         doc.content_versions[version.version_id] = version
 
 
+def _text_already_applied(document: CanvasDocument, op) -> bool:
+    if not isinstance(op, NodeUpdate) or not op.text_versions:
+        return False
+    version = op.text_versions[0]
+    node = next((item for item in document.nodes if item.id == op.node_id), None)
+    stored = document.content_versions.get(version.version_id)
+    return (node is not None and node.type == "text" and node.data.current_version_id == version.version_id
+            and stored is not None and stored.kind == "text" and stored.text == version.text)
+
+
 def _update_node(node, patch, base_payload=None):
     if not patch or patch.keys() - {"title", "position", "size", "hidden", "z_index", "data"}:
         raise CollabOpError(422, "节点变更字段无效")
@@ -242,7 +254,11 @@ def _apply(document: CanvasDocument, op, client_id: str, actor_name: str, owner:
         _text_versions(document, op, node)
         nodes[node.id] = node
     elif isinstance(op, NodeUpdate):
-        node = _update_node(_checked_node(nodes, op.node_id), op.patch, op.base_payload)
+        existing = _checked_node(nodes, op.node_id)
+        if ("base_version_id" in op.model_fields_set and existing.type == "text"
+                and existing.data.current_version_id != op.base_version_id):
+            raise CollabOpError(409, "正文已被他人更新")
+        node = _update_node(existing, op.patch, op.base_payload)
         _text_versions(document, op, node)
         nodes[node.id] = node
     elif isinstance(op, NodeMoves):
@@ -294,6 +310,9 @@ def apply_op(
             if original.client != client_id:
                 raise CollabOpError(409, "操作标识已使用")
             return AppliedOp(original.revision, original.touched, frozenset(), duplicate=True)
+        if _text_already_applied(current, op):
+            # 房主重启丢了操作记录，但这份正文已经落盘：按同一操作的幂等重放处理。
+            return AppliedOp(current.revision, frozenset({op.node_id}), frozenset(), duplicate=True)
         if op.base_revision > current.revision:
             raise CollabOpError(409, "画布版本无效，请刷新画布")
         if len(history.entries) == _HISTORY_SIZE and op.base_revision < history.entries[0].revision - 1:
