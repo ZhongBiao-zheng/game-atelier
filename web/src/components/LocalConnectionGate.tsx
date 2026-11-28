@@ -220,20 +220,36 @@ function useWordmarkAnchor(active: boolean) {
   const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     if (!active) return;
-    const mark = document.querySelector<HTMLElement>('.brand-wordmark');
-    if (!mark) { setAnchor(null); return; }
-    const place = () => {
-      const rect = mark.getBoundingClientRect();
-      setAnchor(current => {
-        const next = { left: Math.round(rect.right + 12), top: Math.round(rect.top + rect.height / 2 - 20) };
-        return current && current.left === next.left && current.top === next.top ? current : next;
-      });
+    let cleanup = () => {};
+    const attach = (mark: HTMLElement) => {
+      const place = () => {
+        const rect = mark.getBoundingClientRect();
+        setAnchor(current => {
+          const next = { left: Math.round(rect.right + 12), top: Math.round(rect.top + rect.height / 2 - 20) };
+          return current && current.left === next.left && current.top === next.top ? current : next;
+        });
+      };
+      place();
+      const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+      resizes?.observe(mark);
+      window.addEventListener('resize', place);
+      cleanup = () => { resizes?.disconnect(); window.removeEventListener('resize', place); };
     };
-    place();
-    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    resizes?.observe(mark);
-    window.addEventListener('resize', place);
-    return () => { resizes?.disconnect(); window.removeEventListener('resize', place); };
+    const found = document.querySelector<HTMLElement>('.brand-wordmark');
+    if (found) attach(found);
+    else {
+      // 只读可能在顶栏挂上之前就成立（启动接力、换页）：等字标出现再定位，不落回固定偏移。
+      setAnchor(null);
+      const watcher = new MutationObserver(() => {
+        const mark = document.querySelector<HTMLElement>('.brand-wordmark');
+        if (!mark) return;
+        watcher.disconnect();
+        attach(mark);
+      });
+      watcher.observe(document.body, { childList: true, subtree: true });
+      cleanup = () => watcher.disconnect();
+    }
+    return () => cleanup();
   }, [active]);
   return active ? anchor : null;
 }
