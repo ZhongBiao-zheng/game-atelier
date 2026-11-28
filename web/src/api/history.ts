@@ -48,3 +48,5 @@ export function deleteHistoryOutputs(id: string, slots: number[]) {
 }
 
 export const HISTORY_CHANGED = 'atelier:history-changed';
+/** 有任务出了结果（全壳那条 SSE 转发）：历史面板就地刷新，不清选择、不回到顶部。 */
+export const HISTORY_JOB_FINISHED = 'atelier:history-job-finished';
