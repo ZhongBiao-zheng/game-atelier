@@ -1,8 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { masonryColumns } from './AssetMasonry';
-import { MediaAssetGrid } from './CreationAssetCards';
-import type { CreationAsset } from '@/schema/creationAssets';
 
 describe('asset masonry', () => {
   it('places landscape images beside a portrait until that column becomes taller', () => {
