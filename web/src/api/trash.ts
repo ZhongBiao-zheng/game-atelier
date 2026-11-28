@@ -1,7 +1,7 @@
 import { requestJson } from '@/api/http';
 
 /** 回收站条目类型 — 与 lib/trash.py `TrashKind` 同步。 */
-export type TrashKind = 'project' | 'conversation' | 'round';
+export type TrashKind = 'project' | 'conversation' | 'round' | 'template';
 
 export interface TrashEntry {
   trash_id: string;
@@ -18,6 +18,7 @@ export const TRASH_KIND_LABEL: Record<TrashKind, string> = {
   project: '项目',
   conversation: '对话',
   round: '生成结果',
+  template: '模板',
 };
 
 export async function listTrash(): Promise<TrashEntry[]> {

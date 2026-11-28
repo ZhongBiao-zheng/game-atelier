@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 TRASH_DAYS = 30
 # project = 画布项目；conversation = 创作台 / 画布 Agent 对话；round = 已付费的一轮结果。
-TrashKind = Literal["project", "conversation", "round"]
+TrashKind = Literal["project", "conversation", "round", "template"]
 TrashState = Literal["moving", "stored", "restoring"]
 TRASH_ID_PATTERN = r"^trash-[0-9]{14}-[0-9a-f]{8}$"
 _TRASH_ID = re.compile(TRASH_ID_PATTERN)

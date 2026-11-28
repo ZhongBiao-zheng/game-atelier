@@ -133,6 +133,12 @@ GET /api/collab/remote/{peer_key}/projects/{project_id}/borrowable-models
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/local
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/borrowed
 POST /api/studio/jobs/{job_id}/shared-canvas
+GET /api/library/templates
+POST /api/library/templates
+PATCH /api/library/templates/{template_id}
+POST /api/library/templates/{template_id}/duplicate
+DELETE /api/library/templates/{template_id}
+GET /api/library/templates/{template_id}/cover
 GET /api/history
 GET /api/history/{job_id}/{output_index}/thumb
 POST /api/history/download
@@ -354,6 +360,7 @@ _READ_POSTS = frozenset({
     ("POST", "/api/creation-assets/staleness"),
 })
 MEDIA_ROUTES = frozenset({
+    "/api/library/templates/{template_id}/cover",
     "/api/history/{job_id}/{output_index}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb",

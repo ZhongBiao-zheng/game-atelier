@@ -1734,3 +1734,12 @@ ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保
 报告包含 `schema_version`、UTC 导出时间 `exported_at`、导出时的应用版本 `app_version`、系统类别 `os` 和 `events`。每条事件包含 UTC 时间 `time` 与类别 `event`。其中 `traceback`、`key_read_failed` 和 `key_save_failed` 记录异常类型 `exception`、可能为空的 `errno` 和 `winerror`，以及最多 6 个产品源码相对位置 `locations: [{file, line}]`。报告从本机当前服务日志和最近 3 份按日轮转的日志读取，每个文件最多取末尾 1 MiB，共保留最后 100 条事件。没有匹配记录时返回空数组。
 
 官方 Windows 和 macOS 桌面安装另外读取同一运行环境下固定 `shell.log` 的末尾 1 MiB。`desktop_renderer_gone` 记录已知异常退出原因 `reason` 和可用的数值 `exit_code`，旧版本缺少退出码时返回 `null`。`desktop_server_restart` 记录外壳检测到服务停止后尝试重启的时间。来源代码模式和便携包只导出服务诊断。
+
+## 画布组模板
+
+本机资产库 `/api/library/templates` 支持 GET 列出 `{items}`，POST 以
+`{project_id, group_id, name}` 保存组的当前节点、生成草稿、媒体及组内连线。
+模板摘要包含 `id, name, node_count, cover, created_at, updated_at, revision`。
+`PATCH /{template_id}` 接收 `{name}`，`POST /{template_id}/duplicate` 创建独立副本，
+`GET /{template_id}/cover` 返回 WebP，`DELETE /{template_id}` 返回 `{trash_id}`。
+路径均相对上述资产库。模板文件位于 `library/templates/<id>/`，连同媒体可从回收站还原。
