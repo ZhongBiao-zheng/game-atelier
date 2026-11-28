@@ -35,7 +35,7 @@ import {
   type CreationAssetPanelHandle,
   type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
-} from '@/components/assets/CreationAssetPanel';
+} from '@/components/assets/creationAssetPanelModel';
 import { MAX_REF_IMAGES, type FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type CanvasTarget, type RoundConfig, type RoundFailure, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';

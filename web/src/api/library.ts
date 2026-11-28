@@ -19,7 +19,7 @@ export function listLibrary(signal?: AbortSignal) {
 export const itemUrl = (id: string) => `/api/library/${encodeURIComponent(id)}/content`;
 export async function libraryWrite<T>(path: string, value?: unknown, method = 'POST') {
   const result = await requestJson<T>(`/api/library/${path}`, '保存素材库', {
-    method, ...(value === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+    method, headers: { 'Content-Type': 'application/json' }, body: value === undefined ? undefined : JSON.stringify(value),
   });
   window.dispatchEvent(new Event(LIBRARY_CHANGED));
   return result;

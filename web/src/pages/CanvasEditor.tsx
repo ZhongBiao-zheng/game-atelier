@@ -147,7 +147,9 @@ import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
-} from '@/components/assets/CreationAssetPanel';
+} from '@/components/assets/creationAssetPanelModel';
+import { ProjectReferenceLibrary } from '@/components/assets/ProjectReferenceLibrary';
+import { MediaPreview } from '@/components/assets/ProjectReferenceMedia';
 import { ProjectSpecsDrawer } from '@/components/canvas/ProjectSpecsDrawer';
 import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
@@ -556,6 +558,8 @@ function CanvasEditorInner({
   const narrowViewport = useNarrowCanvasViewport();
   const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const [referencePreview, setReferencePreview] = useState<CreationAsset | null>(null);
   const [specsOpen, setSpecsOpen] = useState(false);
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -6515,6 +6519,7 @@ function CanvasEditorInner({
                     <DropdownMenuItem className="gap-2" onSelect={beginProjectRename}>
                       <EditIcon aria-hidden="true" />重命名
                     </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" onSelect={() => setReferencesOpen(true)}><LibraryIcon />项目参考库</DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onSelect={() => setSpecsOpen(true)}>
                       <TextFileIcon aria-hidden="true" />规范
                     </DropdownMenuItem>
@@ -6876,6 +6881,16 @@ function CanvasEditorInner({
         )}
         </AnimatePresence>
 
+        <Dialog open={referencesOpen} onOpenChange={setReferencesOpen}><DialogContent className="max-h-[85dvh] overflow-y-auto">
+          <DialogTitle>项目参考库</DialogTitle>
+          {referencesOpen && <ProjectReferenceLibrary visible projectId={projectId} refreshKey={assetsRevision} onAssetsChanged={refreshProjectAssets}
+            onOpen={setReferencePreview} onUse={asset => { void insertCreationAsset(asset.asset_id, {}, selectedNode && selectedDraft ? selectedNode.id : undefined); }} />}
+        </DialogContent></Dialog>
+        <Dialog open={!!referencePreview} onOpenChange={open => { if (!open) setReferencePreview(null); }}><DialogContent>
+          <DialogTitle>{referencePreview?.title}</DialogTitle>
+          {referencePreview && assetMediaContent(referencePreview) && <MediaPreview assetId={referencePreview.asset_id}
+            content={assetMediaContent(referencePreview)!} alt={referencePreview.title} className="max-h-[75vh] w-full object-contain" />}
+        </DialogContent></Dialog>
         {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
 
         <TeamShareDialog

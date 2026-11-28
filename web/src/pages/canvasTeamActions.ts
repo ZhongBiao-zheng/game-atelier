@@ -1,4 +1,4 @@
-import type { CreationAssetSaveRequest } from '@/components/assets/CreationAssetPanel';
+import type { CreationAssetSaveRequest } from '@/components/assets/creationAssetPanelModel';
 import type { TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { promptToAssetSegments } from '@/lib/promptVariables';
 import type {

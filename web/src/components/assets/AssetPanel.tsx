@@ -7,7 +7,10 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 import { loadUiPrefs, saveUiPref } from '@/lib/uiPrefs';
 import { cn } from '@/lib/utils';
-import { CreationAssetPanel, type CreationAssetPanelHandle, type CreationAssetPanelProps } from './CreationAssetPanel';
+import type { CreationAssetPanelHandle, CreationAssetPanelProps } from './creationAssetPanelModel';
+import { FolderPicker } from './FolderPicker';
+import { saveToLibrary } from './saveToLibrary';
+import { notify } from '@/lib/notify';
 import { LibraryPanel } from './LibraryPanel';
 import { OPEN_FOLDER } from '@/api/library';
 import { HistoryPanel } from './HistoryPanel';
@@ -38,7 +41,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
     window.addEventListener(OPEN_FOLDER, open);
     return () => { active = false; window.removeEventListener(OPEN_FOLDER, open); };
   }, []);
-  const library = useRef<CreationAssetPanelHandle>(null);
+
   useEffect(() => {
     let active = true;
     void loadUiPrefs().then(prefs => {
@@ -50,13 +53,9 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
     if (directed) { interacted.current = true; setTab('library'); }
   }, [directed]);
   function close() {
-    if (tab === 'library' && library.current) library.current.requestClose();
-    else props.onClose();
+    props.onClose();
   }
-  function transition(action: () => void) {
-    if (tab === 'library' && library.current) library.current.requestTransition(action);
-    else action();
-  }
+  function transition(action: () => void) { action(); }
   useImperativeHandle(ref, () => ({ requestClose: close, requestTransition: transition }));
   function choose(value: string) {
     if (value !== 'history' && value !== 'library') return;
@@ -75,10 +74,14 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
-          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : directed ? <CreationAssetPanel {...props} ref={library} embedded />
-            : <LibraryPanel target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
+          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <LibraryPanel target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
         </motion.div>
       </AnimatePresence>
     </div>
+    {props.saveRequest && <FolderPicker open onClose={() => props.onSaveRequestHandled?.(props.saveRequest!.requestId)}
+      onChoose={async folder => {
+        await saveToLibrary(folder.id, props.saveRequest!);
+        notify.info('已加入 ' + folder.name, { action: { label: '打开', onClick: () => navigate(folder.id) } });
+      }} />}
   </aside>;
 });
