@@ -8,7 +8,7 @@ from PIL import Image
 from character_workflow.lib import job_runner, library
 from character_workflow.lib.library_subjects import expand
 from character_workflow.lib.schemas import JobParams
-from tests.test_studio_jobs import client  # noqa: F401
+pytest_plugins = ["tests.test_studio_jobs"]
 
 
 def seed_subject(name, description, count):
