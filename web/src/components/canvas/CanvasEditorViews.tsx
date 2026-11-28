@@ -198,6 +198,7 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  saveGroupTemplate?: (group: { id: string; title: string }) => void;
   groupRuns?: ReadonlyMap<string, GroupRun>;
   groupSteps?: ReadonlyMap<string, GroupRun['steps'][number]>;
   refreshGroupRuns?: () => Promise<void>;

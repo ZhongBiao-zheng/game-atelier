@@ -11,6 +11,8 @@ export const TOOL_LABELS: Record<string, string> = {
   list_models: '查看可用模型',
   apply_changes: '修改画布',
   run_group: '整体执行',
+  list_templates: '查看模板',
+  add_template: '添加模板',
   run_generation: '生成',
   run_generations: '批量生成',
   update_plan: '更新待办',

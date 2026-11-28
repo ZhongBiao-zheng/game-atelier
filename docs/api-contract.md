@@ -1747,3 +1747,7 @@ ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保
 `POST /api/canvas/projects/{project_id}/templates/{template_id}/paste` 接收视口中心的画布坐标
 `{x, y}` 和目标修订号 `If-Match`，返回 `{group_id, document}` 及新 ETag。
 每次添加独立复制节点、版本、媒体、组内连线与生成草稿，目标画布保留原视口。
+
+画布 Agent 的 `list_templates` 返回 `{templates: [{id, name, node_count, owner, online}]}`。
+`add_template` 接收 `template_id` 与可选的 `center: {x, y}`，返回 `{group_id}`。
+未指定坐标时沿已有内容右侧排布。添加只创建组，执行仍使用 `run_group` 的估价与确认流程。

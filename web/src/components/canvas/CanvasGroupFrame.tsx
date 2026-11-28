@@ -2,7 +2,8 @@ import { Handle, NodeResizer, Position } from '@xyflow/react';
 import { useEffect, useState } from 'react';
 import { planGroupRun, startGroupRun, updateGroupRun, type GroupPlan } from '@/api/canvasGroupRuns';
 import { CanvasGroupRunDialog } from './CanvasGroupRunDialog';
-import { AddIcon, PlayIcon } from '@/components/ui/icons';
+import { CanvasNodeFlash } from './canvasNodeAttention';
+import { AddIcon, PlayIcon, SaveAssetIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import type { CanvasGroupNode } from '@/schema/canvas';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
@@ -53,6 +54,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
         的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}
+    <CanvasNodeFlash nodeId={node.id} fast />
     <NodeResizer
       isVisible={selected && !context.multiSelectionActive}
       minWidth={160} minHeight={120}
@@ -89,6 +91,8 @@ export function CanvasGroupFrame({ node, context, selected }: {
             onClick={() => void command('plan')}><PlayIcon />整体执行</Button>
           </span>
         </Hint>
+        {context.saveGroupTemplate && <Button size="sm" variant="ghost" className="h-7"
+          onClick={() => context.saveGroupTemplate?.({ id: node.id, title: node.title })}><SaveAssetIcon />存为模板</Button>}
         <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`解散分组 ${node.title}`} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
       </div>}
       {progress && <Hint key={run?.status + progress} label={run?.steps[failed]?.error}>

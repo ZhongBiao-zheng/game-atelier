@@ -143,6 +143,9 @@ import {
   restoreCanvasNodeFocus,
 } from '@/components/canvas/canvasNodePanelInteraction';
 import type { HistoryKind } from '@/api/history';
+import { pasteTemplate, saveTemplate } from '@/api/templates';
+import { TemplateNameDialog } from '@/components/assets/TemplateNameDialog';
+import { saveUiPref } from '@/lib/uiPrefs';
 import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
   type CreationAssetPanelHandle,
@@ -500,7 +503,7 @@ const CANVAS_MAX_ZOOM = 5;
 // xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
 // 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
-type CanvasLibraryMode = 'assets' | 'prompts' | 'team';
+type CanvasLibraryMode = 'assets' | 'prompts' | 'team' | 'templates';
 
 interface CanvasNoticeAction { label: string; run: () => void }
 
@@ -688,6 +691,7 @@ function CanvasEditorInner({
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
   const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
+  const [templateGroup, setTemplateGroup] = useState<{ id: string; title: string } | null>(null);
   const [libraryPanelKey, setLibraryPanelKey] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
@@ -2756,7 +2760,7 @@ function CanvasEditorInner({
       placement = 'each',
       onError = insertError => setError((insertError as Error).message),
     }: {
-      placement?: 'each' | 'group';
+      placement?: 'each' | 'group' | 'preserve';
       onError?: (error: unknown) => void;
     } = {},
   ): Promise<boolean> {
@@ -2787,7 +2791,7 @@ function CanvasEditorInner({
         const newNodes = insertedNodes.filter(inserted => !concurrentIds.has(inserted.id));
         const placedInsertedNodes: CanvasNode[] = placement === 'group'
           ? placeCanvasNodeGroupWithoutOverlap(newNodes, concurrent.nodes, mergedVersions, flowBounds)
-          : [];
+          : placement === 'preserve' ? newNodes : [];
         if (placement === 'each') {
           for (const inserted of newNodes) {
             const placedPosition = placeCanvasNodeWithoutOverlap(
@@ -2839,7 +2843,7 @@ function CanvasEditorInner({
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
-        setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
+        if (placement !== 'preserve') setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
         inserted = true;
       } catch (insertError) {
         onError(insertError);
@@ -2861,6 +2865,33 @@ function CanvasEditorInner({
       if (libraryInsertCommand.current === command) libraryInsertCommand.current = null;
     }
     return inserted;
+  }
+
+  async function addTemplate(templateId: string) {
+    const { flowBounds } = canvasPlacementBounds();
+    const center = { x: (flowBounds.left + flowBounds.right) / 2, y: (flowBounds.top + flowBounds.bottom) / 2 };
+    let groupId = '';
+    const added = await applyServerInsertion(async revision => {
+      const result = await pasteTemplate(projectId, templateId, center, revision);
+      groupId = result.group_id;
+      return result.document;
+    }, { placement: 'preserve' });
+    if (added) {
+      setSelectedNodeIds(new Set([groupId]));
+      flashCanvasNodes([groupId]);
+    }
+  }
+
+  function viewTemplates() {
+    if (projectIdRef.current !== projectId) return;
+    const open = () => {
+      setCreationAssetSaveRequest(null);
+      setLibraryMode('templates');
+      setLibraryPanelKey(value => value + 1);
+      void saveUiPref('asset-panel', 'templates');
+    };
+    if (libraryModeRef.current) creationAssetPanelRef.current?.requestTransition(open);
+    else open();
   }
 
   function insertCreationAsset(
@@ -5831,6 +5862,7 @@ function CanvasEditorInner({
   }, [keys, leaveCanvas, locateNode, selectOnlyNode, setLocation, submitRun]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    saveGroupTemplate: setTemplateGroup,
     groupRuns, groupSteps, refreshGroupRuns,
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
@@ -6166,6 +6198,13 @@ function CanvasEditorInner({
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
+      {templateGroup && <TemplateNameDialog title="存为模板" initialName={templateGroup.title}
+        onClose={() => setTemplateGroup(null)} onSave={async name => {
+          await savePendingEdits();
+          await saveTemplate(projectId, templateGroup.id, name);
+          setAssetsRevision(value => value + 1);
+          notify.info('已存为模板', { action: { label: '查看', onClick: viewTemplates } });
+        }} />}
       <section
         ref={editorRegionRef}
         tabIndex={-1}
@@ -6775,6 +6814,8 @@ function CanvasEditorInner({
           <CanvasSidePanelMotion key="library">
           <AssetPanel
             key={libraryPanelKey}
+            openTemplates={libraryMode === 'templates'}
+            onAddTemplate={addTemplate}
             ref={creationAssetPanelRef}
             refreshKey={assetsRevision}
             onAssetsChanged={refreshProjectAssets}

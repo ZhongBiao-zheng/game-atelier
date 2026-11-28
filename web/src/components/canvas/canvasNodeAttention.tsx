@@ -102,14 +102,14 @@ function useCanvasEdgeFlash(id: string): number | undefined {
 }
 
 /** 放在节点外壳里：被点名时画一圈描边，淡出后卸掉。jsdom 不播，也不留着描边。 */
-export function CanvasNodeFlash({ nodeId }: { nodeId: string }) {
+export function CanvasNodeFlash({ nodeId, fast }: { nodeId: string; fast?: boolean }) {
   const nonce = useSyncExternalStore(nodeFlashes.subscribe, () => nodeFlashes.get(nodeId));
   if (nonce === undefined || !motionAvailable()) return null;
-  return <FadingMark key={nonce} className="pointer-events-none absolute -inset-1 z-30 rounded-xl ring-2 ring-primary" />;
+  return <FadingMark key={nonce} fast={fast} className="pointer-events-none absolute -inset-1 z-30 rounded-xl ring-2 ring-primary" />;
 }
 
 /** 挂载即从不透明淡到 0，播完自己卸掉。减弱动态效果照样淡（只有透明度），时长压到 150ms。 */
-function useFadeOutOnce<T extends Element>() {
+function useFadeOutOnce<T extends Element>(fast = false) {
   const ref = useRef<T>(null);
   const [done, setDone] = useState(false);
   useLayoutEffect(() => {
@@ -118,16 +118,16 @@ function useFadeOutOnce<T extends Element>() {
     const controls = animate(
       element,
       { opacity: [1, 0] },
-      { duration: prefersReducedMotion() ? MOTION_DURATION.fast : MOTION_DURATION.slow, ease: MOTION_EASE.subtle },
+      { duration: fast || prefersReducedMotion() ? MOTION_DURATION.fast : MOTION_DURATION.slow, ease: MOTION_EASE.subtle },
     );
     void controls.finished.then(() => setDone(true));
     return () => controls.stop();
-  }, []);
+  }, [fast]);
   return { ref, done };
 }
 
-function FadingMark({ className }: { className: string }) {
-  const { ref, done } = useFadeOutOnce<HTMLSpanElement>();
+function FadingMark({ className, fast }: { className: string; fast?: boolean }) {
+  const { ref, done } = useFadeOutOnce<HTMLSpanElement>(fast);
   if (done) return null;
   return <span ref={ref} aria-hidden="true" className={className} />;
 }
