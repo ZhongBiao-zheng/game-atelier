@@ -5,6 +5,7 @@ import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
 import { changeDataRoot, fetchDataRoot, type DataRootMove } from '@/api/onboarding';
 import { errorText } from '@/lib/errorText';
+import { moveLabel } from '@/lib/dataRootMove';
 import { ProfileSection } from './ProfileSection';
 import { DiagnosticsExport } from './DiagnosticsExport';
 import { SwapLabel } from '@/components/ui/swap-label';
@@ -20,15 +21,6 @@ const DEFAULT_ROOT = '~/game-atelier';
 const MOVE_POLL_MS = 500;
 const moving = (move: DataRootMove | null) => move?.phase === 'copying' || move?.phase === 'verifying';
 
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  return `${Math.max(0.1, bytes / 1024 ** 2).toFixed(1)} MB`;
-}
-
-function moveProgress(move: DataRootMove): string {
-  if (move.phase === 'verifying') return '校验中…';
-  return `迁移中 ${formatBytes(move.copied_bytes)} / ${formatBytes(move.total_bytes)}`;
-}
 
 export function PreferencesPage() {
   const [root, setRoot] = useState('');
@@ -131,7 +123,7 @@ export function PreferencesPage() {
             {done && <span role="status" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <CheckIcon size="sm" aria-hidden />{move?.mode === 'copy' ? '已迁移，原目录未删除' : '已切换'}
             </span>}
-            {inProgress && move && <span role="status" className="text-xs tabular-nums text-muted-foreground">{moveProgress(move)}</span>}
+            {inProgress && move && <span role="status" className="text-xs tabular-nums text-muted-foreground">{moveLabel(move)}</span>}
             <Button variant="outline" size="sm" type="button" onClick={() => void pickDataRoot()} disabled={loading || choosing || inProgress}>
               <FolderOpenIcon size="sm" aria-hidden /><SwapLabel active={choosing} on="选择中…" off="更换文件夹" />
             </Button>

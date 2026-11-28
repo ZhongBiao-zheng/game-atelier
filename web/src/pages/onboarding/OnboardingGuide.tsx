@@ -4,6 +4,7 @@ import { getChatGPTSubscription, listKeys, type ChatGPTSubscriptionStatus, type 
 import { recordOnboardingEvent, type OnboardingPath } from '@/api/onboarding';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { Button } from '@/components/ui/button';
+import { SwapIcon } from '@/components/ui/swap-icon';
 import { BackIcon, CheckIcon, ChevronRightIcon, ExternalLinkIcon, HelpIcon } from '@/components/ui/icons';
 import { Hint } from '@/components/ui/tooltip';
 import { useRetained } from '@/components/ui/retained';
@@ -123,7 +124,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
 
   const subscriptionLine = subscription === null ? '加载中…' : subscription === 'error' || !subscription.available
     ? '未登录' : subscription.email ?? '已登录';
-  const comfyLine = { checking: '检查中…', running: '运行中', stopped: '未运行' }[comfy];
+  const comfyLine = { checking: '检查中…', running: '运行中', stopped: '未启动' }[comfy];
 
   return (
     <div ref={stepRef} className="flex flex-col gap-6">
@@ -171,7 +172,8 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
         guided
         submitLabel={shownForm.mode === 'edit' ? '完成' : '保存并开始'}
         onCreated={onSaved}
-        onCancel={() => { void settle(null); }}
+        // 取消立刻关表单，是否已有可用模型在后台判断。
+        onCancel={() => { setForm(null); void settle(null); }}
       />}
     </div>
   );
@@ -253,10 +255,10 @@ function StepRow({ index, label, hint, done, current, children }: {
 }) {
   return (
     <li aria-current={current ? 'step' : undefined}
-      className={cn('flex items-center gap-3 rounded-lg border bg-card px-4 py-3', current ? 'border-primary/40' : 'border-border')}>
-      <span aria-hidden className={cn('flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums',
-        done ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground')}>
-        {done ? <CheckIcon size="sm" /> : index}
+      className={cn('flex items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors', current ? 'border-primary/40' : 'border-border')}>
+      <span aria-hidden className={cn('flex size-6 shrink-0 items-center justify-center rounded-full border text-xs tabular-nums transition-colors',
+        done ? 'border-transparent bg-primary text-primary-foreground' : 'border-border text-muted-foreground')}>
+        <SwapIcon swapKey={done} variant="pop">{done ? <CheckIcon size="sm" /> : index}</SwapIcon>
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium">
         {label}
