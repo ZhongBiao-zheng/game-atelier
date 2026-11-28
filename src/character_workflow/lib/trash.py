@@ -215,7 +215,7 @@ def move_to_trash(
     先落盘 moving 状态的清单再移动；`commit`（例如回写任务的输出索引）在全部移入后、标记 stored 前执行，
     抛错则一起回滚。进程中途被终止时，启动恢复按清单移回。调用方负责自己的领域锁并确认内容不在使用中。"""
     targets = [_target(path) for path in paths]
-    if not targets:
+    if not targets and commit is None:
         raise TrashError("没有要删除的内容")
     keys = [relative.casefold() for _, relative in targets]
     for index, key in enumerate(keys):

@@ -58,7 +58,6 @@ def resolve_canvas_thumbnail(
     发原图的情形：不是图片、原图本来就不比缩略图大、动图（缩了会变成静止的一帧）、
     以及任何解码失败。缩略图是纯优化，失败时退回原图而不是报错——画师看到的还是图。
     """
-    from PIL import Image, UnidentifiedImageError
     if version.kind != "image":
         return None
     target_width = snap_thumbnail_width(width)
@@ -68,6 +67,13 @@ def resolve_canvas_thumbnail(
         return None
 
     cached = canvas_thumbnails_dir(project_id) / f"{_SAFE_ID.sub('-', version.version_id)}-{target_width}.webp"
+    return cached_image_thumbnail(cached, source, target_width)
+
+
+def cached_image_thumbnail(cached: Path, source: Path, target_width: int) -> Path | None:
+    """Return the existing rendition or atomically publish it after decoding the source."""
+    from PIL import Image, UnidentifiedImageError
+
     if cached.is_file():
         return cached
     try:

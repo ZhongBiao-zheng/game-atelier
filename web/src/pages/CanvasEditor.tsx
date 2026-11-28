@@ -141,8 +141,9 @@ import {
   isUploadedImageMaterialNode,
   restoreCanvasNodeFocus,
 } from '@/components/canvas/canvasNodePanelInteraction';
+import type { HistoryKind } from '@/api/history';
+import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
-  CreationAssetPanel,
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
@@ -3220,7 +3221,7 @@ function CanvasEditorInner({
     }, menu);
   }
 
-  async function uploadMaterial(file: File, menu: CreateMenuState | null) {
+  async function uploadMaterial(file: File, menu: CreateMenuState | null, rowPosition?: CanvasPoint) {
     const uploaded = await uploadCanvasMedia(projectId, file, serverRevision.current);
     if (latestDocument.current?.project_id !== projectId) return null;
     serverRevision.current = Math.max(serverRevision.current, uploaded.document.revision);
@@ -3242,7 +3243,7 @@ function CanvasEditorInner({
         const size = version.kind === 'image' || version.kind === 'video'
           ? sizeLockedToCanvasVersion(null, version)
           : CANVAS_DEFAULT_NODE_SIZE;
-        return menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size);
+        return rowPosition ?? (menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size));
       })(),
       z_index: 0,
     };
@@ -3268,11 +3269,11 @@ function CanvasEditorInner({
     return node.id;
   }
 
-  function handleUploads(allFiles: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string) {
+  function handleUploads(allFiles: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string, historyKinds?: ReadonlyMap<File, HistoryKind>) {
     if (!allFiles.length) return;
     // 一次拖进来一批：跳过明显不是图片 / 视频 / 音频的文件，其余照常导入，最后一条汇总（Q11）。
     // 浏览器给不出类型的（空 type）交给服务端判断。
-    const files = allFiles.filter(file => !file.type || /^(image|video|audio)\//.test(file.type));
+    const files = allFiles.filter(file => historyKinds?.has(file) || !file.type || /^(image|video|audio)\//.test(file.type));
     const unsupported = allFiles.length - files.length;
     if (!files.length) {
       setError(unsupported === 1 ? '这个文件格式不支持，只能导入图片、视频或音频。' : `${unsupported} 个文件格式都不支持，只能导入图片、视频或音频。`);
@@ -3293,6 +3294,7 @@ function CanvasEditorInner({
       const failures: string[] = [];
       const added: string[] = [];
       try {
+        let rowX = menu?.flow.x ?? 0;
         for (const [index, file] of files.entries()) {
           if (latestDocument.current?.project_id !== projectId) return;
           try {
@@ -3309,8 +3311,26 @@ function CanvasEditorInner({
               mergeMediaPointerCommand(uploaded.document, target.id, dirtyAtCommand, before);
               added.push(target.id);
             } else {
-              const id = await uploadMaterial(file, menu);
-              if (id) added.push(id);
+              const position = historyKinds && menu ? { ...menu, flow: { x: rowX, y: menu.flow.y } } : menu;
+              let id: string | null;
+              if (historyKinds?.get(file) === 'text') {
+                const text = await file.text();
+                if (latestDocument.current?.project_id !== projectId) return;
+                const versionId = makeId('version');
+                id = makeId('text');
+                appendNode({ id, type: 'text', title: file.name, position: position?.flow ?? defaultPosition(CANVAS_TEXT_NODE_DEFAULT_SIZE),
+                  z_index: 0, data: { current_version_id: versionId, generation_draft: null, active_run_id: null, display: { scale: 'sm' } } },
+                  position, latestDocument.current, [{ version_id: versionId, kind: 'text', text,
+                    created_at: new Date().toISOString(), sha256: CANVAS_LOCAL_VERSION_SHA, origin: { kind: 'user_edit' } }], false);
+              } else id = await uploadMaterial(file, position, historyKinds ? position?.flow : undefined);
+              if (id) {
+                added.push(id);
+                if (historyKinds) {
+                  const current = latestDocument.current;
+                  const node = current?.nodes.find(candidate => candidate.id === id);
+                  if (node && current) rowX = node.position.x + canvasNodeRenderedSize(node, current.content_versions).width + 32;
+                }
+              }
             }
           } catch (error) {
             failures.push(`${shortFileName(file.name)}：${(error as Error).message}`);
@@ -6741,7 +6761,7 @@ function CanvasEditorInner({
         <AnimatePresence initial={false}>
         {libraryMode && (
           <CanvasSidePanelMotion key="library">
-          <CreationAssetPanel
+          <AssetPanel
             key={libraryPanelKey}
             ref={creationAssetPanelRef}
             refreshKey={assetsRevision}
@@ -6786,6 +6806,16 @@ function CanvasEditorInner({
                 {},
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
+            }}
+            onHistoryReference={async items => {
+              const kinds = new Map<File, HistoryKind>();
+              for (const item of items) kinds.set(await item.read(), item.kind);
+              const files = Array.from(kinds.keys());
+              if (latestDocument.current?.project_id !== projectId) return;
+              const size = { ...CANVAS_DEFAULT_NODE_SIZE, width: files.length * CANVAS_DEFAULT_NODE_SIZE.width + (files.length - 1) * 32 };
+              const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(size),
+                ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
+              await handleUploads(files, menu, undefined, '已放到画布', kinds);
             }}
             onUseTeamMedia={async file => {
               const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(),

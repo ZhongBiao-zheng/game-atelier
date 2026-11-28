@@ -37,7 +37,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.canvas_thumbnails import discard_canvas_thumbnails
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.jobs import archive_for_usage, job_lock, new_job_id, read_job
+from character_workflow.lib.jobs import archive_for_usage, job_lock, new_job_id, read_canvas_output_job, read_job
 from character_workflow.lib.schemas import (
     DEFAULT_CANVAS_CATEGORIES,
     CanvasAgentSession,
@@ -439,10 +439,15 @@ def export_canvas_projects(
             project = read_canvas_project(project_id)
             document = _read_canvas_document_unlocked(project_id)
             jobs = _jobs_for_project(project_id)
+            job_ids = {job.job_id for job in jobs}
+            # A recycled job can still own versions required by the project package.
+            for origin_id in {version.origin.job_id for version in document.content_versions.values()
+                              if version.origin.kind in {"job_output", "layer_decomposition"}} - job_ids:
+                jobs.append(read_canvas_output_job(project_id, origin_id))
             _assert_jobs_are_quiescent(jobs)
-            for job in jobs:
+            for job in sorted(jobs, key=lambda job: job.job_id):
                 stack.enter_context(job_lock(job.job_id))
-            jobs = [read_job(job.job_id) for job in jobs]
+            jobs = [read_canvas_output_job(project_id, job.job_id) for job in jobs]
 
             package_project_id = f"project-{secrets.token_hex(8)}"
             prefix = f"projects/{package_project_id}"

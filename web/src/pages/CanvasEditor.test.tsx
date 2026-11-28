@@ -2,6 +2,7 @@ import { composeAnnotatedImage } from '@/components/canvas/annotation/composeAnn
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { useContext } from 'react';
+import * as historyApi from '@/api/history';
 import * as connection from '@/api/connection';
 import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
@@ -1712,6 +1713,7 @@ async function openTeamTab() {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
 }
 
@@ -2700,6 +2702,27 @@ async function renderReadyCanvas() {
   await screen.findByLabelText('画布编辑器 列车短片');
 }
 
+it('uses the history kind to add an octet-stream Markdown output as a text node', async () => {
+  const list = vi.spyOn(historyApi, 'listHistory').mockResolvedValue({ next_cursor: null, items: [{
+    job_id: 'job-md', output_index: 0, kind: 'text', filename: 'v1.md', url: '/v1.md',
+    thumbnail_url: '/v1.md', text_preview: '片段', prompt: '分镜', submitted_at: '2026-11-27',
+    width: null, height: null, duration: null,
+  }] });
+  onTestFinished(() => list.mockRestore());
+  const file = Object.assign(new File(['剧本全文'], 'v1.md', { type: 'application/octet-stream' }), {
+    text: async () => '剧本全文',
+  });
+  vi.mocked(readTeamMedia).mockResolvedValueOnce(file);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: '选择 v1.md' }));
+  fireEvent.click(screen.getByRole('button', { name: '用作参考' }));
+  await waitFor(() => expect(Object.values(lastSavedDocument()?.content_versions ?? {})).toContainEqual(
+    expect.objectContaining({ kind: 'text', text: '剧本全文' })));
+  expect(lastSavedDocument()?.nodes).toContainEqual(expect.objectContaining({ type: 'text', title: 'v1.md' }));
+  expect(uploadCanvasMedia).not.toHaveBeenCalled();
+});
+
 it('saves a generated canvas result as a generation asset', async () => {
   vi.mocked(getCanvasDocument).mockResolvedValue(canvasWithImage(generatedVersion));
   vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
@@ -2787,6 +2810,7 @@ it('reproduces from the asset panel and names a model this machine lacks', async
   vi.mocked(reproduceIntoCanvas).mockResolvedValue(reproducedDocument());
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   fireEvent.click(await screen.findByRole('button', { name: missingModel.title }));
   fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
   await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({
@@ -2897,6 +2921,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: '提示词' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true');

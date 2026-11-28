@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import time
 from contextlib import contextmanager
@@ -311,9 +312,11 @@ def _resolve_output(raw: str) -> Path:
     return path if path.is_absolute() else data_root.resolve_data_root() / raw
 
 
-def _trashable_studio_job(job_id: str) -> Job:
+def _trashable_studio_job(job_id: str, *, history: bool) -> Job:
     job = read_job(job_id)
-    if job.namespace != "studio":
+    if history and job.status not in (JobStatus.DONE, JobStatus.PARTIAL):
+        raise ValueError("只能删除已完成的生成记录")
+    if job.namespace != "studio" and not (history and job.namespace == "canvas"):
         raise ValueError("只能删除创作台的生成记录")
     if job.status in (JobStatus.PENDING, JobStatus.PENDING_CONFIRM):
         raise ValueError("生成中的记录不能删除，先停止")
@@ -340,6 +343,9 @@ def output_slots(job: Job) -> list[tuple[int, str]]:
 
     Agent 历史里的 `output:<job_id>:<序号>` 按它解释，旧会话的引用始终指向原图。"""
     removed = removed_output_slots(job)
+    if job.namespace == "canvas":
+        # Immutable project versions still address the complete original path list.
+        return [(slot, path) for slot, path in enumerate(job.output_paths) if slot not in removed]
     slots: list[tuple[int, str]] = []
     slot = 0
     for path in job.output_paths:
@@ -369,6 +375,21 @@ def archive_for_usage(job: Job) -> None:
     atomic_write_text(_usage_archive_dir() / f"{job.job_id}.json", _path(job.job_id).read_text("utf-8"))
 
 
+def read_canvas_output_job(project_id: str, job_id: str) -> Job:
+    """Resolve the registered owner of immutable versions, including a trashed generation."""
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", job_id):
+        raise PermissionError("invalid canvas output owner")
+    try:
+        job = read_job(job_id)
+    except FileNotFoundError:
+        job = _load_job(json.loads(read_text_with_retry(_usage_archive_dir() / f"{job_id}.json")))
+        # An exported project must retain the provenance without reviving deleted history rows.
+        job = _with_removed_slots(job, set(range(len(job.output_paths))), job.output_paths)
+    if job.job_id != job_id or job.namespace != "canvas" or job.canvas_project_id != project_id:
+        raise PermissionError("job does not belong to this canvas project")
+    return job
+
+
 def list_usage_archive() -> list[Job]:
     """用量侧留存的已删除任务；读不出的跳过。是否仍在 `.runtime/jobs/` 由调用方去重（在的以现存为准）。"""
     archive = _usage_archive_dir()
@@ -381,7 +402,8 @@ def list_usage_archive() -> list[Job]:
     return rows
 
 
-def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
+def trash_studio_job(job_id: str, output_path: str | None = None, *,
+                     history_slots: set[int] | None = None) -> str:
     """创作台删除：移进回收站（30 天内可还原），返回 trash_id。
 
     不给 output_path 删整轮（任务文件与产物目录）；给了且这一轮不止一份产物时只删这一份：
@@ -390,29 +412,38 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
     from character_workflow.lib.studio_jobs import studio_root
 
     with job_lock(job_id):
-        job = _trashable_studio_job(job_id)
+        job = _trashable_studio_job(job_id, history=history_slots is not None)
+        slots = dict(output_slots(job))
+        selected = history_slots
         if output_path is not None:
-            if output_path not in job.output_paths:
+            selected = {slot for slot, path in slots.items() if path == output_path}
+        if selected is not None:
+            if not selected or not selected.issubset(slots):
                 raise LookupError("这份结果不在这一轮里")
-            if len(job.output_paths) > 1:
-                slot = dict((path, slot) for slot, path in output_slots(job))[output_path]
-                remaining = [path for path in job.output_paths if path != output_path]
-                updated = _with_removed_slots(job, removed_output_slots(job) | {slot}, remaining)
-                # 输出索引的回写与文件移动同一个回收站事务：一起提交，或一起回滚。
-                return trash.move_to_trash(
-                    "round", _round_label(job), [_resolve_output(output_path)],
-                    {"job_id": job_id, "session_id": job.studio_agent_session_id,
-                     "output_path": output_path, "output_slot": slot},
-                    commit=lambda: _write(updated),
-                )
+            if len(selected) < len(slots):
+                remaining = (job.output_paths if job.namespace == "canvas" else
+                             [path for slot, path in slots.items() if slot not in selected])
+                updated = _with_removed_slots(job, removed_output_slots(job) | selected, remaining)
+                outputs = [(slot, slots[slot]) for slot in sorted(selected)]
+                meta = {"job_id": job_id, "session_id": job.studio_agent_session_id}
+                if len(outputs) == 1:
+                    meta["output_slot"], meta["output_path"] = outputs[0]
+                else:
+                    meta["outputs"] = outputs
+                # 画布版本归项目所有；回收站事务只需提交、还原任务的输出索引。
+                paths = [_resolve_output(path) for _, path in outputs] if job.namespace == "studio" else []
+                return trash.move_to_trash("round", _round_label(job), paths, meta,
+                                           commit=lambda: _write(updated))
         output_dir = studio_root() / job_id
         paths: list[Path] = [_path(job_id)]
-        if output_dir.exists():
-            paths.append(output_dir)
-        for raw in job.output_paths:
-            path = _resolve_output(raw)
-            if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
-                paths.append(path)
+        # Canvas 的不可变版本引用原产物；删除任务记录时文件仍归项目所有。
+        if job.namespace == "studio":
+            if output_dir.exists():
+                paths.append(output_dir)
+            for raw in job.output_paths:
+                path = _resolve_output(raw)
+                if path.exists() and not path.resolve().is_relative_to(output_dir.resolve()):
+                    paths.append(path)
         archive_for_usage(job)
         return trash.move_to_trash(
             "round", _round_label(job), paths,
@@ -420,18 +451,17 @@ def trash_studio_job(job_id: str, output_path: str | None = None) -> str:
         )
 
 
-def _reinsert_output(job_id: str, output_path: str, slot: int) -> None:
-    """持 job_lock：把单张删除的结果按稳定序号插回（重复执行无副作用）。"""
+def _reinsert_outputs(job_id: str, outputs: list[tuple[int, str]]) -> None:
+    """持 job_lock：一次写回稳定序号；中断恢复时可以再次执行。"""
     job = read_job(job_id)
-    removed = removed_output_slots(job)
-    if output_path in job.output_paths:
-        if slot in removed:
-            _write(_with_removed_slots(job, removed - {slot}, list(job.output_paths)))
+    if job.namespace == "canvas":
+        restored = {slot for slot, _ in outputs}
+        _write(_with_removed_slots(job, removed_output_slots(job) - restored, job.output_paths))
         return
-    position = sum(1 for current, _ in output_slots(job) if current < slot)
-    paths = list(job.output_paths)
-    paths.insert(position, output_path)
-    _write(_with_removed_slots(job, removed - {slot}, paths))
+    slots = dict(output_slots(job))
+    slots.update(outputs)
+    removed = removed_output_slots(job) - slots.keys()
+    _write(_with_removed_slots(job, removed, [path for _, path in sorted(slots.items())]))
 
 
 def _restore_round(entry: trash.TrashEntry, restore_files: trash.RestoreFiles) -> None:
@@ -440,15 +470,18 @@ def _restore_round(entry: trash.TrashEntry, restore_files: trash.RestoreFiles) -
         restore_files()
         return
     with job_lock(job_id):
-        output_path = entry.meta.get("output_path")
-        slot = entry.meta.get("output_slot")
-        if not isinstance(output_path, str) or type(slot) is not int:
-            restore_files()
-            return
+        outputs = entry.meta.get("outputs")
+        if outputs is None:
+            output_path = entry.meta.get("output_path")
+            slot = entry.meta.get("output_slot")
+            if not isinstance(output_path, str) or type(slot) is not int:
+                restore_files()
+                return
+            outputs = [(slot, output_path)]
         # 单张：所在的一轮必须还在，否则移回的文件会占住整轮的产物目录，整轮再也还原不了。
         if not _path(job_id).exists():
             raise trash.TrashConflict("这张所在的一轮已删除，先还原这一轮")
-        restore_files(lambda: _reinsert_output(job_id, output_path, slot))
+        restore_files(lambda: _reinsert_outputs(job_id, outputs))
 
 
 trash.register_restore_handler("round", _restore_round)

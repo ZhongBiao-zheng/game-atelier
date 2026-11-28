@@ -40,7 +40,7 @@ async function decodeWaveform(src: string): Promise<Waveform> {
   return { peaks: peaks.map(peak => peak / max), secondsPerBar };
 }
 
-function useWaveform(src: string): Waveform | null {
+export function useWaveform(src: string): Waveform | null {
   const [waveform, setWaveform] = useState<Waveform | null>(null);
   useEffect(() => {
     if (!src || typeof OfflineAudioContext === 'undefined') return;

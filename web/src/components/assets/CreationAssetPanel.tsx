@@ -36,6 +36,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 export type { CreationAssetPanelMode, CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
 
 export interface CreationAssetPanelProps {
+  embedded?: boolean;
   refreshKey?: number;
   onAssetsChanged?: () => Promise<void>;
   className?: string;
@@ -74,6 +75,7 @@ function viewDepth(view: string) {
 
 export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps>(function CreationAssetPanel({
   className,
+  embedded,
   refreshKey,
   onAssetsChanged,
   projectId,
@@ -338,6 +340,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     }
   }
 
+  const Container = embedded ? 'div' : 'aside';
   const HeaderTitle = selected?.kind === 'prompt' ? 'h2' : 'p';
   const isEditing = Boolean(promptEditor || mediaEditor || canvasPickerAsset);
   const shownError = useRetained(error);
@@ -360,8 +363,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   }, { keepWhenReduced: true });
 
   return (
-    <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', className)}>
-      <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
+    <Container aria-label={embedded ? '素材库' : '创作资产'} className={embedded ? 'flex min-h-0 flex-1 flex-col' : cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', className)}>
+      {(!embedded || selected || isEditing) && <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeftIcon /></Button>}
           <div className="min-w-0">
@@ -378,9 +381,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
             <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><ShareIcon />分享到团队库</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void archiveAsset(selected)}><ArchiveIcon />归档</DropdownMenuItem>
           </DropdownMenuContent></DropdownMenu>}
-          <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>
+          {!embedded && <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>}
         </div>
-      </header>
+      </header>}
 
       <Collapse open={Boolean(error)}><p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{shownError}</p></Collapse>
 
@@ -546,6 +549,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       {/* 资产预览统一走 Lightbox（自带下载）；详情页只留元数据与操作。 */}
       {zoomed && zoomedMedia && <Lightbox src={assetMediaSrc(zoomed.asset_id, zoomedMedia)} downloadName={zoomedMedia.filename}
         onClose={() => setZoomed(null)} />}
-    </aside>
+    </Container>
   );
 });

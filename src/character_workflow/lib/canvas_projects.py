@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.jobs import list_jobs, read_job
+from character_workflow.lib.jobs import list_jobs, read_canvas_output_job
 from character_workflow.lib.media_probe import mp4_track_dimensions
 from character_workflow.lib.schemas import (
     CanvasNode,
@@ -832,12 +832,7 @@ def _resolve_canvas_media_version(
         "job_output", "layer_decomposition",
     }:
         raise PermissionError("canvas media version has an invalid owned path")
-    try:
-        job = read_job(version.origin.job_id)
-    except FileNotFoundError as error:
-        raise FileNotFoundError(version.origin.job_id) from error
-    if job.namespace != "canvas" or job.canvas_project_id != project_id:
-        raise PermissionError("job does not belong to this canvas project")
+    job = read_canvas_output_job(project_id, version.origin.job_id)
     normalized = [
         str((Path(item) if Path(item).is_absolute() else data_root.resolve_data_root() / item).resolve())
         for item in job.output_paths
