@@ -43,7 +43,7 @@ type OpAction =
 
 interface HistoryEntry { opId: string; revision: number; touched: string[] }
 type Stack = 'past' | 'future';
-interface Settle { resolve: () => void; reject: (error: Error) => void }
+interface Settle { resolve: (revision: number) => void; reject: (error: Error) => void }
 interface PendingOp { stack: Stack | null; entry?: HistoryEntry; settle?: Settle }
 
 /** 等房主确认一次操作的上限；超时按失败处理，调用方保留弹窗内容。 */
@@ -150,7 +150,7 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
           if (event.client_id === self) {
             const item = pendingOps.get(event.op_id);
             if (item) history.current.applied({opId:event.op_id, revision:event.revision, touched:event.touched_node_ids}, item.stack);
-            item?.settle?.resolve();
+            item?.settle?.resolve(event.revision);
             pendingOps.delete(event.op_id);
           } else if (event.touched_node_ids) history.current.changed(event.touched_node_ids, event.revision);
           else if (before) {
@@ -180,39 +180,41 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
       window.clearTimeout(retry); window.clearTimeout(presenceTimer.current);
       presenceTimer.current = undefined;
       ws.current = null;
-      // 离开画布：等结果的调用方也一起卸了，不再回调（避免离开时弹「已断开」）。
-      pendingOps.clear();
+      // 换房间或重新鉴权（path 变空）时，等结果的弹窗要收到失败，不能一直「保存中…」。
+      dropPending();
       socket?.close();
     };
   }, [path]);
 
-  const send = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry, settle?:Settle) => {
+  const send = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry, settle?:Settle,
+    reuseOpId?:string) => {
     const socket = ws.current;
     if (!socket || socket.readyState !== WebSocket.OPEN || !latest.current || !connected || mode !== 'edit') return null;
-    const opId = crypto.randomUUID();
+    const opId = reuseOpId ?? crypto.randomUUID();
     pending.current.set(opId, {stack, entry, settle});
     socket.send(JSON.stringify({type:'submit_op', op:{...op, op_id:opId, base_revision:baseRevision ?? latest.current.revision}}));
     return opId;
   }, [connected, mode]);
   const submit = useCallback((op: OpAction, baseRevision?:number, stack:Stack | null = null, entry?:HistoryEntry) =>
     send(op, baseRevision, stack, entry) !== null, [send]);
-  /** 提交并等房主确认：applied 时 resolve；被拒、断线或超时 reject，调用方据此保留编辑内容。 */
-  const submitAndWait = useCallback((op: OpAction, baseRevision?:number) => new Promise<void>((resolve, reject) => {
-    let timer = 0;
-    const settle: Settle = {
-      resolve: () => { window.clearTimeout(timer); resolve(); },
-      reject: error => { window.clearTimeout(timer); reject(error); },
-    };
-    const opId = send(op, baseRevision, null, undefined, settle);
-    if (!opId) { reject(new Error('连接已断开，重连后再保存')); return; }
-    timer = window.setTimeout(() => {
-      // 记录留着：迟到的确认照样进撤销栈，只是不再回调。已离开画布（记录清空）就不再报。
-      const item = pending.current.get(opId);
-      if (!item) return;
-      item.settle = undefined;
-      reject(new Error('房主未响应，请重试'));
-    }, OP_ACK_TIMEOUT_MS);
-  }), [send]);
+  /** 提交并等房主确认：applied 时 resolve；被拒、断线或超时 reject，调用方据此保留编辑内容。
+   *  opId：同一份草稿重试时传上次的 op_id 与原样的提交体——房主已落盘就按幂等回同一结果，不会写出第二份。 */
+  const submitAndWait = useCallback((op: OpAction, baseRevision?:number, opId:string = crypto.randomUUID()) =>
+    new Promise<{opId:string; revision:number}>((resolve, reject) => {
+      let timer = 0;
+      const settle: Settle = {
+        resolve: revision => { window.clearTimeout(timer); resolve({opId, revision}); },
+        reject: error => { window.clearTimeout(timer); reject(error); },
+      };
+      if (!send(op, baseRevision, null, undefined, settle, opId)) { reject(new Error('连接已断开，重连后再保存')); return; }
+      timer = window.setTimeout(() => {
+        // 记录留着：迟到的确认照样进撤销栈，只是不再回调。
+        const item = pending.current.get(opId);
+        if (!item) return;
+        item.settle = undefined;
+        reject(new Error('房主未响应，请重试'));
+      }, OP_ACK_TIMEOUT_MS);
+    }), [send]);
 
   const restore = (stack:Stack) => {
     if (!connected || mode !== 'edit') return;
@@ -235,6 +237,8 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
   }
   return {recordCommand,document, members, clientId, mode, allowBorrow:borrow, connected, closed, reconnecting, submit, submitAndWait, updatePresence,
     undo:() => restore('past'), redo:() => restore('future'), canUndo:history.current.available('past'),
+    /** 撤销栈顶那一步的 op_id：撤销提示据此判断「撤销」还指不指向它那一次。 */
+    undoTop:history.current.past.at(-1)?.opId ?? null,
     canRedo:history.current.available('future')};
 }
 
