@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import secrets
 import shutil
@@ -22,6 +23,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.file_lock import file_lock
 
+logger = logging.getLogger(__name__)
 TEMPLATE_ID = r"tpl_[0-9a-f]{24}"
 
 
@@ -51,14 +53,23 @@ def _summary(record):
             ("id", "name", "cover", "node_count", "created_at", "updated_at", "revision")}
 
 
+def template_summary(template_id):
+    return _summary(_read(_directory(template_id)))
+
+
 def list_templates():
     rows = []
     for path in _root().glob("tpl_*/template.json"):
         try:
-            rows.append(_summary(_read(path.parent)))
+            row = template_summary(path.parent.name)
+            if not isinstance(row["created_at"], str) or row["id"] != path.parent.name:
+                raise ValueError("模板元数据无效")
+            rows.append(row)
         except FileNotFoundError:
             continue  # Deleted between enumeration and read.
-    return sorted(rows, key=lambda row: (row["updated_at"], row["id"]), reverse=True)
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.warning("跳过无法读取的模板 %s", path.parent.name, exc_info=True)
+    return sorted(rows, key=lambda row: (row["created_at"], row["id"]), reverse=True)
 
 
 def _name(text):

@@ -1042,7 +1042,11 @@ def summarize_call(tool: str, arguments: dict, titles: dict[str, str] | None = N
         # 只显示文件名：带目录的相对路径会被落盘前的隐私替换当成本机路径藏掉。
         return f"{arguments.get('name', '')} · {PurePosixPath(str(arguments.get('path', ''))).name}"
     if tool == "add_template":
-        return "将模板添加到当前画布"
+        try:
+            name = canvas_templates.template_summary(arguments.get("template_id"))["name"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return "将模板添加到当前画布"
+        return f"添加模板「{_one_line(name, 120)}」"
     if tool in READ_LABELS:
         return READ_LABELS[tool]
     if tool.startswith(PLUGIN_TOOL_PREFIX):

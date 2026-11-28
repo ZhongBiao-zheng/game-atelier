@@ -120,3 +120,26 @@ def test_agent_lists_and_adds_a_template_through_registered_tools():
     result = json.loads(asyncio.run(add.on_invoke_tool(ctx, json.dumps(args))))
     group = next(n for n in projects.read_canvas_document(target).nodes if n.id == result["group_id"])
     assert ctx.context.created_node_ids == {group.id, *group.data.member_node_ids}
+
+
+def test_list_keeps_creation_order_and_skips_unreadable_records(isolated_data_root, caplog, monkeypatch):
+    times = iter(["2026-11-01", "2026-11-02", "2026-11-03"])
+    monkeypatch.setattr(templates, "_now", lambda: next(times))
+    source, _ = source_group()
+    first = templates.save_template(source, "group", "第一张")
+    second = templates.duplicate_template(first["id"])
+    templates.rename_template(first["id"], "新名字")
+    for i, content in enumerate(["{", "{}"]):
+        directory = isolated_data_root / "library/templates" / f"tpl_{i:024x}"
+        directory.mkdir()
+        (directory / "template.json").write_text(content)
+    assert [row["id"] for row in templates.list_templates()] == [second["id"], first["id"]]
+    assert caplog.text.count("跳过无法读取的模板") == 2
+
+
+def test_add_template_approval_summary_uses_the_saved_name():
+    from character_workflow.lib.canvas_agent_runtime import summarize_call
+
+    source, _ = source_group()
+    saved = templates.save_template(source, "group", "海岸分镜")
+    assert summarize_call("add_template", {"template_id": saved["id"]}) == "添加模板「海岸分镜」"
