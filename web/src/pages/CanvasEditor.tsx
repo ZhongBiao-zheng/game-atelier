@@ -2647,7 +2647,7 @@ function CanvasEditorInner({
     }
   }
 
-  function canvasPlacementBounds() {
+  function canvasPlacementBounds(excludePanels = false) {
     const surface = editorRegionRef.current?.getBoundingClientRect();
     const screenBounds = {
       left: (surface?.left ?? 0) + 24,
@@ -2655,6 +2655,19 @@ function CanvasEditorInner({
       top: (surface?.top ?? 0) + 24,
       bottom: (surface?.bottom ?? window.innerHeight) - 24,
     };
+    if (excludePanels && surface) {
+      const middle = (surface.left + surface.right) / 2;
+      const panels = editorRegionRef.current?.querySelectorAll('.canvas-library-panel, #canvas-agent-panel');
+      for (const panel of panels ?? []) {
+        const rect = panel.getBoundingClientRect();
+        if ((rect.left + rect.right) / 2 < middle) {
+          screenBounds.left = Math.max(screenBounds.left, rect.right + 24);
+        } else {
+          screenBounds.right = Math.min(screenBounds.right, rect.left - 24);
+        }
+      }
+      screenBounds.right = Math.max(screenBounds.left, screenBounds.right);
+    }
     const topLeft = screenToFlowPosition({ x: screenBounds.left, y: screenBounds.top });
     const bottomRight = screenToFlowPosition({ x: screenBounds.right, y: screenBounds.bottom });
     return {
@@ -2758,9 +2771,11 @@ function CanvasEditorInner({
     request: (documentRevision: number) => Promise<CanvasDocument>,
     {
       placement = 'each',
+      centerGroupInViewport = false,
       onError = insertError => setError((insertError as Error).message),
     }: {
-      placement?: 'each' | 'group' | 'preserve';
+      placement?: 'each' | 'group';
+      centerGroupInViewport?: boolean;
       onError?: (error: unknown) => void;
     } = {},
   ): Promise<boolean> {
@@ -2787,11 +2802,11 @@ function CanvasEditorInner({
           concurrent.content_versions,
           insertedVersions,
         );
-        const { flowBounds } = canvasPlacementBounds();
+        const { flowBounds } = canvasPlacementBounds(centerGroupInViewport);
         const newNodes = insertedNodes.filter(inserted => !concurrentIds.has(inserted.id));
         const placedInsertedNodes: CanvasNode[] = placement === 'group'
-          ? placeCanvasNodeGroupWithoutOverlap(newNodes, concurrent.nodes, mergedVersions, flowBounds)
-          : placement === 'preserve' ? newNodes : [];
+          ? placeCanvasNodeGroupWithoutOverlap(newNodes, concurrent.nodes, mergedVersions, flowBounds, centerGroupInViewport)
+          : [];
         if (placement === 'each') {
           for (const inserted of newNodes) {
             const placedPosition = placeCanvasNodeWithoutOverlap(
@@ -2843,7 +2858,7 @@ function CanvasEditorInner({
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
-        if (placement !== 'preserve') setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
+        if (!centerGroupInViewport) setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
         inserted = true;
       } catch (insertError) {
         onError(insertError);
@@ -2868,14 +2883,14 @@ function CanvasEditorInner({
   }
 
   async function addTemplate(templateId: string) {
-    const { flowBounds } = canvasPlacementBounds();
+    const { flowBounds } = canvasPlacementBounds(true);
     const center = { x: (flowBounds.left + flowBounds.right) / 2, y: (flowBounds.top + flowBounds.bottom) / 2 };
     let groupId = '';
     const added = await applyServerInsertion(async revision => {
       const result = await pasteTemplate(projectId, templateId, center, revision);
       groupId = result.group_id;
       return result.document;
-    }, { placement: 'preserve' });
+    }, { placement: 'group', centerGroupInViewport: true });
     if (added) {
       setSelectedNodeIds(new Set([groupId]));
       flashCanvasNodes([groupId]);

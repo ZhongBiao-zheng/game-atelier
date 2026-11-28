@@ -454,7 +454,8 @@ export function placeCanvasNodeWithoutOverlap(
   }));
   return candidates.find(position => insideBounds(position) && !overlaps(position))
     ?? candidates.find(position => !overlaps(position))
-    ?? preferred;
+    ?? { x: Math.max(...nodes.map(node => node.position.x + resolveNodeSize(node).width)) + CANVAS_NODE_PLACEMENT_GAP,
+      y: preferred.y };
 }
 
 /** 前端新造的文本 Content Version 用全零 sha256 占位，服务端落盘时改写成真实摘要。

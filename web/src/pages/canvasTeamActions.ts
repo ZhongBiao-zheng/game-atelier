@@ -97,6 +97,7 @@ export function placeCanvasNodeGroupWithoutOverlap(
   existing: readonly CanvasNode[],
   versions: Readonly<Record<string, CanvasContentVersion>>,
   bounds?: CanvasPlacementBounds,
+  centerInViewport = false,
 ): CanvasNode[] {
   if (!group.length) return [];
   const sizeOf = (node: CanvasNode) => canvasNodeRenderedSize(node, versions);
@@ -105,11 +106,24 @@ export function placeCanvasNodeGroupWithoutOverlap(
   const top = Math.min(...boxes.map(box => box.position.y));
   const right = Math.max(...boxes.map(box => box.position.x + box.size.width));
   const bottom = Math.max(...boxes.map(box => box.position.y + box.size.height));
+  const width = right - left;
+  const height = bottom - top;
+  let preferred = { x: left, y: top };
+  let searchBounds = bounds;
+  if (centerInViewport && bounds) {
+    const fits = width <= bounds.right - bounds.left && height <= bounds.bottom - bounds.top;
+    preferred = fits
+      ? { x: (bounds.left + bounds.right - width) / 2, y: (bounds.top + bounds.bottom - height) / 2 }
+      : { x: bounds.left, y: bounds.top };
+    // An oversized group can still stay visible along the other axis.
+    searchBounds = { ...bounds, right: Math.max(bounds.right, bounds.left + width),
+      bottom: Math.max(bounds.bottom, bounds.top + height) };
+  }
   const target = placeCanvasNodeWithoutOverlap(
-    { x: left, y: top },
+    preferred,
     existing,
-    { width: right - left, height: bottom - top },
-    bounds,
+    { width, height },
+    searchBounds,
     sizeOf,
   );
   const dx = target.x - left;

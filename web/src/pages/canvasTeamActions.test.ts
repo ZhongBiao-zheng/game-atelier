@@ -166,6 +166,34 @@ describe('placeCanvasNodeGroupWithoutOverlap', () => {
     expect(placed[0].position).not.toEqual(group[0].position);
   });
 
+  it('places two copies of a template clear of each other and the existing node', () => {
+    const bounds = { left: 30, top: 20, right: 930, bottom: 700 };
+    const size = { width: 200, height: 120 };
+    const template: CanvasNode[] = [
+      { id: 'group', type: 'group', title: '模板', position: { x: 0, y: 0 }, size, z_index: 0,
+        data: { member_node_ids: ['member'] } },
+      { ...textNode, id: 'member', position: { x: 10, y: 10 }, size: { width: 100, height: 80 } },
+    ];
+    const center = { x: 380, y: 300 };
+    const existing = [{ ...textNode, position: center, size }];
+    for (let i = 0; i < 2; i++) {
+      const [frame, member] = placeCanvasNodeGroupWithoutOverlap(template, existing, {}, bounds, true);
+      const { x, y } = frame.position;
+      expect(member.position).toEqual({ x: x + 10, y: y + 10 });
+      expect(x >= bounds.left && x + size.width <= bounds.right).toBe(true);
+      expect(y >= bounds.top && y + size.height <= bounds.bottom).toBe(true);
+      for (const { position } of existing) {
+        expect(x + size.width <= position.x || x >= position.x + size.width
+          || y + size.height <= position.y || y >= position.y + size.height).toBe(true);
+      }
+      existing.push({ ...textNode, position: frame.position, size });
+    }
+    expect(placeCanvasNodeGroupWithoutOverlap(template, [], {}, bounds, true)[0].position).toEqual(center);
+    const narrow = { ...bounds, right: 140 };
+    expect(placeCanvasNodeGroupWithoutOverlap(template, [], {}, narrow, true)[0].position)
+      .toEqual({ x: bounds.left, y: bounds.top });
+  });
+
   it('keeps a group that already sits on free canvas untouched', () => {
     expect(placeCanvasNodeGroupWithoutOverlap(group, [], versions)).toEqual(group);
   });

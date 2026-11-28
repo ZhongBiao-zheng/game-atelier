@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { useContext } from 'react';
 import * as historyApi from '@/api/history';
+import * as templateApi from '@/api/templates';
 import * as connection from '@/api/connection';
 import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
@@ -2701,6 +2702,47 @@ async function renderReadyCanvas() {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
 }
+
+it('adds the same template twice into free space beside the open asset panel', async () => {
+  const size = { width: 160, height: 100 };
+  const blocker = { ...textNode('blocker', '占位'), position: { x: 320, y: 250 }, size };
+  const initial = documentWith({ nodes: [blocker] });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  const list = vi.spyOn(templateApi, 'listTemplates').mockResolvedValue({
+    items: [{ id: 'tpl', name: '分镜', cover: null, node_count: 1 }],
+  });
+  let count = 0;
+  const paste = vi.spyOn(templateApi, 'pasteTemplate').mockImplementation(async (_project, _template, center, revision) => {
+    const id = `group-${++count}`;
+    const member = { ...textNode(`text-${count}`, '文本'), size, position: blocker.position };
+    const group: CanvasNode = { id, title: '分镜', type: 'group', position: blocker.position, size,
+      z_index: 0, data: { member_node_ids: [member.id] } };
+    expect(center).toEqual({ x: 400, y: 300 });
+    const before = lastSavedDocument() ?? initial;
+    return { group_id: id, document: { ...before, revision: revision + 1, nodes: [...before.nodes, group, member] } };
+  });
+  onTestFinished(() => { list.mockRestore(); paste.mockRestore(); });
+  await renderReadyCanvas();
+  const region = screen.getByLabelText('画布编辑器 列车短片');
+  vi.spyOn(region, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1200, 600));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '模板' }));
+  vi.spyOn(screen.getByLabelText('创作资产'), 'getBoundingClientRect').mockReturnValue(new DOMRect(800, 0, 400, 600));
+  const button = await screen.findByRole('button', { name: '添加到画布' });
+  const occupied = [blocker.position];
+  for (let i = 1; i <= 2; i++) {
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1 + i * 2));
+    const { x, y } = lastSavedDocument()!.nodes.find(node => node.id === `group-${i}`)!.position;
+    expect(x >= 24 && x + size.width <= 776 && y >= 24 && y + size.height <= 576).toBe(true);
+    for (const previous of occupied) {
+      expect(x >= previous.x + size.width || previous.x >= x + size.width
+        || y >= previous.y + size.height || previous.y >= y + size.height).toBe(true);
+    }
+    occupied.push({ x, y });
+  }
+});
 
 it('uses the history kind to add an octet-stream Markdown output as a text node', async () => {
   const list = vi.spyOn(historyApi, 'listHistory').mockResolvedValue({ next_cursor: null, items: [{
