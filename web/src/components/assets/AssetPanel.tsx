@@ -20,8 +20,10 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
   const [tab, setTab] = useState<Tab | null>(directed ? 'library' : lastTab);
   const interacted = useRef(directed);
   const library = useRef<CreationAssetPanelHandle>(null);
+  // 有缓存时首帧用缓存，偏好照样读一次（别处改过就跟上）。
+  const shownOnce = useRef(tab !== null);
+  useEffect(() => { if (tab) shownOnce.current = true; }, [tab]);
   useEffect(() => {
-    if (lastTab) return;
     let active = true;
     const settle = (saved: Tab) => {
       lastTab = saved;
@@ -58,7 +60,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
     <div className="relative min-h-0 flex-1">
       <AnimatePresence initial={false}>
         {tab && <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
+          initial={shownOnce.current ? { opacity: 0 } : false} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
           {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
         </motion.div>}

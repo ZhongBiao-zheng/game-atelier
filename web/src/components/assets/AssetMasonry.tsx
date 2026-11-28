@@ -22,14 +22,18 @@ export function masonryColumns<T>(items: T[], ratio: (item: T) => number, placed
   return columns;
 }
 
-/** 已摆好的卡片留在原列：尺寸后到、往后追加都不换列，只有列表本身变了（筛选、删除、插到前面）才整体重排。
+/** 已摆好的卡片留在原列：尺寸后到、往后追加、删掉其中几项都不换列，只有列表本身变了（筛选、插到前面）才整体重排。
  *  跨列移动在 React 里必然重挂，所以重排只发生在内容本来就整体换掉的时候。 */
 function useStableColumns<T>(items: T[], itemKey: (item: T) => string, ratio: (item: T) => number): [T[], T[]] {
   const placement = useRef<{ keys: string[]; columns: Map<string, Column> }>({ keys: [], columns: new Map() });
   const keys = items.map(itemKey);
   const previous = placement.current;
   const appended = previous.keys.length <= keys.length && previous.keys.every((key, index) => keys[index] === key);
-  const kept = appended ? previous.columns : new Map<string, Column>();
+  // 删除：剩下的项保持原顺序，就沿用它们的列位，被删卡片下面的卡片不在两列之间跳。
+  let cursor = 0;
+  const removedOnly = !appended && keys.length < previous.keys.length
+    && keys.every(key => { while (cursor < previous.keys.length && previous.keys[cursor] !== key) cursor++; return cursor++ < previous.keys.length; });
+  const kept = appended || removedOnly ? previous.columns : new Map<string, Column>();
   const columns = masonryColumns(items, ratio, item => kept.get(itemKey(item)));
   // 同样的输入算出同样的结果，渲染期写入可重入（StrictMode 双渲染不会摆出两种布局）。
   const next = new Map<string, Column>();

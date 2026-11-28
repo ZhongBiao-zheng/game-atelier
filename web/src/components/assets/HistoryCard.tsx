@@ -61,7 +61,7 @@ export function HistoryCard({ item, selecting, checked, removing, arrived = fals
             {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
           </span>}
       </Button>
-      <div className={cn('absolute inset-x-1.5 top-1.5 flex items-start justify-between pointer-events-none', !selecting && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100')}>
+      <div className={cn('absolute inset-x-1.5 top-1.5 flex items-start justify-between pointer-events-none transition-opacity duration-150', !selecting && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100')}>
         <Checkbox aria-label={`选择 ${item.filename}`} checked={checked} disabled={busy}
           className="pointer-events-auto size-5 bg-popover border-muted-foreground history-checkbox"
           onClick={event => onToggle(event.shiftKey)} />

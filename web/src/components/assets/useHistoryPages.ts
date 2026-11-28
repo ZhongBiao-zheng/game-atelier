@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { historyKey, listHistory, type HistoryItem, type HistoryKind } from '@/api/history';
+import { errorText } from '@/lib/errorText';
 
 /** Each filter has its own cursor and cancellation scope. Scroll and select-all share pending reads. */
 export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
@@ -24,7 +25,7 @@ export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
         }).catch((err: Error) => {
           if (!page.controller.signal.aborted) {
             if (page.cursor === undefined) setItems([]);
-            setError(err.message);
+            setError(errorText(err));
           }
           throw err;
         }).finally(() => {

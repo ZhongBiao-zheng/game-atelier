@@ -72,6 +72,12 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
     const timer = window.setTimeout(() => update(position.kind, draft), 250);
     return () => window.clearTimeout(timer);
   }, [draft, position, composing]);
+  function closeSearch() {
+    setSearch(false);
+    setDraft('');
+    setComposing(false);
+    if (position?.q) update(position.kind, '');
+  }
   if (!position) return null;
   return <>
     <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
@@ -81,9 +87,13 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
       </Select>
       {search && <Input autoFocus aria-label="按提示词搜索" placeholder="按提示词搜索" value={draft}
         onCompositionStart={() => setComposing(true)} onCompositionEnd={event => { setDraft(event.currentTarget.value); setComposing(false); }}
-        className="h-8 min-w-0 flex-1" onChange={event => setDraft(event.target.value)} />}
+        className="h-8 min-w-0 flex-1" onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+          event.preventDefault(); event.stopPropagation(); closeSearch();
+        }} />}
       <Button variant="ghost" size="icon" aria-label={search ? '关闭搜索' : '搜索'} className="size-8 shrink-0"
-        onClick={() => { setSearch(!search); if (search) { setDraft(''); setComposing(false); if (position.q) update(position.kind, ''); } }}>
+        onClick={() => { if (search) closeSearch(); else setSearch(true); }}>
         {search ? <CloseIcon /> : <SearchIcon />}
       </Button>
     </div>
@@ -288,7 +298,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
             onPreview={rect => { setPreviewRect(rect); setPreview(row); }} onAction={key => void action(key, [row])} />
         }</AssetMasonry>
       </section>)}
-      {loading && <LoadingIcon aria-label="加载中" className="mx-auto my-4 animate-spin text-muted-foreground" />}
+      {loading && <LoadingIcon aria-label="加载中" className="delayed-reveal mx-auto my-4 animate-spin text-muted-foreground" />}
       {error && <div role="alert" className="p-3 text-sm">{error}<Button variant="ghost" size="icon" aria-label="重试" onClick={() => void more().catch(() => {})}><RetryIcon /></Button></div>}
       {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
     </div>
@@ -297,7 +307,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
       initial={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8 }} animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }} transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}>
       <div role="toolbar" aria-label="多选操作" className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-popover px-2 py-1 shell-glow">
-        <span className="px-2 text-xs tabular-nums">已选 <motion.span key={selection.size} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}>{selection.size}</motion.span> 项</span>
+        <span className="px-2 text-xs tabular-nums">已选 {selection.size} 项</span>
         {historyActions.map(({ key, label, Icon }) => <Hint key={key} label={label}><Button variant="ghost" size="icon" className="size-8 rounded-full"
           disabled={busy} aria-label={label} onClick={() => void action(key, selected)}><Icon /></Button></Hint>)}
         <Button variant="ghost" size="icon" className="size-8 rounded-full" aria-label="退出多选" disabled={busy} onClick={clear}><CloseIcon /></Button>
