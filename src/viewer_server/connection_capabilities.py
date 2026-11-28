@@ -256,6 +256,7 @@ POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/text-revision
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/upscale
+POST /api/canvas/projects/{project_id}/upscale/estimate
 POST /api/canvas/projects/{project_id}/image-edits
 POST /api/canvas/projects/{project_id}/runs/image-edit
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition

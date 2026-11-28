@@ -2641,6 +2641,80 @@ def _upscale_size_params(
     return params
 
 
+def _plan_upscale_unlocked(
+    project_id: str,
+    current: CanvasDocument,
+    surface_node_id: str,
+    target: str,
+    *,
+    route_order: list[str] | None,
+    consume: bool,
+) -> tuple[CanvasImageNode, list[CanvasSnapshotInput], KeySpec, ModelSpec, str, JobParams]:
+    """AI高清的源图、模型、尺寸与参考图：提交（submit_upscale_run）与纯估价（estimate_upscale_cost）共用这一份。"""
+    long_edge = CANVAS_UPSCALE_LONG_EDGES.get(target)
+    if long_edge is None:
+        raise CanvasRunCommandError("canvas_upscale_target_invalid", "放大只支持 2K / 4K / 8K。")
+    surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+    if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+        raise CanvasRunCommandError(
+            "canvas_upscale_source_missing",
+            "请选择一个已有内容的图片节点再放大。",
+        )
+    source = current.content_versions.get(surface.data.current_version_id)
+    if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
+        raise CanvasRunCommandError(
+            "canvas_upscale_source_missing",
+            "图片节点当前没有可读取的项目内版本。",
+        )
+    inputs = [CanvasSnapshotInput(
+        order=0,
+        source="explicit_source",
+        node_id=surface.id,
+        version_id=source.version_id,
+        kind="image",
+    )]
+    paths = _input_paths(project_id, current, inputs)
+    width, height = source.width, source.height
+    if not width or not height:
+        from PIL import Image
+
+        with Image.open(paths["image"][0]) as image:
+            width, height = image.size
+    if max(width, height) >= long_edge:
+        raise CanvasRunCommandError(
+            "canvas_upscale_not_needed",
+            f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
+        )
+    key, model, quality, prompt = _resolve_upscale_model(
+        target, width=width, height=height, route_order=route_order, consume=consume,
+    )
+    try:
+        job_params = _normalized_image_preference_params(
+            key, model, _upscale_size_params(key, model, target, width, height, quality),
+        )
+    except ValueError as error:
+        raise CanvasRunCommandError("canvas_upscale_size_invalid", str(error)) from error
+    _validate_input_capabilities(model, JobKind.IMAGE, inputs, job_params)
+    job_params.reference_images = paths["image"]
+    return surface, inputs, key, model, prompt, job_params
+
+
+def estimate_upscale_cost(project_id: str, surface_node_id: str, target: str) -> float | None:
+    """AI高清一档的预计费用（与 /api/pricing/estimate 同口径）。
+
+    与提交走同一份 `_plan_upscale_unlocked`：源图算一张参考图、档位尺寸、模型与路由解析都一样；
+    不建任务、不计费，也不推进自动路由的轮转（consume=False）。拿不到价格返回 None。
+    """
+    from character_workflow.lib.generation_pricing import estimate_submission
+
+    with file_lock(canvas_project_lock_path(project_id)):
+        current = _read_document_unlocked(project_id)
+        _, _, key, model, _, job_params = _plan_upscale_unlocked(
+            project_id, current, surface_node_id, target, route_order=None, consume=False,
+        )
+    return estimate_submission(key, model.id, "image", job_params.model_dump(mode="json", exclude_none=True))
+
+
 def submit_upscale_run(
     project_id: str,
     surface_node_id: str,
@@ -2648,57 +2722,17 @@ def submit_upscale_run(
     target: str,
 ) -> tuple[Job, CanvasDocument]:
     """Freeze one owned image into a fixed-prompt image Run at the tier's resolution."""
-    long_edge = CANVAS_UPSCALE_LONG_EDGES.get(target)
-    if long_edge is None:
+    if target not in CANVAS_UPSCALE_LONG_EDGES:
         raise CanvasRunCommandError("canvas_upscale_target_invalid", "放大只支持 2K / 4K / 8K。")
     with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
-        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
-        if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
-            raise CanvasRunCommandError(
-                "canvas_upscale_source_missing",
-                "请选择一个已有内容的图片节点再放大。",
-            )
-        source = current.content_versions.get(surface.data.current_version_id)
-        if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
-            raise CanvasRunCommandError(
-                "canvas_upscale_source_missing",
-                "图片节点当前没有可读取的项目内版本。",
-            )
-        inputs = [CanvasSnapshotInput(
-            order=0,
-            source="explicit_source",
-            node_id=surface.id,
-            version_id=source.version_id,
-            kind="image",
-        )]
-        paths = _input_paths(project_id, current, inputs)
-        width, height = source.width, source.height
-        if not width or not height:
-            from PIL import Image
-
-            with Image.open(paths["image"][0]) as image:
-                width, height = image.size
-        if max(width, height) >= long_edge:
-            raise CanvasRunCommandError(
-                "canvas_upscale_not_needed",
-                f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
-            )
         route_order: list[str] = []
-        key, model, quality, prompt = _resolve_upscale_model(
-            target, width=width, height=height, route_order=route_order, consume=True,
+        surface, inputs, key, model, prompt, job_params = _plan_upscale_unlocked(
+            project_id, current, surface_node_id, target, route_order=route_order, consume=True,
         )
-        try:
-            job_params = _normalized_image_preference_params(
-                key, model, _upscale_size_params(key, model, target, width, height, quality),
-            )
-        except ValueError as error:
-            raise CanvasRunCommandError("canvas_upscale_size_invalid", str(error)) from error
-        _validate_input_capabilities(model, JobKind.IMAGE, inputs, job_params)
-        job_params.reference_images = paths["image"]
         normalized = job_params.model_dump(mode="json", exclude_none=True)
         normalized.pop("reference_images", None)
         if route_order:

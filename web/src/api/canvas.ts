@@ -31,6 +31,8 @@ import type {
   CanvasReproduceResponse,
   CanvasRun,
   CanvasUpload,
+  CanvasUpscaleEstimateRequest,
+  CanvasUpscaleEstimateResponse,
   CanvasUpscaleTarget,
 } from '@/schema/canvas';
 
@@ -638,6 +640,24 @@ export function submitCanvasUpscaleRun(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** AI高清各档的预计费用：服务端按提交时同一套解析计算，不建任务、不计费。 */
+export function estimateCanvasUpscale(
+  projectId: string,
+  payload: CanvasUpscaleEstimateRequest,
+  signal?: AbortSignal,
+): Promise<CanvasUpscaleEstimateResponse> {
+  return requestJson<CanvasUpscaleEstimateResponse>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/upscale/estimate`,
+    '读取 AI高清估价',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
     },
   );
 }

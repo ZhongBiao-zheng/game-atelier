@@ -48,7 +48,8 @@ from character_workflow.lib.schemas import (
     JOB_PARAM_PATH_FIELDS,
     AccentThemes, AccentThemesUpdate,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionId, CanvasAgentSessionList,
-    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
+    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleEstimateRequest,
+    CanvasUpscaleEstimateResponse, CanvasUpscaleRunCreate,
     CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
     CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
@@ -3846,6 +3847,29 @@ def post_canvas_upscale_run(
     from viewer_server import routes as _self
     background.add_task(_self._run_canvas_job_safely, job.job_id)
     return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/upscale/estimate",
+    response_model=CanvasUpscaleEstimateResponse,
+)
+def post_canvas_upscale_estimate(
+    project_id: str,
+    payload: CanvasUpscaleEstimateRequest,
+) -> CanvasUpscaleEstimateResponse:
+    """AI高清每档的预计费用：与 runs/upscale 共用源图、模型与尺寸解析，不建任务、不计费。"""
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, estimate_upscale_cost
+
+    estimates: dict[str, float | None] = {}
+    for target in dict.fromkeys(payload.targets):
+        try:
+            estimates[target] = estimate_upscale_cost(project_id, payload.surface_node_id, target)
+        except KeyError:
+            raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+        except (CanvasRunCommandError, ValueError):
+            # 这一档提交时会被拒绝（无需放大、没配模型、尺寸不合法…）：不给价，点了由提交接口报原因。
+            estimates[target] = None
+    return CanvasUpscaleEstimateResponse(estimates=estimates)
 
 
 @router.post(

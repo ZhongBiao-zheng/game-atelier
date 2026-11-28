@@ -51,6 +51,17 @@ export interface CanvasGenerationModelSelection {
 
 export type CanvasUpscaleTarget = '2K' | '4K' | '8K';
 
+/** AI高清纯估价（`POST /api/canvas/projects/{id}/upscale/estimate`）↔ schemas.py CanvasUpscaleEstimateRequest / Response。 */
+export interface CanvasUpscaleEstimateRequest {
+  surface_node_id: string;
+  targets: CanvasUpscaleTarget[];
+}
+
+/** 每档预计费用（元）；未计价或这一档提交会被拒绝时为 null。 */
+export interface CanvasUpscaleEstimateResponse {
+  estimates: Partial<Record<CanvasUpscaleTarget, number | null>>;
+}
+
 /** 一个档位的「AI高清」配置：selection 为 null 时服务端自动选模（仅 2K / 4K 有自动路线）；
  *  quality 只对暴露质量档的模型生效，按像素出图的模型直接用档位长边；prompt 留空保存后服务端填回内置提示词。 */
 export interface CanvasUpscaleTierPreferences {

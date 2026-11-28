@@ -818,6 +818,11 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 把当前图片 Version 作为唯一 Snapshot input 冻结为 n=1 的图片 Run（`normalized_params.upscale_target` 记录档位）；结果是
 独立图片节点及一条实际输入连接。浏览器不能传 prompt、alias、model 或其他参数。
 
+`POST /canvas/projects/{id}/upscale/estimate` 是 AI高清菜单的纯估价：请求 `{ surface_node_id, targets: (2K|4K|8K)[] }`（1–3 档），
+响应 `{ estimates: { [target]: number | null } }`（元，与 `/api/pricing/estimate` 同口径）。与 `runs/upscale` 共用
+`_plan_upscale_unlocked`（源图作为一张参考图、档位尺寸、模型与自动路由解析），不建任务、不计费、不推进路由轮转；
+某档提交会被 422 拒绝（无需放大、未配模型、尺寸不合法）或无价格时该档为 null，项目或节点不存在返回 404。
+
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
 discriminated union 执行 `crop`、`split` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
 EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px。旧文档里的 `upscale` origin 记录仍可读取，但浏览器不再能发起本地重采样放大。`remove_background`
