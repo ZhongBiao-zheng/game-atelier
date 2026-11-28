@@ -19,7 +19,8 @@ it('opens history by default and remembers the library tab', async () => {
   render(<AssetPanel {...props} />);
   expect(await screen.findByText('还没有生成记录')).toBeVisible();
   fireEvent.mouseDown(screen.getByRole('tab', { name: '素材库' }));
-  expect(await screen.findByText('提示词')).toBeVisible();
+  // 页签内容有交叉淡化，慢机器上首帧仍不可见：等到可见再断言。
+  await waitFor(() => expect(screen.getByText('提示词')).toBeVisible());
   expect(saveUiPref).toHaveBeenCalledWith('asset-panel', 'library');
 });
 
