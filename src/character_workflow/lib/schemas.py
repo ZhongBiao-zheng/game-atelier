@@ -2799,26 +2799,6 @@ class CanvasCreationAssetInsertRequest(BaseModel):
     target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
-class CreationGenerationFromJob(BaseModel):
-    """Studio 结果「保存为创作资产」：output_index 是 Job.output_paths 的下标。"""
-    model_config = ConfigDict(extra="forbid")
-    job_id: str = Field(min_length=1, max_length=160)
-    output_index: int = Field(ge=0)
-    title: str = Field(min_length=1, max_length=120)
-    tags: list[str] = Field(default_factory=list, max_length=20)
-    project_id: str | None = Field(default=None, min_length=1, max_length=160)
-
-
-class CreationGenerationFromCanvas(BaseModel):
-    """画布结果「保存为创作资产」；project_id 取 canvas_project_id，不单独收。"""
-    model_config = ConfigDict(extra="forbid")
-    canvas_project_id: str = Field(min_length=1, max_length=160)
-    node_id: str = Field(min_length=1, max_length=160)
-    version_id: str = Field(min_length=1, max_length=160)
-    title: str = Field(min_length=1, max_length=120)
-    tags: list[str] = Field(default_factory=list, max_length=20)
-
-
 class CanvasReproduceRequest(BaseModel):
     """画布复刻；model 为 null 时配置节点模型位留空（本机没有配方里的模型）。"""
     model_config = ConfigDict(extra="forbid")

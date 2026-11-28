@@ -416,7 +416,6 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 
 `POST /canvas/projects/{id}/groups/{group_id}/group-runs` 接受 `order`、`total_cny` 和 `quote_id`，计划过期或已有同组执行返回 409。`GET /canvas/projects/{id}/group-runs` 读执行记录，按创建时间倒序。`POST /canvas/projects/{id}/group-runs/{run_id}/resume` 继续失败或中断的执行，`/cancel` 停止后续提交。进度落盘后 SSE 广播 `canvas-group-run-changed`（`project_id`、`run_id`）。
 `POST /creation-assets/media/{upload,from-path}`
-`POST /creation-assets/generation/{from-job,from-canvas}`
 `POST /creation-assets/{asset_id}/use` `POST /creation-assets/{asset_id}/readopt`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/{insert,reproduce}`
 `PUT /profile`
@@ -965,8 +964,6 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 | GET | `/creation-assets/{asset_id}/staleness` | — | `CreationAssetStaleness` |
 | POST | `/creation-assets/staleness` | `CreationAssetStalenessBatchRequest` | `CreationAssetStalenessBatch` |
 | POST | `/creation-assets/{asset_id}/readopt` | — | `CreationAsset` |
-| POST | `/creation-assets/generation/from-job` | `CreationGenerationFromJob` | `CreationAsset` 201 |
-| POST | `/creation-assets/generation/from-canvas` | `CreationGenerationFromCanvas` | `CreationAsset` 201 |
 | POST | `/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` | `CanvasReproduceRequest` + `If-Match` | `CanvasReproduceResponse` |
 
 类别与团队规范（ADR-0031）：`TeamShareRequest` 与 `TeamAssetUpdateRequest` 带可选 `category`（1–24 字，
@@ -1045,15 +1042,6 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 | 409 | `retry` | 写目录时新 blob 被并发删除，重试即可 |
 | 409 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏（与采用接口同一映射） |
 | 500 | `asset_state_broken` | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
-
-生成结果「保存为创作资产」存生成资产（带配方），与分享共用同一份配方来源规则（`generation_recipe`）：
-`POST /creation-assets/generation/from-job` 收 Studio job 的 `output_index`（规则同 `job_output` 分享，
-`project_id` 可选）；`POST /creation-assets/generation/from-canvas` 收画布结果版本（规则同 `canvas_result`
-分享，`project_id` 取 `canvas_project_id`，请求体不收）。成片与参考按内容进 blobs。错误：来源不存在 404；
-来源不可保存 422 `{code: "not_shareable" | "source_missing", message}`；标题去空白后为空 / 标签超 40 字
-422 `{code: "invalid", message}`（在读来源之前校验）；本机资产库状态损坏 500 `{code: "asset_state_broken"}`；长度上限按
-FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "canvas_document_missing"}` 等）是本机数据故障，
-按 500 报出，不归入 `invalid`。
 
 `POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
 `If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 带生成设置的空图片 / 视频节点 + 连线，

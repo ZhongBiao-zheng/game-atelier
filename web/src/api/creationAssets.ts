@@ -7,8 +7,6 @@ import type {
   CreationMediaAssetContent,
   CreationAssetList,
   CreationAssetStaleness,
-  CreationGenerationFromCanvas,
-  CreationGenerationFromJob,
 } from '@/schema/creationAssets';
 import type { CanvasDocument, CanvasPoint } from '@/schema/canvas';
 
@@ -194,23 +192,6 @@ export async function readoptCreationAsset(assetId: string): Promise<CreationAss
 }
 
 /** 生成结果存成带配方的生成资产（Studio 出图）。 */
-export function saveGenerationFromJob(body: CreationGenerationFromJob): Promise<CreationAsset> {
-  return requestJson<CreationAsset>('/api/creation-assets/generation/from-job', '保存生成资产', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
-/** 生成结果存成带配方的生成资产（画布节点版本）。 */
-export function saveGenerationFromCanvas(body: CreationGenerationFromCanvas): Promise<CreationAsset> {
-  return requestJson<CreationAsset>('/api/creation-assets/generation/from-canvas', '保存生成资产', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
 export function insertCreationAssetIntoCanvas(input: {
   projectId: string;
   assetId: string;

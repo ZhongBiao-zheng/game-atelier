@@ -61,7 +61,6 @@ from character_workflow.lib.schemas import (
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     ClipboardAttempt,
     CreationAsset, CreationAssetMetadataUpdate, CreationAssetList, CreationAssetUseRequest,
-    CreationGenerationFromCanvas, CreationGenerationFromJob,
     CreationMediaPathCreate, Job, JobKind, JobParams, JobStatus, WebEditableJobPatch,
 )
 from viewer_server.errors import asset_state_broken_error
@@ -2927,70 +2926,6 @@ async def post_creation_media_upload(
         )
     except (json.JSONDecodeError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
-
-
-def _save_generation(load_source, *, title: str, tags: list[str], project_id: str | None):
-    """生成结果「保存为创作资产」：配方来源与分享共用 generation_recipe，错误按「谁能修」分。
-
-    标题 / 标签在读来源之前单独校验：只有这一步的 ValueError 才是「请求不合规」（422 invalid）。
-    之后冒出来的其他 ValueError（坏 job 文件的 JSONDecodeError / ValidationError 等）是本机数据
-    故障，不翻译，照常 500 带 traceback。RecipeSourceError / CreationAssetStateError /
-    CanvasDocumentError 都是 ValueError 的子类，各自按声明的语义接。
-    """
-    from character_workflow.lib.canvas_projects import CanvasDocumentError
-    from character_workflow.lib.project_reference_assets import (
-        CreationAssetStateError,
-        _normalize_tags,
-        _required_text,
-    )
-    from character_workflow.lib.generation_recipe import (
-        RecipeSourceError,
-        RecipeSourceNotFound,
-        save_generation_asset,
-    )
-    try:
-        clean_title, clean_tags = _required_text(title, "资产标题"), _normalize_tags(tags)
-    except ValueError as error:
-        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
-    try:
-        return save_generation_asset(
-            load_source(), title=clean_title, tags=clean_tags, project_id=project_id,
-        )
-    except RecipeSourceError as error:
-        raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
-    except (RecipeSourceNotFound, KeyError):
-        raise HTTPException(404, detail="找不到这次生成的记录或画布结果") from None
-    except CreationAssetStateError as error:
-        raise asset_state_broken_error(error) from error
-    except CanvasDocumentError as error:
-        # 画布存档不见了 / 记着别的项目（CanvasStorageError）→ 500，不是请求的错。
-        raise _canvas_document_http_error(error) from error
-
-
-# 与 `POST /creation-assets/{asset_id}/<动作>` 段数相同，靠末段字面量区分（from-job / from-canvas
-# 不是任何 {asset_id} 路由的动作名）；给 {asset_id} 加新动作时不能取这两个名字。
-@router.post(
-    "/creation-assets/generation/from-job", response_model=CreationAsset, status_code=201
-)
-def post_creation_generation_from_job(payload: CreationGenerationFromJob):
-    from character_workflow.lib.generation_recipe import recipe_from_job_output
-    return _save_generation(
-        lambda: recipe_from_job_output(payload.job_id, payload.output_index),
-        title=payload.title, tags=payload.tags, project_id=payload.project_id,
-    )
-
-
-@router.post(
-    "/creation-assets/generation/from-canvas", response_model=CreationAsset, status_code=201
-)
-def post_creation_generation_from_canvas(payload: CreationGenerationFromCanvas):
-    from character_workflow.lib.generation_recipe import recipe_from_canvas_result
-    return _save_generation(
-        lambda: recipe_from_canvas_result(
-            payload.canvas_project_id, payload.node_id, payload.version_id,
-        ),
-        title=payload.title, tags=payload.tags, project_id=payload.canvas_project_id,
-    )
 
 
 @router.post("/creation-assets/{asset_id}/use", response_model=CreationAsset)

@@ -203,8 +203,6 @@ GET /api/canvas/projects/{project_id}/lessons
 POST /api/canvas/projects/{project_id}/lessons/{index}/adopt
 DELETE /api/canvas/projects/{project_id}/lessons/{index}
 POST /api/creation-assets/staleness
-POST /api/creation-assets/generation/from-job
-POST /api/creation-assets/generation/from-canvas
 POST /api/creation-assets/media/from-path
 POST /api/creation-assets/media/upload
 POST /api/creation-assets/{asset_id}/use
