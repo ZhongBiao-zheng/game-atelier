@@ -33,7 +33,7 @@ it.each([true, false])('按访客可用模型选择费用承担方（有自有�
 it('在生成占位节点上显示发起人', () => {
   render(<SharedGenerationStatus run={{run_id:'r',source_node_id:'n',status:'pending',execution_mode:'guest',
     initiated_by:'小林',model:'script',mode:'text',started_at:'2026-11-26T00:00:00Z'}} />);
-  expect(screen.getByRole('status')).toHaveTextContent('生成中 · 由小林发起');
+  expect(screen.getByRole('status')).toHaveTextContent('生成中…，由小林发起');
 });
 
 it('拆层时排除普通图像模型，仅能提交具备拆层能力的房主渠道', async () => {
@@ -141,7 +141,7 @@ it.each([false, true])('空图原地生成后重试沿用原始请求体（重�
   expect(screen.getByRole('tab', {name:'房主供应商'})).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('combobox')).toHaveTextContent('first');
   expect(screen.getByLabelText('提示词')).toHaveValue('原始提示');
-  expect(screen.getByLabelText('候选数量')).toHaveValue(1);
+  expect(screen.getByRole('radio', {name:'1'})).toHaveAttribute('aria-checked', 'true');
   fireEvent.click(screen.getByRole('button', {name:'生成'}));
   await waitFor(() => expect(submissions).toHaveLength(2));
   expect(submissions[1]).toEqual(submissions[0]);

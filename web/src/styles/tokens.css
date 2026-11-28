@@ -671,6 +671,17 @@
     opacity: 1;
     pointer-events: auto !important;
   }
+  /* 共享画布没有主画布的悬停侧判定：悬停或选中节点时两侧连接点一起淡入；仅查看时不挂 connectable，一直藏着。 */
+  .canvas-flow-shared:not(.canvas-flow-connecting) .react-flow__node:is(:hover, .selected) .canvas-node-handle.connectable {
+    opacity: 1;
+    pointer-events: auto !important;
+  }
+  /* 别人拖动的节点按 80ms 一帧的在场消息落位：线性补间把台阶连成平滑移动。本人拖动与松手落位不加。 */
+  @media (prefers-reduced-motion: no-preference) {
+    .canvas-flow-shared .react-flow__node.shared-remote-moving {
+      transition: transform 80ms linear;
+    }
+  }
   /* 拖线时所有连接点都要能接住落点，但只显示起点、吸附中的目标（xyflow 的 connectingto）
      和指针所在那一侧，不再一拖线满屏都是圆点。 */
   .canvas-flow.canvas-flow-connecting .canvas-node-handle {

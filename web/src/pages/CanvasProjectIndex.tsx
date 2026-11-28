@@ -39,6 +39,7 @@ import { errorText } from '@/lib/errorText';
 import { clipName, notify } from '@/lib/notify';
 import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable } from '@/lib/motion';
 import { cn } from '@/lib/utils';
+import { useRetainedSession } from '@/components/ui/retained';
 import { CANVAS_PROJECT_DISCARDED_EVENT, markFreshCanvasProject, UNTITLED_CANVAS_PROJECT_NAME } from './canvasFreshProject';
 
 /** 导入后新卡片高亮这么久。 */
@@ -62,6 +63,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   const peers = useSharedCanvases();
   const ownShares = peers.cards.filter(card => card.is_self);
   const [settings, setSettings] = useState<CanvasProjectSummary | null>(null);
+  const shownSettings = useRetainedSession(settings);
   const [projects, setProjects] = useState<CanvasProjectSummary[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -369,8 +371,9 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           </AnimatePresence>
         </div>
         </>}
-        {settings && <SharedCanvasSettingsDialog key={settings.project_id} projectId={settings.project_id} name={settings.name}
-          share={ownShares.find(card => card.project_id === settings.project_id)} onClose={() => setSettings(null)}
+        {shownSettings && <SharedCanvasSettingsDialog key={shownSettings.session} open={Boolean(settings)}
+          projectId={shownSettings.value.project_id} name={shownSettings.value.name}
+          share={ownShares.find(card => card.project_id === shownSettings.value.project_id)} onClose={() => setSettings(null)}
           onSaved={() => { setSettings(null); void peers.refresh(); }} />}
       </div>
 
