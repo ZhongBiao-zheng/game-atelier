@@ -337,6 +337,7 @@ vi.mock('@xyflow/react', () => {
 });
 
 vi.mock('@/api/canvas', () => ({
+  estimateCanvasUpscale: vi.fn(async () => ({ estimates: {} })),
   canvasDownloadUrl: vi.fn(() => '/download'),
   canvasMediaUrl: vi.fn(() => '/media'),
   canvasMediaUrlAtWidth: vi.fn(() => '/media'),
