@@ -10,6 +10,7 @@ import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/te
 import { DesktopDownloadNotice } from '@/components/DesktopDownloadNotice';
 import { Toaster } from '@/components/ui/sonner';
 import { useSSE } from '@/hooks/useSSE';
+import { HISTORY_JOB_FINISHED } from '@/api/history';
 import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
@@ -130,6 +131,10 @@ function AppShellContent() {
   // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
   useSSE({
     onTeamLibraryChanged: event => reminderRef.current?.notify(event),
+    // 生成历史开着时，画布或创作台刚出的结果要直接出现在顶部。
+    onJobChanged: ({ status }) => {
+      if (status === 'done' || status === 'partial') window.dispatchEvent(new Event(HISTORY_JOB_FINISHED));
+    },
     onGatewayTask: publishGatewayTask,
     onConnect: () => { reminderRef.current?.refreshProfile(); publishGatewayConnected(); },
   });

@@ -115,9 +115,10 @@ import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/ca
 import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { localComfyUrl, useComfyStatus } from '@/lib/useComfyStatus';
 import { formatGenerationCost } from '@/lib/generationCost';
-import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { CANVAS_SAVE_ASSET_TEXT, CANVAS_SHARE_TEXT, CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
+import { supportsImageQuality } from '@/lib/modelFamily';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
   videoReferenceLimitLabel,
@@ -448,9 +449,17 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   }, [selected]);
   const layerComposerVisible = nodePanelAllowed && layerComposerOpen
     && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
+  // 浮动面板进场由面板自己播；退场在这里留 150ms 淡出再卸载，与节点工具条同一节奏。
+  const generationPanelPresence = useFadePresence(generationPanelVisible && Boolean(draft));
+  const editPanelPresence = useFadePresence(editPanelVisible && Boolean(editSource));
+  const layerComposerPresence = useFadePresence(layerComposerVisible);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const groupStep = context?.groupSteps?.get(node.id);
+  const groupRun = groupStep ? [...(context?.groupRuns?.values() ?? [])].find(run => run.steps.includes(groupStep)) : undefined;
+  // 整组执行里还没轮到的成员：按 run.steps 的顺序排队（已提交的那个由自己的生成徽章表示）。
+  const groupQueue = groupRun?.status === 'running' ? groupRun.steps.filter(step => step.status === 'pending' && !step.job_id) : [];
+  const groupQueuePosition = groupStep ? groupQueue.indexOf(groupStep) + 1 : 0;
   const groupHeader = useRef<HTMLElement>(null);
   useAnimateOnChange(groupStep?.status, status => { if (status === 'failed') shakeOnError(groupHeader.current); });
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
@@ -591,12 +600,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const fixedToolbarButtons = (
     <>
       {isCanvasContentNode(node) && node.type !== 'image' && isSavableCanvasVersion(content) && (
-        <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
+        <MediaToolButton label={`保存 ${node.title}`} text={CANVAS_SAVE_ASSET_TEXT} onClick={() => void context.saveAsset(node)}>
           <SaveAssetIcon />
         </MediaToolButton>
       )}
       {isCanvasContentNode(node) && node.type !== 'image' && context.shareResult && isShareableCanvasVersion(content) && (
-        <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
+        <MediaToolButton label={`分享 ${node.title}`} text={CANVAS_SHARE_TEXT} onClick={() => context.shareResult?.(node)}>
           <ShareIcon />
         </MediaToolButton>
       )}
@@ -668,7 +677,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           </span>
         )}
         {groupStep?.status !== 'done' && <CanvasNodeRunBadge state={nodeRunState} />}
-        {groupStep?.status === 'done' && <CheckIcon size="sm" role="img" aria-label="整体执行已完成" className="content-swap-in ml-1 text-status-done" />}
+        {groupQueuePosition > 0 && <span className="content-swap-in ml-2 shrink-0 rounded-full bg-secondary px-1.5 text-xs tabular-nums text-muted-foreground">排队第 {groupQueuePosition} 位</span>}
+        {groupStep?.status === 'done' && <CheckIcon size="sm" role="img" aria-label="整体执行已完成"
+          className={cn(groupRun?.status === 'done' ? 'group-run-finished' : 'content-swap-in', 'ml-1 text-status-done')} />}
       </header>
       <NodeToolbar
         isVisible={toolbarPresence.mounted}
@@ -1035,12 +1046,13 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           <span className="canvas-magnetic-anchor" aria-hidden="true"><span className={CANVAS_HANDLE_DOT_CLASS}><AddIcon size="sm" /></span></span>
         </Handle>
       )}
-      {generationPanelVisible && draft && (
+      {generationPanelPresence.mounted && draft && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={generationPanelPresence.phase === 'leaving'}
         >
           {node.type === 'text' ? (
             <CanvasTextNodePanel
@@ -1060,23 +1072,25 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           )}
         </CanvasNodeFloatingPanel>
       )}
-      {editPanelVisible && editSource && context && (
+      {editPanelPresence.mounted && editSource && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={editPanelPresence.phase === 'leaving'}
         >
           <CanvasImageEditPanel node={node} edit={editSource} context={context}
             onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}
-      {layerComposerVisible && node.type === 'layer_stack' && context && (
+      {layerComposerPresence.mounted && node.type === 'layer_stack' && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           hiddenWhileDragging={dragging}
+          leaving={layerComposerPresence.phase === 'leaving'}
         >
           <CanvasLayerStackComposer node={node} context={context} onClose={() => setLayerComposerOpen(false)} />
         </CanvasNodeFloatingPanel>
@@ -1230,10 +1244,13 @@ export function CanvasNodeFloatingPanel({
   anchor,
   surfaceRef,
   hiddenWhileDragging = false,
+  leaving = false,
   children,
 }: {
   nodeId: string;
   hiddenWhileDragging?: boolean;
+  /** 退场中：150ms 淡出，不再接收指针，播完由父级卸载。 */
+  leaving?: boolean;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
   anchor: HTMLElement | null;
@@ -1333,7 +1350,8 @@ export function CanvasNodeFloatingPanel({
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
       // 平移使用 transform，拖动收起使用独立的 translate。
-      className={canvasDragChromeClass(hiddenWhileDragging, 'up')}
+      className={cn(canvasDragChromeClass(hiddenWhileDragging, 'up'),
+        leaving && 'pointer-events-none opacity-0 transition-opacity duration-150')}
       style={{
         position: surface ? 'absolute' : 'fixed',
         width: placement?.width ?? CANVAS_GENERATION_PANEL_WIDTH,
@@ -1942,17 +1960,49 @@ const MATTING_UNAVAILABLE_TOOL_IDS: ReadonlySet<CanvasImageQuickToolId> = new Se
 const DELETE_KEY_HINT = /Mac/i.test(navigator.userAgent) ? '⌫' : 'Delete';
 
 /** AI高清某一档会用哪个模型：指定了就用指定的，否则按服务端同一规则自动选 Nano Banana。 */
-function upscaleModelName(context: CanvasNodeContextValue, target: CanvasUpscaleTarget): string | null {
-  const selection = context.canvasUiPreferences.upscale.tiers[target]?.selection;
+function upscaleChoice(context: CanvasNodeContextValue, target: CanvasUpscaleTarget) {
+  const tier = context.canvasUiPreferences.upscale.tiers[target];
+  const selection = tier?.selection;
   const providers = context.generationProviders ?? context.keys;
   if (selection) {
     const key = providerForAlias(providers, selection.alias);
-    return key?.models.find(model => model.id === selection.model)?.name ?? selection.model;
+    const name = key?.models.find(model => model.id === selection.model)?.name ?? selection.model;
+    return { key, alias: selection.alias ?? undefined, model: selection.model, name, quality: tier.quality };
   }
-  const auto = CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.autoQuality
-    ? canvasUpscaleAutoChoice(context.keys)
-    : null;
-  return auto ? auto.model.name || auto.model.id : null;
+  const autoQuality = CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.autoQuality;
+  const auto = autoQuality ? canvasUpscaleAutoChoice(context.keys) : null;
+  return auto ? {
+    key: auto.key, alias: auto.key.alias, model: auto.model.id,
+    name: auto.model.name || auto.model.id, quality: tier?.quality ?? autoQuality,
+  } : null;
+}
+
+/** 估价用的参数，按服务端 `_upscale_size_params` 的同一规则：比例族只带质量，像素族按档位长边等比放大。 */
+function upscaleEstimateParams(
+  choice: NonNullable<ReturnType<typeof upscaleChoice>>,
+  target: CanvasUpscaleTarget,
+  width: number,
+  height: number,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = { n: 1 };
+  if (choice.quality && supportsImageQuality(choice.model)) params.quality = choice.quality;
+  if (choice.key?.provider === 'openrouter') return { ...params, resolution: target };
+  if (selectionImageCaps(choice.key, choice.model).sizeKind !== 'pixels' || !width || !height) return params;
+  const scale = (CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.longEdge ?? 0) / Math.max(width, height);
+  return { ...params, size_mode: 'custom', size: `${Math.max(1, Math.round(width * scale))}x${Math.max(1, Math.round(height * scale))}` };
+}
+
+/** 一档 AI高清的估价，与生成面板同一个估价接口；拿不到为 null。 */
+function useUpscaleCost(
+  context: CanvasNodeContextValue,
+  target: CanvasUpscaleTarget,
+  width: number,
+  height: number,
+  enabled: boolean,
+) {
+  const choice = upscaleChoice(context, target);
+  return useGenerationEstimate(choice?.alias, choice?.model ?? '',
+    choice ? upscaleEstimateParams(choice, target, width, height) : {}, enabled && Boolean(choice));
 }
 
 type ImageToolbarAction = {
@@ -2021,6 +2071,15 @@ function ImageNodeToolbar({
   const resizeUnlocked = node.data.display.free_resize;
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
+  const sourceWidth = imageContent?.width ?? 0;
+  const sourceHeight = imageContent?.height ?? 0;
+  const upscalePriced = (target: CanvasUpscaleTarget) => Boolean(currentVersionId)
+    && (CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.longEdge ?? 0) > Math.max(sourceWidth, sourceHeight);
+  const upscaleCosts: Record<CanvasUpscaleTarget, number | null> = {
+    '2K': useUpscaleCost(context, '2K', sourceWidth, sourceHeight, upscalePriced('2K')),
+    '4K': useUpscaleCost(context, '4K', sourceWidth, sourceHeight, upscalePriced('4K')),
+    '8K': useUpscaleCost(context, '8K', sourceWidth, sourceHeight, upscalePriced('8K')),
+  };
   // 本机不支持抠图时不列抠图，后面的工具顺延（默认顺延出裁剪）。
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids)
     .filter(definition => definition.id !== 'removeBackground' || context.mattingAvailable !== false);
@@ -2079,13 +2138,18 @@ function ImageNodeToolbar({
         icon: <Icon />,
         disabled: !currentVersionId || submitting || replacing || targets.length === 0,
         run: () => undefined,
-        // 一次点击即提交计费重绘：菜单上写清用哪个模型。
-        menu: targets.map(target => ({
-          id: target.id,
-          title: target.id,
-          detail: upscaleModelName(context, target.id) ?? `长边 ${target.longEdge}px`,
-          onSelect: () => context.upscaleImage(node, target.id),
-        })),
+        // 一次点击即提交计费重绘：菜单上写清用哪个模型、花多少钱。
+        menu: targets.map(target => {
+          const cost = upscaleCosts[target.id];
+          const price = cost != null ? formatGenerationCost(cost) : '未计价';
+          const model = upscaleChoice(context, target.id)?.name;
+          return {
+            id: target.id,
+            title: target.id,
+            detail: model ? `${model} · ${price}` : `长边 ${target.longEdge}px`,
+            onSelect: () => context.upscaleImage(node, target.id),
+          };
+        }),
       };
     }
     if (definition.id === 'removeBackground') action = {
@@ -2214,7 +2278,7 @@ function ImageNodeToolbar({
         </MediaToolButton>
       ))}
       {onSave && (
-        <MediaToolButton label={`保存 ${node.title}`} text="保存到资产" onClick={onSave}><SaveAssetIcon /></MediaToolButton>
+        <MediaToolButton label={`保存 ${node.title}`} text={CANVAS_SAVE_ASSET_TEXT} onClick={onSave}><SaveAssetIcon /></MediaToolButton>
       )}
       {context.finalizeNode && <CanvasFinalizationMenu
         node={node} content={imageContent} context={context}
@@ -2282,7 +2346,7 @@ function ImageNodeToolbar({
           )}
           {onShare && (
             <DropdownMenuItem aria-label={`分享 ${node.title}`} className="gap-2" onSelect={onShare}>
-              <ShareIcon />分享到团队库
+              <ShareIcon />{CANVAS_SHARE_TEXT}
             </DropdownMenuItem>
           )}
           {content?.kind === 'image' && context.createPluginNodeFromMedia && pluginImageActions.length > 0 && <>
@@ -2335,6 +2399,8 @@ function CanvasTextNodePanel({ node, draft, context, embedded = false, onClose, 
 }) {
   const content = context.resolveVersion(node.data.current_version_id);
   const [tab, setTab] = useState(() => defaultTextPanelTab(content?.kind === 'text' ? content.text : null));
+  // 改写要求放在这一层：切到「生成」再切回来，写好的要求还在。
+  const [instruction, setInstruction] = useState('');
   useEffect(() => {
     if (focusRequest) setTab('content');
   }, [focusRequest]);
@@ -2346,7 +2412,8 @@ function CanvasTextNodePanel({ node, draft, context, embedded = false, onClose, 
   );
   return tab === 'content' ? (
     <CanvasTextContentPanel node={node} draft={draft} context={context} header={header}
-      embedded={embedded} onClose={onClose} focusRequest={focusRequest} />
+      embedded={embedded} onClose={onClose} focusRequest={focusRequest}
+      instruction={instruction} onInstructionChange={setInstruction} />
   ) : (
     <CanvasGenerationComposer node={node} draft={draft} context={context} header={header}
       embedded={embedded} onClose={onClose} />
@@ -2959,7 +3026,7 @@ export function CanvasGenerationComposer({
             </SwapIcon>
             {generationButtonState === 'stopping' ? '停止中…'
               : generationButtonState === 'running' ? '停止'
-                : generationButtonState === 'queued' ? '排队中'
+                : generationButtonState === 'queued' ? '排队中…'
                   : generationButtonState === 'submitting' ? '提交中…'
                     : '生成'}
           </Button>

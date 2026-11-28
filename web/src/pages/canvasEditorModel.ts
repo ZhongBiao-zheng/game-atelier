@@ -937,6 +937,21 @@ export function canvasNodeProvidesOutput(
   return canvasNodeProvidesContent(node) || node.type === 'group';
 }
 
+/** 从输出侧拖出连线时，哪些节点算来源。
+ *
+ *  框选一组素材后从其中一个拖线，用户的意图是「把这一组都接进去」而不是只接手里那一个。
+ *  起点不在选区里则维持单源：那是在拖一个未选中的节点，别把无关的选区一起带走。
+ *  拖线预览与松手后的连接共用这一条，拖的时候就看得到会连上哪些。 */
+export function canvasConnectionSourceIds(
+  nodes: readonly CanvasNode[],
+  selection: ReadonlySet<string>,
+  fromNodeId: string,
+): string[] {
+  if (selection.size < 2 || !selection.has(fromNodeId)) return [fromNodeId];
+  const ids = nodes.filter(node => selection.has(node.id) && canvasNodeProvidesOutput(node)).map(node => node.id);
+  return ids.includes(fromNodeId) ? ids : [fromNodeId, ...ids];
+}
+
 /** 一条 input 连线的源，展开成真正会被喂给模型的节点 id。
  *
  *  分组是「素材包」：连的是包，进模型的是包里的内容成员，顺序即 member_node_ids —— 与后端

@@ -2,8 +2,11 @@ import { Handle, NodeResizer, Position } from '@xyflow/react';
 import { useEffect, useState } from 'react';
 import { planGroupRun, startGroupRun, updateGroupRun, type GroupPlan } from '@/api/canvasGroupRuns';
 import { CanvasGroupRunDialog } from './CanvasGroupRunDialog';
-import { AddIcon, PlayIcon } from '@/components/ui/icons';
+import { AddIcon, CheckIcon, LoadingIcon, PlayIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { useFadePresence } from './useFadePresence';
 import type { CanvasGroupNode } from '@/schema/canvas';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { EditableText } from '@/components/ui/editable-text';
@@ -13,14 +16,16 @@ export function CanvasGroupFrame({ node, context, selected }: {
   node: CanvasGroupNode; context: CanvasNodeContextValue; selected: boolean;
 }) {
   const [plan, setPlan] = useState<GroupPlan | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<'plan' | 'start' | 'resume' | 'cancel' | null>(null);
+  const busy = pending !== null;
+  const toolbar = useFadePresence(selected && !context.multiSelectionActive);
   const run = context.groupRuns?.get(node.id);
   const hasDraft = node.data.member_node_ids.some(id => {
     const member = context.findNode?.(id);
     return member && 'generation_draft' in member.data && member.data.generation_draft;
   });
   async function command(action: 'plan' | 'start' | 'resume' | 'cancel') {
-    setBusy(true);
+    setPending(action);
     try {
       await context.savePendingEdits?.();
       if (action === 'plan') {
@@ -37,7 +42,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
     } catch (error) {
       setPlan(null);
       context.reportError?.((error as Error).message);
-    } finally { setBusy(false); }
+    } finally { setPending(null); }
   }
   const failed = run?.steps.findIndex(step => step.status === 'failed') ?? -1;
   const resumable = run?.status === 'failed' || run?.status === 'interrupted';
@@ -49,6 +54,8 @@ export function CanvasGroupFrame({ node, context, selected }: {
     : run?.status === 'interrupted' ? '已中断'
     : run?.status === 'running' || (run?.status === 'done' && completedRun === run.run_id)
       ? `${run.steps.filter(step => step.status === 'done').length}/${run.steps.length}` : '';
+  // 跑完时进度原位换成勾，停约 1 秒再淡出（group-run-finished）。
+  const finished = run?.status === 'done';
   return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-xl border-border'}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
@@ -81,24 +88,34 @@ export function CanvasGroupFrame({ node, context, selected }: {
       <EditableText value={node.title} maxLength={120} triggerLabel={`重命名分组 ${node.title}`}
         className="text-muted-foreground hover:text-foreground"
         onSave={title => context.renameNode(node.id, title)} />
-      {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
-        className="nodrag nopan flex shrink-0 items-center">
-        <Hint label={resumable ? undefined : hasDraft ? '整体执行' : '组里没有可生成的节点'}>
-          <span className={resumable ? 'invisible' : undefined} aria-hidden={resumable}>
-          <Button size="sm" variant="ghost" className="h-7" disabled={busy || !hasDraft || resumable || run?.status === 'running'}
-            onClick={() => void command('plan')}><PlayIcon />整体执行</Button>
+      {toolbar.mounted && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
+        data-phase={toolbar.phase} className="canvas-toolbar-presence nodrag nopan flex shrink-0 items-center">
+        {!resumable && <Hint label={hasDraft ? '整体执行' : '组里没有可生成的节点'}>
+          <span>
+          <Button size="sm" variant="ghost" className="h-7" disabled={busy || !hasDraft || run?.status === 'running'}
+            onClick={() => void command('plan')}>
+            <SwapIcon swapKey={pending === 'plan'}>{pending === 'plan' ? <LoadingIcon className="animate-spin" /> : <PlayIcon />}</SwapIcon>
+            整体执行
+          </Button>
           </span>
-        </Hint>
+        </Hint>}
         <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`解散分组 ${node.title}`} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
       </div>}
-      {progress && <Hint key={run?.status + progress} label={run?.steps[failed]?.error}>
+      {progress && <Hint key={resumable ? run?.status : 'active'} label={run?.steps[failed]?.error}>
         <span role="status" tabIndex={failed >= 0 && resumable ? 0 : undefined}
-          onAnimationEnd={() => { if (run?.status === 'done') setCompletedRun(null); }} className={`${run?.status === 'done' ? 'group-run-finished' : 'content-swap-in'} whitespace-nowrap text-xs tabular-nums ${failed >= 0 && resumable ? 'text-destructive' : 'text-muted-foreground'}`}>{progress}</span>
+          onAnimationEnd={event => { if (finished && event.animationName === 'group-run-finished') setCompletedRun(null); }}
+          className={`${finished ? 'group-run-finished text-status-done' : `content-swap-in ${failed >= 0 && resumable ? 'text-destructive' : 'text-muted-foreground'}`} whitespace-nowrap text-xs tabular-nums`}>
+          <SwapIcon swapKey={finished} variant="pop">
+            {finished ? <CheckIcon size="sm" role="img" aria-label="整体执行已完成" /> : progress}
+          </SwapIcon>
+        </span>
       </Hint>}
       {resumable &&
         <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('resume')}>继续</Button>}
       {(resumable || run?.status === 'running') &&
-        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('cancel')}>取消</Button>}
+        <Button variant="ghost" size="sm" className="nodrag h-7" disabled={busy} onClick={() => void command('cancel')}>
+          <SwapLabel active={pending === 'cancel'} on="停止中…" off="停止" />
+        </Button>}
     </div>
     {plan && <CanvasGroupRunDialog plan={plan} busy={busy} onClose={() => setPlan(null)} onStart={() => void command('start')}
       onLocate={id => { setPlan(null); context.locateNode?.(id); }} />}

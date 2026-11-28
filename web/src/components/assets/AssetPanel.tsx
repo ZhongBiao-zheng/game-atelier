@@ -11,17 +11,26 @@ import { CreationAssetPanel, type CreationAssetPanelHandle, type CreationAssetPa
 import { HistoryPanel } from './HistoryPanel';
 
 type Tab = 'history' | 'library';
+/** 本次运行里上次选中的页签：再打开面板首帧就对，不先闪一下「历史」。偏好本身仍存在 ui-prefs。 */
+let lastTab: Tab | null = null;
 
 export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps & { onHistoryReference: (items: HistoryReference[]) => Promise<void> }>(function AssetPanel(props, ref) {
   const directed = Boolean(props.saveRequest || props.initialKind === 'team');
-  const [tab, setTab] = useState<Tab>(directed ? 'library' : 'history');
+  // 还没读到偏好时为 null：内容区先空着，读到后直接落到对的页签。
+  const [tab, setTab] = useState<Tab | null>(directed ? 'library' : lastTab);
   const interacted = useRef(directed);
   const library = useRef<CreationAssetPanelHandle>(null);
+  // 有缓存时首帧用缓存，偏好照样读一次（别处改过就跟上）。
+  const shownOnce = useRef(tab !== null);
+  useEffect(() => { if (tab) shownOnce.current = true; }, [tab]);
   useEffect(() => {
     let active = true;
-    void loadUiPrefs().then(prefs => {
-      if (active && !interacted.current && prefs?.['asset-panel'] === 'library') setTab('library');
-    });
+    const settle = (saved: Tab) => {
+      lastTab = saved;
+      if (active && !interacted.current) setTab(saved);
+    };
+    void loadUiPrefs().then(prefs => settle(prefs?.['asset-panel'] === 'library' ? 'library' : 'history'),
+      () => settle('history'));
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -39,10 +48,10 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
   function choose(value: string) {
     if (value !== 'history' && value !== 'library') return;
     interacted.current = true;
-    transition(() => { setTab(value); void saveUiPref('asset-panel', value); });
+    transition(() => { lastTab = value; setTab(value); void saveUiPref('asset-panel', value); });
   }
   return <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', props.className)}>
-    <Tabs value={tab} onValueChange={choose} className="shrink-0">
+    <Tabs value={tab ?? ''} onValueChange={choose} className="shrink-0">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <TabsList aria-label="资产"><TabsTrigger value="history">历史</TabsTrigger><TabsTrigger value="library">素材库</TabsTrigger></TabsList>
         <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>
@@ -50,11 +59,11 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
     </Tabs>
     <div className="relative min-h-0 flex-1">
       <AnimatePresence initial={false}>
-        <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
+        {tab && <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
+          initial={shownOnce.current ? { opacity: 0 } : false} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
           {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
-        </motion.div>
+        </motion.div>}
       </AnimatePresence>
     </div>
   </aside>;

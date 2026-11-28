@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { deleteHistoryOutputs, HISTORY_CHANGED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
+import { deleteHistoryOutputs, HISTORY_CHANGED, HISTORY_JOB_FINISHED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
 import { request } from '@/api/http';
 import { restoreTrash } from '@/api/trash';
 import { useRetained } from '@/components/ui/retained';
@@ -72,6 +72,12 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
     const timer = window.setTimeout(() => update(position.kind, draft), 250);
     return () => window.clearTimeout(timer);
   }, [draft, position, composing]);
+  function closeSearch() {
+    setSearch(false);
+    setDraft('');
+    setComposing(false);
+    if (position?.q) update(position.kind, '');
+  }
   if (!position) return null;
   return <>
     <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
@@ -81,9 +87,13 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
       </Select>
       {search && <Input autoFocus aria-label="按提示词搜索" placeholder="按提示词搜索" value={draft}
         onCompositionStart={() => setComposing(true)} onCompositionEnd={event => { setDraft(event.currentTarget.value); setComposing(false); }}
-        className="h-8 min-w-0 flex-1" onChange={event => setDraft(event.target.value)} />}
+        className="h-8 min-w-0 flex-1" onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+          event.preventDefault(); event.stopPropagation(); closeSearch();
+        }} />}
       <Button variant="ghost" size="icon" aria-label={search ? '关闭搜索' : '搜索'} className="size-8 shrink-0"
-        onClick={() => { setSearch(!search); if (search) { setDraft(''); setComposing(false); if (position.q) update(position.kind, ''); } }}>
+        onClick={() => { if (search) closeSearch(); else setSearch(true); }}>
         {search ? <CloseIcon /> : <SearchIcon />}
       </Button>
     </div>
@@ -98,6 +108,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
   const { items, more, reload, removeOutputs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
   const [selection, setSelection] = useState(new Set<string>());
   const [preview, setPreview] = useState<HistoryItem | null>(null);
+  const [previewRect, setPreviewRect] = useState<DOMRect | null>(null);
   const [text, setText] = useState('');
   const shownPreview = useRetained(preview?.kind === 'image' ? null : preview);
   const [removing, setRemoving] = useState(new Set<string>());
@@ -106,6 +117,13 @@ function HistoryList({ position, onReference, onScrollTop }: {
   const list = useRef<HTMLDivElement>(null);
   const restore = useRef(position.top);
   const selectRequest = useRef(0);
+  // 任务出结果后刷新：比刷新前最新一条还新的卡片在顶部淡入；首屏与翻页加载的不播。
+  const arrivedAfter = useRef(Infinity);
+  const latestItems = useRef(items);
+  latestItems.current = items;
+  // 撤销删除后回到原位的卡片：描边约 1.5 秒，不在可见区时滚过去。
+  const [restored, setRestored] = useState<ReadonlySet<string>>(new Set());
+  const revealedRestore = useRef(false);
   const selected = items.filter(item => selection.has(historyKey(item)));
   const groups = useMemo(() => {
     const days = new Map<string, HistoryItem[]>();
@@ -130,9 +148,29 @@ function HistoryList({ position, onReference, onScrollTop }: {
       clear();
       reload();
     };
+    // 新结果只追加在顶部：不清选择，滚动位置照旧。
+    const arrive = () => {
+      arrivedAfter.current = latestItems.current.reduce((newest, item) => Math.max(newest, Date.parse(item.submitted_at) || 0), 0);
+      restore.current = list.current?.scrollTop ?? 0;
+      reload();
+    };
     window.addEventListener(HISTORY_CHANGED, refresh);
-    return () => window.removeEventListener(HISTORY_CHANGED, refresh);
+    window.addEventListener(HISTORY_JOB_FINISHED, arrive);
+    return () => {
+      window.removeEventListener(HISTORY_CHANGED, refresh);
+      window.removeEventListener(HISTORY_JOB_FINISHED, arrive);
+    };
   }, [reload]);
+
+  useEffect(() => {
+    if (!restored.size || revealedRestore.current) return;
+    const first = items.find(item => restored.has(historyKey(item)));
+    if (!first) return;
+    revealedRestore.current = true;
+    list.current?.querySelector(`[data-history-key="${CSS.escape(historyKey(first))}"]`)?.scrollIntoView({ block: 'nearest' });
+    const timer = window.setTimeout(() => setRestored(new Set()), 1500);
+    return () => window.clearTimeout(timer);
+  }, [items, restored]);
 
   useLayoutEffect(() => {
     const el = list.current;
@@ -227,6 +265,10 @@ function HistoryList({ position, onReference, onScrollTop }: {
     window.dispatchEvent(new CustomEvent(HISTORY_CHANGED, { detail: list }));
     notify.undo(`已删除 ${done.size} 项`, () => {
       void Promise.allSettled(trashIds.map(id => restoreTrash(id))).then(results => {
+        if (results.some(result => result.status === 'fulfilled')) {
+          revealedRestore.current = false;
+          setRestored(new Set(done));
+        }
         window.dispatchEvent(new Event(HISTORY_CHANGED));
         const failure = results.find(result => result.status === 'rejected');
         if (failure?.status === 'rejected') notify.error(errorText(failure.reason));
@@ -252,10 +294,11 @@ function HistoryList({ position, onReference, onScrollTop }: {
         <AssetMasonry compact items={rows} itemKey={historyKey} ratio={historyRatio}>{row =>
           <HistoryCard item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
             removing={removing.has(historyKey(row))} onToggle={range => toggle(row, range)}
-            onPreview={() => setPreview(row)} onAction={key => void action(key, [row])} />
+            arrived={Date.parse(row.submitted_at) > arrivedAfter.current} highlighted={restored.has(historyKey(row))}
+            onPreview={rect => { setPreviewRect(rect); setPreview(row); }} onAction={key => void action(key, [row])} />
         }</AssetMasonry>
       </section>)}
-      {loading && <LoadingIcon aria-label="加载中" className="mx-auto my-4 animate-spin text-muted-foreground" />}
+      {loading && <LoadingIcon aria-label="加载中" className="delayed-reveal mx-auto my-4 animate-spin text-muted-foreground" />}
       {error && <div role="alert" className="p-3 text-sm">{error}<Button variant="ghost" size="icon" aria-label="重试" onClick={() => void more().catch(() => {})}><RetryIcon /></Button></div>}
       {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
     </div>
@@ -264,13 +307,15 @@ function HistoryList({ position, onReference, onScrollTop }: {
       initial={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8 }} animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: prefersReducedMotion() ? 0 : 8, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }} transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}>
       <div role="toolbar" aria-label="多选操作" className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-popover px-2 py-1 shell-glow">
-        <span className="px-2 text-xs tabular-nums">已选 <motion.span key={selection.size} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}>{selection.size}</motion.span> 项</span>
+        <span className="px-2 text-xs tabular-nums">已选 {selection.size} 项</span>
         {historyActions.map(({ key, label, Icon }) => <Hint key={key} label={label}><Button variant="ghost" size="icon" className="size-8 rounded-full"
           disabled={busy} aria-label={label} onClick={() => void action(key, selected)}><Icon /></Button></Hint>)}
         <Button variant="ghost" size="icon" className="size-8 rounded-full" aria-label="退出多选" disabled={busy} onClick={clear}><CloseIcon /></Button>
       </div>
     </motion.div>}</AnimatePresence>
-    {preview?.kind === 'image' && <Lightbox src={preview.url} meta={{ prompt: preview.prompt }} downloadName={preview.filename} onClose={() => setPreview(null)} />}
+    {preview?.kind === 'image' && <HistoryLightbox item={preview} items={items} sourceRect={previewRect}
+      onNavigate={row => { setPreviewRect(null); setPreview(row); }} onClose={() => setPreview(null)}
+      onReference={row => void action('reference', [row])} onDelete={row => void action('delete', [row])} />}
     {shownPreview && <Dialog open={Boolean(preview && preview.kind !== 'image')} onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
       <DialogTitle>{shownPreview.filename}</DialogTitle>
       {shownPreview.kind === 'video' ? <video controls autoPlay playsInline src={shownPreview.url} className="max-h-[70vh] w-full" />
@@ -278,4 +323,23 @@ function HistoryList({ position, onReference, onScrollTop }: {
         : <pre className="max-h-[65vh] overflow-y-auto whitespace-pre-wrap font-sans text-sm">{text}</pre>}
     </DialogContent></Dialog>}
   </div>;
+}
+
+/** 历史里的大图：只在图片之间翻页，带「用作参考」「删除」，从被点的卡片飞入。 */
+function HistoryLightbox({ item, items, sourceRect, onNavigate, onClose, onReference, onDelete }: {
+  item: HistoryItem; items: HistoryItem[]; sourceRect: DOMRect | null;
+  onNavigate: (item: HistoryItem) => void; onClose: () => void;
+  onReference: (item: HistoryItem) => void; onDelete: (item: HistoryItem) => void;
+}) {
+  const images = items.filter(row => row.kind === 'image');
+  const index = images.findIndex(row => historyKey(row) === historyKey(item));
+  const previous = index > 0 ? images[index - 1] : undefined;
+  const next = index >= 0 ? images[index + 1] : undefined;
+  return <Lightbox src={item.url} sourceRect={sourceRect} meta={{ prompt: item.prompt }} downloadName={item.filename}
+    preloadSrcs={[previous, next].flatMap(row => row ? [row.url] : [])}
+    onPrevious={previous ? () => onNavigate(previous) : undefined}
+    onNext={next ? () => onNavigate(next) : undefined}
+    onUseAsReference={() => onReference(item)}
+    onDelete={() => onDelete(item)}
+    onClose={onClose} />;
 }

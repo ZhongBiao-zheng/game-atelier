@@ -3,6 +3,8 @@ import {
   type ConnectionLineComponentProps, type InternalNode, type XYPosition,
 } from '@xyflow/react';
 import type { FlowNode } from './CanvasEditorViews';
+import { canvasConnectionSourceIds } from '@/pages/canvasEditorModel';
+import type { CanvasNode } from '@/schema/canvas';
 
 type NodeLookup = Map<string, InternalNode<FlowNode>>;
 
@@ -42,8 +44,21 @@ export function CanvasConnectionLine({
   const nodeLookup = useStore(state => state.nodeLookup) as NodeLookup;
   const zoom = useStore(state => state.transform[2]);
   const compareSlot = fromHandle.id === 'before' || fromHandle.id === 'after';
+  // 从输出侧拖、起点在多选里：和松手后一样，选中的每个能输出的节点各牵一条线。
+  const sourceIds = useStore(state => {
+    if (fromHandle.type !== 'source') return fromNode.id;
+    const domains: CanvasNode[] = [];
+    const selection = new Set<string>();
+    for (const node of (state.nodeLookup as NodeLookup).values()) {
+      if (!('domain' in node.data)) continue;
+      domains.push(node.data.domain);
+      if (node.selected) selection.add(node.id);
+    }
+    return canvasConnectionSourceIds(domains, selection, fromNode.id).join('\n');
+  }).split('\n');
   const domain = 'domain' in fromNode.data ? fromNode.data.domain : null;
-  const origins = domain?.type === 'group' ? outputOrigins(nodeLookup, [fromNode.id]) : [{ x: fromX, y: fromY }];
+  const origins = sourceIds.length > 1 || domain?.type === 'group'
+    ? outputOrigins(nodeLookup, sourceIds) : [{ x: fromX, y: fromY }];
   return <g>
     {ropes(origins, fromPosition, { x: toX, y: toY }, toPosition)}
     {compareSlot ? <circle cx={toX} cy={toY} r={4} className="fill-primary" /> :

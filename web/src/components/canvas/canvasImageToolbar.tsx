@@ -30,6 +30,10 @@ export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'angle', label: '多角度', icon: AngleIcon, defaultVisible: false },
 ];
 
+/** 保存 / 分享的统一叫法：工具条提示与菜单项同名，与创作台一致（5.142.0 名称统一）。 */
+export const CANVAS_SAVE_ASSET_TEXT = '保存到资产';
+export const CANVAS_SHARE_TEXT = '分享到团队库';
+
 /** AI高清档位：longEdge 是该档的目标长边，长边不超过原图的档位不展示；
  *  autoQuality 是未固定模型时自动选 Nano Banana 用的质量档，没有的档位（8K）必须手选模型。 */
 export const CANVAS_UPSCALE_TARGETS: ReadonlyArray<{

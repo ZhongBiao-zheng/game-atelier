@@ -1,4 +1,4 @@
-import { DragHandleIcon, ImageIcon, MoreIcon } from '@/components/ui/icons';
+import { BrushIcon, DragHandleIcon, ImageIcon, MoreIcon } from '@/components/ui/icons';
 import { Reorder, useDragControls } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -88,23 +88,27 @@ export function CanvasImageToolbarPreferencesDialog({
       <DialogContent className="max-h-[92dvh] min-w-0 max-w-3xl grid-cols-1 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>自定义图片快捷工具</DialogTitle>
-          <DialogDescription>勾选要用的工具，拖动调整顺序。前 {IMAGE_TOOLBAR_INLINE_LIMIT} 个直接显示在节点上方，其余在「更多」里。设置会应用到所有画布项目。</DialogDescription>
+          <DialogDescription className="sr-only">图片节点工具条的快捷工具与顺序</DialogDescription>
         </DialogHeader>
 
         <section aria-label="工具栏预览" className="rounded-lg border border-border bg-card p-4">
           <p className="mb-3 text-xs text-muted-foreground">节点预览</p>
-          <div className="overflow-x-auto rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow">
-            <div className="flex min-w-max items-center">
+          {/* 与真实工具条同构：纯图标，固定的「局部修改」在最前（置灰表示不可调），分隔线后「更多」。 */}
+          <div className="mx-auto w-fit max-w-full overflow-x-auto rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow">
+            <div className="flex min-w-max items-center gap-1">
+              <span role="img" aria-label="局部修改（固定）" className="grid size-7 place-items-center rounded-full text-muted-foreground opacity-50">
+                <BrushIcon aria-hidden="true" />
+              </span>
               {preview.map(tool => {
                 const Icon = tool.icon;
                 return (
-                  <span key={tool.id} className="flex h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground">
+                  <span key={tool.id} role="img" aria-label={tool.label} className="grid size-7 place-items-center rounded-full text-muted-foreground">
                     <Icon aria-hidden="true" />
-                    <span>{tool.label}</span>
                   </span>
                 );
               })}
-              <span className="grid size-9 place-items-center rounded-md text-muted-foreground" aria-label="更多与配置">
+              <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+              <span role="img" aria-label="更多" className="grid size-7 place-items-center rounded-full text-muted-foreground">
                 <MoreIcon aria-hidden="true" />
               </span>
             </div>

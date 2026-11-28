@@ -1,5 +1,6 @@
 import { copySharedNodes, reproduceFrozen } from '@/api/collabTransfer';
-import { useRetained } from '@/components/ui/retained';
+import { useRetained, useRetainedSession } from '@/components/ui/retained';
+import { ZOOM_DOCK_BUTTON_CLASS, ZOOM_DOCK_PERCENT_CLASS } from '@/components/zoomDock';
 import { Lightbox } from '@/components/Lightbox';
 import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDetails';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
@@ -214,7 +215,7 @@ import {
   buildCanvasMentionReferences,
   removeCanvasMentionTokens,
 } from '@/lib/canvasMentions';
-import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
+import { shouldPreventCanvasHistoryNavigation, WHEEL_ZOOMS_BY_DEFAULT } from '@/lib/canvasTrackpad';
 import {
   CANVAS_LOCAL_VERSION_SHA,
   CANVAS_DEFAULT_NODE_SIZE,
@@ -231,7 +232,7 @@ import {
   canvasNodeRenderZIndex,
   canvasNodeProvidesContent,
   canvasNodeAcceptsInput,
-  canvasNodeProvidesOutput,
+  canvasConnectionSourceIds,
   canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
   isCanvasCompareSlot,
@@ -483,10 +484,8 @@ interface CanvasClipboardPayload {
 // 触控板双指滑动或 Space/Ctrl+拖动移动，用鼠标的画师在空白处按中键完全没反应。左键留给
 // selectionOnDrag 框选，右键留给上下文菜单，所以这里只放中键。
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [1];
-// 滚轮语义必须按输入设备分：鼠标滚轮要缩放，触控板双指滑动要平移。两者用的是同一个 wheel
-// 事件、deltaMode 也都是 0，运行时区分不了，所以只能按平台近似（macOS 触控板优先，其余鼠标
-// 优先）。捏合缩放走 zoomOnPinch，两个平台都保留。
-const CANVAS_WHEEL_ZOOMS = !/Mac/i.test(navigator.userAgent);
+// 滚轮缩放还是平移按平台近似，判别与大图查看器共用（见 lib/canvasTrackpad）。捏合缩放走 zoomOnPinch。
+const CANVAS_WHEEL_ZOOMS = WHEEL_ZOOMS_BY_DEFAULT;
 // 删除节点的按键也得按平台分。macOS 键盘上那个「delete」键发出来的是 Backspace（物理上没有
 // 独立的 Delete 键），所以 mac 必须收 Backspace；Windows / Linux 有独立 Delete 键，而 Backspace
 // 在那边就是纯粹的「退格」—— 画师在文本节点里打错字按退格，整个节点直接没了（2026-08-27 实测
@@ -677,6 +676,13 @@ function CanvasEditorInner({
   const [maskEditBusy, setMaskEditBusy] = useState(false);
   const [maskEditError, setMaskEditError] = useState<string | null>(null);
   const [angleState, setAngleState] = useState<AngleState | null>(null);
+  // 弹窗一律受控 open：关闭期间沿用最后一份内容播完退场；带表单的再次打开换会话号，表单从头来。
+  const shownMaskEdit = useRetainedSession(maskEdit);
+  const shownAngle = useRetainedSession(angleState);
+  const shownMediaOperation = useRetainedSession(mediaOperation);
+  const shownMattingPrompt = useRetained(mattingPrompt);
+  const shownLayerPreviewId = useRetained(layerPreviewId);
+  const shownCompareViewId = useRetained(compareViewId);
   const [angleBusy, setAngleBusy] = useState(false);
   const [angleError, setAngleError] = useState<string | null>(null);
   const [mediaReplaceTarget, setMediaReplaceTarget] = useState<MediaReplaceTarget | null>(null);
@@ -2039,18 +2045,11 @@ function CanvasEditorInner({
     }, true);
   }, [commit]);
 
-  /** 从输出侧拖出连线时，哪些节点算来源。
-   *
-   *  框选一组素材后从其中一个拖线，用户的意图是「把这一组都接进去」而不是只接手里那一个。
-   *  起点不在选区里则维持单源：那是在拖一个未选中的节点，别把无关的选区一起带走。 */
+  /** 从输出侧拖出连线时，哪些节点算来源（规则见 canvasConnectionSourceIds）。 */
   const connectionSourceIds = useCallback((fromNodeId: string): string[] => {
     const current = latestDocument.current;
-    const selection = latestSelectedNodeIds.current;
-    if (!current || selection.size < 2 || !selection.has(fromNodeId)) return [fromNodeId];
-    const ids = current.nodes
-      .filter(node => selection.has(node.id) && canvasNodeProvidesOutput(node))
-      .map(node => node.id);
-    return ids.includes(fromNodeId) ? ids : [fromNodeId, ...ids];
+    if (!current) return [fromNodeId];
+    return canvasConnectionSourceIds(current.nodes, latestSelectedNodeIds.current, fromNodeId);
   }, []);
 
   const connectSources = useCallback((sourceIds: string[], targetNodeId: string) => {
@@ -5312,11 +5311,8 @@ function CanvasEditorInner({
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
       setMediaOperation(null);
-      announceToolNotice(
-        editsLayer ? '已更新图层素材' : operation.kind === 'split'
-          ? `已生成 ${result.created_node_ids.length} 个切图节点`
-          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成抠图节点',
-      );
+      // 切图、裁剪、抠图的结果就在原图旁淡入并被选中，那是原位反馈，不再配文字。
+      if (editsLayer) announceToolNotice('已更新图层素材');
       requestAnimationFrame(() => editorRegionRef.current?.focus());
     } catch (operationError) {
       reportError((operationError as Error).message);
@@ -6116,7 +6112,7 @@ function CanvasEditorInner({
   // 从图片的输出端拖出来的新建菜单才给「对比」：新节点会把这张图接到 Before。
   const createMenuFromImage = Boolean(createMenu?.sourceId && createMenu.sourceHandle !== 'target'
     && (createMenu.sourceIds ?? [createMenu.sourceId]).every(id => document?.nodes.find(node => node.id === id)?.type === 'image'));
-  const compareViewNode = compareViewId ? document?.nodes.find(node => node.id === compareViewId) : undefined;
+  const compareViewNode = shownCompareViewId ? document?.nodes.find(node => node.id === shownCompareViewId) : undefined;
   const compareViewInputs = compareViewNode ? compareInputsByNodeId.get(compareViewNode.id) : undefined;
   const compareViewAfter = compareViewInputs?.after?.versionId ? resolveVersion(compareViewInputs.after.versionId) : undefined;
   const compareViewAfterSize = compareViewAfter?.kind === 'image' && compareViewAfter.width && compareViewAfter.height
@@ -6134,11 +6130,12 @@ function CanvasEditorInner({
   const previewJob = previewJobId
     ? jobs.find(job => job.job_id === previewJobId)
     : undefined;
-  const maskEditNode = maskEdit
-    ? document.nodes.find(node => node.id === maskEdit.nodeId) ?? null
+  const maskEditNode = shownMaskEdit
+    ? document.nodes.find(node => node.id === shownMaskEdit.value.nodeId) ?? null
     : null;
   const maskEditData = maskEditNode?.type === 'image_edit' ? maskEditNode.data : undefined;
-  const MaskEditor = maskEdit?.mode === 'outpaint' ? CanvasOutpaintEditor : CanvasInpaintEditor;
+  const MaskEditor = shownMaskEdit?.value.mode === 'outpaint' ? CanvasOutpaintEditor : CanvasInpaintEditor;
+  const shownLayerPreviewNode = document.nodes.find(node => node.id === shownLayerPreviewId);
   const maskEditSourceTitle = document.nodes.find(node => node.id === maskEditData?.source_node_id)?.title;
 
   const minimapToggle = (
@@ -6941,13 +6938,13 @@ function CanvasEditorInner({
           )}
         </AnimatePresence>
 
-        {maskEdit && (
+        {shownMaskEdit && (
           <MaskEditor
-            key={`${projectId}:${maskEdit.nodeId}:${maskEdit.version.version_id}`}
-            open={maskEdit.open}
-            title={maskEditSourceTitle ?? maskEdit.title}
-            version={maskEdit.version}
-            mediaUrl={localCanvasTransport.mediaUrl(projectId, maskEdit.version.version_id)}
+            key={`${projectId}:${shownMaskEdit.value.nodeId}:${shownMaskEdit.value.version.version_id}:${shownMaskEdit.session}`}
+            open={Boolean(maskEdit?.open)}
+            title={maskEditSourceTitle ?? shownMaskEdit.value.title}
+            version={shownMaskEdit.value.version}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, shownMaskEdit.value.version.version_id)}
             keys={keys}
             initialData={maskEditData}
             busy={maskEditBusy}
@@ -6963,11 +6960,12 @@ function CanvasEditorInner({
           />
         )}
 
-        {angleState && (
+        {shownAngle && (
           <CanvasAngleDialog
-            open
-            title={angleState.title}
-            mediaUrl={localCanvasTransport.mediaUrl(projectId, angleState.version.version_id)}
+            key={shownAngle.session}
+            open={Boolean(angleState)}
+            title={shownAngle.value.title}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, shownAngle.value.version.version_id)}
             busy={angleBusy}
             error={angleError}
             onOpenChange={open => {
@@ -7009,16 +7007,17 @@ function CanvasEditorInner({
           onSave={(value, upscale) => void persistGenerationPreferences(value, upscale)}
         />
 
-        {mediaOperation && (
+        {shownMediaOperation && (
           <CanvasMediaOperationDialog
-            open
-            tool={mediaOperation.tool}
-            title={mediaOperation.title}
-            version={mediaOperation.version}
-            mediaUrl={localCanvasTransport.mediaUrl(projectId, mediaOperation.version.version_id)}
+            key={shownMediaOperation.session}
+            open={Boolean(mediaOperation)}
+            tool={shownMediaOperation.value.tool}
+            title={shownMediaOperation.value.title}
+            version={shownMediaOperation.value.version}
+            mediaUrl={localCanvasTransport.mediaUrl(projectId, shownMediaOperation.value.version.version_id)}
             busy={mediaOperationBusy}
             error={mediaOperationError}
-            updatesMaterial={layerMaterialNodeIds(document).has(mediaOperation.nodeId)}
+            updatesMaterial={layerMaterialNodeIds(document).has(shownMediaOperation.value.nodeId)}
             onOpenChange={open => {
               if (!open) {
                 setMediaOperation(null);
@@ -7029,10 +7028,10 @@ function CanvasEditorInner({
           />
         )}
 
-        {mattingPrompt && (
+        {shownMattingPrompt && (
           <CanvasMattingModelDialog
-            open
-            bytes={mattingPrompt.bytes}
+            open={Boolean(mattingPrompt)}
+            bytes={shownMattingPrompt.bytes}
             downloading={mattingDownloading}
             onCancel={() => {
               if (!mattingDownloading) setMattingPrompt(null);
@@ -7042,11 +7041,11 @@ function CanvasEditorInner({
         )}
 
         <Dialog open={layerPreviewNode?.type === 'layer_stack'} onOpenChange={open => { if (!open) setLayerPreviewId(null); }}>
-          {layerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={layerPreviewNode.id}
-            node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
-            onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(layerPreviewNode.id); }} />}
+          {shownLayerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={shownLayerPreviewNode.id}
+            node={shownLayerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
+            onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(shownLayerPreviewNode.id); }} />}
         </Dialog>
-        <Dialog open={compareViewNode?.type === 'compare'} onOpenChange={open => { if (!open) setCompareViewId(null); }}>
+        <Dialog open={Boolean(compareViewId) && compareViewNode?.type === 'compare'} onOpenChange={open => { if (!open) setCompareViewId(null); }}>
           {compareViewNode?.type === 'compare' && (
             <DialogContent className="max-w-[min(92vw,96rem)] gap-3 p-3"
               onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(compareViewNode.id); }}>
@@ -7838,7 +7837,7 @@ function CanvasZoomCssVars() {
   return null;
 }
 
-const zoomDockButtonClass = 'grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+const zoomDockButtonClass = ZOOM_DOCK_BUTTON_CLASS;
 
 function CanvasZoomDock({
   assetControl,
@@ -7879,7 +7878,7 @@ function CanvasZoomDock({
           <Button variant="bare"
             type="button"
             aria-label={`画布缩放 ${percent}%`}
-            className="h-8 w-14 rounded-md text-xs tabular-nums text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary"
+            className={`${ZOOM_DOCK_PERCENT_CLASS} transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary`}
           >{percent}%</Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="center" className="min-w-36 rounded-xl">

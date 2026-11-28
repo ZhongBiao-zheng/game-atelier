@@ -52,7 +52,7 @@ it('resets to fit on navigation and leaves editing shortcuts with their input', 
   expect(next).toHaveBeenCalledOnce();
   rerender(<Lightbox src="/b.png" {...props} />);
   await loadPhoto(400, 1000);
-  expect(screen.getByRole('button', { name: '适配', pressed: true })).toBeVisible();
+  expect(screen.getByRole('button', { name: '实际大小' })).toBeEnabled();
   expect(screen.getByLabelText('当前缩放')).toHaveTextContent('50%');
 });
 
@@ -107,7 +107,8 @@ it('shrinks a zoomed and clipped image inside its viewport on close', async () =
   } as unknown as ReturnType<typeof motion.animate>);
   render(<Lightbox src="/image.png" sourceRect={new DOMRect(40, 30, 200, 125)} onClose={vi.fn()} />);
   await loadPhoto(410, 250);
-  fireEvent.click(screen.getByRole('button', { name: '200%' }));
+  fireEvent.click(screen.getByRole('button', { name: '放大' }));
+  fireEvent.click(screen.getByRole('button', { name: '放大' }));
   const image = screen.getByAltText('大图');
   vi.mocked(image.getBoundingClientRect).mockReturnValue(new DOMRect(90, 60, 820, 500));
   fireEvent.click(screen.getByRole('button', { name: '关闭' }));
@@ -115,19 +116,19 @@ it('shrinks a zoomed and clipped image inside its viewport on close', async () =
   expect(animate).toHaveBeenLastCalledWith(image, { scale: [1, .96] }, expect.anything());
 });
 
-it('distinguishes Fit from actual pixels at the same percentage and clears presets on free zoom', async () => {
+it('steps through discrete levels and disables the fit toggle when the image already fits', async () => {
   render(<Lightbox src="/small.png" onClose={vi.fn()} />);
   const viewport = await loadPhoto(400, 250);
-  const pressed = (name: string) => screen.getByRole('button', { name, pressed: true });
-  expect(screen.getByLabelText('当前缩放')).toHaveTextContent('100%');
-  expect(pressed('适配')).toBeVisible();
+  const label = screen.getByLabelText('当前缩放');
+  expect(label).toHaveTextContent('100%');
+  expect(screen.getByRole('button', { name: '实际大小' })).toBeDisabled();
   fireEvent.keyDown(window, { key: '1' });
-  expect(pressed('100%')).toBeVisible();
-  expect(screen.getByRole('button', { name: '适配', pressed: false })).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '200%' }));
-  expect(pressed('200%')).toBeVisible();
+  expect(screen.getByRole('button', { name: '适配' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '放大' }));
+  expect(label).toHaveTextContent('150%');
+  expect(screen.getByRole('button', { name: '适配' })).toBeEnabled();
   fireEvent.wheel(viewport, { deltaY: 100 });
-  expect(screen.queryByRole('button', { pressed: true })).toBeNull();
-  fireEvent.keyDown(window, { key: '0' });
-  expect(pressed('适配')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '适配' }));
+  expect(label).toHaveTextContent('100%');
+  expect(screen.getByRole('button', { name: '实际大小' })).toBeDisabled();
 });

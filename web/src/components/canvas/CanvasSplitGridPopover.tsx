@@ -6,6 +6,8 @@ import type { CanvasMediaOperation } from '@/schema/canvas';
 
 const GRID = 6;
 const PRESETS = [[2, 2], [3, 3], [4, 3]] as const;
+// 打开时先停在 2 × 2：给一个能直接回车的默认值，不先讲规则。
+const DEFAULT_CELL = GRID + 1;
 
 export function CanvasSplitGridPopover({ width, height, onSubmit, onCustom, onReturnFocus }: {
   width: number;
@@ -55,7 +57,7 @@ export function CanvasSplitGridPopover({ width, height, onSubmit, onCustom, onRe
       event.preventDefault();
       returnFocus.current = true;
       current.current = { cols: 0, rows: 0 };
-      (matrix.current?.firstElementChild as HTMLElement | null)?.focus();
+      (matrix.current?.children[DEFAULT_CELL] as HTMLElement | undefined)?.focus();
     }}
     onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current) onReturnFocus(); }}>
     <div className="mb-2 flex gap-1">
@@ -81,13 +83,14 @@ export function CanvasSplitGridPopover({ width, height, onSubmit, onCustom, onRe
         (matrix.current?.children[(y - 1) * GRID + x - 1] as HTMLElement)?.focus();
         highlight(x, y);
       }}>
-      {cells.map(({ cols, rows }, i) => <Button key={i} variant="solid" size="icon" tabIndex={i === 0 ? 0 : -1}
+      {cells.map(({ cols, rows }, i) => <Button key={i} variant="solid" size="icon" tabIndex={i === DEFAULT_CELL ? 0 : -1}
+        data-active={i % GRID < 2 && Math.floor(i / GRID) < 2 ? 'true' : 'false'}
         className="size-6 rounded-sm border border-border bg-popover p-0 hover:bg-popover focus-visible:ring-1 data-[active=true]:border-primary data-[active=true]:bg-primary/20 data-[active=true]:hover:bg-primary/20"
         aria-label={`${cols} 列 ${rows} 行`} aria-disabled={Boolean(message(cols, rows))}
         onPointerEnter={() => highlight(cols, rows)} onFocus={() => highlight(cols, rows)}
         onClick={() => submit(cols, rows)} />)}
     </div>
-    <p ref={label} aria-live="polite" className="my-2 text-xs tabular-nums text-muted-foreground">1 × 1 · 请选择至少 2 格</p>
+    <p ref={label} aria-live="polite" className="my-2 text-xs tabular-nums text-muted-foreground">2 × 2</p>
     <div className="border-t border-border pt-1"><Button variant="ghost" size="sm" onClick={() => { returnFocus.current = false; onCustom(); }}>自定义切线…</Button></div>
   </PopoverContent>;
 }
