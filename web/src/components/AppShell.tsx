@@ -10,7 +10,7 @@ import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/te
 import { DesktopDownloadNotice } from '@/components/DesktopDownloadNotice';
 import { Toaster } from '@/components/ui/sonner';
 import { useSSE } from '@/hooks/useSSE';
-import { HISTORY_JOB_FINISHED } from '@/api/history';
+import { HISTORY_JOB_FINISHED, HISTORY_RECONNECTED } from '@/api/history';
 import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
@@ -158,8 +158,8 @@ function AppShellContent() {
     onConnect: reconnected => {
       reminderRef.current?.refreshProfile();
       publishGatewayConnected();
-      // 断线期间完成的任务收不到事件：重连后让历史面板补取一次顶部。
-      if (reconnected) window.dispatchEvent(new Event(HISTORY_JOB_FINISHED));
+      // 断线期间完成的任务收不到事件：重连后让历史面板整表重载。
+      if (reconnected) window.dispatchEvent(new Event(HISTORY_RECONNECTED));
     },
   });
 
