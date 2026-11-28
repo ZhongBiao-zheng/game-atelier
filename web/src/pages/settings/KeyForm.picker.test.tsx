@@ -45,7 +45,7 @@ it('keeps selected chips pressed across search and category changes, and toggles
   fireEvent.click(screen.getByRole('checkbox', { name: 'Chat chat-demo' }));
   expect(screen.getByRole('checkbox', { name: 'Chat chat-demo' })).not.toBeChecked();
   fireEvent.click(screen.getByRole('button', { name: '启用所选（1）' }));
-  expect(screen.getByRole('button', { name: 'image-demo' })).toHaveClass('bg-primary/10');
+  expect(screen.getByRole('button', { name: '移除 image-demo' }).parentElement).toHaveClass('bg-primary/10');
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({ models: [expect.objectContaining({ id: 'image-demo' })] })));
 });
@@ -102,40 +102,26 @@ it('retains connection success and selections if a custom catalog cannot be load
   expect(await screen.findByRole('alert')).toHaveTextContent('目录不可用');
   expect(previewModels).toHaveBeenCalledTimes(2);
   expect(previewModels).toHaveBeenLastCalledWith(expect.objectContaining({ protocol_id: 'hp-aaaaaaaaaaaa' }));
-  expect(screen.getByRole('button', { name: 'chat-demo' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '移除 chat-demo' })).toBeInTheDocument();
 });
 
-it.each(['create', 'edit'] as const)('collapses manual entry by default and does not persist it in %s', async mode => {
-  const view = open(mode);
-  const summary = screen.getByText('手动添加模型');
-  expect(summary.closest('button')).toHaveAttribute('aria-expanded', 'false');
-  fireEvent.click(summary);
-  expect(summary.closest('button')).toHaveAttribute('aria-expanded', 'true');
-  fireEvent.change(screen.getByLabelText('添加模型 ID'), { target: { value: 'manual-demo' } });
-  fireEvent.click(screen.getByRole('button', { name: '添加', hidden: true }));
-  expect(screen.getByRole('button', { name: 'manual-demo' })).toHaveAttribute('aria-pressed', 'true');
-  view.unmount();
-  open(mode);
-  expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'false');
-});
-
-it.each(['获取失败', '上游没有模型列表接口（HTTP 404）'])('opens manual entry when the list is unavailable: %s', async message => {
+it.each(['获取失败', '上游没有模型列表接口（HTTP 404）'])('opens model details when the list is unavailable: %s', async message => {
   vi.mocked(previewModels).mockRejectedValue(new Error(message));
   open();
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
   // 界面只显示原因，不带「（HTTP 404）」状态码（规格 2.2）。
   expect(await screen.findByRole('alert')).toHaveTextContent(message.replace(/（HTTP \d+）$/, ''));
-  await waitFor(() => expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'true'));
-  expect(screen.getByRole('button', { name: 'chat-demo' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('模型详情').closest('button')).toHaveAttribute('aria-expanded', 'true'));
+  expect(screen.getByRole('button', { name: '移除 chat-demo' })).toBeInTheDocument();
 });
 
-it('opens manual entry after a failed connection without adding a second error', async () => {
+it('opens model details after a failed connection without adding a second error', async () => {
   vi.mocked(previewModels).mockRejectedValue(new Error('列表接口不可用'));
   open();
   fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('列表接口不可用');
   expect(screen.getAllByRole('alert')).toHaveLength(1);
-  expect(screen.getByText('手动添加模型').closest('button')).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('模型详情').closest('button')).toHaveAttribute('aria-expanded', 'true');
 });
 
 it('does not save an unclassified selection as an image when a refresh hides it', async () => {

@@ -27,7 +27,7 @@ const PLUGIN_KIT = /(?:^|\/)plugins\/[^/]+\/ui\/src\/kit\//;
 const PAGES = FILES.filter(({ rel }) => !rel.startsWith('components/ui/') && !PLUGIN_KIT.test(rel));
 
 // 棘轮基线（2026-10-30）：bare 含 2026-10-30 从原生 button 迁来的 Button variant="bare"
-const BARE_CONTROL_BASELINE = 165;
+const BARE_CONTROL_BASELINE = 160;
 
 const ARBITRARY_SPACING = /(?<![\w-])-?(?:p[xytrbl]?|m[xytrbl]?|gap(?:-[xy])?|space-[xy])-\[/g;
 

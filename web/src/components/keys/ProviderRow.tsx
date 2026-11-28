@@ -122,10 +122,11 @@ export function ProviderRow({ row, overdue, pending, saved = false, failedTick =
         <span ref={switchWrapRef} className="inline-flex">
           <Switch size="sm" checked={enabled} aria-label={`启用 ${row.alias}`} onCheckedChange={onToggle} />
         </span>
-        <Button variant="bare" type="button" aria-label={`打开 ${row.alias}`} onClick={onEdit}
-          className="rounded-md p-1 text-muted-foreground transition-colors duration-150 group-hover/row:text-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <ChevronRightIcon size="sm" className="transition-transform duration-150 motion-safe:group-hover/row:translate-x-0.5" aria-hidden />
-        </Button>
+        {/* 纯装饰：键盘与读屏走左侧「编辑」按钮，不重复停一次。 */}
+        <span aria-hidden onClick={onEdit}
+          className="cursor-pointer rounded-md p-1 text-muted-foreground transition-colors duration-150 group-hover/row:text-foreground hover:text-foreground">
+          <ChevronRightIcon size="sm" className="transition-transform duration-150 motion-safe:group-hover/row:translate-x-0.5" />
+        </span>
       </motion.div>
     </motion.li>
   );

@@ -41,7 +41,7 @@ it('discovers through a template catalog, warns, and binds rows of the template 
   const source = await screen.findByLabelText('模型目录');
   await chooseOption(source, '画师接口');
   fireEvent.click(screen.getByRole('button', { name: '重新获取' }));
-  expect(await screen.findByText('已发现不代表可用')).toBeInTheDocument();
+  await screen.findByRole('checkbox', { name: /painter/ });
   expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({ protocol_id: 'hp-aaaaaaaaaaaa' }));
   for (const name of [/painter/, /chat/]) fireEvent.click(screen.getByRole('checkbox', { name }));
   await chooseOption(screen.getByRole('combobox', { name: /^类型 .*mystery/ }), '图片');  // 未识别行选类型即勾上

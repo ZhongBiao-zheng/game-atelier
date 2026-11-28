@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AddIcon, CloseIcon, SearchIcon } from '@/components/ui/icons';
+import { AddIcon } from '@/components/ui/icons';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus } from '@/api/keys';
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Button } from '@/components/ui/button';
 import { Hint } from '@/components/ui/tooltip';
 import { errorText } from '@/lib/errorText';
@@ -17,11 +16,11 @@ import {
 import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './providerPresets';
 
 const GROUPS = [
-  { kind: 'official', title: '供应商', description: '模型厂商官方接口' },
-  { kind: 'relay', title: '中转', description: '一个密钥，多家模型' },
-  { kind: 'subscription', title: '订阅', description: '登录即可，无需密钥' },
-  { kind: 'local', title: '本机', description: '连接本机运行的服务' },
-  { kind: 'team', title: '团队网关', description: '连接同事开启的团队网关' },
+  { kind: 'official', title: '供应商' },
+  { kind: 'relay', title: '中转' },
+  { kind: 'subscription', title: '订阅' },
+  { kind: 'local', title: '本机' },
+  { kind: 'team', title: '团队网关' },
 ] as const;
 
 const MODALITIES: Record<string, string> = { image: '图片', video: '视频', audio: '音频', llm: '文本' };
@@ -38,16 +37,16 @@ function presetHint(preset: ProviderPreset): string {
 export interface ProviderCatalogSectionProps {
   /** 已配置的全部供应商（含已启用与已关闭），用于隐藏下方已配置的预置项。 */
   keys: { provider?: string; base_url?: string | null }[];
+  /** 页面顶部「查找供应商」的查找词：同时筛已配置列表和这里的可添加目录。 */
+  query: string;
   onSelect: (preset: ProviderPreset) => void;
 }
 
-export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectionProps) {
-  const [query, setQuery] = useState('');
+export function ProviderCatalogSection({ keys, query, onSelect }: ProviderCatalogSectionProps) {
   const [catalogMotion, setCatalogMotion] = useState<'reveal' | 'instant'>('reveal');
   const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [showSubLoading, setShowSubLoading] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const configuredIds = useMemo(
     () => new Set(keys.map(key => providerPresetId(key)).filter(id => id !== 'custom')),
@@ -61,10 +60,14 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
     [configuredIds],
   );
   const prevSignature = useRef(keysSignature);
+  const prevQuery = useRef(query);
   if (prevSignature.current !== keysSignature) {
     prevSignature.current = keysSignature;
     if (catalogMotion !== 'reveal') setCatalogMotion('reveal');
+  } else if (prevQuery.current !== query) {
+    if (catalogMotion !== 'instant') setCatalogMotion('instant');
   }
+  prevQuery.current = query;
 
   useEffect(() => {
     if (!showChatGPT) return;
@@ -102,50 +105,11 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
   const canAnimate = catalogMotion === 'reveal' && motionAvailable();
   const reduced = prefersReducedMotion();
 
-  const updateQuery = (next: string) => {
-    setCatalogMotion('instant');
-    setQuery(next);
-  };
-
   return (
     <section aria-label="添加供应商" className="space-y-6 border-t border-border pt-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-medium text-foreground">添加供应商</h2>
         <div className="flex flex-wrap items-center gap-2">
-          <InputGroup className="w-56">
-            <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
-            <InputGroupInput
-              ref={searchRef}
-              aria-label="查找可添加的供应商"
-              placeholder="查找可添加的供应商"
-              value={query}
-              onChange={event => updateQuery(event.target.value)}
-            />
-            <AnimatePresence>
-              {query.length > 0 && (
-                <InputGroupAddon align="inline-end" className="px-1.5">
-                  <motion.span
-                    initial={motionAvailable() ? (reduced ? { opacity: 0 } : { opacity: 0, scale: 0.75 }) : false}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.75 }}
-                    transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}
-                    className="inline-flex"
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      aria-label="清空可添加供应商搜索"
-                      onClick={() => { updateQuery(''); searchRef.current?.focus(); }}
-                      className="size-6 rounded-sm border-0 text-muted-foreground hover:border-transparent hover:bg-secondary/70 hover:text-foreground hover:backdrop-blur-none"
-                    >
-                      <CloseIcon size="sm" aria-hidden />
-                    </Button>
-                  </motion.span>
-                </InputGroupAddon>
-              )}
-            </AnimatePresence>
-          </InputGroup>
           <Button variant="outline" type="button" className="px-3" onClick={() => onSelect(CUSTOM_PRESET)}>
             <AddIcon size="sm" aria-hidden />自定义供应商
           </Button>
@@ -153,7 +117,7 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
       </div>
 
       {remaining.length === 0 ? (
-        <p className="content-swap-in text-sm text-muted-foreground">所有预置供应商均已配置，可通过右上角「自定义供应商」继续添加</p>
+        <p className="content-swap-in text-sm text-muted-foreground">预置供应商已全部添加</p>
       ) : visible.length === 0 ? (
         <p className="content-swap-in text-sm text-muted-foreground">没有匹配的可添加供应商</p>
       ) : (
@@ -175,10 +139,7 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
                   className="-mx-2.5 overflow-hidden px-2.5"
                 >
                   <div className="space-y-2 py-0.5">
-                    <div className="flex items-baseline gap-2.5">
-                      <h3 className="text-xs font-medium text-foreground">{group.title}</h3>
-                      <span className="text-xs text-muted-foreground">{group.description}</span>
-                    </div>
+                    <h3 className="text-xs font-medium text-foreground">{group.title}</h3>
                     <div className={isSubscription
                       ? '-mx-2.5 grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2 lg:grid-cols-3'
                       : '-mx-2.5 grid grid-cols-2 gap-x-2 gap-y-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
@@ -204,7 +165,7 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
                               type="button"
                               data-press="none"
                               onClick={() => onSelect(preset)}
-                              className="group/item h-auto w-full justify-start gap-2.5 rounded-md border-0 px-2.5 py-2 text-left font-normal text-foreground transition-[background-color,color,scale] duration-150 hover:border-transparent hover:bg-secondary/60 hover:backdrop-blur-none active:bg-secondary/90 motion-safe:active:scale-[0.985]"
+                              className="group/item h-auto w-full justify-start gap-2.5 rounded-md border-0 px-2.5 py-2 text-left font-normal text-foreground transition-colors duration-150 hover:border-transparent hover:bg-secondary/60 hover:backdrop-blur-none active:bg-secondary/90"
                             >
                               <span aria-hidden className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 group-hover/item:text-foreground">
                                 <ProviderBrandIcon size="md" provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />
@@ -240,7 +201,7 @@ export function ProviderCatalogSection({ keys, onSelect }: ProviderCatalogSectio
                                 type="button"
                                 data-press="none"
                                 onClick={() => onSelect(preset)}
-                                className="group/item h-auto w-full justify-start gap-2.5 rounded-md border-0 px-2.5 py-2 text-left font-normal text-foreground transition-[background-color,color,scale] duration-150 hover:border-transparent hover:bg-secondary/60 hover:backdrop-blur-none active:bg-secondary/90 motion-safe:active:scale-[0.985]"
+                                className="group/item h-auto w-full justify-start gap-2.5 rounded-md border-0 px-2.5 py-2 text-left font-normal text-foreground transition-colors duration-150 hover:border-transparent hover:bg-secondary/60 hover:backdrop-blur-none active:bg-secondary/90"
                               >
                                 <span aria-hidden className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 group-hover/item:text-foreground">
                                   <ProviderBrandIcon size="md" provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />

@@ -14,6 +14,7 @@ import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import { revealInvalidField } from '@/components/ui/invalid-field';
 import { checkGateway } from '@/api/gateway';
 import { errorText } from '@/lib/errorText';
+import { UNDO_DURATION_MS } from '@/lib/notify';
 import { parseGatewayInvite } from './lan-sharing/invite';
 import { listHttpProtocols } from '@/api/httpProtocols';
 import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
@@ -21,7 +22,8 @@ import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 import { probeKey, recordOnboardingEvent, type KeyProbeResult } from '@/api/onboarding';
 import { modelBrand, modelCatalog, modelDisplayName } from '@/lib/modelCatalog';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
-import { MOTION_DURATION } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
@@ -171,9 +173,6 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   const [enabled, setEnabled] = useState(initial?.enabled !== false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
-  const [manualId, setManualId] = useState('');
-  const [manualOpen, setManualOpen] = useState(false);
-  const [manualType, setManualType] = useState<ModelModality>(defaultManualType(initialPreset));
   const [pendingRequest, setPendingRequest] = useState<'list' | 'test' | null>(null);
   const testing = pendingRequest === 'test';
   const fetching = pendingRequest === 'list';
@@ -214,7 +213,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
   const [fetchError, setFetchError] = useState<FormIssue | null>(null);
   const shownFetchError = useRetained(fetchError);
-  useEffect(() => { if (fetchError) setManualOpen(true); }, [fetchError]);
+  // 拉取失败：自定义供应商展开「模型详情」，在那里手填模型。
+  useEffect(() => { if (fetchError && provider === 'custom') setDetailsOpen(true); }, [fetchError]); // eslint-disable-line react-hooks/exhaustive-deps
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
   const [pickerQuery, setPickerQuery] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -257,6 +257,15 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     }
     setBaseUrl(next);
   };
+  // 「已启用 / 全部」只切视图：勾选留在预览里，保存时一并写入；提交只走「启用所选」。
+  const [modelView, setModelView] = useState<'enabled' | 'all'>('all');
+  // 「模型详情」里删掉的、带单价或自己起了名的行：原位留「已删除 · 撤销」8 秒。
+  const [removedRow, setRemovedRow] = useState<{ row: EditableModel; index: number } | null>(null);
+  useEffect(() => {
+    if (!removedRow) return;
+    const timer = window.setTimeout(() => setRemovedRow(null), UNDO_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [removedRow]);
   const isGateway = provider === GATEWAY_PROVIDER;
   const isComfy = provider === 'comfyui';
   const isSubscription = provider === 'chatgpt';
@@ -437,8 +446,6 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setBillingGroup('');
     setHomepage(nextPreset.homepageUrl ?? '');
     setTextProtocol(nextPreset.textProtocol ?? null);
-    setManualType(defaultManualType(nextPreset));
-    setManualOpen(false);
     setModels(nextPreset.defaultModels);
     setPreview(null);
     setModalityPick({});
@@ -468,6 +475,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setPickerFilter('all');
     setPickerQuery('');
     setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
+    setModelView('all');
     setFetchedChecked(new Set(sorted.filter(m => enabledIds.has(m.id)).map(m => m.id)));
     setModalityPick(Object.fromEntries(rows.filter(m => m.id.trim())
       .map(m => [m.id.trim(), m.modality ?? 'image'])));
@@ -547,6 +555,34 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     if (unresolvedChecked.length) return;
     setModels(mergedModels());
     setPreview(null);
+  };
+  const showPicker = Boolean(preview) && modelView === 'all';
+  const dropModelRow = (index: number) => {
+    const row = models[index];
+    setModels(models.filter((_, i) => i !== index));
+    const named = row.name.trim() && row.name.trim() !== row.id.trim();
+    const priced = [priceText(row), priceInText(row), priceOutText(row)].some(value => value.trim());
+    setRemovedRow(named || priced ? { row, index } : null);
+  };
+  const restoreModelRow = () => {
+    if (!removedRow) return;
+    const { row, index } = removedRow;
+    setModels([...models.slice(0, index), row, ...models.slice(index)]);
+    setRemovedRow(null);
+  };
+  const removedRowNotice = removedRow && <motion.div key={`removed-${removedRow.row._rowId}`} {...modelRowMotion()} className="overflow-hidden">
+    <p role="status" className="flex h-8 items-center gap-1.5 text-xs text-muted-foreground">
+      已删除 {removedRow.row.name.trim() || removedRow.row.id.trim()} ·
+      <Button variant="link" size="sm" type="button" onClick={restoreModelRow} className="h-auto p-0 text-xs">撤销</Button>
+    </p>
+  </motion.div>;
+  const shownGatewayError = useRetained(gatewayError);
+  const shownConnectionFailure = useRetained(connectionTest && !connectionTest.ok ? connectionTest : null);
+  // 「已启用」显示保存时会写入的模型：已有的加上预览里勾选的。
+  const enabledModels = mergedModels().filter(m => m.id.trim());
+  const dropEnabledModel = (id: string) => {
+    setModels(models.filter(m => m.id.trim() !== id));
+    if (fetchedChecked.has(id)) setFetchedChecked(new Set([...fetchedChecked].filter(item => item !== id)));
   };
 
   // 地址格式在输入时内联校验（原来的「测试」按钮只查格式、又和「测试连接」重名，已去掉）。
@@ -749,7 +785,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
       if (run !== listRun.current) return;
       const issue = toIssue(error);
       setConnectionTest({ ok: false, message: issue.message, raw: issue.raw });
-      setManualOpen(true);
+      if (provider === 'custom') setDetailsOpen(true);
     } finally { if (run === listRun.current) setPendingRequest(null); }
   };
   // 有未保存的输入时点外面不关、Esc 先问（规格 2.1）；只有「取消」直接放弃。
@@ -765,23 +801,13 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setDetailsOpen(true);
     const timer = window.setTimeout(() => {
       const field = formBodyRef.current?.querySelector<HTMLElement>(`[aria-label="单价 ${index + 1}"], [aria-label="输入单价 ${index + 1}"]`);
-      field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      field?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
       field?.focus({ preventScroll: true });
     }, MOTION_DURATION.slow * 1000);
     return () => window.clearTimeout(timer);
   }, [focusPriceModel]); // eslint-disable-line react-hooks/exhaustive-deps
   const typeDot = (modality?: ModelModality | null) => ({ image: 'bg-brand-2', video: 'bg-brand-3', text: 'bg-brand-4', audio: 'bg-muted-foreground' }[modality ?? 'image']);
   const title = editing ? `编辑 ${initial?.alias && initial.alias !== provider ? initial.alias : (PROVIDER_PRESETS.find(p => p.value === provider)?.label ?? initial?.alias ?? '')}` : preset.label;
-  const addManualModel = () => {
-    const id = manualId.trim();
-    if (!id || models.some(model => model.id === id)) return;
-    setModels([...models.filter(model => model.id.trim()), { name: id, id, modality: manualType }]);
-    if (preview?.models.some(model => model.id === id)) {
-      setFetchedChecked(new Set([...fetchedChecked, id]));
-      setModalityPick({ ...modalityPick, [id]: manualType });
-    }
-    setManualId('');
-  };
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!next && !saving) onCancel(); }}>
@@ -819,7 +845,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
               <div className="space-y-1">
                 <Input id="key-base-url" value={baseUrl} aria-invalid={baseUrlInvalid || undefined} placeholder="https://api.example.com/v1"
                   onChange={e => { changeBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
-                {baseUrlInvalid && <p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p>}
+                <Collapse open={baseUrlInvalid}><p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p></Collapse>
               </div>
             </>}
             {isComfy ? <>
@@ -827,7 +853,10 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
               <Input id="comfy-address" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setConnectionTest(null); }} />
               <span />
               <div className="space-y-2"><Button variant="outline" disabled={testing} onClick={testConnection}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
-                {connectionTest && <p key={connectionTest.message} role={connectionTest.ok ? 'status' : 'alert'} className="content-swap-in text-xs text-muted-foreground">{connectionTest.message}</p>}
+                {connectionTest && <p key={connectionTest.message} role={connectionTest.ok ? 'status' : 'alert'}
+                  className={cn('content-swap-in flex items-center gap-1.5 text-xs', connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive')}>
+                  {connectionTest.ok ? <CheckIcon size="sm" aria-hidden /> : <ErrorIcon size="sm" aria-hidden />}{connectionTest.message}
+                </p>}
               </div>
             </> : isSubscription ? <>
               <span className="pt-2 text-xs text-muted-foreground">账号</span>
@@ -873,16 +902,19 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                 {connecting && !gatewayInfo && !gatewayError && <p role="status" className="py-2 text-sm text-muted-foreground">连接中…</p>}
                 {(gatewayInfo || gatewayError) && <Button variant="ghost" size="sm" type="button" onClick={() => void connectGateway()} disabled={!baseUrl.trim() || connecting}><SwapLabel active={connecting} on="连接中…" off={gatewayModels.length ? '重新同步' : '重新连接'} /></Button>}
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
-                <IssueText issue={gatewayError} />
+                <Collapse open={Boolean(gatewayError)}><IssueText issue={shownGatewayError} /></Collapse>
                 <ul aria-label="团队网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
               </> : <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <ToggleGroup type="single" size="sm" variant="outline" sliding aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
-                    onValueChange={value => { if (value === 'selected') applyFetchedSelection(); else if (value === 'all') void fetchModels(); }}>
-                    <ToggleGroupItem value="selected" disabled={unresolvedChecked.length > 0}>已选 {mergedModels().filter(m => m.id.trim()).length}</ToggleGroupItem>
+                  <ToggleGroup type="single" size="sm" variant="outline" sliding aria-label="模型范围" className="shrink-0" value={showPicker ? 'all' : 'enabled'}
+                    onValueChange={value => {
+                      if (value === 'enabled') setModelView('enabled');
+                      else if (value === 'all') { if (preview) setModelView('all'); else void fetchModels(); }
+                    }}>
+                    <ToggleGroupItem value="enabled">已启用 {enabledModels.length}</ToggleGroupItem>
                     <ToggleGroupItem value="all" disabled={fetching || testing}>全部</ToggleGroupItem>
                   </ToggleGroup>
-                  {!preview && <Input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className="min-w-0 flex-1 basis-28" />}
+                  {!showPicker && <Input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className="min-w-0 flex-1 basis-28" />}
                   {catalogInterfaces.length > 0 && <Select value={catalogProtocolId ?? DEFAULT_CATALOG} onValueChange={value => setCatalogSource(value === DEFAULT_CATALOG ? '' : value)}>
                     <SelectTrigger size="sm" aria-label="模型目录" className="w-auto"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -893,10 +925,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                   <Button variant="ghost" size="sm" type="button" disabled={fetching || testing || !fetchModelsBaseUrl} onClick={() => void fetchModels()}><SwapLabel active={fetching} on="获取中…" off="重新获取" /></Button>
                 </div>
                 <Collapse open={Boolean(fetchError)}><IssueText issue={shownFetchError} /></Collapse>
-                {preview ? <div className="min-w-0 space-y-3">
+                {showPicker && preview ? <div className="min-w-0 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>上游 {preview.total} 个模型</span>
-                    {preview.discovered && <span>已发现不代表可用</span>}
                     {(preview.excluded > 0 || preview.includeAll) && <>
                       <span>{preview.includeAll ? '已显示全部，含不可生成模型' : `已过滤 ${preview.excluded} 个不可生成模型`}</span>
                       <Button variant="link" size="sm" type="button" disabled={fetching || testing} onClick={() => fetchModels(!preview.includeAll)} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">{preview.includeAll ? '只看可生成模型' : '显示全部'}</Button>
@@ -932,37 +963,40 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                     {pickerVisible.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">没有匹配的模型</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    <span>已选 {fetchedChecked.size} 个模型</span>
+                    <span>勾选 {fetchedChecked.size}</span>
                     <Button variant="link" size="sm" className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground" type="button" onClick={selectAllVisible} disabled={!pickerVisible.length}>全选当前 {pickerVisible.length} 个</Button>
                     <Button variant="link" size="sm" type="button" onClick={() => setFetchedChecked(new Set())} disabled={!fetchedChecked.size} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">清空选择</Button>
                     <Button variant="link" size="sm" type="button" onClick={applyFetchedSelection} disabled={unresolvedChecked.length > 0} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">启用所选（{fetchedChecked.size}）</Button>
                     {unresolvedChecked.length > 0 && <Button variant="link" size="sm" type="button" onClick={() => { setPickerQuery(''); setPickerFilter('unknown'); }} className="h-auto px-0 text-xs text-destructive">{unresolvedChecked.length} 个模型还没选类型</Button>}
                   </div>
                 </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
-                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-xs">
-                    <CheckIcon size="sm" aria-hidden /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
-                  </Button>)}
+                  {/* 只有 × 能移除；移走的那颗 150ms 淡出缩小，后面的滑过去补位。 */}
+                  <AnimatePresence mode="popLayout" initial={false}>
+                  {enabledModels.filter(m => `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map(model => <motion.span
+                    key={model._rowId ?? `remote-${model.id}`}
+                    layout="position"
+                    exit={{ opacity: 0, scale: prefersReducedMotion() ? 1 : 0.96, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
+                    transition={{ layout: MOTION_SPRING.snappy }}
+                    className="flex max-w-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 py-0.5 pl-3 pr-0.5 font-mono text-xs">
+                    <CheckIcon size="sm" aria-hidden /><span className="truncate">{model.id}</span>
+                    <Button variant="ghost" size="icon" type="button" aria-label={`移除 ${model.id}`} onClick={() => dropEnabledModel(model.id)}
+                      className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"><CloseIcon size="sm" aria-hidden /></Button>
+                  </motion.span>)}
+                  </AnimatePresence>
                 </div>}
-                {provider === 'custom' && <Disclosure summary="手动添加模型" open={manualOpen} onOpenChange={setManualOpen}>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                  <Input aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className="min-w-0 flex-1 basis-28 font-mono" />
-                  <Select value={manualType} onValueChange={value => setManualType(value as ModelModality)}>
-                    <SelectTrigger aria-label="新增模型类型" className="w-auto"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GENERATION_MODALITIES.map(type => <SelectItem key={type} value={type}>{CATEGORY_LABELS[type]}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Button variant="ghost" size="sm" type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel}>添加</Button>
-                  </div>
-                </Disclosure>}
                 <Disclosure summary="模型详情" open={detailsOpen} onOpenChange={setDetailsOpen}>
                   <div className="mt-3 space-y-3">
-                    <Button variant="ghost" size="sm" type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '' }]); }}>添加模型</Button>
+                    <Button variant="ghost" size="sm" type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '', modality: defaultManualType(preset) }]); }}>添加模型</Button>
                 <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
                 </div>
                 <div className="space-y-2">
-                  {models.map((model, index) => (
-                    <div key={model._rowId} className="grid grid-cols-2 items-start gap-2">
+                  <AnimatePresence initial={false}>
+                  {models.flatMap((model, index) => [
+                    ...(removedRow && removedRow.index === index ? [removedRowNotice] : []),
+                    <motion.div key={model._rowId} {...modelRowMotion()} className="overflow-hidden">
+                    <div className="grid grid-cols-2 items-start gap-2">
                       <Label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</Label>
                       <Input
                         ref={(input) => {
@@ -983,7 +1017,12 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                         id={`key-model-id-${index}`}
                         aria-label={`模型 ID ${index + 1}`}
                         value={model.id}
-                        onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, id: e.target.value } : m))}
+                        onChange={(e) => {
+                          setModels(models.map((m, i) => i === index ? { ...m, id: e.target.value } : m));
+                          // 预览开着时手填了上游里有的 ID：一并勾上，保存时不会被当成「取消勾选」丢掉。
+                          const id = e.target.value.trim();
+                          if (preview?.models.some(item => item.id === id) && !fetchedChecked.has(id)) setFetchedChecked(new Set([...fetchedChecked, id]));
+                        }}
                         className="font-mono"
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                       />
@@ -998,7 +1037,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                             </span>
                           </div>
                         ) : (
-                          <ToggleGroup type="single" size="sm" variant="outline" aria-label={`模型分类 ${index + 1}`}
+                          <ToggleGroup type="single" size="sm" variant="outline" sliding aria-label={`模型分类 ${index + 1}`}
                             value={model.modality ?? 'image'}
                             onValueChange={value => {
                               if (!value) return;
@@ -1100,7 +1139,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                       </div>
                       <Button variant="bare"
                         type="button"
-                        onClick={() => setModels(models.filter((_, i) => i !== index))}
+                        onClick={() => dropModelRow(index)}
                         disabled={models.length === 1}
                         aria-label={`删除模型 ${index + 1}`}
                         className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
@@ -1108,7 +1147,10 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                         <CloseIcon size="sm" aria-hidden />
                       </Button>
                     </div>
-                  ))}
+                    </motion.div>,
+                  ])}
+                  {removedRow && removedRow.index >= models.length && removedRowNotice}
+                  </AnimatePresence>
                 </div>
 
                   </div>
@@ -1123,7 +1165,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                   <Button variant="outline" type="button" onClick={testConnection} disabled={testing || fetching || !fetchModelsBaseUrl || baseUrlInvalid || keyMissing}><SwapLabel active={testing} on="测试中…" off="测试连接" /></Button>
                   {connectionTest?.ok && <span key={connectionTest.message} role="status" className="content-swap-in text-xs text-[color:var(--status-done)]">{connectionTest.message}</span>}
                 </div>
-                {connectionTest && !connectionTest.ok && <IssueText key={connectionTest.message} className="content-swap-in text-xs" issue={{ message: connectionTest.message, raw: connectionTest.raw ?? null, code: null }} />}
+                <Collapse open={Boolean(connectionTest && !connectionTest.ok)}>
+                  {shownConnectionFailure && <IssueText key={shownConnectionFailure.message} className="content-swap-in text-xs" issue={{ message: shownConnectionFailure.message, raw: shownConnectionFailure.raw ?? null, code: null }} />}
+                </Collapse>
               </div>
               <Disclosure summary={userBaseUrl ? '高级：计费分组 · 官网' : '高级：请求地址 · 计费分组'} className="col-span-full border-t border-border pt-3">
                 <div className="mt-3 grid grid-cols-1 items-center gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
@@ -1131,7 +1175,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                     <Label htmlFor="key-base-url" className="text-xs text-muted-foreground">请求地址</Label>
                     <div className="space-y-1">
                       <Input id="key-base-url" value={baseUrl} aria-invalid={baseUrlInvalid || undefined} onChange={e => { changeBaseUrl(e.target.value); setConnectionTest(null); }} className="font-mono" />
-                      {baseUrlInvalid && <p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p>}
+                      <Collapse open={baseUrlInvalid}><p className="text-xs text-destructive">要以 http:// 或 https:// 开头</p></Collapse>
                     </div>
                   </>}
                   <Label htmlFor="key-billing-group" className="text-xs text-muted-foreground">计费分组（可选）</Label>
@@ -1181,6 +1225,16 @@ function IssueText({ issue, className }: { issue: FormIssue | null; className?: 
     </Disclosure>}
     <DiagnosticsExport compact />
   </div>;
+}
+
+/** 模型详情的行：删除时高度收起淡出；减弱动态效果时只淡出；测试环境（无 matchMedia）直接增删。 */
+function modelRowMotion() {
+  if (!motionAvailable()) return {};
+  const exit = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
+  return prefersReducedMotion()
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0, transition: exit }, transition: exit }
+    : { initial: { opacity: 0, height: 0 }, animate: { opacity: 1, height: 'auto' }, exit: { opacity: 0, height: 0, transition: exit },
+      transition: { duration: MOTION_DURATION.slow, ease: MOTION_EASE.inOut } };
 }
 
 const BUILTIN_INTERFACE = '__builtin';
