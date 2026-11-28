@@ -11,8 +11,6 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 
-from PIL import Image
-
 from character_workflow.lib import data_root, slug, trash
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
@@ -275,6 +273,8 @@ def _insert(tx, owner_id, title, body, kind, suffix, source, key=None):
     if kind == "text":
         record["text_preview"] = preview
     if kind == "image":
+        from PIL import Image
+
         try:
             with Image.open(BytesIO(body)) as image:
                 record["width"], record["height"] = image.size
