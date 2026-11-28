@@ -35,11 +35,10 @@ import { listKeys } from '@/api/keys';
 import {
   insertCreationAssetIntoCanvas,
   listCreationAssets,
-  markCreationAssetUsed,
 } from '@/api/creationAssets';
 import { readTeamMedia } from '@/components/assets/teamAssetUse';
 vi.mock('@/components/assets/teamAssetUse', () => ({ readTeamMedia: vi.fn() }));
-import { adoptTeamAsset, listRelatedTeamAssets, listTeamAssets, listTeamLibraries } from '@/api/teamLibraries';
+import { adoptTeamAsset, listRelatedTeamAssets, listTeamLibraries } from '@/api/teamLibraries';
 import { ApiError } from '@/api/http';
 import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
 import type { CreationAsset } from '@/schema/creationAssets';
@@ -1719,6 +1718,15 @@ it('opens the shared section in the new asset library', async () => {
   fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
   expect(await screen.findByText('暂无共享素材')).toBeVisible();
 });
+
+function mockFileUpload(file: File, revision: number) {
+  const version = { version_id: `version-${file.name}`, kind: 'image' as const,
+    created_at: '2026-09-10T00:00:00Z', sha256: 'b'.repeat(64),
+    origin: { kind: 'upload' as const, upload_id: file.name }, path: `uploads/${file.name}`,
+    mime_type: 'image/png', bytes: file.size, width: 300, height: 180 };
+  return { version, filename: file.name, document: { ...emptyDocument, revision: revision + 1,
+    content_versions: { [version.version_id]: version } } };
+}
 
 it('imports every chosen file as separate non-overlapping material nodes', async () => {
   vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => mockFileUpload(file, revision));
