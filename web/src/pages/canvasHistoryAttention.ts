@@ -1,3 +1,4 @@
+import type { Job } from '@/schema/jobs';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 
 import { canvasNodeRenderedSize } from './canvasEditorModel';
@@ -107,4 +108,51 @@ export function canvasRemoteNodeChanges(before: CanvasDocument, after: CanvasDoc
     else if (old !== node && visibleSignature(old) !== visibleSignature(node)) changed.push(node.id);
   }
   return { added, changed };
+}
+
+/** Advance only group-owned fields in the undo baseline. A simultaneous rename,
+ * move or other external edit still gets its own undo entry. */
+export function withGroupRunResults(before: CanvasDocument, after: CanvasDocument, jobs: Job[]): CanvasDocument {
+  const runs = new Set<string>();
+  const versions = new Set<string>();
+  for (const job of jobs) {
+    if (!job.canvas_run?.snapshot?.normalized_params?.group_run) continue;
+    runs.add(job.canvas_run.run_id);
+    for (const candidate of job.canvas_run.candidates) {
+      if (candidate.version_id) versions.add(candidate.version_id);
+    }
+  }
+  if (!runs.size) return before;
+  const targets = new Map(after.nodes.map(node => [node.id, node]));
+  const contentVersions = { ...before.content_versions };
+  for (const id of versions) {
+    if (after.content_versions[id]) contentVersions[id] = after.content_versions[id];
+  }
+  const nodes = before.nodes.map(node => {
+    const target = targets.get(node.id);
+    if (!target || !('current_version_id' in node.data) || !('current_version_id' in target.data)) return node;
+    const active = target.data.active_run_id;
+    const current = target.data.current_version_id;
+    const takeRun = runs.has(active ?? '') || (!active && runs.has(node.data.active_run_id ?? ''));
+    const takeVersion = current && versions.has(current) && !before.content_versions[current];
+    if (!takeRun && !takeVersion) return node;
+    const frame = takeVersion ? groupResultFrame(node, target, before.content_versions) : {};
+    return { ...node, ...(frame.size ? {size: frame.size} : {}), data: { ...node.data,
+      ...(frame.display ? {display: frame.display} : {}),
+      active_run_id: takeRun ? active : node.data.active_run_id,
+      current_version_id: takeVersion ? current : node.data.current_version_id,
+    } } as CanvasNode;
+  });
+  return { ...before, nodes, content_versions: contentVersions };
+}
+
+// Only accept the group's fixed frame when it matches the actual pre-run dimensions.
+// Independent local resizes and display changes remain part of the user's history.
+export function groupResultFrame(node: CanvasNode, target: CanvasNode, versions: CanvasDocument['content_versions']) {
+  if ((node.type !== 'image' && node.type !== 'video') || (target.type !== 'image' && target.type !== 'video')
+    || node.data.display.free_resize || !target.data.display.free_resize) return {};
+  const old = canvasNodeRenderedSize(node, versions);
+  const next = canvasNodeRenderedSize(target, versions);
+  if (old.width !== next.width || old.height !== next.height) return {};
+  return {size: target.size, display: {...node.data.display, free_resize: true}};
 }

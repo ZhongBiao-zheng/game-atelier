@@ -28,12 +28,14 @@ export function useCanvasJobSync({
   onError,
   onDocumentChanged,
   onCanvasAgent,
+  refreshGroupRuns,
 }: {
   projectId: string;
-  mergeRunDocument: (remote: CanvasDocument, runIds: ReadonlySet<string>, nodeIds?: ReadonlySet<string>) => void;
+  mergeRunDocument: (remote: CanvasDocument, runIds: ReadonlySet<string>, nodeIds?: ReadonlySet<string>, groupResultIds?: ReadonlySet<string>) => void;
   onError: (message: string) => void;
   /** 本项目的画布文档在服务端落盘（含 Agent 改动）→ 带上新 revision；由编辑器决定重载还是提示。 */
   onDocumentChanged?: (revision: number | null) => void;
+  refreshGroupRuns?: () => void;
   /** 本项目画布 Agent 的会话事件；借这条常驻连接给 Agent 按钮的状态点用，不再另开一条 SSE。 */
   onCanvasAgent?: (data: CanvasAgentEventPayload) => void;
 }): CanvasJobSync {
@@ -128,7 +130,9 @@ export function useCanvasJobSync({
                 ? [node.id] : []
             )),
           ]);
-          mergeRunDocument(remote, runIdsToSync, resultNodeIds);
+          const groupResultIds = new Set([...completedRuns, ...jobsWithNewCandidateVersions]
+            .flatMap(job => job.canvas_run?.snapshot?.normalized_params?.group_run ? [job.canvas_run.result_node_id] : []));
+          mergeRunDocument(remote, runIdsToSync, resultNodeIds, groupResultIds);
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
           for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);
         }
@@ -208,7 +212,8 @@ export function useCanvasJobSync({
       requestJobSync.current();
     },
     // 重连后全量补一次：断连期间 / 队列满丢掉的事件靠这一下补齐。
-    onConnect: () => requestJobSync.current(),
+    onGroupRunChanged: id => { if (id === projectId) refreshGroupRuns?.(); },
+    onConnect: () => { requestJobSync.current(); refreshGroupRuns?.(); },
   });
 
   return { jobs, acceptJobs, applyLocalJob, reset };

@@ -14,6 +14,7 @@ from character_workflow.lib.canvas_projects import create_canvas_project
 from character_workflow.lib.canvas_tool_common import CanvasToolError
 from character_workflow.lib.plugin_manifest import PluginManifest
 from character_workflow.lib.private_json import read_private_json
+from tests.canvas_agent_approval_helpers import confirmation_required
 from tests.local_client import LocalTestClient
 from tests.plugin_fixtures import manifest, use_plugins_root, write_plugin
 from viewer_server.server_app import build_app
@@ -141,8 +142,8 @@ def test_agent_only_routes_are_invisible_to_the_browser_entry(host, tmp_path):
 
 def test_always_confirm_tools_ask_even_in_auto_mode_and_show_the_field(host):
     project_id = create_canvas_project("宿主工具").project_id
-    assert runtime.confirmation_required(project_id, RUN, {"code": "a\n  b"}, "auto") is True
-    assert runtime.confirmation_required(project_id, LOOK, {}, "auto") is False
+    assert confirmation_required(project_id, RUN, {"code": "a\n  b"}, "auto") is True
+    assert confirmation_required(project_id, LOOK, {}, "auto") is False
     assert runtime.summarize_call(RUN, {"code": "a\n  b"}) == "（插件：演示插件）执行\na\n  b"
 
 

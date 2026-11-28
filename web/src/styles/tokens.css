@@ -1198,3 +1198,13 @@
 @media (prefers-reduced-motion: no-preference) {
   .canvas-toolbar-presence[data-phase='entering'] { translate: 0 4px; }
 }
+
+@keyframes group-run-finished {
+  to { opacity: 0; }
+}
+.group-run-finished {
+  animation: group-run-finished var(--motion-fast) var(--ease-atelier-out) var(--motion-slow) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .group-run-finished { visibility: hidden; }
+}

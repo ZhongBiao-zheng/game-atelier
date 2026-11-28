@@ -31,6 +31,7 @@ interface UseSSEOptions {
   enabled?: boolean;
   /** job-changed 事件携带 {job_id, status}（watcher 已在广播），定向更新用，不再扔掉 payload。 */
   onJobChanged?: (data: JobChangedPayload) => void;
+  onGroupRunChanged?: (projectId: string) => void;
   /** 画布文档落盘（浏览器保存、Agent 经 MCP 改动都算）→ {project_id, revision}；只发回调，不触发全局刷新信号。 */
   onCanvasDocumentChanged?: (data: CanvasDocumentChangedPayload) => void;
   /** 团队库索引有条目增删改（watcher 重扫后按 diff 逐条广播）；只发回调，不触发全局刷新信号。 */
@@ -59,6 +60,8 @@ export function useSSE(options?: UseSSEOptions): number {
   onCanvasAgentRef.current = options?.onCanvasAgent;
   const onGatewayTaskRef = useRef(options?.onGatewayTask);
   onGatewayTaskRef.current = options?.onGatewayTask;
+  const groupChanged = useRef(options?.onGroupRunChanged);
+  groupChanged.current = options?.onGroupRunChanged;
   const needsResync = useRef(false);
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
@@ -91,6 +94,9 @@ export function useSSE(options?: UseSSEOptions): number {
           }
           if (event === 'job-changed') {
             try { onJobChangedRef.current?.(JSON.parse(data) as JobChangedPayload); } catch { /* Index invalidation already ran. */ }
+          }
+          if (event === 'canvas-group-run-changed') {
+            try { groupChanged.current?.(JSON.parse(data).project_id); } catch { /* Resync on reconnect. */ }
           }
           if (event === 'canvas-document-changed') {
             try { onCanvasDocumentChangedRef.current?.(JSON.parse(data) as CanvasDocumentChangedPayload); } catch { /* Malformed payload: the next save or reload resyncs. */ }

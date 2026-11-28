@@ -83,6 +83,10 @@ class CanvasDocumentsHandler(GuardedHandler):
         if is_dir:
             return
         p = Path(raw_path)
+        if p.parent.name == "group-runs" and p.suffix == ".json" and p.stem.startswith("grun_"):
+            hub.broadcast("canvas-group-run-changed", {"project_id": p.parent.parent.name,
+                                                       "run_id": p.stem})
+            return
         if p.name != "canvas.json":
             return
         try:

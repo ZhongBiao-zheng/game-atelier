@@ -199,7 +199,7 @@ export interface CanvasGenerationSnapshot {
   model: string;
   provider: string;
   alias: string | null;
-  normalized_params: Record<string, unknown>;
+  normalized_params: Record<string, unknown> & { group_run?: { id: string; previous_version_id?: string | null } };
   inputs: Array<{
     order: number;
     annotated?: boolean;

@@ -33,6 +33,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
+import type { GroupRun } from '@/api/canvasGroupRuns';
 import { AddIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
@@ -197,6 +198,9 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  groupRuns?: ReadonlyMap<string, GroupRun>;
+  groupSteps?: ReadonlyMap<string, GroupRun['steps'][number]>;
+  refreshGroupRuns?: () => Promise<void>;
   projectCategories?: readonly string[];
   resolveFinalCategory?: (sha256: string) => string | null;
   finalizationRevision?: string;
@@ -446,6 +450,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
+  const groupStep = context?.groupSteps?.get(node.id);
+  const groupHeader = useRef<HTMLElement>(null);
+  useAnimateOnChange(groupStep?.status, status => { if (status === 'failed') shakeOnError(groupHeader.current); });
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
   useEffect(() => {
@@ -550,7 +557,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const candidatePresentation = node.type === 'image'
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
-  const mediaCandidates = candidatePresentation?.current ?? [];
+  const groupOutput = Boolean(nodeJob?.canvas_run?.snapshot?.normalized_params?.group_run);
+  const mediaCandidates = groupOutput ? [] : candidatePresentation?.current ?? [];
   const stackCoverId = context.resultStackOwnerById?.get(node.id) ?? null;
   const nodeRunning = submittingNode || nodeRunState.status === 'loading';
   // 结果组的总张数：已拆成节点的按成员数，最近一次生成还没拆的按这一批成功的张数。
@@ -626,7 +634,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
       />
-      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
+      <header ref={groupHeader} className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -659,7 +667,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             {layerStackInfo}
           </span>
         )}
-        <CanvasNodeRunBadge state={nodeRunState} />
+        {groupStep?.status !== 'done' && <CanvasNodeRunBadge state={nodeRunState} />}
+        {groupStep?.status === 'done' && <CheckIcon size="sm" role="img" aria-label="整体执行已完成" className="content-swap-in ml-1 text-status-done" />}
       </header>
       <NodeToolbar
         isVisible={toolbarPresence.mounted}
@@ -999,7 +1008,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           ? revealedVersionId !== null
           : Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
         holdUntilReady={content?.kind === 'image' && revealedVersionId !== content.version_id}
-        onFailureAction={context.runFailureAction}
+        onFailureAction={groupStep?.job_id === nodeJob?.job_id && nodeJob?.canvas_run?.snapshot?.normalized_params?.group_run
+          && nodeRunState.failureAction?.kind === 'retry' ? undefined : context.runFailureAction}
       />
       {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
         <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
@@ -2716,7 +2726,7 @@ export function CanvasGenerationComposer({
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
       </Collapse>
-      {node.type === 'audio' && (
+      {isCanvasContentNode(node) && (node.type === 'audio' || context.jobsByResultNodeId.get(node.id)?.some(job => job.canvas_run?.snapshot?.normalized_params?.group_run)) && (
         <CandidateHistory
           nodeId={node.id}
           primaryVersionId={node.data.current_version_id}
@@ -3410,7 +3420,11 @@ function CandidateHistory({
   running: boolean;
   submitting: boolean;
 }) {
-  const { current, history } = presentCanvasCandidates(context.jobsByResultNodeId.get(nodeId) ?? []);
+  const jobs = context.jobsByResultNodeId.get(nodeId) ?? [];
+  const { current, history } = presentCanvasCandidates(jobs);
+  const known = new Set([...current, ...history].map(entry => entry.candidate.version_id));
+  const previous = [...new Set(jobs.map(job => job.canvas_run?.snapshot?.normalized_params?.group_run?.previous_version_id))]
+    .filter((id): id is string => !!id && !known.has(id) && !!context.resolveVersion(id));
   if (!current.length && !history.length) return null;
 
   return (
@@ -3423,9 +3437,14 @@ function CandidateHistory({
         primaryVersionId={primaryVersionId}
         actionsDisabled={running || submitting}
       />
-      {history.length > 0 && (
+      {history.length + previous.length > 0 && (
         <details className="mt-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none py-1">历史候选 · {history.length}</summary>
+          <summary className="cursor-pointer select-none py-1">历史候选 · {history.length + previous.length}</summary>
+          {previous.map(id => <Button key={id} size="sm" variant="ghost"
+            disabled={running || submitting || id === primaryVersionId}
+            onClick={() => context.selectCandidate(nodeId, id)}>
+            {new Date(context.resolveVersion(id)!.created_at).toLocaleString()} · 执行前版本
+          </Button>)}
           <CandidateGrid
             label="历史候选结果"
             entries={history}
