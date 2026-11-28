@@ -42,7 +42,7 @@ def _uncatalogued_digest(path: Path, size: int, mtime_ns: int, preview_json: str
         if preview_json is None:
             sha = hashlib.file_digest(source, 'sha256').hexdigest()
         else:
-            from character_workflow.lib.creation_assets import PROMPT_PREVIEW_MAX_BYTES, validate_prompt_preview
+            from character_workflow.lib.project_reference_assets import PROMPT_PREVIEW_MAX_BYTES, validate_prompt_preview
             from character_workflow.lib.schemas import PromptPreviewImage
             body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
             validate_prompt_preview(PromptPreviewImage.model_validate_json(preview_json), body)

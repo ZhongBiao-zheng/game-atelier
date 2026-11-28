@@ -437,7 +437,7 @@ def thumbnail_bytes(
 
 
 def read_prompt_preview_files(asset_dir: Path, previews: list[PromptPreviewImage]) -> dict[str, bytes]:
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         PROMPT_PREVIEW_LIMIT, PROMPT_PREVIEW_MAX_BYTES, validate_prompt_preview,
     )
     if len(previews) > PROMPT_PREVIEW_LIMIT or len({p.file for p in previews}) != len(previews):

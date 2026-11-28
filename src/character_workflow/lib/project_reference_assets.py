@@ -1403,7 +1403,7 @@ def migrate_creation_asset_catalog_schema() -> None:
     替换的那一刻锁外打开会 PermissionError(13)（2026-11-18 并发采用 CI 偶发失败的根因）。
     调用方都在拿锁之前调用它，这里不会重入。
     """
-    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
+    from character_workflow.lib.library_legacy_upgrade import migrate_creation_assets_to_v4
 
     with file_lock(_catalog_lock_path()):
         migrate_creation_assets_to_v4()

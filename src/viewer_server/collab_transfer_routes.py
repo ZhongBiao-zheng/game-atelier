@@ -18,7 +18,7 @@ from character_workflow.lib.canvas_projects import (
     _sniff_media_mime, canvas_project_lock_path, read_canvas_document,
 )
 from character_workflow.lib.canvas_reproduce import _commit
-from character_workflow.lib.creation_assets import sniff_media_mime
+from character_workflow.lib.project_reference_assets import sniff_media_mime
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import (

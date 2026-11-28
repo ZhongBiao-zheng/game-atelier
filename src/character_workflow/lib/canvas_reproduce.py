@@ -23,7 +23,7 @@ from character_workflow.lib.canvas_projects import (
     canvas_project_lock_path,
     read_canvas_project,
 )
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     CreationAssetStateError,
     creation_asset_input_path,
     get_creation_asset,

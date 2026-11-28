@@ -15,7 +15,7 @@ from typing import Any
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_projects import read_canvas_document, resolve_canvas_media
 from character_workflow.lib.canvas_runs import canvas_numbering_prefix
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     _normalize_tags,
     _required_text,
     create_generation_asset,

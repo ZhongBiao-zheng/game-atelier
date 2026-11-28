@@ -9,7 +9,6 @@ import type {
   CreationAssetStaleness,
   CreationGenerationFromCanvas,
   CreationGenerationFromJob,
-  CreationPromptSegment,
 } from '@/schema/creationAssets';
 import type { CanvasDocument, CanvasPoint } from '@/schema/canvas';
 
@@ -52,24 +51,6 @@ export function listCreationAssets(options: {
   if (options.archived) params.set('archived', 'true');
   const query = params.size ? `?${params.toString()}` : '';
   return requestJson<CreationAssetList>(`/api/creation-assets${query}`, '读取创作资产');
-}
-
-export function createPromptCreationAsset(input: {
-  title: string;
-  segments: CreationPromptSegment[];
-  tags: string[];
-  projectId?: string;
-}): Promise<CreationAsset> {
-  return requestJson<CreationAsset>('/api/creation-assets/prompts', '保存提示词资产', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      title: input.title,
-      segments: input.segments,
-      tags: input.tags,
-      project_id: input.projectId,
-    }),
-  });
 }
 
 export async function uploadMediaCreationAsset(input: {
@@ -138,65 +119,6 @@ export async function saveMediaCreationAssetFromPath(input: {
   }
   if (!response.ok) throw await apiError(response, '保存媒体资产');
   return response.json() as Promise<CreationAsset>;
-}
-
-export function updatePromptCreationAsset(
-  assetId: string,
-  input: { title: string; segments: CreationPromptSegment[]; tags: string[] },
-): Promise<CreationAsset> {
-  return requestJson<CreationAsset>(
-    `/api/creation-assets/${encodeURIComponent(assetId)}/prompt`,
-    '编辑提示词资产',
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function updateMediaCreationAsset(
-  assetId: string,
-  input: { title: string; tags: string[]; file?: File },
-): Promise<CreationAsset> {
-  const form = new FormData();
-  form.append('title', input.title);
-  form.append('tags', JSON.stringify(input.tags));
-  if (input.file) form.append('file', input.file);
-  let response: Response;
-  try {
-    response = await connectionFetch(
-      `/api/creation-assets/${encodeURIComponent(assetId)}/media`,
-      { method: 'PUT', body: form },
-    );
-  } catch (error) {
-    throw new Error(`编辑媒体资产失败：${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (response.status === 409) {
-    const body = await response.clone().json().catch(() => null) as {
-      detail?: { code?: string; asset_id?: string };
-    } | null;
-    if (body?.detail?.code === 'duplicate_asset' && body.detail.asset_id) {
-      throw new DuplicateCreationAssetError(body.detail.asset_id);
-    }
-  }
-  if (!response.ok) throw await apiError(response, '编辑媒体资产');
-  return response.json() as Promise<CreationAsset>;
-}
-
-/** D13：个人资产不物理删除，归档后在「已归档」里可还原。 */
-export async function archiveCreationAsset(assetId: string): Promise<void> {
-  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/archive`, {
-    method: 'POST',
-  });
-  if (!response.ok) throw await apiError(response, '归档资产');
-}
-
-export async function restoreCreationAsset(assetId: string): Promise<void> {
-  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/restore`, {
-    method: 'POST',
-  });
-  if (!response.ok) throw await apiError(response, '还原资产');
 }
 
 export function markCreationAssetUsed(
@@ -330,26 +252,3 @@ export function classifyCreationAssets(projectId: string, assetIds: string[], se
   });
 }
 
-export function promptPreviewUrl(assetId: string, file: string, width?: number): string {
-  const base = `/api/creation-assets/${encodeURIComponent(assetId)}/previews/${encodeURIComponent(file)}`;
-  return width ? `${base}/thumb?w=${width}` : base;
-}
-
-export async function uploadPromptPreviews(assetId: string, files: File[], replaceFile?: string): Promise<CreationAsset> {
-  const form = new FormData();
-  files.forEach(file => form.append('files', file));
-  if (replaceFile) form.append('replace_file', replaceFile);
-  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/previews`, { method: 'POST', body: form });
-  if (!response.ok) throw await apiError(response, '上传效果图');
-  return response.json() as Promise<CreationAsset>;
-}
-
-export function deletePromptPreview(assetId: string, file: string): Promise<CreationAsset> {
-  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/${encodeURIComponent(file)}`, '删除效果图', { method: 'DELETE' });
-}
-
-export function reorderPromptPreviews(assetId: string, files: string[]): Promise<CreationAsset> {
-  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/order`, '设置效果图顺序', {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ files }),
-  });
-}

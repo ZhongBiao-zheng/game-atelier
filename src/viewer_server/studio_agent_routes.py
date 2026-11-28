@@ -26,7 +26,7 @@ from character_workflow.lib import canvas_agent_skills as skills, studio_agent_s
 from character_workflow.lib.atomic_io import atomic_write_bytes, read_text_with_retry
 from character_workflow.lib.canvas_agent_sessions import with_appended_messages
 from character_workflow.lib.canvas_tool_common import CanvasToolError
-from character_workflow.lib.creation_assets import asset_media_content, get_creation_asset
+from character_workflow.lib.project_reference_assets import asset_media_content, get_creation_asset
 from character_workflow.lib.jobs import list_jobs
 from character_workflow.lib.schemas import (
     CanvasAgentApprovalsSubmit,

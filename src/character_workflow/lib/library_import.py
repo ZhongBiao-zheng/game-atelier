@@ -7,10 +7,10 @@ import logging
 import uuid
 from pathlib import Path
 
-from character_workflow.lib import creation_assets as project_assets
+from character_workflow.lib import project_reference_assets as project_assets
 from character_workflow.lib import data_root, library, trash
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json, read_text_with_retry
-from character_workflow.lib.creation_assets_migration import (
+from character_workflow.lib.library_legacy_upgrade import (
     migrate_creation_assets_to_single_content, migrate_creation_assets_to_v4,
 )
 from character_workflow.lib.file_lock import file_lock

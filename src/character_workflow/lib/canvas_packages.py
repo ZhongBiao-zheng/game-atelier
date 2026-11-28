@@ -1281,7 +1281,7 @@ def delete_canvas_project(
                 stack.enter_context(job_lock(job.job_id))
             locked_jobs = [read_job(job.job_id) for job in jobs]
             _assert_jobs_are_quiescent(locked_jobs)
-            from character_workflow.lib.creation_assets import canvas_project_asset_ids
+            from character_workflow.lib.project_reference_assets import canvas_project_asset_ids
             from character_workflow.lib.team_library import list_mounts
             mounts = [mount.model_dump(mode="json") for mount in list_mounts(project_id)]
             # 花费留在用量侧：任务记录进了回收站（之后可能被清空），已发生的消费照样计入。
@@ -1304,7 +1304,7 @@ def delete_canvas_project(
         collab_server.apply_saved()
     # 缩略图是派生缓存，还原后按需重建；资产关系与团队库挂载随删除清掉，还原时按条目记录接回。
     discard_canvas_thumbnails(project_id)
-    from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
+    from character_workflow.lib.project_reference_assets import remove_canvas_project_asset_relations
     remove_canvas_project_asset_relations(project_id)
     from character_workflow.lib.team_library import remove_project_mounts
     remove_project_mounts(project_id)
@@ -1334,7 +1334,7 @@ def discard_empty_canvas_project(project_id: str, expected_revision: int) -> boo
     项目名仍是「未命名项目」、分类与规范未改，没有节点 / 连线 / 内容版本 / 画布任务，
     没有团队库挂载和资产关系，项目目录里只有新建时的文件（Agent 会话、计划、上传都会留下文件）。
     任一条不满足或读不准就保留，返回 False。"""
-    from character_workflow.lib.creation_assets import list_creation_assets
+    from character_workflow.lib.project_reference_assets import list_creation_assets
     from character_workflow.lib.team_library import list_mounts
 
     if list_mounts(project_id) or list_creation_assets(project_id=project_id, archived=None).assets:
@@ -1395,7 +1395,7 @@ def _restore_canvas_project(entry: trash.TrashEntry, restore_files: trash.Restor
         return
     asset_ids = entry.meta.get("asset_ids")
     if isinstance(asset_ids, list):
-        from character_workflow.lib.creation_assets import restore_canvas_project_asset_relations
+        from character_workflow.lib.project_reference_assets import restore_canvas_project_asset_relations
         restore_canvas_project_asset_relations(
             project_id, [value for value in asset_ids if isinstance(value, str)],
         )
