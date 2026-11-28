@@ -2715,6 +2715,8 @@ it('uses the history kind to add an octet-stream Markdown output as a text node'
   vi.mocked(readTeamMedia).mockResolvedValueOnce(file);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
+  // 资产面板记住本次运行里上次的页签（前面的用例切过素材库）。
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '历史' }));
   fireEvent.click(await screen.findByRole('checkbox', { name: '选择 v1.md' }));
   fireEvent.click(screen.getByRole('button', { name: '用作参考' }));
   await waitFor(() => expect(Object.values(lastSavedDocument()?.content_versions ?? {})).toContainEqual(

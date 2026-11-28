@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Textarea } from '@/components/ui/textarea';
-import { MOTION_DURATION, MOTION_EASE, prefersReducedMotion, shakeOnError } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, shakeOnError } from '@/lib/motion';
 import { routeChannel, storedAlias } from '@/lib/modelRoutes';
 import { cn } from '@/lib/utils';
 import { canvasGenerationModelSupportsMode, normalizeCanvasTextParams } from '@/pages/canvasEditorModel';
@@ -197,20 +197,17 @@ export function CanvasTextContentPanel({
       </div>
       <div className="mt-2 flex flex-col gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <div className="flex items-center gap-1.5">
-          {/* 胶囊进出时宽度一起收放，输入框跟着平滑让位，不被一下挤窄。减弱动态效果时只淡入淡出。 */}
+          {/* 胶囊只淡入淡出：布局一次到位，不逐帧改输入框宽度。 */}
           <AnimatePresence initial={false}>{selectedCount > 0 && (
-            <motion.span key="selection" className="-mr-1.5 flex shrink-0 overflow-hidden"
-              initial={{ opacity: 0, width: prefersReducedMotion() ? 'auto' : 0 }}
-              animate={{ opacity: 1, width: 'auto' }}
-              exit={{ opacity: 0, width: prefersReducedMotion() ? 'auto' : 0 }}
+            <motion.span key="selection"
+              className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-sm bg-secondary py-0.5 pl-2 pr-0.5 text-xs tabular-nums text-foreground"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}>
-              <span className="mr-1.5 flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-sm bg-secondary py-0.5 pl-2 pr-0.5 text-xs tabular-nums text-foreground">
-                选中 {selectedCount} 字
-                <Button type="button" variant="ghost" size="icon" className="size-5 rounded-sm"
-                  aria-label="取消选区" onClick={() => setSelection(null)}>
-                  <CloseIcon size="sm" aria-hidden="true" />
-                </Button>
-              </span>
+              选中 {selectedCount} 字
+              <Button type="button" variant="ghost" size="icon" className="size-5 rounded-sm"
+                aria-label="取消选区" onClick={() => setSelection(null)}>
+                <CloseIcon size="sm" aria-hidden="true" />
+              </Button>
             </motion.span>
           )}</AnimatePresence>
           <Input

@@ -4,11 +4,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import type { GroupPlan } from '@/api/canvasGroupRuns';
 import { formatGenerationCost } from '@/lib/generationCost';
 
-export function CanvasGroupRunDialog({ plan, busy, onClose, onStart, onLocate }: {
-  plan: GroupPlan; busy: boolean; onClose: () => void; onStart: () => void; onLocate?: (nodeId: string) => void;
+/** 受控 open：调用方关闭时传 false、plan 沿用最后一份，退场动画带着原内容播完。 */
+export function CanvasGroupRunDialog({ open = true, plan, busy, onClose, onStart, onLocate }: {
+  open?: boolean; plan: GroupPlan; busy: boolean; onClose: () => void; onStart: () => void; onLocate?: (nodeId: string) => void;
 }) {
   const total = formatGenerationCost(plan.total_cny);
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
+  return <Dialog open={open} onOpenChange={next => { if (!next && !busy) onClose(); }}>
     <DialogContent aria-describedby={undefined}>
       <DialogHeader><DialogTitle>整体执行 {plan.steps.length} 个节点</DialogTitle></DialogHeader>
       {plan.cycle && <p role="alert" className="text-sm text-destructive">组里的连线有循环</p>}

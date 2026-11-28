@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { useFadePresence } from './useFadePresence';
+import { useRetained } from '@/components/ui/retained';
 import type { CanvasGroupNode } from '@/schema/canvas';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { EditableText } from '@/components/ui/editable-text';
@@ -19,6 +20,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
   const [pending, setPending] = useState<'plan' | 'start' | 'resume' | 'cancel' | null>(null);
   const busy = pending !== null;
   const toolbar = useFadePresence(selected && !context.multiSelectionActive);
+  const shownPlan = useRetained(plan);
   const run = context.groupRuns?.get(node.id);
   const hasDraft = node.data.member_node_ids.some(id => {
     const member = context.findNode?.(id);
@@ -117,7 +119,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
           <SwapLabel active={pending === 'cancel'} on="停止中…" off="停止" />
         </Button>}
     </div>
-    {plan && <CanvasGroupRunDialog plan={plan} busy={busy} onClose={() => setPlan(null)} onStart={() => void command('start')}
+    {shownPlan && <CanvasGroupRunDialog open={Boolean(plan)} plan={shownPlan} busy={busy} onClose={() => setPlan(null)} onStart={() => void command('start')}
       onLocate={id => { setPlan(null); context.locateNode?.(id); }} />}
   </div>;
 }
