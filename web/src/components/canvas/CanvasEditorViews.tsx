@@ -1977,17 +1977,28 @@ function upscaleChoice(context: CanvasNodeContextValue, target: CanvasUpscaleTar
   } : null;
 }
 
-/** 估价用的参数，按服务端 `_upscale_size_params` 的同一规则：比例族只带质量，像素族按档位长边等比放大。 */
+/** 估价用的参数，与服务端提交（canvas_runs.submit_upscale_run → `_upscale_size_params`）逐项对齐：
+ *  原图作为一张参考图随请求发出（有的渠道按参考图张数计价）；比例取渠道支持的最近比例；
+ *  OpenRouter 带分辨率档；比例族只带质量；像素族按档位长边等比放大。 */
 function upscaleEstimateParams(
   choice: NonNullable<ReturnType<typeof upscaleChoice>>,
   target: CanvasUpscaleTarget,
   width: number,
   height: number,
 ): Record<string, unknown> {
-  const params: Record<string, unknown> = { n: 1 };
+  const caps = selectionImageCaps(choice.key, choice.model);
+  const params: Record<string, unknown> = { n: 1, reference_images: ['source'] };
+  const ratios = caps.ratios.filter(ratio => ratio.includes(':'));
+  if (width && height && ratios.length) {
+    const aspect = Math.log(width / height);
+    const distance = (ratio: string) => { const [a, b] = ratio.split(':').map(Number); return Math.abs(aspect - Math.log(a / b)); };
+    params.ratio = ratios.reduce((best, ratio) => distance(ratio) < distance(best) ? ratio : best);
+  }
   if (choice.quality && supportsImageQuality(choice.model)) params.quality = choice.quality;
-  if (choice.key?.provider === 'openrouter') return { ...params, resolution: target };
-  if (selectionImageCaps(choice.key, choice.model).sizeKind !== 'pixels' || !width || !height) return params;
+  if (choice.key?.provider === 'openrouter') {
+    return (caps.resolutions as readonly string[]).includes(target) ? { ...params, resolution: target } : params;
+  }
+  if (caps.sizeKind !== 'pixels' || !width || !height) return params;
   const scale = (CANVAS_UPSCALE_TARGETS.find(item => item.id === target)?.longEdge ?? 0) / Math.max(width, height);
   return { ...params, size_mode: 'custom', size: `${Math.max(1, Math.round(width * scale))}x${Math.max(1, Math.round(height * scale))}` };
 }
