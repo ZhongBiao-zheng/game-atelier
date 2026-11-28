@@ -38,14 +38,12 @@ export function listCreationAssets(options: {
   hasCategory?: boolean;
   projectId?: string;
   /** 只列已归档的（「已归档」筛选）。 */
-  archived?: boolean;
 } = {}): Promise<CreationAssetList> {
   const params = new URLSearchParams();
   if (options.kind) params.set('kind', options.kind);
   if (options.scope) params.set('scope', options.scope);
   if (options.projectId) params.set('project_id', options.projectId);
   if (options.hasCategory !== undefined) params.set('has_category', String(options.hasCategory));
-  if (options.archived) params.set('archived', 'true');
   const query = params.size ? `?${params.toString()}` : '';
   return requestJson<CreationAssetList>(`/api/creation-assets${query}`, '读取创作资产');
 }
