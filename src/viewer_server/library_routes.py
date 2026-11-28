@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zipfile import ZipFile
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from character_workflow.lib import library, slug
 from character_workflow.lib.canvas_projects import (
@@ -75,6 +75,22 @@ def handle(name: str):
         return {"handle": slug.dedupe(slug.generate(name), {s["handle"] for s in library.catalog()["subjects"]})}
 
 
+class SubjectPreview(BaseModel):
+    prompt: str = Field(max_length=40000)
+    model: str = Field(max_length=200)
+    explicit: int = Field(ge=0, le=200)
+
+
+@router.post("/subject-preview")
+def subject_preview(body: SubjectPreview):
+    from character_workflow.lib.library_subjects import expand
+    from character_workflow.lib.schemas import JobParams
+    params = JobParams(reference_images=[""] * body.explicit)
+    with errors():
+        expand(body.prompt, params, body.model, preview=True)
+    return {"warnings": params.warnings or []}
+
+
 @router.post("/folders")
 def create_folder(body: Folder):
     with errors():
@@ -89,6 +105,11 @@ def create_subject(body: Subject):
 
 @router.post("/{owner}/upload")
 def upload(owner: Key, file: UploadFile):
+    with errors():
+        return library.insert(owner, *_upload_source(file))
+
+
+def _upload_source(file):
     title = Path((file.filename or "素材").replace("\\", "/")).name
     ext = Path(title).suffix.lower()
     limit = upload_max_bytes(ext)
@@ -102,31 +123,66 @@ def upload(owner: Key, file: UploadFile):
         if not mime or mime not in _ACCEPTED_MIMES.get(ext, set()) | ({"image/gif"} if ext == ".gif" else set()):
             raise HTTPException(422, "不支持的素材格式")
         kind = mime.split("/")[0]
-    with errors():
-        return library.insert(owner, title, body, kind, ext, {"kind": "upload"})
+    return title, body, kind, ext, {"kind": "upload"}
 
 
 @router.post("/{owner}/history")
 def from_history(owner: Key, ref: OutputRef):
     with errors():
-        job, path = _lookup(ref, *map(set, _read_gallery_hidden_state()))
-        return library.insert(owner, path.name, path.read_bytes(), job.kind, path.suffix.lower(),
-                              {"kind": "history", **ref.model_dump()})
+        return library.insert(owner, *_history_source(ref))
+
+
+def _history_source(ref):
+    job, path = _lookup(ref, *map(set, _read_gallery_hidden_state()))
+    return path.name, path.read_bytes(), job.kind, path.suffix.lower(), {"kind": "history", **ref.model_dump()}
 
 
 @router.post("/{owner}/canvas")
 def from_canvas(owner: Key, ref: CanvasRef):
     with errors():
-        document = read_canvas_document(ref.project_id)
-        version = document.content_versions[ref.version_id]
-        node = next((n for n in document.nodes if getattr(n.data, "current_version_id", None) == ref.version_id), None)
-        title = getattr(node, "title", None) or version.version_id
-        source = dict(kind="canvas", canvas_project_id=ref.project_id, version_id=ref.version_id,
-                      node_id=node.id if node else None)
-        if version.kind == "text":
-            return library.insert(owner, title, version.text.encode(), "text", ".md", source)
-        path, _ = resolve_canvas_media(ref.project_id, ref.version_id)
-        return library.insert(owner, title, path.read_bytes(), version.kind, path.suffix.lower(), source)
+        return library.insert(owner, *_canvas_source(ref))
+
+
+def _canvas_source(ref):
+    document = read_canvas_document(ref.project_id)
+    version = document.content_versions[ref.version_id]
+    node = next((n for n in document.nodes if getattr(n.data, "current_version_id", None) == ref.version_id), None)
+    title = getattr(node, "title", None) or version.version_id
+    source = dict(kind="canvas", canvas_project_id=ref.project_id, version_id=ref.version_id,
+                  node_id=node.id if node else None)
+    if version.kind == "text":
+        return title, version.text.encode(), "text", ".md", source
+    path, _ = resolve_canvas_media(ref.project_id, ref.version_id)
+    return title, path.read_bytes(), version.kind, path.suffix.lower(), source
+
+
+class UploadSource(BaseModel):
+    upload: int = Field(ge=0, lt=20)
+
+
+class SubjectForm(Subject):
+    id: Key | None = None
+    revision: int | None = None
+    cover_index: int | None = Field(default=None, ge=0, lt=20)
+    additions: list[UploadSource | OutputRef | CanvasRef] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/subject-editor")
+def save_subject(payload: Annotated[str, Form()], files: Annotated[list[UploadFile] | None, File()] = None):
+    with errors():
+        form = TypeAdapter(SubjectForm).validate_json(payload)
+        additions = []
+        for source in form.additions:
+            if isinstance(source, UploadSource):
+                if not files or source.upload >= len(files):
+                    raise ValueError("缺少上传的参考素材")
+                additions.append(_upload_source(files[source.upload]))
+            elif isinstance(source, OutputRef):
+                additions.append(_history_source(source))
+            else:
+                additions.append(_canvas_source(source))
+        return library.save_subject(form.id, form.revision, form.name, form.handle,
+                                    form.description, additions, form.cover_index)
 
 
 @router.patch("/{key}")

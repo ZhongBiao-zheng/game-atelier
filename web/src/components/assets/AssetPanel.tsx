@@ -8,6 +8,8 @@ import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
 import { loadUiPrefs, saveUiPref } from '@/lib/uiPrefs';
 import { cn } from '@/lib/utils';
 import { CreationAssetPanel, type CreationAssetPanelHandle, type CreationAssetPanelProps } from './CreationAssetPanel';
+import { LibraryPanel } from './LibraryPanel';
+import { OPEN_FOLDER } from '@/api/library';
 import { HistoryPanel } from './HistoryPanel';
 
 type Tab = 'history' | 'library';
@@ -16,6 +18,26 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
   const directed = Boolean(props.saveRequest || props.initialKind === 'team');
   const [tab, setTab] = useState<Tab>(directed ? 'library' : 'history');
   const interacted = useRef(directed);
+  const [target, setTarget] = useState<string | null>(null);
+  const touchedTarget = useRef(false);
+  function navigate(id: string | null) {
+    touchedTarget.current = true;
+    setTarget(id);
+    void saveUiPref('asset-library-position', id);
+  }
+  useEffect(() => {
+    let active = true;
+    void loadUiPrefs().then(prefs => {
+      const saved = prefs?.['asset-library-position'];
+      if (active && !touchedTarget.current && typeof saved === 'string') setTarget(saved);
+    });
+    const open = (event: Event) => {
+      interacted.current = true; navigate((event as CustomEvent<string>).detail);
+      setTab('library'); void saveUiPref('asset-panel', 'library');
+    };
+    window.addEventListener(OPEN_FOLDER, open);
+    return () => { active = false; window.removeEventListener(OPEN_FOLDER, open); };
+  }, []);
   const library = useRef<CreationAssetPanelHandle>(null);
   useEffect(() => {
     let active = true;
@@ -53,7 +75,8 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
         <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
-          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
+          {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : directed ? <CreationAssetPanel {...props} ref={library} embedded />
+            : <LibraryPanel target={target} onTarget={navigate} onReference={props.onHistoryReference} />}
         </motion.div>
       </AnimatePresence>
     </div>

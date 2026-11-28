@@ -139,6 +139,8 @@ GET /api/library/{key}/content
 POST /api/library/download
 POST /api/library/folders
 POST /api/library/subjects
+POST /api/library/subject-preview
+POST /api/library/subject-editor
 POST /api/library/{owner}/upload
 POST /api/library/{owner}/canvas
 POST /api/library/{owner}/history

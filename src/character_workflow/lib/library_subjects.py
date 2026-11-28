@@ -13,7 +13,7 @@ from character_workflow.lib.schemas import JobParams, SubjectSnapshot
 _TOKEN = re.compile(r"@\[subject:(sbj_[a-f0-9]{32}):([^\]\n]*)\]")
 
 
-def expand(prompt: str, params: JobParams, model: str, *, limit: int | None = None) -> str:
+def expand(prompt: str, params: JobParams, model: str, *, limit: int | None = None, preview=False) -> str:
     # Ignore any snapshots in the request. Only the editor tokens select local subjects.
     params.subjects = None
     params.subject_prompt = None
@@ -48,7 +48,7 @@ def expand(prompt: str, params: JobParams, model: str, *, limit: int | None = No
                     record, path = library.media(item)
                     # A later deletion of either the item or its subject cannot break the queued job.
                     target = data_root.runtime_dir() / "uploads" / "library" / record["file"]
-                    if not target.exists():
+                    if not preview and not target.exists():
                         atomic_write_bytes(target, path.read_bytes())
                 except FileNotFoundError as error:
                     raise ValueError(f"@{rows[key]['name']} 当前不可用") from error

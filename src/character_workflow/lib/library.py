@@ -191,6 +191,27 @@ def update(key, fields):
         return tx.put(row)
 
 
+def save_subject(key, revision, name, handle, description, additions, cover_index):
+    with transaction() as tx:
+        if key and not key.startswith("sbj_"):
+            raise ValueError("请选择主体")
+        row = tx.get(key) if key else dict(id=_new("sbj"), item_ids=[], cover_item_id=None)
+        if key and row["revision"] != revision:
+            raise ValueError("主体已更新，请重新打开")
+        if len(row["item_ids"]) + len(additions) > 20:
+            raise ValueError("一个主体最多添加 20 个素材")
+        name = _title(name)
+        updated = tx.put({**row, "name": name, "description": description, "handle": _handle(name, handle, key)})
+        for source in additions:
+            _insert(tx, updated["id"], *source)
+        result = tx.get(updated["id"])
+        if cover_index is not None:
+            if not 0 <= cover_index < len(result["item_ids"]):
+                raise ValueError("请选择封面素材")
+            result = tx.put({**result, "cover_item_id": result["item_ids"][cover_index]})
+        return result
+
+
 def _add(tx, owner, key):
     ids = [*owner["item_ids"], key]
     if owner["id"].startswith("sbj_"):
@@ -219,7 +240,7 @@ def _insert(tx, owner_id, title, body, kind, suffix, source, key=None):
     key = key or _new("itm")
     digest = hashlib.sha256(body).hexdigest()
     if kind == "text":
-        body.decode("utf-8")
+        preview = body.decode("utf-8")[:1024]
         filename = "content.md"
     else:
         if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
@@ -227,6 +248,8 @@ def _insert(tx, owner_id, title, body, kind, suffix, source, key=None):
         filename = digest + suffix
     record = dict(id=key, title=_title(title), kind=kind, file=filename, sha256=digest,
                   bytes=len(body), source=source)
+    if kind == "text":
+        record["text_preview"] = preview
     if kind == "image":
         with Image.open(BytesIO(body)) as image:
             record["width"], record["height"] = image.size

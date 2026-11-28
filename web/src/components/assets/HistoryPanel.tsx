@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { deleteHistoryOutputs, HISTORY_CHANGED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
+import { downloadLibrary, libraryWrite, LIBRARY_CHANGED, OPEN_FOLDER, type LibraryFolder } from '@/api/library';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { FolderPicker } from './FolderPicker';
 import { request } from '@/api/http';
 import { restoreTrash } from '@/api/trash';
 import { useRetained } from '@/components/ui/retained';
@@ -76,7 +79,7 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
   return <>
     <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
       <Select value={position.kind} onValueChange={value => update(value as Kind, position.q)}>
-        <SelectTrigger aria-label="类型" className="w-auto gap-2 pl-0 border-transparent bg-transparent"><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label="类型" className="-ml-3 w-auto gap-2 px-3 border-transparent bg-transparent"><SelectValue /></SelectTrigger>
         <SelectContent>{Object.entries(labels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
       </Select>
       {search && <Input autoFocus aria-label="按提示词搜索" placeholder="按提示词搜索" value={draft}
@@ -95,7 +98,18 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
 function HistoryList({ position, onReference, onScrollTop }: {
   position: Position; onReference: Reference; onScrollTop: (top: number) => void;
 }) {
-  const { items, more, reload, removeOutputs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
+  const pages = useHistoryPages(position.kind, position.q);
+  return <AssetItemList pages={pages} position={position} onReference={onReference} onScrollTop={onScrollTop} />;
+}
+
+export function AssetItemList({ pages, position, onReference, onScrollTop, library = false }: {
+  pages: ReturnType<typeof useHistoryPages>; position: Position; onReference: Reference; onScrollTop: (n: number) => void; library?: boolean;
+}) {
+  const { items, more, reload, removeOutputs, loading, error, hasMore } = pages;
+  const [moving, setMoving] = useState<HistoryItem | null>(null);
+  const [renaming, setRenaming] = useState<HistoryItem | null>(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [pickRows, setPickRows] = useState<HistoryItem[] | null>(null);
   const [selection, setSelection] = useState(new Set<string>());
   const [preview, setPreview] = useState<HistoryItem | null>(null);
   const [text, setText] = useState('');
@@ -108,6 +122,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
   const selectRequest = useRef(0);
   const selected = items.filter(item => selection.has(historyKey(item)));
   const groups = useMemo(() => {
+    if (library) return [['', items]] as [string, HistoryItem[]][];
     const days = new Map<string, HistoryItem[]>();
     for (const item of items) {
       const label = dayLabel(item.submitted_at);
@@ -115,7 +130,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
       days.get(label)!.push(item);
     }
     return Array.from(days);
-  }, [items]);
+  }, [items, library]);
 
   useEffect(() => {
     clear();
@@ -193,7 +208,12 @@ function HistoryList({ position, onReference, onScrollTop }: {
     setBusy(true);
     try {
       if (key === 'delete') { await remove(rows); return; }
-      if (key === 'download') await downloadHistory(rows);
+      if (key === 'folder') { setPickRows(rows); return; }
+      if (key === 'favorite') { await addTo(rows, { id: 'favorites', name: '收藏' }); return; }
+      if (key === 'download') {
+        if (library) await downloadLibrary(rows.map(r => r.job_id), rows.length === 1 ? rows[0].filename : '素材');
+        else await downloadHistory(rows);
+      }
       else {
         await onReference(rows.map(row => ({
           kind: row.kind, read: () => readTeamMedia(row.url, { title: row.filename, mime_type: null }),
@@ -202,6 +222,15 @@ function HistoryList({ position, onReference, onScrollTop }: {
       clear();
     } catch (err) { notify.error(errorText(err)); }
     finally { setBusy(false); }
+  }
+  async function addTo(rows: HistoryItem[], folder: Pick<LibraryFolder, 'id' | 'name'>) {
+    for (const row of rows) {
+      if (library) await libraryWrite(row.job_id + '/copy', { target: folder.id });
+      else await libraryWrite(folder.id + '/history', { job_id: row.job_id, output_index: row.output_index });
+    }
+    clear();
+    notify.info('已加入 ' + folder.name, { action: { label: '打开', onClick: () =>
+      window.dispatchEvent(new CustomEvent(OPEN_FOLDER, { detail: folder.id })) } });
   }
   async function remove(rows: HistoryItem[]) {
     const jobs = new Map<string, number[]>();
@@ -213,7 +242,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
     const done = new Set<string>();
     try {
       for (const [id, slots] of jobs) {
-        const result = await deleteHistoryOutputs(id, slots);
+        const result = library ? await libraryWrite<{ trash_id: string }>(id, undefined, 'DELETE') : await deleteHistoryOutputs(id, slots);
         trashIds.push(result.trash_id);
         for (const slot of slots) done.add(`${id}/${slot}`);
       }
@@ -227,7 +256,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
     window.dispatchEvent(new CustomEvent(HISTORY_CHANGED, { detail: list }));
     notify.undo(`已删除 ${done.size} 项`, () => {
       void Promise.allSettled(trashIds.map(id => restoreTrash(id))).then(results => {
-        window.dispatchEvent(new Event(HISTORY_CHANGED));
+        window.dispatchEvent(new Event(library ? LIBRARY_CHANGED : HISTORY_CHANGED));
         const failure = results.find(result => result.status === 'rejected');
         if (failure?.status === 'rejected') notify.error(errorText(failure.reason));
       });
@@ -235,7 +264,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
   }
 
   return <div className="relative flex min-h-0 flex-1 flex-col">
-    <div ref={list} tabIndex={0} role="region" aria-label="生成历史" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-16 rounded-b-xl outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+    <div ref={list} tabIndex={0} role="region" aria-label={library ? '素材' : '生成历史'} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-16 rounded-b-xl outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
       onScroll={event => {
         const el = event.currentTarget;
         if (!restore.current) onScrollTop(el.scrollTop);
@@ -248,16 +277,20 @@ function HistoryList({ position, onReference, onScrollTop }: {
         void more(true).then(rows => { if (id === selectRequest.current) setSelection(new Set(rows.map(historyKey))); }).catch(() => {});
       }}>
       {groups.map(([label, rows]) => <section key={label}>
-        <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>
+        {label && <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>}
         <AssetMasonry compact items={rows} itemKey={historyKey} ratio={historyRatio}>{row =>
-          <HistoryCard item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
+          <HistoryCard extraMenu={library && <>
+            <DropdownMenuItem onSelect={() => { setNewTitle(row.filename); setRenaming(row); }}>重命名</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setMoving(row)}>移动到…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { void libraryWrite(row.job_id + '/copy', {}).catch(e => notify.error(errorText(e))); }}>创建副本</DropdownMenuItem>
+            <DropdownMenuSeparator /></>} item={row} selecting={selection.size > 0} checked={selection.has(historyKey(row))} busy={busy}
             removing={removing.has(historyKey(row))} onToggle={range => toggle(row, range)}
             onPreview={() => setPreview(row)} onAction={key => void action(key, [row])} />
         }</AssetMasonry>
       </section>)}
       {loading && <LoadingIcon aria-label="加载中" className="mx-auto my-4 animate-spin text-muted-foreground" />}
       {error && <div role="alert" className="p-3 text-sm">{error}<Button variant="ghost" size="icon" aria-label="重试" onClick={() => void more().catch(() => {})}><RetryIcon /></Button></div>}
-      {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
+      {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{library ? '还没有素材' : position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
     </div>
     <AnimatePresence>{selection.size > 0 && <motion.div
       className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center"
@@ -270,6 +303,16 @@ function HistoryList({ position, onReference, onScrollTop }: {
         <Button variant="ghost" size="icon" className="size-8 rounded-full" aria-label="退出多选" disabled={busy} onClick={clear}><CloseIcon /></Button>
       </div>
     </motion.div>}</AnimatePresence>
+    <FolderPicker open={!!moving} onClose={() => setMoving(null)} onChoose={async f => {
+      if (moving) await libraryWrite(moving.job_id + '/move', { target: f.id });
+    }} />
+    <Dialog open={!!renaming} onOpenChange={v => { if (!v) setRenaming(null); }}><DialogContent><DialogTitle>重命名</DialogTitle>
+      <form className="grid gap-3" onSubmit={e => { e.preventDefault(); if (renaming) void libraryWrite(renaming.job_id, { title: newTitle }, 'PATCH')
+        .then(() => setRenaming(null)).catch(err => notify.error(errorText(err))); }}>
+        <Input autoFocus value={newTitle} maxLength={160} aria-label="素材名称" onChange={e => setNewTitle(e.target.value)} />
+        <Button disabled={!newTitle.trim()}>保存</Button></form>
+    </DialogContent></Dialog>
+    <FolderPicker open={pickRows !== null} onClose={() => setPickRows(null)} onChoose={f => addTo(pickRows || [], f)} />
     {preview?.kind === 'image' && <Lightbox src={preview.url} meta={{ prompt: preview.prompt }} downloadName={preview.filename} onClose={() => setPreview(null)} />}
     {shownPreview && <Dialog open={Boolean(preview && preview.kind !== 'image')} onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
       <DialogTitle>{shownPreview.filename}</DialogTitle>
