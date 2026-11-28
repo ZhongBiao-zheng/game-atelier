@@ -498,7 +498,7 @@ def test_share_job_output_returns_refreshed_entry_and_broadcasts_added(
 
 
 def test_share_creation_asset(client, shared_lib):
-    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_bytes
 
     lib, _ = shared_lib
     asset = create_media_asset_from_bytes(
@@ -723,7 +723,7 @@ def test_related_requires_project_id_and_is_not_swallowed_by_library_routes(clie
 
 
 def test_staleness_reports_all_four_states(client, isolated_data_root, shared_lib):
-    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_bytes
 
     lib, _ = shared_lib
     own = create_media_asset_from_bytes(
@@ -854,7 +854,7 @@ _STATE_BROKEN = {"code": "asset_state_broken", "message": "创作资产库状态
 
 
 def _raise_state_broken(*_args, **_kwargs):
-    from character_workflow.lib.creation_assets import CreationAssetStateError
+    from character_workflow.lib.project_reference_assets import CreationAssetStateError
 
     raise CreationAssetStateError("创作资产库状态损坏")
 
@@ -1080,7 +1080,7 @@ def _adopted(client, isolated_data_root, lib) -> tuple[dict, str]:
 
 
 def test_staleness_batch_reports_known_assets_only(client, isolated_data_root, shared_lib):
-    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_bytes
 
     lib, _ = shared_lib
     own = create_media_asset_from_bytes(
@@ -1102,7 +1102,7 @@ def test_staleness_batch_reports_known_assets_only(client, isolated_data_root, s
 
 
 def test_readopt_overwrites_local_copy(client, isolated_data_root, shared_lib):
-    from character_workflow.lib.creation_assets import get_creation_asset
+    from character_workflow.lib.project_reference_assets import get_creation_asset
 
     lib, _ = shared_lib
     entry, asset_id = _adopted(client, isolated_data_root, lib)
@@ -1124,7 +1124,7 @@ def test_readopt_overwrites_local_copy(client, isolated_data_root, shared_lib):
 def test_readopt_error_codes(client, isolated_data_root, shared_lib):
     import shutil
 
-    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_bytes
 
     lib, folder = shared_lib
     assert client.post("/api/creation-assets/ca_missing/readopt").status_code == 404
@@ -1151,7 +1151,7 @@ def test_readopt_error_codes(client, isolated_data_root, shared_lib):
     ("not_adoptable", 409, "not_adoptable"),
 ])
 def test_readopt_race_and_adopt_errors(client, monkeypatch, error, status, code):
-    from character_workflow.lib.creation_assets import CreationAssetDuplicateError
+    from character_workflow.lib.project_reference_assets import CreationAssetDuplicateError
     from character_workflow.lib.team_library_adopt import TeamAssetAdoptError
     from viewer_server import team_library_routes
 

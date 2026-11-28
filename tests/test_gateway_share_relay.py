@@ -121,7 +121,7 @@ def test_three_roots_incremental_content_and_host_stop(trio, monkeypatch):
             assert result.status_code == 200
             assert hashlib.sha256(result.content).digest() == hashlib.sha256(original_file.read_bytes()).digest()
             assert result.headers['content-disposition'] == 'attachment'
-        assert not (p['roots']['viewer'] / 'creation-assets').exists()
+        assert not (p['roots']['viewer'] / 'project-references').exists()
     # 请求者不看到自己的上传库；主机本机直接读取中转存储。
     assert p['request']('GET', 'libraries').json() == []
     with p['at']('host'):
@@ -245,7 +245,7 @@ def test_pending_references_survive_gc_and_disk_errors_are_503(trio, monkeypatch
 
 def test_unchanged_second_sync_does_not_open_media_or_previews(trio, monkeypatch):
     from pathlib import Path
-    from character_workflow.lib import creation_assets
+    from character_workflow.lib import project_reference_assets as creation_assets
     from character_workflow.lib.team_library_share import share_creation_asset
     p = trio
     with p['at']('publisher'):

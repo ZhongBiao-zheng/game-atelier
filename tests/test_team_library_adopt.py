@@ -7,7 +7,7 @@ import json
 import pytest
 
 from tests.team_library_helpers import scan_and_cache
-from character_workflow.lib.creation_assets import list_creation_assets
+from character_workflow.lib.project_reference_assets import list_creation_assets
 from character_workflow.lib.schemas import TeamLibraryIndexEntry, TeamLibraryMount
 from character_workflow.lib.team_library_adopt import TeamAssetAdoptError, adopt_team_asset
 
@@ -304,7 +304,7 @@ def _rewrite_asset_json(asset_dir, mutate):
 
 
 def test_adopt_generation_copies_media_and_refs_into_blobs(isolated_data_root, tmp_path):
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         creation_asset_input_path,
         creation_asset_media_path,
     )
@@ -440,7 +440,7 @@ def _adopt_from_index(mount, entry_id):
 
 
 def test_staleness_unknown_for_local_asset(isolated_data_root):
-    from character_workflow.lib.creation_assets import create_prompt_asset
+    from character_workflow.lib.project_reference_assets import create_prompt_asset
     from character_workflow.lib.team_library_adopt import adoption_staleness
 
     asset = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
@@ -561,7 +561,7 @@ def test_staleness_unknown_while_entry_is_syncing(isolated_data_root, tmp_path):
 
 
 def _blob_files(data_root_path):
-    blobs = data_root_path / "creation-assets" / "blobs"
+    blobs = data_root_path / "project-references" / "blobs"
     return sorted(p.name for p in blobs.iterdir()) if blobs.is_dir() else []
 
 
@@ -577,7 +577,7 @@ def test_adopt_generation_validates_everything_before_storing(isolated_data_root
 
 def test_adopt_rewrites_declared_mime_to_sniffed_type(isolated_data_root, tmp_path):
     """存量坏资产（声明 image/jpeg 实为 PNG）：sha256 已保证完整，按内容存并改写快照类型。"""
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         creation_asset_input_path,
         creation_asset_media_path,
     )
@@ -600,7 +600,7 @@ def test_adopt_rewrites_declared_mime_to_sniffed_type(isolated_data_root, tmp_pa
 
 
 def test_adopt_rewrites_ref_kind_when_sniffed_family_differs(isolated_data_root, tmp_path):
-    from character_workflow.lib.creation_assets import creation_asset_input_path
+    from character_workflow.lib.project_reference_assets import creation_asset_input_path
 
     video = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
     folder, mount = _mount(tmp_path)
@@ -716,7 +716,7 @@ _REF_C = _png((10, 10, 200))
 def test_readopt_overwrites_copy_and_keeps_local_identity(isolated_data_root, tmp_path):
     import shutil
 
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         blob_path_for,
         creation_asset_input_path,
         mark_creation_asset_used,
@@ -754,7 +754,7 @@ def test_readopt_raw_follows_new_content(isolated_data_root, tmp_path):
     import os
 
     from character_workflow.lib import team_library_index as idx
-    from character_workflow.lib.creation_assets import creation_asset_media_path
+    from character_workflow.lib.project_reference_assets import creation_asset_media_path
     from character_workflow.lib.team_library_adopt import readopt_team_asset
 
     folder, mount = _registered_mount(tmp_path)
@@ -780,7 +780,7 @@ def test_readopt_errors_are_distinguishable(isolated_data_root, tmp_path):
 
     from character_workflow.lib import team_library as tl
     from character_workflow.lib import team_library_index as idx
-    from character_workflow.lib.creation_assets import create_prompt_asset
+    from character_workflow.lib.project_reference_assets import create_prompt_asset
     from character_workflow.lib.team_library_adopt import (
         TeamAssetNotAdopted,
         TeamAssetWithdrawn,
@@ -857,7 +857,7 @@ def test_staleness_batch_reads_each_library_once_and_skips_missing_ids(
     isolated_data_root, tmp_path, monkeypatch
 ):
     from character_workflow.lib import team_library_index as idx
-    from character_workflow.lib.creation_assets import create_prompt_asset
+    from character_workflow.lib.project_reference_assets import create_prompt_asset
     from character_workflow.lib.team_library_adopt import adoption_staleness_batch
 
     folder, mount = _registered_mount(tmp_path)
@@ -930,7 +930,7 @@ def test_catalog_schema_check_reads_under_the_catalog_lock(isolated_data_root, m
     """
     import threading
 
-    from character_workflow.lib import creation_assets, creation_assets_migration
+    from character_workflow.lib import project_reference_assets as creation_assets, library_legacy_upgrade as creation_assets_migration
     from character_workflow.lib.file_lock import try_file_lock
 
     held: list[bool] = []

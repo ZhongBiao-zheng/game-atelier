@@ -425,7 +425,7 @@ def test_opposite_lock_orders_do_not_wait_on_each_other(isolated_data_root):
     修复前：B 持目录锁等项目锁，A 持项目锁等目录锁，互等。A 用非阻塞轮询取目录锁（最多 5 秒），
     所以修复前这条用例是超时失败、不会卡死；A 放掉项目锁后 B 也能走完。
     """
-    from character_workflow.lib import creation_assets
+    from character_workflow.lib import project_reference_assets as creation_assets
     from character_workflow.lib.canvas_projects import canvas_project_lock_path, create_canvas_project
     from character_workflow.lib.file_lock import file_lock, try_file_lock
 

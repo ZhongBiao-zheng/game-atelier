@@ -8,8 +8,8 @@ import pytest
 from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.atomic_io import atomic_write_json
-from character_workflow.lib.creation_assets import list_creation_assets
-from character_workflow.lib.creation_assets_migration import (
+from character_workflow.lib.schemas import CreationAssetCatalog
+from character_workflow.lib.library_legacy_upgrade import (
     migrate_creation_assets_to_v4,
     migrate_creation_assets_to_single_content,
 )
@@ -171,7 +171,7 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
     # server 启动顺序：v1→v2 之后紧接 v2→v4，之后目录才可读。
     assert migrate_creation_assets_to_v4()["catalog_assets"] == 2
     assert json.loads((creation_assets_dir / "catalog.json").read_text("utf-8"))["schema_version"] == 4
-    restored = next(asset for asset in list_creation_assets().assets if asset.asset_id == asset_id)
+    restored = next(asset for asset in CreationAssetCatalog.model_validate_json((creation_assets_dir / "catalog.json").read_bytes()).assets if asset.asset_id == asset_id)
     assert restored.title == "旧提示词"
     assert restored.content.segments[0].text == "最新正文"
     assert "archived_at" not in restored.model_dump()
@@ -207,10 +207,10 @@ def test_v2_image_assets_migrate_to_media_v4(isolated_data_root):
         }],
     }
     atomic_write_json(isolated_data_root / "creation-assets" / "catalog.json", catalog)
-    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
+    from character_workflow.lib.library_legacy_upgrade import migrate_creation_assets_to_v4
     result = migrate_creation_assets_to_v4()
     assert result["catalog_assets"] == 1
-    listed = list_creation_assets(kind="media")
+    listed = CreationAssetCatalog.model_validate_json((isolated_data_root / "creation-assets/catalog.json").read_bytes())
     assert listed.assets[0].kind == "media" and listed.assets[0].content.kind == "media"
     raw = json.loads((isolated_data_root / "creation-assets" / "catalog.json").read_text("utf-8"))
     assert raw["schema_version"] == 4
@@ -259,15 +259,16 @@ def test_media_migration_keeps_v2_intact_when_a_row_fails_validation(isolated_da
     assert not (isolated_data_root / ".runtime" / "backups" / "creation-assets").exists()
 
 
-def test_reading_the_catalog_outside_the_server_migrates_v2_to_v4(isolated_data_root):
-    """Skill CLI / workshop 入口没有 lifespan：读目录本身必须先过 v2→v4。"""
+def test_import_upgrades_v2_to_v4_before_reading_media(isolated_data_root):
+    """导入时先升级旧目录，再读取媒体。"""
     catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
     atomic_write_json(catalog_path, _v2_catalog({
         "kind": "image", "path": "creation-assets/blobs/" + "c" * 64 + ".png",
         "mime_type": "image/png", "bytes": 10, "sha256": "c" * 64, "filename": "x.png",
     }))
 
-    listed = list_creation_assets()
+    migrate_creation_assets_to_v4()
+    listed = CreationAssetCatalog.model_validate_json(catalog_path.read_bytes())
 
     assert [asset.kind for asset in listed.assets] == ["media"]
     assert listed.assets[0].content.kind == "media"
@@ -301,17 +302,13 @@ def _v3_catalog() -> dict:
     }
 
 
-def test_v3_catalog_drops_recommendation_on_the_read_path(isolated_data_root, client):
+def test_v3_catalog_drops_recommendation_before_import(isolated_data_root):
     catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
     atomic_write_json(catalog_path, _v3_catalog())
 
-    listed = client.get("/api/creation-assets")
-
-    assert listed.status_code == 200, listed.json()
-    assert [row["asset_id"] for row in listed.json()["assets"]] == [
-        "creation-asset-prompt", "creation-asset-media",
-    ]
-    assert all("recommendation" not in row for row in listed.json()["assets"])
+    migrate_creation_assets_to_v4()
+    listed = CreationAssetCatalog.model_validate_json(catalog_path.read_bytes())
+    assert [row.asset_id for row in listed.assets] == ["creation-asset-prompt", "creation-asset-media"]
     raw = json.loads(catalog_path.read_text("utf-8"))
     assert raw["schema_version"] == 4 and raw["revision"] == 6
     assert all("recommendation" not in row for row in raw["assets"])

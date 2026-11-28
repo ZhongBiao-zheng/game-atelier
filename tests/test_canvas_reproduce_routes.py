@@ -12,7 +12,7 @@ from character_workflow.lib.canvas_projects import (
     create_canvas_project,
     read_canvas_document,
 )
-from character_workflow.lib.creation_assets import blob_path_for, create_media_asset_from_bytes
+from character_workflow.lib.project_reference_assets import blob_path_for, create_media_asset_from_bytes
 from viewer_server.server_app import build_app
 
 

@@ -364,7 +364,7 @@ def test_search_team_sees_only_libraries_mounted_on_this_canvas(canvas, team):
 
 
 def test_add_asset_node_with_team_ref_adopts_with_category(canvas, team):
-    from character_workflow.lib.creation_assets import list_creation_assets
+    from character_workflow.lib.project_reference_assets import list_creation_assets
 
     pid = canvas.project.project_id
     result = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[

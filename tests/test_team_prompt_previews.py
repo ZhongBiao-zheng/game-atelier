@@ -7,7 +7,7 @@ import shutil
 import pytest
 from PIL import Image
 
-from character_workflow.lib import creation_assets as assets
+from character_workflow.lib import project_reference_assets as assets
 from character_workflow.lib import team_library_index as idx
 from character_workflow.lib.canvas_projects import create_canvas_project
 from character_workflow.lib.schemas import TeamLibraryIndex
@@ -61,7 +61,7 @@ def test_round_trip_between_two_data_roots_is_self_contained(shared, tmp_path, m
     assert copied.adopted_from.source_preview_fingerprint
     shutil.rmtree(folder)
     assert assets.prompt_preview_bytes(copied.asset_id, copied.content.preview_images[0].file) == (png('red'), 'image/png')
-    assert not (recipient / 'creation-assets' / 'blobs').exists()
+    assert not (recipient / 'project-references' / 'blobs').exists()
 
 
 def test_legacy_manifest_and_index_without_previews_still_read_and_adopt(shared):

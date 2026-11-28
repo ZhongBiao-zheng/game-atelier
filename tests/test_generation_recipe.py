@@ -22,7 +22,7 @@ from character_workflow.lib.canvas_runs import (
     finalize_canvas_run,
     submit_canvas_run,
 )
-from character_workflow.lib.creation_assets import creation_asset_input_path, get_creation_asset
+from character_workflow.lib.project_reference_assets import creation_asset_input_path, get_creation_asset
 from character_workflow.lib.generation_recipe import (
     RECIPE_PARAM_ALLOW,
     RecipeSource,
@@ -521,7 +521,7 @@ def test_save_generation_asset_rejects_blank_title_before_writing_blobs(isolated
     source = recipe_from_job_output(job.job_id, 0)
     with pytest.raises(ValueError):
         save_generation_asset(source, title="  ", tags=[], project_id=None)
-    assert not (isolated_data_root / "creation-assets" / "blobs").exists()
+    assert not (isolated_data_root / "project-references" / "blobs").exists()
 
 
 @pytest.mark.parametrize(
@@ -540,7 +540,7 @@ def test_save_generation_asset_rejects_oversized_title_or_tags_before_writing_bl
     source = recipe_from_job_output(job.job_id, 0)
     with pytest.raises(ValueError):
         save_generation_asset(source, title=title, tags=tags, project_id=None)
-    blobs = isolated_data_root / "creation-assets" / "blobs"
+    blobs = isolated_data_root / "project-references" / "blobs"
     assert not blobs.exists() or not any(blobs.rglob("*"))
 
 

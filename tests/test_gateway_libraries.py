@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from character_workflow.lib import creation_assets, data_root, gateway_keys, keys, team_library
+from character_workflow.lib import project_reference_assets as creation_assets, data_root, gateway_keys, keys, team_library
 from character_workflow.lib import team_library_index as idx
 from character_workflow.lib.schemas import TEAM_ASSET_ID_PATTERN, GenerationRecipe
 from character_workflow.lib.team_library_share import share_creation_asset

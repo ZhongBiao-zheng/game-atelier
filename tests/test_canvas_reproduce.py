@@ -17,7 +17,7 @@ from character_workflow.lib.canvas_runs import canvas_input_sources
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib import canvas_reproduce
 from character_workflow.lib.canvas_runs import prepare_canvas_generation
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     CreationAssetStateError,
     blob_path_for,
     create_generation_asset,
@@ -152,7 +152,7 @@ def test_reproduce_marks_asset_used_in_the_canvas_project():
 
 
 def test_reproduce_survives_asset_deleted_before_marking_used(monkeypatch):
-    from character_workflow.lib.creation_assets import delete_creation_asset
+    from character_workflow.lib.project_reference_assets import delete_creation_asset
 
     project = create_canvas_project("复刻")
     asset = _asset([(_REF_A, "reference")])

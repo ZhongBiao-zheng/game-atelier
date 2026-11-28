@@ -1,14 +1,11 @@
-import json
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pytest
 from PIL import Image
 
-from character_workflow.lib import creation_assets as assets
+from character_workflow.lib import project_reference_assets as assets
 from character_workflow.lib.schemas import CreationPromptAssetContent, JobParams
-from tests.local_client import LocalTestClient
-from viewer_server.server_app import build_app
 
 
 def png(index=0):
@@ -20,11 +17,6 @@ def png(index=0):
 @pytest.fixture
 def prompt():
     return assets.create_prompt_asset('角色', [{'kind': 'text', 'text': '铅笔素描'}], [])
-
-
-@pytest.fixture
-def client(isolated_data_root):
-    return LocalTestClient(base_url='http://127.0.0.1', app=build_app(dist_dir=isolated_data_root / 'dist'))
 
 
 def test_empty_metadata_is_omitted_and_old_content_reads():
@@ -39,7 +31,7 @@ def test_upload_deduplicates_and_keeps_previews_when_prompt_is_edited(prompt, is
     preview, = saved.content.preview_images
     assert (preview.width, preview.height) == (120, 240)
     assert assets.prompt_preview_bytes(prompt.asset_id, preview.file) == (png(), 'image/png')
-    assert not (isolated_data_root / 'creation-assets/blobs').exists()
+    assert not (isolated_data_root / 'project-references/blobs').exists()
     edited = assets.update_prompt_asset(prompt.asset_id, title='新标题', segments=[{'kind': 'text', 'text': '水彩'}], tags=[])
     assert edited.content.preview_images == saved.content.preview_images
     assert assets.add_prompt_previews(prompt.asset_id, [(png(), 'image/png')]).updated_at == edited.updated_at
@@ -97,44 +89,6 @@ def test_bad_upload_is_rejected_without_files(prompt, body, mime):
     with pytest.raises(ValueError):
         assets.add_prompt_previews(prompt.asset_id, [(body, mime)])
     assert not assets._preview_dir(prompt.asset_id).exists()
-
-
-def test_routes_upload_read_cache_order_and_delete(prompt, client):
-    base = f'/api/creation-assets/{prompt.asset_id}/previews'
-    response = client.post(base, files=[('files', ('one.png', png(), 'image/png'))])
-    assert response.status_code == 200, response.text
-    file = response.json()['content']['preview_images'][0]['file']
-    response = client.get(f'{base}/{file}')
-    assert response.content == png()
-    assert response.headers['cache-control'] == 'private, max-age=31536000, immutable'
-    thumb = client.get(f'{base}/{file}/thumb?w=128')
-    assert thumb.headers['content-type'] == 'image/webp'
-    with Image.open(BytesIO(thumb.content)) as image:
-        assert image.size == (64, 128)
-    assert client.get(f'{base}/0000000000000000.png').status_code == 404
-    assert client.get(f'{base}/{file}/thumb?w=9999').status_code == 422
-    assert client.put(f'{base}/order', json={'files': [file, file]}).status_code == 422
-    assert client.delete(f'{base}/{file}').status_code == 200
-    assert client.get(f'{base}/{file}/thumb').status_code == 404
-
-
-def test_existing_result_preview_remains_readable_and_editable_without_the_job_action(prompt, client):
-    base = f'/api/creation-assets/{prompt.asset_id}/previews'
-    saved = assets.add_prompt_previews(prompt.asset_id, [(png(), 'image/png')])
-    original, = saved.content.preview_images
-    catalog_file = assets._catalog_path()
-    historical = json.loads(catalog_file.read_bytes())
-    record, = historical['assets'][0]['content']['preview_images']
-    record.update(source_job_id='old-job', source_model='gpt-image-2')
-    catalog_file.write_text(json.dumps(historical), encoding='utf-8')
-
-    assert not any(route.path.endswith('/previews/from-job') for route in client.app.routes)
-    assert client.get(f'{base}/{original.file}').content == png()
-    uploaded = client.post(base, files={'files': ('new.png', png(2), 'image/png')})
-    assert uploaded.status_code == 200
-    previous, new = uploaded.json()['content']['preview_images']
-    assert previous['source_job_id'] == 'old-job' and previous['source_model'] == 'gpt-image-2'
-    assert new['source_job_id'] is None and new['source_model'] is None
 
 
 def test_preview_path_cannot_escape_or_follow_symlink(prompt, tmp_path):

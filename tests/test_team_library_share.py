@@ -14,7 +14,7 @@ from PIL import Image
 from tests.team_library_helpers import scan_and_cache
 from character_workflow.lib import generation_recipe
 from character_workflow.lib import team_library_share as share
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,

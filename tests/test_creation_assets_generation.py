@@ -10,7 +10,7 @@ from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,
@@ -209,7 +209,7 @@ def test_generation_asset_inserts_into_canvas_as_its_output_image():
 
 
 def test_insert_survives_asset_deleted_before_marking_used(monkeypatch):
-    from character_workflow.lib import creation_assets
+    from character_workflow.lib import project_reference_assets as creation_assets
 
     project = create_canvas_project("生成资产画布")
     asset, *_ = _generation_asset()
@@ -261,22 +261,6 @@ def test_generation_assets_list_through_http(client: TestClient):
     assert [row["asset_id"] for row in body] == [asset.asset_id]
     assert body[0]["content"]["snapshot"]["inputs"][1]["role"] == "mj_sref"
     assert "recommendation" not in body[0]
-
-
-def test_prompt_asset_requests_reject_recommendation(client: TestClient):
-    recommendation = {"mode": "image", "model": "gpt-image-2", "params": {}}
-    segments = [{"kind": "text", "text": "猫"}]
-    created = client.post("/api/creation-assets/prompts", json={
-        "title": "猫", "segments": segments, "tags": [], "recommendation": recommendation,
-    })
-    assert created.status_code == 422
-
-    prompt = create_prompt_asset("猫", segments, [])
-    assert "recommendation" not in prompt.model_dump()
-    updated = client.put(f"/api/creation-assets/{prompt.asset_id}/prompt", json={
-        "title": "猫", "segments": segments, "tags": [], "recommendation": recommendation,
-    })
-    assert updated.status_code == 422
 
 
 def _team_asset_payload(**overrides) -> dict:
