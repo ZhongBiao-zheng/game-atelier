@@ -39,7 +39,50 @@ interface SubmissionAttempt {
     model: string; prompt: string; requested_count: number; params: Record<string, unknown>;
     channel_id?: string; alias?: string;
   };
+  /** 这次提交的表单内容（供应商、渠道、模型、提示词、张数）：同样内容重试沿用同一个 request_id。 */
+  intent: string;
+  at: number;
   refreshRevision?: boolean;
+}
+
+/** 提交记录按 request_id 存（命名空间：房主 + 项目 + 节点）。只有确定的终态（成功、或服务端明确拒绝不会受理）才删；
+ *  502、超时、断网都不算终态，同样内容再提交沿用原 request_id，房主按它去重，不会重复计费。
+ *  每个回执只改自己 request_id 那条，不碰别的。 */
+const MAX_ATTEMPTS = 20;
+
+function readAttempts(key: string): Record<string, SubmissionAttempt> {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch { return {}; }
+}
+
+function writeAttempt(key: string, attempt: SubmissionAttempt) {
+  const rows = Object.values({...readAttempts(key), [attempt.body.request_id]: attempt})
+    .sort((a, b) => b.at - a.at).slice(0, MAX_ATTEMPTS);
+  sessionStorage.setItem(key, JSON.stringify(Object.fromEntries(rows.map(row => [row.body.request_id, row]))));
+}
+
+function removeAttempt(key: string, requestId: string) {
+  const rows = readAttempts(key);
+  if (!(requestId in rows)) return;
+  delete rows[requestId];
+  if (Object.keys(rows).length) sessionStorage.setItem(key, JSON.stringify(rows));
+  else sessionStorage.removeItem(key);
+}
+
+function latestAttempt(key: string): SubmissionAttempt | null {
+  return Object.values(readAttempts(key)).sort((a, b) => b.at - a.at)[0] ?? null;
+}
+
+function intentOf(source: Source, channel: string, model: string, prompt: string, count: number) {
+  return JSON.stringify([source, channel, model, prompt, count]);
+}
+
+/** 服务端明确拒绝、同一个 request_id 再发也不会受理：版本冲突（409）、超时与限流不算，留着记录重试。 */
+function isFinalRejection(reason: unknown) {
+  return reason instanceof ApiError && reason.status >= 400 && reason.status < 500
+    && ![408, 409, 425, 429].includes(reason.status);
 }
 
 /** 打开过、还没提交的提示词草稿（键含房主、项目、节点）：房主重启要重新鉴权时操作条会卸载，重新打开时恢复文字。
@@ -48,11 +91,6 @@ interface SubmissionAttempt {
 interface OpenDraft { session: number; prompt: string; prefill: string; count: number }
 const openDrafts = new Map<string, OpenDraft>();
 let draftSessions = 0;
-
-function pendingAttempt(key: string): SubmissionAttempt | null {
-  const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null');
-  return saved?.body ? saved : null;
-}
 
 function priceLabel(model: Choice) {
   // 房主目录的视频价按固定示例规格算，不是这次的价格。
@@ -76,6 +114,10 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
 }) {
   const storageKey = 'shared-generation:' + JSON.stringify([peerKey, projectId, node.id]);
   const session = useRef(0);
+  const alive = useRef(true);
+  /** 回执回来时表单的最新内容：只收起仍停在提交那份内容上的弹窗。 */
+  const latestForm = useRef<{intent: string | null; prompt: string; count: number}>({intent: null, prompt: '', count: 1});
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [open, setOpen] = useState(false);
   const draft = 'generation_draft' in node.data ? node.data.generation_draft : null;
   const mode = draft?.mode ?? (node.type === 'layer_stack' || node.type === 'image_edit' ? 'image' : node.type);
@@ -127,7 +169,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       const failure = [mineResult, hostResult].find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') setError(errorText(failure.reason));
       setMine(local); setHost(remote);
-      const saved = pendingAttempt(storageKey);
+      const saved = latestAttempt(storageKey);
       setSource(saved?.source ?? (!local.length && remote.length ? 'borrowed' : 'local'));
       setChosen(saved ? JSON.stringify([saved.body.channel_id ?? saved.body.alias, saved.body.model]) : '');
     }).catch(reason => { if (active) setError(errorText(reason)); })
@@ -146,42 +188,46 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const estimate = choice?.key && !hasInputs && (mode === 'image' || (mode === 'video' && params.duration != null))
     ? estimateGenerationCostForSubmission(choice.key, choice.model, mode, params)
     : null;
+  const currentIntent = choice ? intentOf(source, choice.channel_id, choice.model, prompt, count) : null;
+  latestForm.current = {intent: currentIntent, prompt, count};
   async function submit() {
-    if (!choice || submitting.current) return;
+    if (!choice || !currentIntent || submitting.current) return;
     submitting.current = true;
     setPending(true); setError('');
-    let attempt: SubmissionAttempt | null = null;
+    const intent = currentIntent;
+    const submitSession = session.current;
+    // Only the form controls express a new intent. Live results can change every other default.
+    const previous = Object.values(readAttempts(storageKey)).filter(row => row.intent === intent).sort((a, b) => b.at - a.at)[0];
+    const body = previous ? {...previous.body, expected_revision: previous.refreshRevision ? revision : previous.body.expected_revision} : {
+      request_id: crypto.randomUUID().replaceAll('-', ''), expected_revision: revision,
+      surface_node_id: node.id, model: choice.model, requested_count: count, prompt,
+      params: {...(frozen?.params ?? {}), ...(draft?.params ?? {})},
+      ...(source === 'borrowed' ? {channel_id: choice.channel_id} : {alias: choice.channel_id}),
+    };
+    const attempt: SubmissionAttempt = {source, body, intent, at: Date.now()};
+    writeAttempt(storageKey, attempt);
+    setChosen(value(choice));
     try {
-      const previous = pendingAttempt(storageKey);
-      const originalBody = previous?.body;
-      // Only the form controls express a new intent. Live results can change every other default.
-      const retry = previous?.source === source && originalBody?.model === choice.model
-        && (originalBody.channel_id ?? originalBody.alias) === choice.channel_id
-        && originalBody.prompt === prompt && originalBody.requested_count === count;
-      const body = retry ? {...originalBody, expected_revision: previous.refreshRevision ? revision : originalBody.expected_revision} : {
-        request_id: crypto.randomUUID().replaceAll('-', ''), expected_revision: revision,
-        surface_node_id: node.id, model: choice.model, requested_count: count, prompt,
-        params: {...(frozen?.params ?? {}), ...(draft?.params ?? {})},
-        ...(source === 'borrowed' ? {channel_id: choice.channel_id} : {alias: choice.channel_id}),
-      };
-      attempt = {source, body};
-      sessionStorage.setItem(storageKey, JSON.stringify(attempt));
-      setChosen(value(choice));
       await requestJson(base + '/runs/' + source, '提交共享生成', {
         method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body),
       });
-      // 只清自己这次的提交记录：期间若有新的提交，它的记录留着，重试才能沿用同一个 request_id。
-      if (pendingAttempt(storageKey)?.body.request_id === body.request_id) sessionStorage.removeItem(storageKey);
-      changeOpen(false);
+      // 成功：只清自己这条记录，只收起仍停在这份内容上的弹窗与草稿。
+      removeAttempt(storageKey, body.request_id);
+      const kept = openDrafts.get(storageKey);
+      if (kept && kept.prompt === body.prompt && kept.count === body.requested_count) openDrafts.delete(storageKey);
+      if (alive.current && session.current === submitSession && latestForm.current.intent === intent) changeOpen(false);
     } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 409 && attempt) {
-        // The next click can accept a newer revision while keeping the same billing intent.
-        sessionStorage.setItem(storageKey, JSON.stringify({...attempt, refreshRevision: true}));
+      if (isFinalRejection(reason)) removeAttempt(storageKey, body.request_id);
+      // The next click can accept a newer revision while keeping the same billing intent.
+      else if (reason instanceof ApiError && reason.status === 409 && readAttempts(storageKey)[body.request_id]) {
+        writeAttempt(storageKey, {...attempt, refreshRevision: true});
       }
-      setError(errorText(reason));
-      shakeOnError(submitButton.current);
+      if (alive.current && session.current === submitSession) {
+        setError(errorText(reason));
+        shakeOnError(submitButton.current);
+      }
     }
-    finally { setPending(false); submitting.current = false; }
+    finally { if (alive.current) setPending(false); submitting.current = false; }
   }
   return <>
     <Button size="sm" disabled={disabled} onClick={() => {
@@ -190,7 +236,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       setLoading(true);
       const kept = openDrafts.get(storageKey);
       if (kept) { setPrompt(kept.prompt); setPrefill(kept.prefill); setCount(kept.count); setOpen(true); return; }
-      const saved = pendingAttempt(storageKey)?.body;
+      const saved = latestAttempt(storageKey)?.body;
       const initialPrompt = saved?.prompt ?? (draft?.prompt || frozen?.prompt || (node.type === 'layer_stack' ? node.data.prompt : ''));
       setPrompt(initialPrompt); setPrefill(initialPrompt);
       setCount(saved?.requested_count ?? Math.max(1, Math.min(4, Number(draft?.params.n ?? frozen?.params.n) || 1)));
