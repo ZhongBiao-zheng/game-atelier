@@ -11,6 +11,8 @@ import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { useRetained } from '@/components/ui/retained';
 
 /** 文件夹选择器给的是相对路径（含选中的那层目录名），服务端以 SKILL.md 所在目录为根。 */
 function relativePath(file: File): string {
@@ -31,10 +33,14 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  // 触发导入的那个按钮：导入期间换成「导入中…」。
+  const [importing, setImporting] = useState<'archive' | 'folder' | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [confirming, setConfirming] = useState<{
     title: string; message: string; confirmText: string; destructive: boolean; resolve: (ok: boolean) => void;
   } | null>(null);
+  // 关闭的退场期间沿用最后一份确认内容，不闪成空的。
+  const shownConfirm = useRetained(confirming);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const archiveRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -57,9 +63,10 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
     setConfirming(null);
   }
 
-  async function importFiles(files: File[], paths: string[]) {
+  async function importFiles(files: File[], paths: string[], source: 'archive' | 'folder') {
     if (!files.length) return;
     setBusy(true);
+    setImporting(source);
     setNotice(null);
     try {
       let installed: CanvasAgentSkill;
@@ -79,6 +86,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
       setNotice({ text: errorText(error), error: true });
     } finally {
       setBusy(false);
+      setImporting(null);
     }
   }
 
@@ -115,7 +123,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
       ><SkillIcon />{label}</Button></Hint>
       <ToolbarPopover
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => { setOpen(false); setQuery(''); }}
         anchorRef={anchorRef}
         direction={direction}
         align="start"
@@ -160,10 +168,10 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
         )}
         <div className="mt-1 flex gap-1 border-t border-border pt-1.5">
           <Button variant="bare" type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40">
-            <ArchiveFileIcon size="sm" />导入 zip / SKILL.md
+            <ArchiveFileIcon size="sm" /><SwapLabel active={importing === 'archive'} on="导入中…" off="导入 zip / SKILL.md" />
           </Button>
           <Button variant="bare" type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40">
-            <FolderOpenIcon size="sm" />导入文件夹
+            <FolderOpenIcon size="sm" /><SwapLabel active={importing === 'folder'} on="导入中…" off="导入文件夹" />
           </Button>
         </div>
         <FileInput
@@ -174,7 +182,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
           onChange={event => {
             const files = Array.from(event.target.files ?? []);
             event.target.value = '';
-            void importFiles(files, []);
+            void importFiles(files, [], 'archive');
           }}
         />
         <FileInput
@@ -186,16 +194,16 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
           onChange={event => {
             const files = Array.from(event.target.files ?? []);
             event.target.value = '';
-            void importFiles(files, files.map(relativePath));
+            void importFiles(files, files.map(relativePath), 'folder');
           }}
         />
       </ToolbarPopover>
       <ConfirmDialog
         open={confirming !== null}
-        title={confirming?.title ?? ''}
-        message={confirming?.message ?? ''}
-        confirmText={confirming?.confirmText ?? ''}
-        variant={confirming?.destructive ? 'destructive' : 'default'}
+        title={shownConfirm?.title ?? ''}
+        message={shownConfirm?.message ?? ''}
+        confirmText={shownConfirm?.confirmText ?? ''}
+        variant={shownConfirm?.destructive ? 'destructive' : 'default'}
         onConfirm={() => settle(true)}
         onCancel={() => settle(false)}
       />

@@ -65,7 +65,7 @@ export function CanvasAgentModelPicker({ models, alias, model, triggerClassName,
       </Button></Hint>
       <ToolbarPopover
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => { setOpen(false); setQuery(''); }}
         anchorRef={anchorRef}
         direction={direction}
         align="start"
@@ -103,7 +103,7 @@ export function CanvasAgentModelPicker({ models, alias, model, triggerClassName,
                       role="option"
                       aria-selected={selected}
                       onClick={() => { onSelect(item); setOpen(false); }}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
                     >
                       <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
                         <ModelBrandIcon brand={modelBrand(item.model)} size="md" />

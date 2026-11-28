@@ -148,7 +148,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
                       disabled={disabled}
                       onClick={() => toggle(item)}
                       className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60',
+                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60',
                         auto && 'opacity-60 hover:opacity-100',
                       )}
                     >
