@@ -114,7 +114,8 @@ it('按名称、类型和域名过滤供应商', async () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('local');
   }
   fireEvent.change(search, { target: { value: 'missing' } });
-  expect(screen.getByText('没有匹配的供应商')).toBeInTheDocument();
+  expect(screen.queryByRole('list', { name: '供应商列表' })).not.toBeInTheDocument();
+  expect(screen.getByText('没有匹配的可添加供应商')).toBeInTheDocument();
 });
 it('停用立即变淡并提交，请求期间不禁用，失败回滚', async () => {
   let reject!: (error: Error) => void;

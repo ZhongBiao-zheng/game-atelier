@@ -225,7 +225,12 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             <InputGroup className="w-56">
               <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
               <InputGroupInput ref={searchRef} aria-label="查找供应商" placeholder="查找供应商" value={query}
-                onChange={event => updateQuery(event.target.value)} />
+                onChange={event => updateQuery(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key !== 'Escape' || event.nativeEvent.isComposing || !query) return;
+                  event.preventDefault();
+                  updateQuery('');
+                }} />
               <AnimatePresence>
                 {query.length > 0 && (
                   <InputGroupAddon align="inline-end" className="px-1.5">
@@ -274,7 +279,8 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
       {!loading && (keys.length > 0 || !error) && (
         <div className="content-reveal space-y-8">
           <div className="space-y-3">
-            {!(embedded && activeKeys.length === 0 && closedKeys.length > 0) && (
+            {!(embedded && activeKeys.length === 0 && closedKeys.length > 0)
+              && !(embedded && keys.length > 0 && filteredKeys.length === 0) && (
               <div className="overflow-hidden rounded-xl border border-border bg-card">
                 {keys.length === 0 ? (
                   embedded ? (
@@ -294,7 +300,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
                         <AnimatePresence initial={false}>
                           {activeKeys.map(providerRow)}
                         </AnimatePresence>
-                        {filteredKeys.length === 0 && <li className="content-swap-in px-4 py-8 text-center text-sm text-muted-foreground">没有匹配的供应商</li>}
                       </ul>
                     ) : (
                       <>{keyRows}</>
