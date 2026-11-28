@@ -8,10 +8,7 @@ vi.mock('@/api/history', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/history')>(),
   listHistory: vi.fn(async () => ({ items: [], next_cursor: null })),
 }));
-vi.mock('./CreationAssetPanel', async () => {
-  const { forwardRef } = await import('react');
-  return { CreationAssetPanel: forwardRef(() => <div>提示词</div>) };
-});
+vi.mock('./LibraryPanel', () => ({ LibraryPanel: () => <div>我的文件夹</div> }));
 const props = { onHistoryReference: vi.fn(), onClose: vi.fn(), onUseMedia: vi.fn(), onUsePrompt: vi.fn() };
 
 it('opens history by default and remembers the library tab', async () => {
@@ -20,7 +17,7 @@ it('opens history by default and remembers the library tab', async () => {
   expect(await screen.findByText('还没有生成记录')).toBeVisible();
   fireEvent.mouseDown(screen.getByRole('tab', { name: '素材库' }));
   // 页签内容有交叉淡化，慢机器上首帧仍不可见：等到可见再断言。
-  await waitFor(() => expect(screen.getByText('提示词')).toBeVisible());
+  await waitFor(() => expect(screen.getByText('我的文件夹')).toBeVisible());
   expect(saveUiPref).toHaveBeenCalledWith('asset-panel', 'library');
 });
 

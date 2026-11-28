@@ -7,7 +7,7 @@ declare const process: { cwd: () => string };
 
 const tokenSource = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8');
 const libraryPanelSource = readFileSync(
-  `${process.cwd()}/src/components/assets/CreationAssetPanel.tsx`,
+  `${process.cwd()}/src/components/assets/AssetPanel.tsx`,
   'utf-8',
 );
 

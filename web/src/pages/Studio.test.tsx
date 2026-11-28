@@ -17,14 +17,14 @@ import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
 // 透传真实面板，只记下 Studio 传进来的 props：复刻入口的按钮在面板里（另一个 Task），
 // Studio 侧只需验证拿到 onReproduce 之后怎么填输入框。
 const assetPanelProps = vi.hoisted(() => ({ current: null as null | Record<string, any> }));
-vi.mock('@/components/assets/CreationAssetPanel', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/assets/CreationAssetPanel')>();
+vi.mock('@/components/assets/AssetPanel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/assets/AssetPanel')>();
   const { createElement, forwardRef } = await import('react');
   const Recording = forwardRef<unknown, Record<string, any>>((props, ref) => {
     assetPanelProps.current = props;
-    return createElement(actual.CreationAssetPanel as any, { ...props, ref });
+    return createElement(actual.AssetPanel as any, { ...props, ref });
   });
-  return { ...actual, CreationAssetPanel: Recording };
+  return { ...actual, AssetPanel: Recording };
 });
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
