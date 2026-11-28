@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
 import { StartupScreen } from '@/components/StartupScreen';
-import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable } from '@/lib/motion';
 import { notify } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 
@@ -61,6 +61,8 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   // 启动页：自动重连到警示级或已暂停才露错误与「重试」，之前一律「启动中…」。
   const startupFailed = level === 'warning' || level === 'paused';
   const blocked = !ready || viewOnly;
+  const showViewOnly = activated && ready && viewOnly;
+  const viewOnlyAnchor = useWordmarkAnchor(showViewOnly && !immersiveCanvas);
 
   useLayoutEffect(() => { void localConnection.start({ editing }); }, [editing]);
   useEffect(() => {
@@ -179,19 +181,25 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
           : activated && ready && !online && <StatusCapsule key="offline" tone="warning"><p role="status">网络已断开</p></StatusCapsule>}
       </AnimatePresence>
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
-          （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
+          （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 贴在字标实际的右边缘后面，而不是渲染进顶栏。
           画布编辑器没有顶栏，仍居中。 */}
-      {activated && ready && viewOnly && <Hint label="另一页面正在编辑"><div
+      <AnimatePresence>
+      {showViewOnly && <Hint key="view-only" label="另一页面正在编辑"><motion.div
         data-connection-controls
-        className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
-        style={{ marginTop: 'env(safe-area-inset-top)' }}>
+        // 与断线胶囊同一套进退场：200ms 落位淡入，150ms 淡出。
+        initial={motionAvailable() ? { opacity: 0, y: -4 } : false}
+        animate={{ opacity: 1, y: 0, transition: { duration: MOTION_DURATION.base, ease: MOTION_EASE.out } }}
+        exit={motionAvailable() ? { opacity: 0, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } } : undefined}
+        className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : viewOnlyAnchor ? '' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
+        style={viewOnlyAnchor && !immersiveCanvas ? { left: viewOnlyAnchor.left, top: viewOnlyAnchor.top } : { marginTop: 'env(safe-area-inset-top)' }}>
         <span aria-hidden className="hidden size-1.5 rounded-full bg-status-running sm:block" />
         <p role="status" className="hidden sm:block">只读</p>
-        {/* 手机宽度下字标与版本号之间只容得下两个字 */}
+        {/* 手机宽度下字标与右侧按钮之间只容得下两个字 */}
         <Button variant="secondary" size="sm" aria-label="接管编辑" className="h-7 rounded-full px-3 text-xs" onClick={() => setConfirmTakeover(true)}>
           <span className="sm:hidden">接管</span><span className="hidden sm:inline">接管编辑</span>
         </Button>
-      </div></Hint>}
+      </motion.div></Hint>}
+      </AnimatePresence>
       <Dialog open={confirmTakeover} onOpenChange={setConfirmTakeover}>
         <DialogContent data-connection-controls onOpenAutoFocus={event => { event.preventDefault(); cancelRef.current?.focus(); }}>
           <DialogTitle>接管编辑？</DialogTitle>
@@ -204,6 +212,30 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       </Dialog>
     </>
   );
+}
+
+/** 顶栏字标右边缘后 12px、与字标垂直居中的位置（胶囊高 40px）；字标随窗口宽度、字体加载、桌面版标题栏避让变化时跟着重算。
+ *  找不到字标（没有顶栏）时返回 null。 */
+function useWordmarkAnchor(active: boolean) {
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!active) return;
+    const mark = document.querySelector<HTMLElement>('.brand-wordmark');
+    if (!mark) { setAnchor(null); return; }
+    const place = () => {
+      const rect = mark.getBoundingClientRect();
+      setAnchor(current => {
+        const next = { left: Math.round(rect.right + 12), top: Math.round(rect.top + rect.height / 2 - 20) };
+        return current && current.left === next.left && current.top === next.top ? current : next;
+      });
+    };
+    place();
+    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    resizes?.observe(mark);
+    window.addEventListener('resize', place);
+    return () => { resizes?.disconnect(); window.removeEventListener('resize', place); };
+  }, [active]);
+  return active ? anchor : null;
 }
 
 function StatusCapsule({ tone, children }: { tone: 'neutral' | 'warning'; children: ReactNode }) {

@@ -65,7 +65,7 @@ describe('Home', () => {
     expect(shell).toHaveClass('h-auto', 'px-4', 'py-2');
   });
 
-  it('shows skeleton during LOADING', () => {
+  it('shows skeleton during LOADING', async () => {
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
         return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
@@ -76,7 +76,7 @@ describe('Home', () => {
       return new Promise(() => {});
     }) as any;
     const { container } = renderHome();
-    expect(container.querySelectorAll('[data-skeleton]').length).toBeGreaterThan(0);
+    await waitFor(() => expect(container.querySelectorAll('[data-skeleton]').length).toBeGreaterThan(0));
   });
 
   it('shows EMPTY copy when 0 characters', async () => {

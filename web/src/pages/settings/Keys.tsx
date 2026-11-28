@@ -25,10 +25,9 @@ import { notify } from '@/lib/notify';
 import { useRetained } from '@/components/ui/retained';
 import { Collapse } from '@/components/ui/collapse';
 import { Disclosure } from '@/components/ui/disclosure';
-import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, SKELETON_DELAY_MS } from '@/lib/motion';
 
 /** 首次读取超过 250ms 才出骨架：本机毫秒级就绪时直接淡入内容，不闪骨架。 */
-const SKELETON_DELAY_MS = 250;
 
 interface Props {
   /** 首启向导复用同一个供应商表单。 */

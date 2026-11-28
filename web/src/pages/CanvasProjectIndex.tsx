@@ -21,6 +21,7 @@ import {
   renameCanvasProject,
 } from '@/api/canvas';
 import { restoreTrash } from '@/api/trash';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import {
@@ -37,7 +38,7 @@ import { FileInput } from '@/components/ui/file-input';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { errorText } from '@/lib/errorText';
 import { clipName, notify } from '@/lib/notify';
-import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING, MOTION_STAGGER, motionAvailable, SKELETON_DELAY_MS } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { CANVAS_PROJECT_DISCARDED_EVENT, markFreshCanvasProject, UNTITLED_CANVAS_PROJECT_NAME } from './canvasFreshProject';
 
@@ -45,7 +46,6 @@ import { CANVAS_PROJECT_DISCARDED_EVENT, markFreshCanvasProject, UNTITLED_CANVAS
 const IMPORTED_HIGHLIGHT_MS = 2400;
 
 /** 读取超过这么久才出骨架：快的时候直接出卡片，不闪一下骨架。 */
-const SKELETON_DELAY_MS = 300;
 /** 首屏卡片错峰淡入，总时长封顶。 */
 const ENTRANCE_STAGGER_CAP = 0.15;
 
@@ -79,7 +79,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     return () => window.clearTimeout(timer);
   }, [importedIds]);
   const [listMotion, setListMotion] = useState<ListMotion>('reveal');
-  // 加载中与为空是两态：读取超过 300ms 才出骨架，之前保持空白。
+  // 加载中与为空是两态：读取超过 SKELETON_DELAY_MS 才出骨架，之前保持空白。
   const [showSkeleton, setShowSkeleton] = useState(false);
   useEffect(() => {
     if (!loading) {
@@ -176,7 +176,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     try {
       await exportCanvasProjects([project.project_id]);
     } catch (error) {
-      setActionError((error as Error).message);
+      setActionError(errorText(error));
     } finally {
       setBusyProjectId(null);
     }
@@ -194,13 +194,11 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       const updated = await setCanvasProjectGalleryHidden(project.project_id, nextHidden);
       setHiddenOnHomeIds(new Set(updated));
       if (nextHidden) {
-        notify.undo(`已在首页隐藏「${clipName(project.name)}」的作品`, () => {
+        notify.undo(`「${clipName(project.name)}」的作品不在首页展示`, () => {
           void setCanvasProjectGalleryHidden(project.project_id, false)
             .then(restored => setHiddenOnHomeIds(new Set(restored)))
             .catch(error => notify.error(errorText(error)));
         });
-      } else {
-        notify.info(`已在首页恢复展示「${clipName(project.name)}」的作品`);
       }
     } catch (error) {
       setHiddenOnHomeIds(current => {
@@ -275,7 +273,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <Link href="/settings/trash"><DeleteIcon aria-hidden="true" />回收站</Link>
             </Button>
             <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
-              <UploadIcon aria-hidden="true" />{importing ? '导入中…' : '导入项目包'}
+              <UploadIcon aria-hidden="true" /><SwapLabel active={importing} on="导入中…" off="导入项目包" />
             </Button>
             <Button disabled={creating} onClick={() => void createProject()}>
               <AddIcon aria-hidden="true" />新建项目
@@ -459,7 +457,7 @@ function CanvasProjectCard({
         <p className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
           <span>{project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}</span>
           {share && <span>共享中 · {share.online_count} 人在线</span>}
-          {hiddenOnHome && <span className="inline-flex items-center gap-1 text-subtle-foreground"><HideIcon size="sm" aria-hidden="true" />首页隐藏</span>}
+          {hiddenOnHome && <span className="inline-flex items-center gap-1 text-subtle-foreground"><HideIcon size="sm" aria-hidden="true" />不在首页展示</span>}
         </p>
       </div>
       <DropdownMenu>
@@ -473,11 +471,11 @@ function CanvasProjectCard({
           <DropdownMenuItem onSelect={onShare}><ShareIcon aria-hidden="true" />{share ? '共享设置' : '共享画布…'}</DropdownMenuItem>
           {share && <DropdownMenuItem onSelect={onStop}>停止共享</DropdownMenuItem>}
           <DropdownMenuItem onSelect={onToggleHiddenOnHome}>
-            {hiddenOnHome ? <><ShowIcon aria-hidden="true" />在首页展示作品</> : <><HideIcon aria-hidden="true" />在首页隐藏作品</>}
+            {hiddenOnHome ? <><ShowIcon aria-hidden="true" />在首页展示作品</> : <><HideIcon aria-hidden="true" />不在首页展示作品</>}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={onExport}><DownloadIcon aria-hidden="true" />导出项目包</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onDelete} className="text-destructive"><DeleteIcon aria-hidden="true" />删除</DropdownMenuItem>
+          <DropdownMenuItem destructive onSelect={onDelete}><DeleteIcon aria-hidden="true" />删除</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </article>
@@ -487,11 +485,12 @@ function CanvasProjectCard({
 
 function CanvasCardSkeleton() {
   return (
-    <div aria-hidden="true" className="overflow-hidden rounded-xl border border-border bg-card/30">
-      <div className="aspect-[16/10] animate-pulse border-b border-border bg-secondary/40 motion-reduce:animate-none" />
+    // 骨架静态，不循环闪烁（DESIGN「不用自动 loop 动画」）。
+    <div aria-hidden="true" className="content-swap-in overflow-hidden rounded-xl border border-border bg-card/40">
+      <div className="aspect-[16/10] border-b border-border bg-secondary/40" />
       <div className="min-h-24 space-y-2 p-4">
-        <div className="h-4 w-2/3 animate-pulse rounded-sm bg-secondary motion-reduce:animate-none" />
-        <div className="h-3 w-1/3 animate-pulse rounded-sm bg-secondary/70 motion-reduce:animate-none" />
+        <div className="h-4 w-2/3 rounded-sm bg-secondary" />
+        <div className="h-3 w-1/3 rounded-sm bg-secondary/70" />
       </div>
     </div>
   );

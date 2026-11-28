@@ -96,7 +96,7 @@ describe('CanvasProjectIndex', () => {
     const more = await screen.findByRole('button', { name: '管理画布项目 内部草图' });
     fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     fireEvent.keyDown(more, { key: 'Enter' });
-    const hideItem = await screen.findByRole('menuitem', { name: /在首页隐藏作品/ });
+    const hideItem = await screen.findByRole('menuitem', { name: /不在首页展示作品/ });
     fireEvent.click(hideItem);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -106,6 +106,6 @@ describe('CanvasProjectIndex', () => {
         body: JSON.stringify({ canvas_project_id: 'canvas-hide-me', hidden: true }),
       }),
     ));
-    expect(await screen.findByText('首页隐藏')).toBeVisible();
+    expect(await screen.findByText('不在首页展示')).toBeVisible();
   });
 });

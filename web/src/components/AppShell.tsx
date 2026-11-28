@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { LayoutGroup, motion } from 'motion/react';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, MOTION_SPRING, useAnimateOnChange } from '@/lib/motion';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon } from '@/components/ui/icons';
@@ -52,7 +52,15 @@ const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/canvas', label: '画布', icon: CanvasIcon },
 ];
 
-function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon; badge?: number }) {
+/** 选中药丸：tab 之间靠 layoutId 滑动；进出控制台（没有选中项）时淡入、150ms 淡出。
+ *  custom = 这一刻是否没有任何选中项：只有「全部取消选中」才淡出，换 tab 时旧药丸直接交给新药丸滑走。 */
+const PILL_VARIANTS = {
+  hidden: { opacity: 0 },
+  shown: { opacity: 1 },
+  gone: (noneActive: boolean) => ({ opacity: 0, transition: { duration: noneActive ? MOTION_DURATION.fast : 0, ease: MOTION_EASE.subtle } }),
+};
+
+function NavTab({ to, label, isActive, fromNone, noneActive, icon: Icon, badge = 0 }: { to: string; label: string; isActive: boolean; fromNone: boolean; noneActive: boolean; icon: typeof HomeIcon; badge?: number }) {
   return (
     <Link
       href={to}
@@ -64,19 +72,26 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
         isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
       ].join(' ')}
     >
+      <AnimatePresence custom={noneActive}>
       {isActive && (
         // magic-move：共享 layoutId 的药丸在 tab 间切换时由 framer-motion 自动 FLIP 滑过去；
         // 玻璃质感 + 锥形金属环（.nav-active-ring）随药丸一起移动
         <motion.span
+          key="pill"
           layoutId="nav-active-pill"
           aria-hidden
           data-testid="nav-active-indicator"
           // 定位走 className：framer-motion 会吞掉 style 里的 position/inset（它自管 layout 元素的盒定位），
           // 但不碰 className；.nav-active-ring 已去掉 position，absolute 不再被覆盖，稳定铺满整颗 tab
           className="absolute inset-0 -z-10 rounded-full border border-input bg-glass nav-tab-glass nav-active-ring backdrop-blur-glass"
-          transition={MOTION_SPRING.snappy}
+          variants={PILL_VARIANTS}
+          initial={fromNone ? 'hidden' : false}
+          animate="shown"
+          exit="gone"
+          transition={{ ...MOTION_SPRING.snappy, opacity: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } }}
         />
       )}
+      </AnimatePresence>
       <Icon size="lg" />
       {label}
       {badge > 0 && <span aria-hidden className="ml-0.5 rounded-full bg-primary px-1.5 text-xs leading-4 text-primary-foreground">{badge}</span>}
@@ -126,6 +141,10 @@ function AppShellContent() {
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
   const pageOwnsScroll = loc === '/studio' || loc === '/canvas';
   const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : -1;
+  // 从「没有选中项」（控制台）回到某个 tab：药丸淡入，而不是凭空出现。
+  const previousActive = useRef(activeIndex);
+  const fromNone = previousActive.current === -1 && activeIndex !== -1;
+  useEffect(() => { previousActive.current = activeIndex; }, [activeIndex]);
   const reminderRef = useRef<TeamShareReminderHandle>(null);
   // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
   useSSE({
@@ -153,7 +172,7 @@ function AppShellContent() {
           <LayoutGroup>
             <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">
               {NAV_TABS.map((t, i) => (
-                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} />
+                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} fromNone={fromNone} noneActive={activeIndex === -1} icon={t.icon} />
               ))}
             </nav>
           </LayoutGroup>
