@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import uuid
@@ -66,6 +67,23 @@ def _publish(rows):
     _journal().unlink()
 
 
+def _pending_items():
+    return data_root.runtime_dir() / "library-new-items.log"
+
+
+def _recover_items():
+    pending = _pending_items()
+    if not pending.exists():
+        return
+    for key in pending.read_text().splitlines():
+        if not _ID.fullmatch(key) or not key.startswith("itm_"):
+            continue
+        path = _path(key)
+        if not path.exists() and path.parent.is_dir():
+            shutil.rmtree(path.parent)
+    pending.unlink()
+
+
 class _Changes:
     """Stage records in memory. Readers recover a partially published transaction before use."""
 
@@ -96,6 +114,7 @@ def transaction():
     with _lock("tree"):
         if _journal().exists():
             _publish(json.loads(read_text_with_retry(_journal())))
+        _recover_items()
         change = _Changes()
         if not _path(FAVORITES).exists():
             change.put(dict(id=FAVORITES, name="收藏", system="favorites", parent_id=None, item_ids=[]))
@@ -104,6 +123,8 @@ def transaction():
         try:
             yield change
             change.commit()
+            if change.created_dirs:
+                _pending_items().unlink(missing_ok=True)
         except BaseException:
             if not _journal().exists():
                 for directory in change.created_dirs:
@@ -251,10 +272,18 @@ def _insert(tx, owner_id, title, body, kind, suffix, source, key=None):
     if kind == "text":
         record["text_preview"] = preview
     if kind == "image":
-        with Image.open(BytesIO(body)) as image:
-            record["width"], record["height"] = image.size
-            image.verify()
+        try:
+            with Image.open(BytesIO(body)) as image:
+                record["width"], record["height"] = image.size
+                image.verify()
+        except (OSError, SyntaxError) as error:
+            raise ValueError("无法读取图片") from error
     directory = _path(key).parent
+    # Record the intent before creating bytes. Recovery completes a published journal first.
+    with _pending_items().open("a", encoding="utf-8") as pending:
+        pending.write(key + "\n")
+        pending.flush()
+        os.fsync(pending.fileno())
     directory.mkdir(parents=True, exist_ok=False)
     tx.created_dirs.append(directory)
     atomic_write_bytes(directory / filename, body)

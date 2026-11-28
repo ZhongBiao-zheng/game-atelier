@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 
@@ -50,13 +51,18 @@ def _import_catalog(source, catalog):
             tx.put(dict(id=folder, name="旧素材", parent_id=None, item_ids=[]))
         for asset in catalog.assets:
             # Project references and adopted team entries retain their IDs for existing clients.
-            preserve = bool(asset.project_ids or asset.category or asset.adopted_from)
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", asset.asset_id):
+                raise ValueError("旧素材标识无效")
+            preserve = bool(asset.project_ids or asset.category or asset.adopted_from or asset.kind == "generation")
             entries = []
             media = project_assets.asset_media_content(asset)
             if media:
                 ext = MEDIA_SUFFIXES[media.mime_type]
                 file = media.sha256 + ext
-                body = _checked(source / "blobs" / file, source, media.sha256)
+                blob = source.parent / media.path
+                body = _checked(blob, source / "blobs", media.sha256)
+                if len(body) != media.bytes:
+                    raise ValueError("旧素材文件长度不匹配")
                 entries.append(("media", asset.title, body, media.mime_type.split("/")[0], ext))
                 if preserve:
                     _copy_reference(body, destination / "blobs" / file)
@@ -70,6 +76,8 @@ def _import_catalog(source, catalog):
                 value = project_assets.render_prompt_segments(asset.content.segments, {})
                 entries.append(("prompt", asset.title, value.encode(), "text", ".md"))
                 for i, preview in enumerate(asset.content.preview_images):
+                    if Path(preview.file).name != preview.file or "\\" in preview.file:
+                        raise ValueError("旧效果图文件名无效")
                     file = Path("prompt-previews") / asset.asset_id / preview.file
                     body = _checked(source / file, source, Path(preview.file).stem)
                     entries.append((preview.file, f"{asset.title} 效果图 {i + 1}", body, "image", file.suffix))
