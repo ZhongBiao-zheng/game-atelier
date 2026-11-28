@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { deleteHistoryOutputs, HISTORY_CHANGED, HISTORY_JOB_FINISHED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
+import { deleteHistoryOutputs, HISTORY_CHANGED, HISTORY_JOB_FINISHED, HISTORY_RECONNECTED, downloadHistory, historyKey, type HistoryItem, type HistoryReference } from '@/api/history';
 import { downloadLibrary, libraryWrite, LIBRARY_CHANGED, OPEN_FOLDER, type LibraryFolder } from '@/api/library';
 import { CanvasIcon, EditIcon, MoveIcon, CopyIcon } from '@/components/ui/icons';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -177,17 +177,25 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
       clear();
       reload();
     };
-    // 新结果（或重连后补回的）按 historyKey 合并到顶部：已载入的页、选择与滚动都保留。
+    // 新结果按 historyKey 合并到顶部：已载入的页、选择与滚动都保留。
     const arrive = () => {
       if (!refreshHead) return;
       arrivedAfter.current = latestItems.current.reduce((newest, item) => Math.max(newest, Date.parse(item.submitted_at) || 0), 0);
       refreshHead();
     };
+    // SSE 重连：整表重载（丢掉旧游标与旧页），不清选择——批量操作读的是选中时的记录快照；滚动位置照旧恢复。
+    const reconnect = () => {
+      if (!refreshHead) return;
+      restore.current = list.current?.scrollTop ?? 0;
+      reload();
+    };
     window.addEventListener(HISTORY_CHANGED, refresh);
     window.addEventListener(HISTORY_JOB_FINISHED, arrive);
+    window.addEventListener(HISTORY_RECONNECTED, reconnect);
     return () => {
       window.removeEventListener(HISTORY_CHANGED, refresh);
       window.removeEventListener(HISTORY_JOB_FINISHED, arrive);
+      window.removeEventListener(HISTORY_RECONNECTED, reconnect);
     };
   }, [reload, refreshHead]);
 

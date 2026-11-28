@@ -2,19 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { historyKey, listHistory, type HistoryItem, type HistoryKind } from '@/api/history';
 import { errorText } from '@/lib/errorText';
 
-/** 重连补取最多往后翻几页去找与已载入行的重叠。 */
-const HEAD_REFRESH_PAGE_LIMIT = 20;
+/** 一页列表属于哪一个筛选（类型 + 搜索词）。 */
+const filterKey = (kind: string, query: string) => `${kind}\n${query}`;
 
 /** Each filter has its own cursor and cancellation scope. Scroll and select-all share pending reads. */
 export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const state = useRef({ controller: new AbortController(), rows: [] as HistoryItem[],
-    removed: new Set<string>(), cursor: undefined as string | null | undefined, pending: null as Promise<void> | null });
+  const state = useRef({ controller: new AbortController(), filter: filterKey(kind, query), rows: [] as HistoryItem[],
+    removed: new Set<string>(), cursor: undefined as string | null | undefined, pending: null as Promise<void> | null,
+    head: { running: false, again: false } });
 
   const more = useCallback(async (all = false) => {
     const page = state.current;
+    // 旧筛选的回调（筛选刚换、reload 还没跑）不往新列表里写。
+    if (page.filter !== filterKey(kind, query)) return [];
     do {
       if (page.cursor === null || page.controller.signal.aborted) break;
       if (!page.pending) {
@@ -45,61 +48,45 @@ export function useHistoryPages(kind: HistoryKind | 'all', query: string) {
 
   const reload = useCallback(() => {
     state.current.controller.abort();
-    const page = { controller: new AbortController(), rows: [], removed: new Set<string>(), cursor: undefined, pending: null };
+    const page = { controller: new AbortController(), filter: filterKey(kind, query), rows: [], removed: new Set<string>(),
+      cursor: undefined, pending: null, head: { running: false, again: false } };
     state.current = page;
     void more().catch(() => {});
-  }, [more]);
+  }, [more, kind, query]);
   useEffect(() => {
     reload();
     return () => state.current.controller.abort();
   }, [reload]);
 
-  /** 有任务出了结果或 SSE 重连：从头往后翻页，补到与已载入的行重叠为止，再接回原来的游标——
-   *  断线期间新增超过一页也不留缺口。新的放最前，已载入的行、已翻过的页与选中都保留。
-   *  翻到 HEAD_REFRESH_PAGE_LIMIT 页仍没重叠，就改用这次取到的行和游标，原来的行之后翻页时再回来。
-   *  同时只跑一轮；跑的过程中又来了事件，跑完再补一轮。 */
-  const headRefresh = useRef<{ running: boolean; again: boolean }>({ running: false, again: false });
+  /** 有任务出了结果：只重取第一页，按 historyKey 合并进已载入的行（新的放最前），已翻过的页与游标都留着。
+   *  SSE 重连不走这里（断线期间完成的旧任务可能落在任何一页），由调用方整表 reload。
+   *  回调绑定发起时的那一页（筛选代号）：筛选换了、或这一页已被 reload 换掉，结果直接丢弃，
+   *  不会把旧筛选的行写进新列表。同一页同时只跑一轮，期间的事件跑完再补一轮。 */
   const refreshHead = useCallback(() => {
-    const gate = headRefresh.current;
-    if (gate.running) { gate.again = true; return; }
-    gate.running = true;
     const page = state.current;
-    const run = async () => {
-      const known = new Set(page.rows.map(historyKey));
-      const fetched: HistoryItem[] = [];
-      let cursor: string | undefined;
-      let next: string | null = null;
-      let overlapped = false;
-      for (let count = 0; count < HEAD_REFRESH_PAGE_LIMIT; count++) {
-        const result = await listHistory(kind, query, cursor, page.controller.signal);
-        next = result.next_cursor;
-        for (const row of result.items) {
-          if (known.has(historyKey(row))) { overlapped = true; continue; }
-          fetched.push(row);
-        }
-        // 原来一行都没有：取一页就够，游标就用这一页的。
-        if (overlapped || next === null || !known.size) break;
-        cursor = next;
-      }
+    if (page.filter !== filterKey(kind, query)) return;
+    if (page.head.running) { page.head.again = true; return; }
+    page.head.running = true;
+    const run = (): Promise<void> => listHistory(kind, query, undefined, page.controller.signal).then(result => {
       if (page.controller.signal.aborted || state.current !== page) return;
-      const head = fetched.filter(row => !page.removed.has(historyKey(row)));
-      if (overlapped) {
-        // 等待期间往下翻页追加的行与这批新行不会重叠，但仍按 historyKey 去重以防万一。
-        const fresh = new Set(head.map(historyKey));
-        page.rows = [...head, ...page.rows.filter(row => !fresh.has(historyKey(row)))];
-        if (page.cursor === undefined) page.cursor = next;
-      } else {
-        // 没接上（原来是空的、翻到了底、或新增超过上限）：这次取到的就是从头开始的连续一段，换成它和它的游标；
-        // 原来的行若还在，之后往下翻页时会再回来（追加时按 historyKey 去重）。
-        page.rows = head;
-        page.cursor = next;
-      }
+      const head = result.items.filter(row => !page.removed.has(historyKey(row)));
+      const fresh = new Set(head.map(historyKey));
+      page.rows = [...head, ...page.rows.filter(row => !fresh.has(historyKey(row)))];
+      if (page.cursor === undefined) page.cursor = result.next_cursor;
       setItems(page.rows);
-    };
-    void run().catch(() => { /* 下一次完成事件、重连或重开面板再取。 */ }).finally(() => {
-      gate.running = false;
-      if (gate.again) { gate.again = false; refreshHead(); }
     });
+    const loop = (): void => {
+      void run().catch(() => { /* 下一次完成事件、重连或重开面板再取。 */ }).finally(() => {
+        if (page.head.again && state.current === page && !page.controller.signal.aborted) {
+          page.head.again = false;
+          loop();
+          return;
+        }
+        page.head.running = false;
+        page.head.again = false;
+      });
+    };
+    loop();
   }, [kind, query]);
 
   function removeOutputs(ids: Set<string>) {
