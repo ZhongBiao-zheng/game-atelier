@@ -133,6 +133,20 @@ GET /api/collab/remote/{peer_key}/projects/{project_id}/borrowable-models
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/local
 POST /api/collab/remote/{peer_key}/projects/{project_id}/runs/borrowed
 POST /api/studio/jobs/{job_id}/shared-canvas
+GET /api/library
+GET /api/library/handle
+GET /api/library/{key}/content
+POST /api/library/download
+POST /api/library/folders
+POST /api/library/subjects
+POST /api/library/subject-preview
+POST /api/library/subject-editor
+POST /api/library/{owner}/upload
+POST /api/library/{owner}/canvas
+POST /api/library/{owner}/history
+POST /api/library/{key}/{action}
+PATCH /api/library/{key}
+DELETE /api/library/{key}
 GET /api/history
 GET /api/history/{job_id}/{output_index}/thumb
 POST /api/history/download
@@ -189,21 +203,9 @@ GET /api/canvas/projects/{project_id}/lessons
 POST /api/canvas/projects/{project_id}/lessons/{index}/adopt
 DELETE /api/canvas/projects/{project_id}/lessons/{index}
 POST /api/creation-assets/staleness
-POST /api/creation-assets/generation/from-job
-POST /api/creation-assets/generation/from-canvas
-POST /api/creation-assets/prompts
 POST /api/creation-assets/media/from-path
 POST /api/creation-assets/media/upload
-PUT /api/creation-assets/{asset_id}/prompt
-PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
-POST /api/creation-assets/{asset_id}/archive
-POST /api/creation-assets/{asset_id}/restore
-POST /api/creation-assets/{asset_id}/previews
-PUT /api/creation-assets/{asset_id}/previews/order
-DELETE /api/creation-assets/{asset_id}/previews/{file}
-GET /api/creation-assets/{asset_id}/previews/{file}
-GET /api/creation-assets/{asset_id}/previews/{file}/thumb
 GET /api/creation-assets/{asset_id}/content
 GET /api/creation-assets/{asset_id}/inputs/{order}
 GET /api/creation-assets/{asset_id}/staleness
@@ -354,14 +356,13 @@ _READ_POSTS = frozenset({
     ("POST", "/api/creation-assets/staleness"),
 })
 MEDIA_ROUTES = frozenset({
+    "/api/library/{key}/content",
     "/api/history/{job_id}/{output_index}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/previews/{n}/thumb",
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",
-    "/api/creation-assets/{asset_id}/previews/{file}",
-    "/api/creation-assets/{asset_id}/previews/{file}/thumb",
     "/api/creation-assets/{asset_id}/inputs/{order}",
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",

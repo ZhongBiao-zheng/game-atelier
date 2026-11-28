@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from character_workflow.lib import data_root, trash
 from character_workflow.lib.canvas_thumbnails import cached_image_thumbnail, snap_thumbnail_width
+from character_workflow.lib.library_subjects import display_prompt
 from character_workflow.lib.jobs import list_jobs, output_slots, read_job, trash_studio_job
 from character_workflow.lib.schemas import JobStatus
 from character_workflow.lib.team_library_share import _media_filename
@@ -56,6 +57,14 @@ def _lookup(ref, hidden_paths, hidden_projects):
             if slot == ref.output_index and (path := _visible_file(raw, hidden_paths)):
                 return job, path
     raise HTTPException(404, "找不到生成结果")
+
+
+def output_title(job, slot, path):
+    prompt = " ".join(display_prompt(job).split())[:16]
+    if not prompt:
+        return path.name
+    multiple = slot > 0 or len(job.output_paths) > 1 or (job.params.n or 1) > 1
+    return f"{prompt} · {slot + 1}" if multiple else prompt
 
 
 def _download_name(path):
@@ -110,7 +119,7 @@ def history(kind: Kind = "all", q: str = "", cursor: str | None = None,
     query = q.strip().casefold()
     jobs = sorted(((_timestamp(job.submitted_at), job) for job in list_jobs()
                    if _visible_job(job, hidden_projects) and kind in ("all", job.kind)
-                   and query in job.prompt.casefold()), key=lambda row: (row[0], row[1].job_id), reverse=True)
+                   and query in display_prompt(job).casefold()), key=lambda row: (row[0], row[1].job_id), reverse=True)
     items = []
     last = None
     for stamp, job in jobs:
@@ -134,7 +143,7 @@ def history(kind: Kind = "all", q: str = "", cursor: str | None = None,
             items.append(dict(job_id=job.job_id, output_index=slot, kind=job.kind, url=url,
                               thumbnail_url=thumb, width=width, height=height,
                               duration=duration if duration is not None else job.params.duration, text_preview=preview,
-                              filename=_download_name(raw), prompt=job.prompt[:120],
+                              filename=_download_name(raw), title=output_title(job, slot, path), prompt=display_prompt(job)[:120],
                               submitted_at=job.submitted_at))
             last = key
     return {"items": items, "next_cursor": None}

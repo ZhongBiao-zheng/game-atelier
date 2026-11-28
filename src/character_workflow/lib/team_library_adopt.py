@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from character_workflow.lib import team_library_index as idx
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     asset_media_content,
     create_adopted_asset,
     find_adopted_asset,

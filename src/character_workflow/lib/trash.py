@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 TRASH_DAYS = 30
 # project = 画布项目；conversation = 创作台 / 画布 Agent 对话；round = 已付费的一轮结果。
-TrashKind = Literal["project", "conversation", "round"]
+TrashKind = Literal["project", "conversation", "round", "library"]
 TrashState = Literal["moving", "stored", "restoring"]
 TRASH_ID_PATTERN = r"^trash-[0-9]{14}-[0-9a-f]{8}$"
 _TRASH_ID = re.compile(TRASH_ID_PATTERN)
@@ -389,7 +389,7 @@ def _keep_visible(trash_id: str) -> None:
 
 def _load_restore_handlers() -> None:
     # 还原 handler 随领域模块导入注册；启动恢复可能早于这些模块被导入。
-    from character_workflow.lib import canvas_packages, jobs, studio_agent_sessions  # noqa: F401
+    from character_workflow.lib import canvas_packages, jobs, library, studio_agent_sessions  # noqa: F401
 
 
 def purge(trash_id: str) -> None:

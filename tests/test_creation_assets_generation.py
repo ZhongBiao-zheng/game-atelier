@@ -1,6 +1,7 @@
 """生成资产（成片 + 自包含冻结快照）、团队侧快照读模型、参考内容端点、recommendation 已删除。"""
 from __future__ import annotations
 
+from tests.project_reference_fixtures import seed_prompt, remove_fixture_record
 import io
 
 import pytest
@@ -10,20 +11,17 @@ from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,
-    create_prompt_asset,
     creation_asset_input_path,
     creation_asset_media_path,
-    delete_creation_asset,
     get_creation_asset,
     insert_creation_asset_into_canvas,
     list_creation_assets,
     sniff_media_mime,
     store_media_blob,
-    update_media_asset_from_bytes,
 )
 from character_workflow.lib.schemas import (
     CanvasPoint,
@@ -162,35 +160,12 @@ def test_input_path_is_only_for_generation_assets():
     media_asset = create_media_asset_from_bytes(
         title="图", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
     )
-    prompt = create_prompt_asset("提示词", [{"kind": "text", "text": "猫"}], [])
+    prompt = seed_prompt("提示词", [{"kind": "text", "text": "猫"}], [])
     for asset_id in (media_asset.asset_id, prompt.asset_id):
         with pytest.raises(KeyError):
             creation_asset_input_path(asset_id, 0)
 
 
-def test_deleting_generation_asset_keeps_blobs_other_assets_still_use():
-    asset, media, ref_a, ref_b = _generation_asset()
-    shared = create_media_asset_from_bytes(
-        title="同一张参考", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
-    )
-
-    delete_creation_asset(asset.asset_id)
-
-    assert not blob_path_for(media.sha256, media.mime_type).exists()
-    assert not blob_path_for(ref_b.sha256, ref_b.mime_type).exists()
-    assert blob_path_for(ref_a.sha256, ref_a.mime_type).is_file()
-    assert [row.asset_id for row in list_creation_assets().assets] == [shared.asset_id]
-
-
-def test_deleting_media_asset_keeps_blob_a_generation_input_uses():
-    media_asset = create_media_asset_from_bytes(
-        title="参考", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
-    )
-    _, _, ref_a, _ = _generation_asset()
-
-    delete_creation_asset(media_asset.asset_id)
-
-    assert blob_path_for(ref_a.sha256, ref_a.mime_type).is_file()
 
 
 def test_generation_asset_inserts_into_canvas_as_its_output_image():
@@ -209,14 +184,14 @@ def test_generation_asset_inserts_into_canvas_as_its_output_image():
 
 
 def test_insert_survives_asset_deleted_before_marking_used(monkeypatch):
-    from character_workflow.lib import creation_assets
+    from character_workflow.lib import project_reference_assets as creation_assets
 
     project = create_canvas_project("生成资产画布")
     asset, *_ = _generation_asset()
     real_mark = creation_assets.mark_creation_asset_used
 
     def delete_then_mark(asset_id, project_id=None):
-        delete_creation_asset(asset_id)
+        remove_fixture_record(asset_id)
         return real_mark(asset_id, project_id)
 
     monkeypatch.setattr(creation_assets, "mark_creation_asset_used", delete_then_mark)
@@ -248,7 +223,7 @@ def test_inputs_endpoint_is_404_for_prompt_and_media_assets(client: TestClient):
     media_asset = create_media_asset_from_bytes(
         title="图", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
     )
-    prompt = create_prompt_asset("提示词", [{"kind": "text", "text": "猫"}], [])
+    prompt = seed_prompt("提示词", [{"kind": "text", "text": "猫"}], [])
     for asset_id in (media_asset.asset_id, prompt.asset_id):
         assert client.get(f"/api/creation-assets/{asset_id}/inputs/0").status_code == 404
 
@@ -261,22 +236,6 @@ def test_generation_assets_list_through_http(client: TestClient):
     assert [row["asset_id"] for row in body] == [asset.asset_id]
     assert body[0]["content"]["snapshot"]["inputs"][1]["role"] == "mj_sref"
     assert "recommendation" not in body[0]
-
-
-def test_prompt_asset_requests_reject_recommendation(client: TestClient):
-    recommendation = {"mode": "image", "model": "gpt-image-2", "params": {}}
-    segments = [{"kind": "text", "text": "猫"}]
-    created = client.post("/api/creation-assets/prompts", json={
-        "title": "猫", "segments": segments, "tags": [], "recommendation": recommendation,
-    })
-    assert created.status_code == 422
-
-    prompt = create_prompt_asset("猫", segments, [])
-    assert "recommendation" not in prompt.model_dump()
-    updated = client.put(f"/api/creation-assets/{prompt.asset_id}/prompt", json={
-        "title": "猫", "segments": segments, "tags": [], "recommendation": recommendation,
-    })
-    assert updated.status_code == 422
 
 
 def _team_asset_payload(**overrides) -> dict:
@@ -373,7 +332,7 @@ def test_team_prompt_asset_ignores_fields_from_newer_machines():
 
 def test_team_prompt_accepts_the_local_prompt_content_when_sharing():
     """分享写 asset.json 时直接拿本机提示词内容；采用时团队侧内容又直接回到 CreationAsset。"""
-    local = create_prompt_asset("猫", [
+    local = seed_prompt("猫", [
         {"kind": "text", "text": "一只"}, {"kind": "variable", "name": "主体", "default_value": "猫"},
     ], [])
     payload = _team_asset_payload(kind="prompt", media=None, snapshot=None)
@@ -394,40 +353,6 @@ def test_recipe_rejects_inputs_whose_type_has_no_blob_suffix():
         }]})
 
 
-def test_replacing_media_body_keeps_blob_a_generation_asset_uses():
-    output_twin = create_media_asset_from_bytes(
-        title="成片副本", body=_OUTPUT, filename="out.png", mime_type="image/png", tags=[],
-    )
-    ref_twin = create_media_asset_from_bytes(
-        title="参考副本", body=_REF_B, filename="b.png", mime_type="image/png", tags=[],
-    )
-    _, media, _, ref_b = _generation_asset()
-
-    update_media_asset_from_bytes(
-        output_twin.asset_id, title="成片副本", tags=[], body=_png((1, 2, 3)),
-        filename="new.png", mime_type="image/png",
-    )
-    update_media_asset_from_bytes(
-        ref_twin.asset_id, title="参考副本", tags=[], body=_png((4, 5, 6)),
-        filename="new2.png", mime_type="image/png",
-    )
-
-    assert blob_path_for(media.sha256, media.mime_type).is_file()
-    assert blob_path_for(ref_b.sha256, ref_b.mime_type).is_file()
-
-
-def test_replacing_media_body_removes_blob_nobody_uses():
-    asset = create_media_asset_from_bytes(
-        title="孤图", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
-    )
-    old = blob_path_for(asset.content.sha256, asset.content.mime_type)
-
-    update_media_asset_from_bytes(
-        asset.asset_id, title="孤图", tags=[], body=_png((7, 8, 9)),
-        filename="n.png", mime_type="image/png",
-    )
-
-    assert not old.exists()
 
 
 def test_inputs_endpoint_is_404_when_reference_blob_is_missing(client: TestClient):
@@ -495,3 +420,12 @@ def test_generation_asset_with_same_adoption_origin_is_not_duplicated():
 )
 def test_sniff_media_mime_reads_only_the_content(body, declared, expected):
     assert sniff_media_mime(body, declared) == expected
+
+
+def test_empty_metadata_is_omitted_and_old_content_reads():
+    from character_workflow.lib.schemas import CreationPromptAssetContent, JobParams
+
+    content = {'kind': 'prompt', 'segments': [{'kind': 'text', 'text': '角色'}]}
+    assert CreationPromptAssetContent.model_validate(content).model_dump() == content
+    assert 'prompt_asset_id' not in JobParams().model_dump()
+    assert 'prompt_asset_id' not in JobParams.model_validate({'prompt_asset_id': 'old-preview-target'}).model_dump()

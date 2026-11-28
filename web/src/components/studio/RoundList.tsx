@@ -1,3 +1,4 @@
+import { displaySubjectPrompt, SavedSubjectText } from '@/components/assets/SubjectMentions';
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -654,7 +655,7 @@ export function RoundList({
           meta={lightboxCurrent ? buildLightboxMeta(lightboxCurrent) : undefined}
           onUseAsReference={onEditAsReference && lightboxCurrent
             ? () => { void onEditAsReference(lightboxCurrent.path); } : undefined}
-          onCopyPrompt={lightboxCurrent ? () => lightboxCurrent.config.prompt : undefined}
+          onCopyPrompt={lightboxCurrent ? () => displaySubjectPrompt(lightboxCurrent.config.prompt) : undefined}
           onDelete={onDeleteResult && lightboxCurrent?.deletable
             ? () => { void onDeleteResult(lightboxCurrent.jobId, lightboxCurrent.path); } : undefined}
         />
@@ -1014,7 +1015,7 @@ function MentionPrompt({
     intentTimer.current = null;
   };
   useEffect(() => clearIntent, []);
-  const isLongPrompt = prompt.length > 48 || prompt.includes('\n');
+  const isLongPrompt = displaySubjectPrompt(prompt).length > 48 || prompt.includes('\n');
   const parts = useMemo(() => {
     const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
     let last = 0;
@@ -1034,7 +1035,7 @@ function MentionPrompt({
   const renderParts = () =>
     parts.map((part, i) =>
       typeof part === 'string' ? (
-        <span key={i}>{part}</span>
+        <SavedSubjectText key={i} text={part} />
       ) : (
         <MentionChip
           key={i}

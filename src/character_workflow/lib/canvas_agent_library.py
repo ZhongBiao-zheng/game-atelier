@@ -14,7 +14,7 @@ from character_workflow.lib.canvas_projects import (
     _display_image_dimensions, _read_canvas_document_unlocked, _recover_canvas_transactions_unlocked,
     canvas_project_dir, canvas_project_lock_path,
 )
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     _mark_used_if_present, asset_media_content, creation_asset_media_path, get_creation_asset,
     list_creation_assets, video_dimensions_from_bytes,
 )

@@ -1,3 +1,4 @@
+import { displaySubjectPrompt } from '@/components/assets/SubjectMentions';
 import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -33,10 +34,8 @@ import { StudioComposer, useStudioComposer } from '@/components/studio/StudioCom
 import type { InputFlashRequest } from '@/components/studio/PromptInput';
 import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
-  type CreationAssetPanelHandle,
-  type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
-} from '@/components/assets/CreationAssetPanel';
+} from '@/components/assets/creationAssetPanelModel';
 import { MAX_REF_IMAGES, type FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type CanvasTarget, type RoundConfig, type RoundFailure, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
@@ -65,11 +64,11 @@ import { clampImageCount, configForJob, isOmniVideoConfig } from './studioJobCon
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
 import { costLabel, referenceImageLimit, studioEstimateLabel } from './studioEstimate';
-import { creationAssetInputUrl, readCreationMediaFile, markCreationAssetUsed } from '@/api/creationAssets';
+import { creationAssetInputUrl, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { adoptTeamAsset, fetchProfile, listTeamLibraries } from '@/api/teamLibraries';
 import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
-import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
+import type { CreationAsset, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
@@ -307,13 +306,11 @@ function StudioFull() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelKind, setAssetPanelKind] = useState<CreationAssetPanelMode>('prompt');
+  const [openLibrary, setOpenLibrary] = useState(false);
   // 面板只在挂载与 initialKind 变化时同步栏位；「看看」要确定落在团队栏，就换 key 重新挂载。
   const [assetPanelMount, setAssetPanelMount] = useState(0);
   // 「看看」定位：团队栏初始落在挂着该库的画布与该库上。
-  const [teamPanelTarget, setTeamPanelTarget] = useState<{ projectId: string; libraryId: string } | null>(null);
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
-  const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
   const canvasTargetOptions = useMemo<CanvasTarget[]>(
     () => canvasTargets.map(target => ({ projectId: target.project_id, name: target.name })), [canvasTargets]);
@@ -377,7 +374,6 @@ function StudioFull() {
   useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice, followHeicReplacement);
   useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice, followHeicReplacement);
 
-  const teamReferenceFiles = useRef(new Map<string, File>());
   const referenceSlots = useRef({ referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs });
   referenceSlots.current = { referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs };
 
@@ -1385,17 +1381,17 @@ function StudioFull() {
           onEditAsReference={handleEditAsReference}
           onShareResult={(jobId, index, path, config) => setShareRequest({
             source: { kind: 'job_output', job_id: jobId, output_index: index },
-            defaultTitle: assetTitleFromPrompt(config.prompt),
+            defaultTitle: assetTitleFromPrompt(displaySubjectPrompt(config.prompt)),
             // 对话框只把 previewUrl 渲染成 <img>：视频结果不传。
             ...(config.kind === 'video' ? {} : { previewUrl: galleryMediaUrl(path) }),
           })}
           onSavePromptAsset={(config) => {
-            setAssetPanelKind('prompt');
+            setOpenLibrary(false);
             setAssetPanelOpen(true);
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'prompt',
-              title: assetTitleFromPrompt(config.prompt),
+              title: assetTitleFromPrompt(displaySubjectPrompt(config.prompt)),
               segments: [{ kind: 'text', text: config.prompt }],
             });
           }}
@@ -1540,7 +1536,7 @@ function StudioFull() {
           value={promptText}
           onValueChange={setPromptText}
           onSavePromptAsset={() => {
-            setAssetPanelKind('prompt');
+            setOpenLibrary(false);
             setAssetPanelOpen(true);
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
@@ -1550,8 +1546,8 @@ function StudioFull() {
           }}
           assetPanelOpen={assetPanelOpen}
           onToggleAssetPanel={() => {
-            if (assetPanelOpen) assetPanelRef.current?.requestClose();
-            else setAssetPanelOpen(true);
+            setOpenLibrary(false);
+            setAssetPanelOpen(current => !current);
           }}
           providers={providers}
           providerAlias={providerAlias}
@@ -1608,29 +1604,20 @@ function StudioFull() {
       {assetPanelOpen && (
         <AssetPanel
           key={assetPanelMount}
-          ref={assetPanelRef}
-          initialKind={assetPanelKind}
-          initialTeamProjectId={teamPanelTarget?.projectId}
-          initialTeamLibraryId={teamPanelTarget?.libraryId}
-          canvasTargets={canvasTargetOptions}
+          openLibrary={openLibrary}
           saveRequest={assetSaveRequest}
           onSaveRequestHandled={(requestId) => {
             setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
           }}
           onClose={() => {
             setAssetPanelOpen(false);
-            setTeamPanelTarget(null);
-            setAssetPanelKind('prompt');
+            setOpenLibrary(false);
           }}
-          onUsePrompt={(asset, renderedPrompt) => {
-            if (composer.mode === 'agent') { composer.setText(renderedPrompt); return; }
-            setPromptText(renderedPrompt);
-            sourceTitleFile.current = null;
-            setPromptAssetSourceTitle(asset.title);
+          onSubject={token => {
+            if (composer.mode === 'agent') setKind('image');
+            setPromptText(current => [current, token].filter(Boolean).join(' '));
             setClickPinned(true);
           }}
-          onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
-          onReproduce={requestReproduce}
           onHistoryReference={async items => {
             let added = 0;
             const texts: string[] = [];
@@ -1660,15 +1647,6 @@ function StudioFull() {
             }
             if (added < items.length) setAssetNotice(`只加入了 ${added} ${items.every(item => item.kind === 'image') ? '张' : '项'}`);
           }}
-          onUseTeamMedia={(file, entry, key) => {
-            const reused = teamReferenceFiles.current.get(key) ?? file;
-            teamReferenceFiles.current.set(key, reused);
-            addReferenceFile(reused, entry.mime_type ?? file.type, entry.title);
-          }}
-          onUseTeamPrompt={(text, entry) => {
-            if (composer.mode === 'agent') { composer.setText(text); return; }
-            setPromptText(text); sourceTitleFile.current = null; setPromptAssetSourceTitle(entry.title); setClickPinned(true);
-          }}
         />
       )}
       <TeamShareDialog
@@ -1696,12 +1674,12 @@ function StudioFull() {
 
   // Studio 自家出图存成带配方的生成资产；skill / 归档来的记录后端不收 from-job，只存媒体。
   function saveResultAsset({ jobId, index, path, mediaKind, generated, config }: SaveResultAssetRequest) {
-    setAssetPanelKind('media');
+    setOpenLibrary(true);
     setAssetPanelOpen(true);
     setAssetSaveRequest({
       requestId: crypto.randomUUID(),
       kind: 'media',
-      title: assetTitleFromPrompt(config.prompt),
+      title: assetTitleFromPrompt(displaySubjectPrompt(config.prompt)),
       sourcePath: path,
       previewUrl: galleryMediaUrl(path),
       mediaKind,
@@ -1743,16 +1721,11 @@ function StudioFull() {
       setAssetNotice('没有挂载这个团队库');
       return;
     }
-    const target = { projectId, libraryId };
-    const show = () => {
-      setCanvasTargets(projects);
-      setTeamPanelTarget(target);
-      setAssetPanelKind('team');
-      setAssetPanelMount(current => current + 1);
-      setAssetPanelOpen(true);
-    };
-    if (assetPanelRef.current) assetPanelRef.current.requestTransition(show);
-    else show();
+    setCanvasTargets(projects);
+    setOpenLibrary(true);
+    setAssetPanelMount(current => current + 1);
+    setAssetPanelOpen(true);
+
   }
 
   // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；覆盖非空输入时给撤销，不弹确认。
@@ -1844,15 +1817,6 @@ function StudioFull() {
     else { slots.referenceImages = [...slots.referenceImages, file]; setReferenceImages(slots.referenceImages); }
     sourceTitleFile.current = file; setPromptAssetSourceTitle(title); setClickPinned(true); setAssetNotice('已加入参考图');
     return true;
-  }
-
-  async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
-    const route = mediaReferenceRoute(content.mime_type);
-    if ('notice' in route) { setAssetNotice(route.notice); return; }
-    try {
-      const file = await readCreationMediaFile(asset.asset_id, content);
-      addReferenceFile(file, content.mime_type, asset.title);
-    } catch (error) { notify.error(errorText(error)); }
   }
 
   async function deleteFailedRound(jobId: string) {

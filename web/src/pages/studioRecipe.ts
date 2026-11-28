@@ -64,7 +64,7 @@ function syntheticJob(recipe: GenerationRecipe, alias: string | null, provider: 
   return {
     job_id: 'recipe',
     character_id: '',
-    prompt: recipe.final_prompt,
+    prompt: (recipe.params as JobParams).subject_prompt ?? recipe.final_prompt,
     submitted_at: recipe.submitted_at,
     model: recipe.model,
     params: recipe.params as JobParams,

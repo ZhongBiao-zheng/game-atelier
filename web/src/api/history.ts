@@ -10,6 +10,7 @@ export interface HistoryItem {
   url: string;
   thumbnail_url: string;
   filename: string;
+  title?: string;
   width: number | null;
   height: number | null;
   duration: number | null;

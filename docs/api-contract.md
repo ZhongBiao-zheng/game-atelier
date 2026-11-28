@@ -332,7 +332,7 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 | ModelRoute | `lib/model_routes.py` | `web/src/api/models.ts` | `tests/test_model_routes.py` + `lib/modelRoutes.test.ts` |
 | CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
-| CreationAsset / CreationAssetContent | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
+| CreationAsset / CreationAssetContent | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `LibraryPanel.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 | 插件清单 / 包锁文件 / 列表接口 | `lib/plugin_manifest.py` + `lib/plugin_registry.py` | `web/src/schema/plugins.ts` + `api/plugins.ts` | `tests/test_plugin_registry.py` + `PluginsPage.test.tsx`（后者直接读入库的 `manifest.lock.json`） |
@@ -415,10 +415,8 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `POST /canvas/projects/{id}/groups/{group_id}/run-plan` 返回按连线和位置排序的 `order`、`steps`（节点名、模型、数量、估价）、`total_cny`、`unpriced`、`quote_id` 和 `needs_confirmation`。`blocked` 列出不完整草稿及原因，`cycle_nodes` 只列成环节点。每个可执行草稿提交一次，张数按节点设置（MJ 固定 4）。整体执行把候选登记为原节点的版本，首个结果成为当前版本，下游提交时冻结上游当前版本。Job 快照的 `normalized_params.group_run` 记录组执行 ID 和执行前的版本 ID，供历史切换与界面同步。
 
 `POST /canvas/projects/{id}/groups/{group_id}/group-runs` 接受 `order`、`total_cny` 和 `quote_id`，计划过期或已有同组执行返回 409。`GET /canvas/projects/{id}/group-runs` 读执行记录，按创建时间倒序。`POST /canvas/projects/{id}/group-runs/{run_id}/resume` 继续失败或中断的执行，`/cancel` 停止后续提交。进度落盘后 SSE 广播 `canvas-group-run-changed`（`project_id`、`run_id`）。
-`POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
-`POST /creation-assets/generation/{from-job,from-canvas}`
-`PUT /creation-assets/{asset_id}/{prompt,media}`
-`POST /creation-assets/{asset_id}/use` `POST /creation-assets/{asset_id}/readopt` `DELETE /creation-assets/{asset_id}`
+`POST /creation-assets/media/{upload,from-path}`
+`POST /creation-assets/{asset_id}/use` `POST /creation-assets/{asset_id}/readopt`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/{insert,reproduce}`
 `PUT /profile`
 `POST /team-libraries` `DELETE /team-libraries/{library_id}`
@@ -857,11 +855,8 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 均静止后，先把项目和 Job 原子移入 `.runtime/canvas-delete-transactions/` 的短期事务目录，再立即物理清除；
 项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
 
-创作资产是应用级个人数据，真源为 `creation-assets/catalog.json` 与
-`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产有 prompt / media
-（media 覆盖图片 / 视频 / 音频）/ generation 三类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和媒体文件
-均由同一个编辑入口原位更新。媒体按 SHA-256 去重，提示词重复只在 Web 提醒。提示词资产不携带模型或参数
-（`recommendation` 已删除；创建 / 更新请求带它返回 422）。
+项目参考库和团队采用记录保存在 `project-references/catalog.json`，媒体和配方输入按
+SHA-256 保存在 `project-references/blobs/`。旧目录的首次导入和个人素材操作见「素材库」。
 
 `CreationAsset.use_count` 默认 0，0 时不序列化；每次 `mark_creation_asset_used` 在 catalog 锁内加一，
 同时更新最近使用时间。`CreationMediaAssetContent.width/height` 是可选显示尺寸，图片入库时读取并计入
@@ -870,21 +865,7 @@ EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加
 提示词效果图是 `CreationPromptAssetContent.preview_images` 的有序数组，第 0 张为封面；空数组不序列化。
 每项为 `{file, mime_type, width, height, source_job_id?, source_model?, added_at}`，`file` 只允许
 `[a-f0-9]{16}\.(png|jpg|webp|gif)`。文件独立保存到
-`creation-assets/prompt-previews/<asset_id>/<file>`，不进入媒体资产或共享 blob。唯一写入者为
-`creation_assets.py`，持 catalog 锁原子写入；内容哈希去重，删除提示词时清理全部效果图。
-
-| 方法 | 路径（均带 `/api` 前缀） | 契约 |
-|---|---|---|
-| POST | `/creation-assets/{id}/previews` | multipart `files`，可多选；可选 `replace_file` 原子更换一张，满 8 张也可更换 |
-| PUT | `/creation-assets/{id}/previews/order` | `{files: [...]}`，必须恰好包含全部现有文件、无重复 |
-| DELETE | `/creation-assets/{id}/previews/{file}` | 删除元数据与文件 |
-| GET | `/creation-assets/{id}/previews/{file}` | 读取当前 catalog 登记的独立原图 |
-| GET | `/creation-assets/{id}/previews/{file}/thumb?w=` | 按 128/256/512 取档生成 WebP，运行时缓存放 `.runtime/thumbs/prompt-previews/` |
-
-写入边界：最多 8 张、每张 ≤20 MiB、PNG/JPEG/WebP/GIF，校验真实图像格式与声明 MIME 一致。
-不存在返回 404，不合规返回 422；这些接口要求本机会话，写操作要求编辑权限。图片响应为
-`Cache-Control: private, max-age=31536000, immutable`，不扩展 `/api/raw` 白名单。
-提示词文字编辑保留效果图；文件夹团队库分享和采用均复制独立效果图文件，见下文团队库契约。
+`project-references/prompt-previews/<asset_id>/<file>`，团队分享与采用会复制独立效果图。
 
 生成资产 = 成片 + 自包含冻结快照：`content = {kind: "generation", media: CreationMediaAssetContent,
 snapshot: GenerationRecipe}`。`GenerationRecipe = {mode, model, provider, alias, final_prompt, draft_prompt,
@@ -942,7 +923,7 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 图片保存在该团队资产目录的 `previews/<内容哈希文件名>`，先写临时条目再整体改名发布。
 索引扫描检查每张图都在该条目目录内，缺图或越界符号链接标记 `incomplete`；采用时重新校验
 实际内容哈希、图片类型、尺寸、20 MiB / 8 张限制，旧 ready 索引不能绕过验证。
-采用与重新采用由 `creation_assets.py` 在 catalog 锁内写入本机提示词独立目录；catalog 失败回滚新文件，
+采用与重新采用由 `project_reference_assets.py` 在 catalog 锁内写入本机提示词独立目录；catalog 失败回滚新文件，
 重新采用成功后清理不再引用的旧效果图，保持本机资产身份与项目关系。团队文件被删除不影响已采用副本。
 
 `AdoptionOrigin.source_preview_fingerprint` 保存采用时来源效果图有序元数据的摘要，空值不序列化。
@@ -983,8 +964,6 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 | GET | `/creation-assets/{asset_id}/staleness` | — | `CreationAssetStaleness` |
 | POST | `/creation-assets/staleness` | `CreationAssetStalenessBatchRequest` | `CreationAssetStalenessBatch` |
 | POST | `/creation-assets/{asset_id}/readopt` | — | `CreationAsset` |
-| POST | `/creation-assets/generation/from-job` | `CreationGenerationFromJob` | `CreationAsset` 201 |
-| POST | `/creation-assets/generation/from-canvas` | `CreationGenerationFromCanvas` | `CreationAsset` 201 |
 | POST | `/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` | `CanvasReproduceRequest` + `If-Match` | `CanvasReproduceResponse` |
 
 类别与团队规范（ADR-0031）：`TeamShareRequest` 与 `TeamAssetUpdateRequest` 带可选 `category`（1–24 字，
@@ -1063,15 +1042,6 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 | 409 | `retry` | 写目录时新 blob 被并发删除，重试即可 |
 | 409 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏（与采用接口同一映射） |
 | 500 | `asset_state_broken` | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
-
-生成结果「保存为创作资产」存生成资产（带配方），与分享共用同一份配方来源规则（`generation_recipe`）：
-`POST /creation-assets/generation/from-job` 收 Studio job 的 `output_index`（规则同 `job_output` 分享，
-`project_id` 可选）；`POST /creation-assets/generation/from-canvas` 收画布结果版本（规则同 `canvas_result`
-分享，`project_id` 取 `canvas_project_id`，请求体不收）。成片与参考按内容进 blobs。错误：来源不存在 404；
-来源不可保存 422 `{code: "not_shareable" | "source_missing", message}`；标题去空白后为空 / 标签超 40 字
-422 `{code: "invalid", message}`（在读来源之前校验）；本机资产库状态损坏 500 `{code: "asset_state_broken"}`；长度上限按
-FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "canvas_document_missing"}` 等）是本机数据故障，
-按 500 报出，不归入 `invalid`。
 
 `POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
 `If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 带生成设置的空图片 / 视频节点 + 连线，
@@ -1734,3 +1704,23 @@ ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保
 报告包含 `schema_version`、UTC 导出时间 `exported_at`、导出时的应用版本 `app_version`、系统类别 `os` 和 `events`。每条事件包含 UTC 时间 `time` 与类别 `event`。其中 `traceback`、`key_read_failed` 和 `key_save_failed` 记录异常类型 `exception`、可能为空的 `errno` 和 `winerror`，以及最多 6 个产品源码相对位置 `locations: [{file, line}]`。报告从本机当前服务日志和最近 3 份按日轮转的日志读取，每个文件最多取末尾 1 MiB，共保留最后 100 条事件。没有匹配记录时返回空数组。
 
 官方 Windows 和 macOS 桌面安装另外读取同一运行环境下固定 `shell.log` 的末尾 1 MiB。`desktop_renderer_gone` 记录已知异常退出原因 `reason` 和可用的数值 `exit_code`，旧版本缺少退出码时返回 `null`。`desktop_server_restart` 记录外壳检测到服务停止后尝试重启的时间。来源代码模式和便携包只导出服务诊断。
+
+## 素材库
+
+本机 `/api/library` 返回 folders、subjects 和按 id 索引的 items。首次读取创建系统文件夹 favorites。
+POST /folders、/subjects 新建容器，PATCH /{key} 修改名称或容器字段。
+POST /{owner}/upload、/history、/canvas 从上传、可见的稳定产出序号或所属项目的内容版本复制文件。
+POST /{key}/copy（可选 target）、/favorite 均创建独立素材，/move 只改变归属。
+GET /{key}/content 返回素材正文，POST /download 接受 ID 数组并打包。DELETE /{key} 返回 trash_id，
+撤销走通用回收站还原接口，恢复素材顺序、归属和封面。
+
+POST /subject-editor 用 multipart 同时保存主体、封面和新增参考。payload 带名称、描述、可选 handle、
+已有主体的 id 和 revision、从零计数的 cover_index、additions 和待移入回收站的素材 ID 数组 removed。封面序号对应移除后再追加的最终顺序。版本冲突返回 409。每个来源使用上传文件序号、
+job_id + output_index、project_id + version_id 或已有 item_id。任一来源无效时整次保存失败。
+
+编辑器以稳定主体 ID 引用素材。POST /subject-preview 与两端提交共用展开逻辑。任务在
+params.subjects 记录本次主体的 id、名称、revision 和实际选中的 item_ids，params.subject_prompt
+保留编辑器原文。记录流与历史使用提交时保存的名称展示 @主体，历史搜索使用同一文本。从历史加入素材时默认取前 16 字为标题，后续产出带序号。主体删除后，已提交任务的参考文件仍可读取。
+
+首次启动将旧个人库导入「旧素材」。项目引用、团队采用记录和生成配方由 project-references/
+保留原 ID，导入进度登记在 .runtime/library-import.json，完成后将原目录整体移入回收站。

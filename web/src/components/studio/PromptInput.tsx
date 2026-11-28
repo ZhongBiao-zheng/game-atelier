@@ -57,6 +57,8 @@ import { Collapse } from '@/components/ui/collapse';
 import { animate, clearOnFinish, MOTION_DURATION, MOTION_EASE, shakeOnError, useAnimateOnChange, motionAvailable, prefersReducedMotion } from '@/lib/motion';
 import { ReferenceItemMotion, useArrivingKeys, useFileKeys, useLeavingRefs, useSlideOnReorder, withLeaving } from './ReferenceMotion';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { MentionTabs, SubjectFeedback, subjectChip, subjectToken, useSubjects, withSubjectChips } from '@/components/assets/SubjectMentions';
+import { itemThumb } from '@/api/library';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
@@ -237,6 +239,7 @@ export function domToText(root: HTMLElement): string {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
+    if (el.dataset.subjectToken) { out += el.dataset.subjectToken; return; }
     if (el.dataset.promptVariable) {
       out += el.dataset.promptVariable;
       return;
@@ -375,6 +378,11 @@ export function PromptInput({
   const lastSynced = useRef<string | null>(null);
   const composing = useRef(false);
   const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionTab, setMentionTab] = useState('all');
+  const subjects = useSubjects(!isAgent && (mentionOpen || text.includes('@[subject:')));
+  const subjectsRef = useRef(subjects);
+  subjectsRef.current = subjects;
   // chip hover 预览：标签 + fixed 锚点坐标（portal 到 body，浮在参考内容上方）
   const [chipHover, setChipHover] = useState<{ label: string; left: number; top: number } | null>(null);
   // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
@@ -471,7 +479,7 @@ export function PromptInput({
   mentionsEnabledRef.current = mentionsEnabled;
 
   /** prompt 字符串 → 编辑器 DOM：@图N 字面量渲染成原子 chip。仅外部改写时调用。 */
-  const promptNodes = useCallback((value: string) => variablePromptNodes(value, (plain) => {
+  const promptNodes = useCallback((value: string) => variablePromptNodes(value, part => withSubjectChips(part, subjectsRef.current, 'studio', plain => {
     if (!mentionsEnabledRef.current) return [document.createTextNode(plain)];
     const nodes: Node[] = [];
     let last = 0;
@@ -484,7 +492,7 @@ export function PromptInput({
     }
     if (last < plain.length) nodes.push(document.createTextNode(plain.slice(last)));
     return nodes;
-  }), []);
+  })), []);
   const renderDom = useCallback((value: string) => {
     editorRef.current?.replaceChildren(...promptNodes(value));
   }, [promptNodes]);
@@ -520,6 +528,12 @@ export function PromptInput({
     }
   }, [text, renderDom, noWorkflowPrompt]);
 
+  useEffect(() => {
+    editorRef.current?.querySelectorAll<HTMLElement>('[data-subject-token]').forEach(span => {
+      span.replaceWith(subjectChip(span.dataset.subjectToken!, subjects, 'studio'));
+    });
+  }, [subjects]);
+
   // 视频抽帧是异步的：thumb 到位后原地补进已渲染的 chip，不重建 DOM（保光标）。
   useEffect(() => {
     const root = editorRef.current;
@@ -533,7 +547,7 @@ export function PromptInput({
 
   /** 光标前一字符是 @ 且有素材 → 弹引用菜单。 */
   const updateMentionMenu = useCallback(() => {
-    if (!mentionsEnabled || stackItems.length === 0) {
+    if (isAgent && (!mentionsEnabled || stackItems.length === 0)) {
       setMentionOpen(false);
       return;
     }
@@ -545,8 +559,9 @@ export function PromptInput({
         open = (r.startContainer.textContent ?? '')[r.startOffset - 1] === '@';
       }
     }
+    if (open) { setMentionTab('all'); setMentionIndex(0); }
     setMentionOpen(open);
-  }, [mentionsEnabled, stackItems.length]);
+  }, [mentionsEnabled, stackItems.length, isAgent]);
 
   /** 在光标处插入纯文本（Enter 换行 / 粘贴去格式共用）。execCommand 保原生撤销栈，jsdom 无则 Range 兜底。 */
   function insertPlainText(value: string) {
@@ -624,7 +639,7 @@ export function PromptInput({
     const sel = window.getSelection();
     let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
     if (range && !root.contains(range.startContainer)) range = null;
-    const chip = buildChipEl(label, chipMetaRef.current.get(label));
+    const chip = label.startsWith('@[subject:') ? subjectChip(label, subjects, 'studio') : buildChipEl(label, chipMetaRef.current.get(label));
     if (!range) {
       // 光标不在编辑器内（异常路径）：chip 追加到末尾，光标落到尾部
       root.appendChild(chip);
@@ -789,6 +804,15 @@ export function PromptInput({
       e.preventDefault();
       setMentionOpen(false);
       return;
+    }
+    if (mentionOpen && !composing.current && !e.nativeEvent.isComposing && !e.ctrlKey && !e.metaKey) {
+      const labels = [...subjects.map(subjectToken), ...(mentionTab === 'all' && mentionsEnabled ? mentionItems.map(item => item.label) : [])];
+      if (labels.length && ['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === 'Enter') insertMention(labels[mentionIndex % labels.length]);
+        else setMentionIndex(index => (index + (e.key === 'ArrowDown' ? 1 : -1) + labels.length) % labels.length);
+        return;
+      }
     }
     if (e.key !== 'Enter') return;
     // 输入法组合期（中文候选）按 Enter 是确认候选，既不提交也不换行。
@@ -1344,6 +1368,8 @@ export function PromptInput({
         />
         </div>
         </div>
+        <SubjectFeedback prompt={text} rows={subjects} model={model} mode={isVideo ? 'video' : 'image'}
+          frameMode={isVideo && videoMode === 'firstlast' ? 'firstlast' : undefined} explicit={isMj ? mjRefs.image.length : referenceImages.length} />
         {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
         {onSavePromptAsset && !collapsed && text.trim() && (
           <Button variant="bare"
@@ -1381,7 +1407,7 @@ export function PromptInput({
           );
         })()}
         <ToolbarPopover
-          open={mentionOpen && mentionItems.length > 0}
+          open={mentionOpen && (mentionItems.length > 0 || subjects.length > 0)}
           onClose={() => setMentionOpen(false)}
           anchorRef={editorRef}
           direction={menuDirection}
@@ -1391,12 +1417,17 @@ export function PromptInput({
           maxHeight={280}
           className="w-[260px] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card p-1"
         >
-          {mentionItems.map((item) => (
+          {!isAgent && <MentionTabs value={mentionTab} change={value => { setMentionTab(value); setMentionIndex(0); }} />}
+          {subjects.map((s, i) => <Button key={s.id} role="option" aria-selected={mentionIndex === i} variant="ghost" className="w-full justify-start aria-selected:bg-secondary"
+            onMouseDown={e => e.preventDefault()} onClick={() => insertMention(subjectToken(s))}>
+            {s.cover_item_id ? <img src={itemThumb(s.cover_item_id)} className="size-8 rounded-md object-cover" alt="" /> : <span className="grid size-8 place-items-center rounded-md bg-secondary"><ImageIcon /></span>}
+            {s.name}<span className="text-xs text-muted-foreground">@{s.handle}</span></Button>)}
+          {mentionTab === 'all' && mentionsEnabled && mentionItems.map((item, i) => (
             <Button variant="bare"
               key={item.index}
               type="button"
               role="option"
-              aria-selected="false"
+              aria-selected={mentionIndex === subjects.length + i}
               // 按下不抢编辑器焦点：插入要依赖编辑器里的光标位置（@ 触发字符所在处）
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => insertMention(item.label)}

@@ -28,7 +28,7 @@ from character_workflow.lib.canvas_projects import (  # noqa: E402
     _display_image_dimensions, _now, read_canvas_document, save_canvas_document, save_canvas_upload,
 )
 from character_workflow.lib.canvas_specs import validate_text  # noqa: E402
-from character_workflow.lib.creation_assets import create_media_asset_from_path  # noqa: E402
+from character_workflow.lib.project_reference_assets import create_media_asset_from_path  # noqa: E402
 from character_workflow.lib.file_lock import file_lock  # noqa: E402
 from character_workflow.lib.schemas import (  # noqa: E402
     CanvasDocument, CanvasGroupNode, CanvasGroupNodeData, CanvasGroupSize, CanvasPoint,

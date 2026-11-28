@@ -238,23 +238,6 @@ async def normal_lifespan(app: FastAPI):
 
     _reset_studio_recovery_workers()
     await recover_abandoned_turns()
-    from character_workflow.lib.creation_assets_migration import (
-        migrate_creation_assets_to_v4,
-        migrate_creation_assets_to_single_content,
-    )
-
-    asset_migration = migrate_creation_assets_to_single_content()
-    if asset_migration:
-        logging.getLogger(__name__).info(
-            "migrated creation assets to single content; backup: %s",
-            asset_migration["backup_path"],
-        )
-    media_migration = migrate_creation_assets_to_v4()
-    if media_migration:
-        logging.getLogger(__name__).info(
-            "migrated creation asset catalog to v4; backup: %s",
-            media_migration["backup_path"],
-        )
     # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
     # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
     resumable_studio = resumable_studio_jobs()
@@ -281,6 +264,11 @@ async def normal_lifespan(app: FastAPI):
             logging.getLogger(__name__).info("purged %d expired trash entries", purged)
     except OSError as error:
         logging.getLogger(__name__).warning("trash cleanup failed: %s", error)
+    from character_workflow.lib.library_import import import_legacy
+    try:
+        import_legacy()
+    except (OSError, ValueError, KeyError):
+        logging.getLogger(__name__).error("旧素材尚未导入，将在下次启动重试")
     canvas_projects = list_canvas_projects()
     from character_workflow.lib.canvas_group_runs import recover_group_runs
     for project in canvas_projects:
@@ -478,6 +466,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(collab_transfer_local_router)
     from viewer_server.history_routes import router as history_router
     app.include_router(history_router)
+    from viewer_server.library_routes import router as library_router
+    app.include_router(library_router)
     app.include_router(router)
     from viewer_server.canvas_group_routes import router as group_router
     app.include_router(group_router)

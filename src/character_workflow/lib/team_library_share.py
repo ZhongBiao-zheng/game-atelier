@@ -22,7 +22,7 @@ from typing import Any
 
 
 from character_workflow.lib.atomic_io import atomic_write_json
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     _normalize_tags,
     _required_text,
     blob_path_for,

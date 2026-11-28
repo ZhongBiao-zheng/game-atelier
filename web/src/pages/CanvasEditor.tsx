@@ -146,9 +146,10 @@ import {
 import type { HistoryKind } from '@/api/history';
 import { AssetPanel } from '@/components/assets/AssetPanel';
 import {
-  type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
-} from '@/components/assets/CreationAssetPanel';
+} from '@/components/assets/creationAssetPanelModel';
+import { ProjectReferenceLibrary } from '@/components/assets/ProjectReferenceLibrary';
+import { MediaPreview } from '@/components/assets/ProjectReferenceMedia';
 import { ProjectSpecsDrawer } from '@/components/canvas/ProjectSpecsDrawer';
 import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
@@ -557,6 +558,8 @@ function CanvasEditorInner({
   const narrowViewport = useNarrowCanvasViewport();
   const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const [referencePreview, setReferencePreview] = useState<CreationAsset | null>(null);
   const [specsOpen, setSpecsOpen] = useState(false);
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -604,11 +607,9 @@ function CanvasEditorInner({
     setCreateMenu(null);
     if (agentOpen && !agentHidden) { setAgentOpen(false); return; }
     if (!libraryMode || wideViewport) { setAgentOpen(true); return; }
-    creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
+    closeLibrary(); setAgentOpen(true);
   }
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
-  const libraryModeRef = useRef(libraryMode);
-  libraryModeRef.current = libraryMode;
   const [creationAssetSaveRequest, setCreationAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
@@ -694,15 +695,12 @@ function CanvasEditorInner({
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
-  const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
-  const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
   const [libraryPanelKey, setLibraryPanelKey] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
-  const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
@@ -831,7 +829,6 @@ function CanvasEditorInner({
     zoomTo,
   } = useReactFlow<FlowNode>();
   const flowStore = useStoreApi<FlowNode>();
-  const usedPromptAssetRef = useRef(false);
   const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
   const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
   useEffect(() => {
@@ -848,10 +845,7 @@ function CanvasEditorInner({
   const closeLibrary = useCallback(() => {
     const trigger = assetLibraryTriggerRef.current;
     setLibraryMode(null);
-    setTeamRelatedSha256(null);
-    setTeamLibraryId(null);
-    if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
-    usedPromptAssetRef.current = false;
+    requestAnimationFrame(() => trigger?.focus());
   }, []);
 
   const preserveImageEditResultHistory = useCallback((current: CanvasDocument, insertedIds: ReadonlySet<string>) => {
@@ -1206,7 +1200,7 @@ function CanvasEditorInner({
       }
       if (libraryMode) {
         event.preventDefault();
-        creationAssetPanelRef.current?.requestClose();
+        closeLibrary();
         return;
       }
       if (selectedNodeIds.size || selectedConnectionIds.size) {
@@ -2930,18 +2924,11 @@ function CanvasEditorInner({
     if (notices.length) announceToolNotice(notices.join('\n'));
   }
 
-  function openTeamPanel(relatedSha256: string | null, libraryId: string | null = null) {
+  function openTeamPanel() {
     setAddOpen(false);
     setCreateMenu(null);
-    const open = () => {
-      setTeamRelatedSha256(relatedSha256);
-      setTeamLibraryId(libraryId);
-      setLibraryMode('team');
-      // 面板只在挂载时读初始栏位与初始库：一律换 key 重挂，保证落在团队栏和指定的库上。
-      setLibraryPanelKey(current => current + 1);
-    };
-    if (libraryModeRef.current) creationAssetPanelRef.current?.requestTransition(open);
-    else open();
+    setLibraryMode('team');
+    setLibraryPanelKey(current => current + 1);
   }
 
   /** 推荐是附加信息：查不到或查询失败都不打断拖入，只在有命中时提示。 */
@@ -2953,7 +2940,7 @@ function CanvasEditorInner({
       return;
     }
     if (!related.length) return;
-    announceToolNotice(`有 ${related.length} 条相关配方`, { label: '看看', run: () => openTeamPanel(sha256) });
+    announceToolNotice(`有 ${related.length} 条相关配方`, { label: '看看', run: () => openTeamPanel() });
   }
 
   /** 分享提醒的「复刻」/「看看」：画布页认领后就地处理，不再导航去 Studio。 */
@@ -2964,13 +2951,13 @@ function CanvasEditorInner({
       return;
     }
     if (action.action === 'open') {
-      openTeamPanel(null, action.library_id);
+      openTeamPanel();
       return;
     }
     try {
       const result = await adoptTeamAsset(action.library_id, action.asset_id, projectId);
       if (result.asset.kind !== 'generation') {
-        openTeamPanel(null, action.library_id);
+        openTeamPanel();
         return;
       }
       await reproduceGenerationAsset(result.asset);
@@ -6153,7 +6140,7 @@ function CanvasEditorInner({
     setAddOpen(false);
     setAgentOpen(false);
     setCreateMenu(null);
-    if (libraryMode) creationAssetPanelRef.current?.requestClose();
+    if (libraryMode) closeLibrary();
     else setLibraryMode('prompts');
   };
   const fitAllNodes = () => {
@@ -6514,6 +6501,7 @@ function CanvasEditorInner({
                     <DropdownMenuItem className="gap-2" onSelect={beginProjectRename}>
                       <EditIcon aria-hidden="true" />重命名
                     </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" onSelect={() => setReferencesOpen(true)}><LibraryIcon />项目参考库</DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onSelect={() => setSpecsOpen(true)}>
                       <TextFileIcon aria-hidden="true" />规范
                     </DropdownMenuItem>
@@ -6774,82 +6762,29 @@ function CanvasEditorInner({
           <CanvasSidePanelMotion key="library">
           <AssetPanel
             key={libraryPanelKey}
-            ref={creationAssetPanelRef}
-            refreshKey={assetsRevision}
-            onAssetsChanged={refreshProjectAssets}
             className={cn('canvas-library-panel', wideViewport && agentOpen && 'left-20! right-auto!')}
             projectId={projectId}
-            canvasTargets={projects.map(project => ({ projectId: project.project_id, name: project.name }))}
-            initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
+            openLibrary={libraryMode === 'team'}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
             }}
             onClose={closeLibrary}
-            onUsePrompt={(asset, renderedPrompt) => {
-              usedPromptAssetRef.current = true;
-              if (selectedNode && selectedDraft) {
-                commit(current => ({
-                  ...current,
-                  nodes: current.nodes.map(node => {
-                    if (node.id !== selectedNode.id) return node;
-                    const draft = resolveCanvasGenerationDraft(node, providers, canvasUiPreferences.generation_defaults.text);
-                    if (!draft) return node;
-                    const params = {
-                      ...draft.params,
-                      creation_asset_source_title: asset.title,
-                    };
-                    return withGenerationDraftForNode(node, {
-                      ...draft,
-                      prompt: renderedPrompt,
-                      params,
-                      updated_at: new Date().toISOString(),
-                    });
-                  }),
-                }), true);
-                return;
-              }
-              void insertCreationAsset(asset.asset_id, {});
-            }}
-            onUseMedia={(asset: CreationAsset) => {
-              void insertCreationAsset(
-                asset.asset_id,
-                {},
-                selectedNode && selectedDraft ? selectedNode.id : undefined,
-              );
-            }}
-            onHistoryReference={async items => {
+            onSubject={selectedNode && selectedDraft ? token => {
+              commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === selectedNode.id
+                ? withGenerationDraftForNode(node, { ...selectedDraft, prompt: [selectedDraft.prompt, token].filter(Boolean).join(' '),
+                  updated_at: new Date().toISOString() }) : node) }), true);
+            } : undefined}
+            onHistoryReference={async (items, placeOnCanvas) => {
               const kinds = new Map<File, HistoryKind>();
               for (const item of items) kinds.set(await item.read(), item.kind);
               const files = Array.from(kinds.keys());
               if (latestDocument.current?.project_id !== projectId) return;
               const size = { ...CANVAS_DEFAULT_NODE_SIZE, width: files.length * CANVAS_DEFAULT_NODE_SIZE.width + (files.length - 1) * 32 };
               const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(size),
-                ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
+                ...(!placeOnCanvas && selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
               await handleUploads(files, menu, undefined, '已放到画布', kinds);
             }}
-            onUseTeamMedia={async file => {
-              const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(),
-                ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
-              await handleUploads([file], menu, undefined, '已放到画布');
-            }}
-            onUseTeamPrompt={(text, entry) => {
-              if (selectedNode && selectedDraft) {
-                commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === selectedNode.id
-                  ? withGenerationDraftForNode(node, { ...selectedDraft, prompt: text,
-                    params: { ...selectedDraft.params, creation_asset_source_title: entry.title }, updated_at: new Date().toISOString() }) : node) }), true);
-              } else {
-                const versionId = makeId('version');
-                const version: CanvasTextVersion = { version_id: versionId, kind: 'text', text,
-                  created_at: new Date().toISOString(), sha256: CANVAS_LOCAL_VERSION_SHA, origin: { kind: 'user_edit' } };
-                appendNode({ id: makeId('text'), type: 'text', title: entry.title, position: defaultPosition(CANVAS_TEXT_NODE_DEFAULT_SIZE),
-                  z_index: 0, data: { current_version_id: versionId, generation_draft: null, active_run_id: null, display: { scale: 'sm' } } }, null, undefined, [version]);
-              }
-              announceToolNotice('已放到画布');
-            }}
-            onReproduce={asset => void reproduceGenerationAsset(asset)}
-            teamRelatedSha256={teamRelatedSha256}
-            initialTeamLibraryId={teamLibraryId}
           />
           </CanvasSidePanelMotion>
         )}
@@ -6875,6 +6810,16 @@ function CanvasEditorInner({
         )}
         </AnimatePresence>
 
+        <Dialog open={referencesOpen} onOpenChange={setReferencesOpen}><DialogContent className="max-h-[85dvh] overflow-y-auto">
+          <DialogTitle>项目参考库</DialogTitle>
+          {referencesOpen && <ProjectReferenceLibrary visible projectId={projectId} refreshKey={assetsRevision} onAssetsChanged={refreshProjectAssets}
+            onOpen={setReferencePreview} onUse={asset => { void insertCreationAsset(asset.asset_id, {}, selectedNode && selectedDraft ? selectedNode.id : undefined); }} />}
+        </DialogContent></Dialog>
+        <Dialog open={!!referencePreview} onOpenChange={open => { if (!open) setReferencePreview(null); }}><DialogContent>
+          <DialogTitle>{referencePreview?.title}</DialogTitle>
+          {referencePreview && assetMediaContent(referencePreview) && <MediaPreview assetId={referencePreview.asset_id}
+            content={assetMediaContent(referencePreview)!} alt={referencePreview.title} className="max-h-[75vh] w-full object-contain" />}
+        </DialogContent></Dialog>
         {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
 
         <TeamShareDialog

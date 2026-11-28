@@ -1,4 +1,5 @@
 """两个独立 data root、真实回环网关 + 成员本机代理；不调用厂商。"""
+from tests.project_reference_fixtures import seed_prompt, seed_previews
 from contextlib import contextmanager
 from contextvars import ContextVar
 from io import BytesIO
@@ -13,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from character_workflow.lib import creation_assets, data_root, gateway_keys, keys, team_library
+from character_workflow.lib import project_reference_assets as creation_assets, data_root, gateway_keys, keys, team_library
 from character_workflow.lib import team_library_index as idx
 from character_workflow.lib.schemas import TEAM_ASSET_ID_PATTERN, GenerationRecipe
 from character_workflow.lib.team_library_share import share_creation_asset
@@ -44,8 +45,8 @@ def pair(tmp_path, monkeypatch):
         (folder / 'clip.mp4').write_bytes(b'private original video')
         mount = team_library.mount_library(project_id='host-project', path=str(folder), name='画面参考', created_by='林晓')
         team_library.write_profile('林晓')
-        prompt = creation_assets.create_prompt_asset('夕照', [{'kind': 'text', 'text': '山谷夕照'}], ['场景'])
-        creation_assets.add_prompt_previews(prompt.asset_id, [((folder / 'scene.png').read_bytes(), 'image/png')])
+        prompt = seed_prompt('夕照', [{'kind': 'text', 'text': '山谷夕照'}], ['场景'])
+        seed_previews(prompt.asset_id, [((folder / 'scene.png').read_bytes(), 'image/png')])
         share_creation_asset(mount, asset_id=prompt.asset_id, title=prompt.title, tags=[], author='林晓')
         media = creation_assets.store_media_blob((folder / 'scene.png').read_bytes(), 'scene.png', 'image/png')
         generated = creation_assets.create_generation_asset(title='生成参考', tags=[], media=media,

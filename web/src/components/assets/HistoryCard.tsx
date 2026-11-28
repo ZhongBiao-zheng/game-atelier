@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { AddImageIcon, DeleteIcon, DownloadIcon, MoreIcon, PlayIcon } from '@/components/ui/icons';
+import { AddImageIcon, DeleteIcon, DownloadIcon, FavoriteIcon, FolderIcon, MoreIcon, PlayIcon } from '@/components/ui/icons';
 import { useWaveform } from '@/components/canvas/CanvasAudioPlayer';
 import { prefersReducedMotion } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,8 @@ import { mediaRatio } from './AssetMasonry';
 
 export const historyActions = [
   { key: 'reference', label: '用作参考', Icon: AddImageIcon },
+  { key: 'folder', label: '加入文件夹', Icon: FolderIcon },
+  { key: 'favorite', label: '收藏', Icon: FavoriteIcon },
   { key: 'download', label: '下载', Icon: DownloadIcon },
   { key: 'delete', label: '删除', Icon: DeleteIcon },
 ] as const;
@@ -33,10 +35,12 @@ function Waveform({ url }: { url: string }) {
 }
 
 /** arrived：任务刚出结果、出现在顶部的新卡片，挂载时淡入。highlighted：撤销删除后回到原位的卡片，描边约 1.5 秒。 */
-export function HistoryCard({ item, selecting, checked, removing, arrived = false, highlighted = false, busy, onToggle, onPreview, onAction }: {
+export function HistoryCard({ item, selecting, checked, removing, arrived = false, highlighted = false, busy, onToggle, onPreview, onAction, canvasMenu, extraMenu, showTitle }: {
+  extraMenu?: React.ReactNode; canvasMenu?: React.ReactNode; showTitle?: boolean;
   item: HistoryItem; selecting: boolean; checked: boolean; removing: boolean; arrived?: boolean; highlighted?: boolean; busy: boolean;
   onToggle: (range: boolean) => void; onPreview: (sourceRect: DOMRect) => void; onAction: (action: HistoryAction) => void;
 }) {
+  const [menu, setMenu] = useState(false);
   const [duration, setDuration] = useState(item.duration);
   const reduced = prefersReducedMotion();
   // 删除：grid-rows 1fr→0fr 收起并淡出，只动这一张的高度；减弱动态效果时只淡出。
@@ -45,7 +49,7 @@ export function HistoryCard({ item, selecting, checked, removing, arrived = fals
     <div className="min-h-0 overflow-hidden">
     <div className={cn('group relative isolate overflow-hidden rounded-sm bg-card media-edge outline -outline-offset-2 transition-[outline-color]',
       checked || highlighted ? 'outline-primary' : 'outline-transparent')}
-      style={{ aspectRatio: historyRatio(item) }}>
+      onContextMenu={e => { e.preventDefault(); if (!selecting) setMenu(true); }} style={{ aspectRatio: historyRatio(item) }}>
       <Button variant="ghost" aria-label={item.prompt || item.filename}
         className="grid size-full place-items-center overflow-hidden whitespace-normal rounded-sm border-0 hover:bg-transparent hover:backdrop-blur-none p-0 text-left font-normal focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
         onClick={event => selecting || event.shiftKey ? onToggle(event.shiftKey) : onPreview(event.currentTarget.getBoundingClientRect())}>
@@ -61,14 +65,15 @@ export function HistoryCard({ item, selecting, checked, removing, arrived = fals
             {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
           </span>}
       </Button>
+      {showTitle && <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-scrim px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">{item.filename}</span>}
       <div className={cn('absolute inset-x-1.5 top-1.5 flex items-start justify-between pointer-events-none transition-opacity duration-150', !selecting && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100')}>
         <Checkbox aria-label={`选择 ${item.filename}`} checked={checked} disabled={busy}
           className="pointer-events-auto size-5 bg-popover border-muted-foreground history-checkbox"
           onClick={event => onToggle(event.shiftKey)} />
-        {!selecting && <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="更多操作"
+        {!selecting && <DropdownMenu open={menu} onOpenChange={setMenu}><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="更多操作"
           className="pointer-events-auto size-6 rounded-full border-0 bg-scrim text-white"><MoreIcon size="sm" /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">{historyActions.map(({ key, label, Icon }) =>
-            <Fragment key={key}>{key === 'delete' && <DropdownMenuSeparator />}
+          <DropdownMenuContent align="end">{canvasMenu}{historyActions.map(({ key, label, Icon }) =>
+            <Fragment key={key}>{key === 'folder' && extraMenu}{key === 'delete' && <DropdownMenuSeparator />}
               <DropdownMenuItem destructive={key === 'delete'} disabled={busy} onSelect={() => onAction(key)}><Icon />{label}</DropdownMenuItem>
             </Fragment>
           )}</DropdownMenuContent></DropdownMenu>}

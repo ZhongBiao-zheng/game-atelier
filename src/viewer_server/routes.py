@@ -61,9 +61,7 @@ from character_workflow.lib.schemas import (
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     ClipboardAttempt,
     CreationAsset, CreationAssetMetadataUpdate, CreationAssetList, CreationAssetUseRequest,
-    CreationGenerationFromCanvas, CreationGenerationFromJob,
-    CreationMediaPathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
-    Job, JobKind, JobParams, JobStatus, WebEditableJobPatch,
+    CreationMediaPathCreate, Job, JobKind, JobParams, JobStatus, WebEditableJobPatch,
 )
 from viewer_server.errors import asset_state_broken_error
 
@@ -2354,6 +2352,12 @@ def _create_user_job(
             raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
         params.n = image_count
 
+    from character_workflow.lib.library_subjects import expand
+    try:
+        prompt = expand(prompt, params, model_id, mode=body.kind.value)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
     job = Job(
         job_id=job_id or new_job_id(),
         studio_agent_session_id=studio_agent_session_id,
@@ -2749,7 +2753,7 @@ def _raise_canvas_revision_error(error: RuntimeError) -> None:
 
 
 def _raise_creation_asset_error(error: Exception) -> None:
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         CreationAssetDuplicateError,
         CreationAssetStateError,
     )
@@ -2836,7 +2840,7 @@ def post_canvas_classify(project_id: str, payload: CanvasClassifyRequest):
 
 @router.put("/canvas/projects/{project_id}/categories", response_model=CanvasProject)
 def put_canvas_categories(project_id: str, payload: CanvasCategoriesUpdate):
-    from character_workflow.lib.creation_assets import CategoryInUseError, update_canvas_categories
+    from character_workflow.lib.project_reference_assets import CategoryInUseError, update_canvas_categories
     try:
         return update_canvas_categories(project_id, payload.categories)
     except CategoryInUseError as error:
@@ -2850,7 +2854,7 @@ def put_canvas_categories(project_id: str, payload: CanvasCategoriesUpdate):
 
 @router.patch("/creation-assets/{asset_id}", response_model=CreationAsset)
 def patch_creation_asset(asset_id: str, payload: CreationAssetMetadataUpdate):
-    from character_workflow.lib.creation_assets import update_creation_asset_category
+    from character_workflow.lib.project_reference_assets import update_creation_asset_category
     try:
         return update_creation_asset_category(asset_id, payload.category)
     except (KeyError, ValueError) as error:
@@ -2863,38 +2867,22 @@ def get_creation_assets(
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
     has_category: bool | None = Query(default=None),
-    archived: bool = Query(default=False),
 ):
-    from character_workflow.lib.creation_assets import list_creation_assets
+    from character_workflow.lib.project_reference_assets import list_creation_assets
     try:
         return list_creation_assets(
             kind=kind,
             scope=scope,
             project_id=project_id,
             has_category=has_category,
-            archived=archived,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/prompts", response_model=CreationAsset, status_code=201)
-def post_creation_prompt(payload: CreationPromptAssetCreate):
-    from character_workflow.lib.creation_assets import create_prompt_asset
-    try:
-        return create_prompt_asset(
-            payload.title,
-            payload.segments,
-            payload.tags,
-            payload.project_id,
-        )
-    except ValueError as error:
-        _raise_creation_asset_error(error)
-
-
 @router.post("/creation-assets/media/from-path", response_model=CreationAsset, status_code=201)
 def post_creation_media_from_path(payload: CreationMediaPathCreate):
-    from character_workflow.lib.creation_assets import create_media_asset_from_path
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_path
     try:
         return create_media_asset_from_path(
             title=payload.title,
@@ -2916,7 +2904,7 @@ async def post_creation_media_upload(
     project_id: str | None = Form(default=None),
     allow_existing: bool = Form(default=False),
 ):
-    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+    from character_workflow.lib.project_reference_assets import create_media_asset_from_bytes
     try:
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
@@ -2938,213 +2926,18 @@ async def post_creation_media_upload(
         _raise_creation_asset_error(error)
 
 
-def _save_generation(load_source, *, title: str, tags: list[str], project_id: str | None):
-    """生成结果「保存为创作资产」：配方来源与分享共用 generation_recipe，错误按「谁能修」分。
-
-    标题 / 标签在读来源之前单独校验：只有这一步的 ValueError 才是「请求不合规」（422 invalid）。
-    之后冒出来的其他 ValueError（坏 job 文件的 JSONDecodeError / ValidationError 等）是本机数据
-    故障，不翻译，照常 500 带 traceback。RecipeSourceError / CreationAssetStateError /
-    CanvasDocumentError 都是 ValueError 的子类，各自按声明的语义接。
-    """
-    from character_workflow.lib.canvas_projects import CanvasDocumentError
-    from character_workflow.lib.creation_assets import (
-        CreationAssetStateError,
-        _normalize_tags,
-        _required_text,
-    )
-    from character_workflow.lib.generation_recipe import (
-        RecipeSourceError,
-        RecipeSourceNotFound,
-        save_generation_asset,
-    )
-    try:
-        clean_title, clean_tags = _required_text(title, "资产标题"), _normalize_tags(tags)
-    except ValueError as error:
-        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
-    try:
-        return save_generation_asset(
-            load_source(), title=clean_title, tags=clean_tags, project_id=project_id,
-        )
-    except RecipeSourceError as error:
-        raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
-    except (RecipeSourceNotFound, KeyError):
-        raise HTTPException(404, detail="找不到这次生成的记录或画布结果") from None
-    except CreationAssetStateError as error:
-        raise asset_state_broken_error(error) from error
-    except CanvasDocumentError as error:
-        # 画布存档不见了 / 记着别的项目（CanvasStorageError）→ 500，不是请求的错。
-        raise _canvas_document_http_error(error) from error
-
-
-# 与 `POST /creation-assets/{asset_id}/<动作>` 段数相同，靠末段字面量区分（from-job / from-canvas
-# 不是任何 {asset_id} 路由的动作名）；给 {asset_id} 加新动作时不能取这两个名字。
-@router.post(
-    "/creation-assets/generation/from-job", response_model=CreationAsset, status_code=201
-)
-def post_creation_generation_from_job(payload: CreationGenerationFromJob):
-    from character_workflow.lib.generation_recipe import recipe_from_job_output
-    return _save_generation(
-        lambda: recipe_from_job_output(payload.job_id, payload.output_index),
-        title=payload.title, tags=payload.tags, project_id=payload.project_id,
-    )
-
-
-@router.post(
-    "/creation-assets/generation/from-canvas", response_model=CreationAsset, status_code=201
-)
-def post_creation_generation_from_canvas(payload: CreationGenerationFromCanvas):
-    from character_workflow.lib.generation_recipe import recipe_from_canvas_result
-    return _save_generation(
-        lambda: recipe_from_canvas_result(
-            payload.canvas_project_id, payload.node_id, payload.version_id,
-        ),
-        title=payload.title, tags=payload.tags, project_id=payload.canvas_project_id,
-    )
-
-
-@router.put("/creation-assets/{asset_id}/prompt", response_model=CreationAsset)
-def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate):
-    from character_workflow.lib.creation_assets import update_prompt_asset
-    try:
-        return update_prompt_asset(
-            asset_id,
-            title=payload.title,
-            segments=payload.segments,
-            tags=payload.tags,
-        )
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.put("/creation-assets/{asset_id}/media", response_model=CreationAsset)
-async def put_creation_media_asset(
-    asset_id: str,
-    title: str = Form(...),
-    tags: str = Form(default="[]"),
-    file: UploadFile | None = File(default=None),
-):
-    from character_workflow.lib.creation_assets import update_media_asset_from_bytes
-    try:
-        parsed_tags = json.loads(tags)
-        if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
-            raise ValueError("tags 必须是字符串数组")
-        filename = (file.filename or "media") if file is not None else "media"
-        body: bytes | None = None
-        mime_type = file.content_type if file is not None else None
-        if file is not None:
-            converted_name, body = await _convert_image_upload(filename, await file.read())
-            if converted_name != filename:
-                filename, mime_type = converted_name, _converted_mime(converted_name)
-        return await asyncio.to_thread(
-            update_media_asset_from_bytes,
-            asset_id,
-            title=title,
-            tags=parsed_tags,
-            body=body,
-            filename=filename,
-            mime_type=mime_type,
-        )
-    except (json.JSONDecodeError, KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-class PromptPreviewOrder(BaseModel):
-    files: list[str] = Field(max_length=8)
-
-
-@router.post("/creation-assets/{asset_id}/previews", response_model=CreationAsset)
-async def post_prompt_previews(asset_id: str, files: list[UploadFile] = File(...),
-                               replace_file: str | None = Form(default=None)):
-    from character_workflow.lib.creation_assets import (
-        PROMPT_PREVIEW_MAX_BYTES, add_prompt_previews,
-    )
-    try:
-        if not 1 <= len(files) <= 8:
-            raise ValueError("请选择 1–8 张效果图")
-        uploads = []
-        for file in files:
-            body = await file.read(PROMPT_PREVIEW_MAX_BYTES + 1)
-            if len(body) > PROMPT_PREVIEW_MAX_BYTES:
-                raise ValueError("单张效果图不能超过 20MB")
-            uploads.append((body, file.content_type or ""))
-        return await asyncio.to_thread(add_prompt_previews, asset_id, uploads, replace_file=replace_file)
-    except (KeyError, FileNotFoundError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.put("/creation-assets/{asset_id}/previews/order", response_model=CreationAsset)
-def put_prompt_preview_order(asset_id: str, payload: PromptPreviewOrder):
-    from character_workflow.lib.creation_assets import reorder_prompt_previews
-    try:
-        return reorder_prompt_previews(asset_id, payload.files)
-    except (KeyError, FileNotFoundError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.delete("/creation-assets/{asset_id}/previews/{file}", response_model=CreationAsset)
-def delete_prompt_preview_route(asset_id: str, file: str):
-    from character_workflow.lib.creation_assets import delete_prompt_preview
-    try:
-        return delete_prompt_preview(asset_id, file)
-    except (KeyError, FileNotFoundError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-def _prompt_preview_response(asset_id: str, file: str, width: int | None = None):
-    from character_workflow.lib.creation_assets import prompt_preview_bytes
-    try:
-        body, mime = prompt_preview_bytes(asset_id, file, width)
-        return Response(body, media_type=mime, headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
-            "X-Content-Type-Options": "nosniff",
-        })
-    except (KeyError, FileNotFoundError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.get("/creation-assets/{asset_id}/previews/{file}")
-def get_prompt_preview(asset_id: str, file: str):
-    return _prompt_preview_response(asset_id, file)
-
-
-@router.get("/creation-assets/{asset_id}/previews/{file}/thumb")
-def get_prompt_preview_thumb(asset_id: str, file: str, w: int = Query(default=256, ge=1, le=1024)):
-    return _prompt_preview_response(asset_id, file, w)
-
-
 @router.post("/creation-assets/{asset_id}/use", response_model=CreationAsset)
 def post_creation_asset_use(asset_id: str, payload: CreationAssetUseRequest):
-    from character_workflow.lib.creation_assets import mark_creation_asset_used
+    from character_workflow.lib.project_reference_assets import mark_creation_asset_used
     try:
         return mark_creation_asset_used(asset_id, payload.project_id)
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/{asset_id}/archive", status_code=204)
-def archive_creation_asset_route(asset_id: str) -> Response:
-    """D13：个人资产「删除」改为归档，可在「已归档」里还原。"""
-    from character_workflow.lib.creation_assets import set_creation_assets_archived
-    try:
-        set_creation_assets_archived([asset_id], True)
-        return Response(status_code=204)
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post("/creation-assets/{asset_id}/restore", status_code=204)
-def restore_creation_asset_route(asset_id: str) -> Response:
-    from character_workflow.lib.creation_assets import set_creation_assets_archived
-    try:
-        set_creation_assets_archived([asset_id], False)
-        return Response(status_code=204)
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
 @router.get("/creation-assets/{asset_id}/content")
 def get_creation_asset_content(asset_id: str):
-    from character_workflow.lib.creation_assets import creation_asset_media_path
+    from character_workflow.lib.project_reference_assets import creation_asset_media_path
     try:
         return FileResponse(creation_asset_media_path(asset_id))
     except (KeyError, ValueError) as error:
@@ -3154,7 +2947,7 @@ def get_creation_asset_content(asset_id: str):
 @router.get("/creation-assets/{asset_id}/inputs/{order}")
 def get_creation_asset_input(asset_id: str, order: int):
     """生成资产快照里第 order 份参考的本体；prompt / media 资产与越界都是 404。"""
-    from character_workflow.lib.creation_assets import creation_asset_input_path
+    from character_workflow.lib.project_reference_assets import creation_asset_input_path
     try:
         path, mime_type = creation_asset_input_path(asset_id, order)
         return FileResponse(path, media_type=mime_type)
@@ -3173,7 +2966,7 @@ def post_canvas_creation_asset_insert(
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
-    from character_workflow.lib.creation_assets import (
+    from character_workflow.lib.project_reference_assets import (
         CreationAssetStateError,
         insert_creation_asset_into_canvas,
     )
@@ -3212,7 +3005,7 @@ def post_canvas_creation_asset_reproduce(
 ):
     """画布复刻：生成资产 → 参考输入节点 + 生成配置节点 + 连线，不自动 Run。"""
     from character_workflow.lib.canvas_reproduce import reproduce_generation_asset_into_canvas
-    from character_workflow.lib.creation_assets import CreationAssetStateError
+    from character_workflow.lib.project_reference_assets import CreationAssetStateError
     try:
         document = reproduce_generation_asset_into_canvas(
             project_id=project_id,

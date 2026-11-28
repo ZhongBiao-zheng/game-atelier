@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AddIcon, AiIcon, MoreIcon, UploadIcon } from '@/components/ui/icons';
 import { classifyCreationAssets, listCreationAssets, updateCreationAssetCategory, uploadMediaCreationAsset } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import { MediaPreview } from './CreationAssetCards';
+import { MediaPreview } from './ProjectReferenceMedia';
 import { rememberedModel } from '@/components/agent/useWorkspaceAgent';
 import { Button } from '@/components/ui/button';
 import { assetMediaContent, CREATION_ASSET_DRAG_TYPE, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';

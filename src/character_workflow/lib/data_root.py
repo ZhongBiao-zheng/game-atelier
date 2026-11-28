@@ -57,6 +57,10 @@ def canvases_dir() -> Path:
     return resolve_data_root() / "canvases"
 
 
+def project_references_dir() -> Path:
+    return resolve_data_root() / "project-references"
+
+
 def creation_assets_dir() -> Path:
     return resolve_data_root() / "creation-assets"
 

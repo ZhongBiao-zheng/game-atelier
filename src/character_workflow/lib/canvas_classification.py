@@ -11,7 +11,7 @@ from character_workflow.lib import keys
 from character_workflow.lib.callers import openai_text
 from character_workflow.lib.canvas_agent_models import CHAT_PROVIDERS, enabled_text_models
 from character_workflow.lib.canvas_projects import read_canvas_project
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     asset_media_content, creation_asset_media_path, get_creation_asset,
 )
 from character_workflow.lib.schemas import CanvasCategorySuggestion, CanvasClassifyRequest

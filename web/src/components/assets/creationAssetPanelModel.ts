@@ -1,7 +1,5 @@
+import type { HistoryReference } from '@/api/history';
 import type { CreationPromptSegment } from '@/schema/creationAssets';
-
-/** 本机创作资产、团队库与项目参考库视图。 */
-export type CreationAssetPanelMode = 'prompt' | 'media' | 'team' | 'reference';
 
 /** 生成结果的来源：有它时保存为带配方的生成资产，而不是普通媒体。 */
 export type CreationGenerationSource =
@@ -33,4 +31,15 @@ export type CreationAssetSaveRequest =
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export interface CreationAssetPanelProps {
+  className?: string;
+  projectId?: string;
+  openLibrary?: boolean;
+  saveRequest?: CreationAssetSaveRequest | null;
+  onSaveRequestHandled?: (requestId: string) => void;
+  onClose: () => void;
+  onHistoryReference: (items: HistoryReference[], placeOnCanvas?: boolean) => Promise<void>;
+  onSubject?: (token: string) => void;
 }

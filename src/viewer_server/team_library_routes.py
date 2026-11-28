@@ -19,7 +19,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
 from character_workflow.lib import team_library_specs
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     CreationAssetDuplicateError,
     CreationAssetStateError,
     get_creation_asset,

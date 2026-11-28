@@ -103,7 +103,7 @@ def place(obstacles: list[Rect], anchor: Rect | None, width: float, height: floa
 
 def _estimated_size(change: dict, drafts: dict[str, dict]) -> tuple[float, float]:
     if change.get("op") == "add_asset_node":
-        from character_workflow.lib.creation_assets import asset_media_content, get_creation_asset, creation_asset_media_path
+        from character_workflow.lib.project_reference_assets import asset_media_content, get_creation_asset, creation_asset_media_path
         from character_workflow.lib.canvas_projects import _display_image_dimensions
         try:
             asset = get_creation_asset(change["asset_id"])

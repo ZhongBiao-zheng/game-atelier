@@ -1463,6 +1463,11 @@ def _commit_frozen_run(
         and not _surface_has_content(current, surface)
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
+    from character_workflow.lib.library_subjects import expand
+    final_prompt = expand(final_prompt, job_params, model.id, mode=mode)
+    if job_params.subjects:
+        normalized = {**normalized, "subjects": [s.model_dump() for s in job_params.subjects],
+                      "subject_prompt": result_draft.prompt if result_draft else job_params.subject_prompt}
     snapshot_payload = {
         "snapshot_version": 1,
         "surface_node_id": surface.id,

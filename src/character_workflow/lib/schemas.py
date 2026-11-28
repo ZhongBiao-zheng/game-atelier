@@ -177,6 +177,13 @@ class EditInput(BaseModel):
     path: str
 
 
+class SubjectSnapshot(BaseModel):
+    id: str
+    name: str
+    revision: int
+    item_ids: list[str]
+
+
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     workflow_inputs: dict[str, str | int | float | bool | None] | None = None
@@ -188,6 +195,8 @@ class JobParams(BaseModel):
     # 出图卡片展示用 —— 让画师在确认前看到完整调用细节
     vendor: str | None = None
     n: int | None = None
+    subjects: list[SubjectSnapshot] | None = Field(default=None, exclude_if=lambda value: value is None)
+    subject_prompt: str | None = Field(default=None, exclude_if=lambda value: value is None)
     # Studio 提交时冻结的可核实人民币总价；无法计算时不写。
     estimated_cost_cny: float | None = Field(default=None, ge=0)
     # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
@@ -2788,26 +2797,6 @@ class CanvasCreationAssetInsertRequest(BaseModel):
     position: CanvasPoint
     variable_values: dict[str, str] = Field(default_factory=dict)
     target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
-
-
-class CreationGenerationFromJob(BaseModel):
-    """Studio 结果「保存为创作资产」：output_index 是 Job.output_paths 的下标。"""
-    model_config = ConfigDict(extra="forbid")
-    job_id: str = Field(min_length=1, max_length=160)
-    output_index: int = Field(ge=0)
-    title: str = Field(min_length=1, max_length=120)
-    tags: list[str] = Field(default_factory=list, max_length=20)
-    project_id: str | None = Field(default=None, min_length=1, max_length=160)
-
-
-class CreationGenerationFromCanvas(BaseModel):
-    """画布结果「保存为创作资产」；project_id 取 canvas_project_id，不单独收。"""
-    model_config = ConfigDict(extra="forbid")
-    canvas_project_id: str = Field(min_length=1, max_length=160)
-    node_id: str = Field(min_length=1, max_length=160)
-    version_id: str = Field(min_length=1, max_length=160)
-    title: str = Field(min_length=1, max_length=120)
-    tags: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CanvasReproduceRequest(BaseModel):

@@ -5,8 +5,6 @@ import {
   fetchCreationAssetStaleness,
   fetchCreationAssetStalenessBatch,
   readoptCreationAsset,
-  saveGenerationFromCanvas,
-  saveGenerationFromJob,
   TeamSourceWithdrawnError,
 } from './creationAssets';
 import { ApiError } from './http';
@@ -33,34 +31,6 @@ describe('creationAssets api', () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: 'stale' }), { status: 200 }));
     await expect(fetchCreationAssetStaleness('asset-1')).resolves.toBe('stale');
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/creation-assets/asset-1/staleness');
-  });
-
-  it('saves a Studio job output as a generation asset', async () => {
-    fetchMock.mockResolvedValue(json({ asset_id: 'a1', kind: 'generation' }, 201));
-    const body = { job_id: 'job-1', output_index: 1, title: '白犬', tags: ['角色'], project_id: 'p1' };
-    const asset = await saveGenerationFromJob(body);
-    expect(asset.asset_id).toBe('a1');
-    expect(call().url).toBe('/api/creation-assets/generation/from-job');
-    expect(call().init.method).toBe('POST');
-    expect(JSON.parse(String(call().init.body))).toEqual(body);
-  });
-
-  it('saves a canvas result as a generation asset', async () => {
-    fetchMock.mockResolvedValue(json({ asset_id: 'a2' }, 201));
-    const body = { canvas_project_id: 'c1', node_id: 'n1', version_id: 'v1', title: '白犬', tags: [] };
-    await saveGenerationFromCanvas(body);
-    expect(call().url).toBe('/api/creation-assets/generation/from-canvas');
-    expect(call().init.method).toBe('POST');
-    expect(JSON.parse(String(call().init.body))).toEqual(body);
-  });
-
-  it('surfaces the stable error code when a job output cannot become a generation asset', async () => {
-    fetchMock.mockResolvedValue(json({ detail: { code: 'not_shareable', message: '不是生成结果' } }, 422));
-    const error = await saveGenerationFromJob({ job_id: 'j', output_index: 0, title: 't', tags: [] })
-      .catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe('not_shareable');
-    expect((error as ApiError).message).toContain('不是生成结果');
   });
 
   it('reads staleness of many assets in one request', async () => {

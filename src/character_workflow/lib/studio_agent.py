@@ -24,7 +24,7 @@ from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_agent_schema import MAX_BATCH_GENERATIONS
 from character_workflow.lib.canvas_agent_tools import _size_checks, _transparency
 from character_workflow.lib.canvas_tool_common import CanvasToolError
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     asset_media_content,
     creation_asset_media_path,
     get_creation_asset,

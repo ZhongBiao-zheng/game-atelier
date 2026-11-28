@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.project_reference_fixtures import seed_prompt, remove_fixture_record
 import base64
 import re
 
@@ -13,13 +14,11 @@ from character_workflow.lib.canvas_projects import (
     create_canvas_project,
     read_canvas_document,
 )
-from character_workflow.lib.creation_assets import (
+from character_workflow.lib.project_reference_assets import (
     CreationAssetDuplicateError,
     create_adopted_asset,
     create_media_asset_from_bytes,
-    create_prompt_asset,
     creation_asset_media_path,
-    delete_creation_asset,
     get_creation_asset,
     find_adopted_asset,
     find_media_asset_by_sha256,
@@ -29,9 +28,6 @@ from character_workflow.lib.creation_assets import (
     list_creation_assets,
     mark_creation_asset_used,
     migrate_legacy_canvas_libraries,
-    render_prompt_segments,
-    update_media_asset_from_bytes,
-    update_prompt_asset,
 )
 from character_workflow.lib.schemas import (
     TEAM_ASSET_ID_PATTERN,
@@ -72,41 +68,19 @@ def _segments(subject: str = "白色三头犬") -> list[dict[str, str]]:
     ]
 
 
-def test_prompt_asset_has_one_mutable_content_and_renders_variables():
-    created = create_prompt_asset("地狱犬角色", _segments(), ["角色", "角色", "像素风"])
-    assert created.kind == "prompt"
-    assert created.tags == ["角色", "像素风"]
-    assert created.model_dump().keys() >= {"asset_id", "content"}
-    assert "versions" not in created.model_dump()
-    assert render_prompt_segments(created.content.segments, {}) == "一只白色三头犬站在火山口中。"
-    assert render_prompt_segments(
-        created.content.segments,
-        {"主体": "机械犬", "场景": "月面"},
-    ) == "一只机械犬站在月面中。"
-
-    updated = update_prompt_asset(
-        created.asset_id,
-        title="地狱犬模板",
-        segments=_segments("毛绒三头犬"),
-        tags=["角色"],
-    )
-    assert updated.asset_id == created.asset_id
-    assert updated.title == "地狱犬模板"
-    assert render_prompt_segments(updated.content.segments, {}) == "一只毛绒三头犬站在火山口中。"
-
 
 def test_project_scope_uses_last_used_sorting(monkeypatch):
     # 排序靠时间戳先后；Windows 上连续两次 datetime.now() 可能落在同一个时钟刻度，换成严格递增的时钟。
     import itertools
     from datetime import datetime, timedelta, timezone
 
-    import character_workflow.lib.creation_assets as creation_assets
+    import character_workflow.lib.project_reference_assets as creation_assets
     ticks = itertools.count()
     monkeypatch.setattr(creation_assets, "_now", lambda: (
         datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=next(ticks))
     ).isoformat())
-    first = create_prompt_asset("先创建", _segments(), ["角色"])
-    second = create_prompt_asset("后创建", _segments("狐狸"), ["角色"], project_id="canvas-a")
+    first = seed_prompt("先创建", _segments(), ["角色"])
+    second = seed_prompt("后创建", _segments("狐狸"), ["角色"], project_id="canvas-a")
 
     mark_creation_asset_used(first.asset_id, project_id="canvas-a")
     rows = list_creation_assets(scope="project", project_id="canvas-a")
@@ -116,7 +90,7 @@ def test_project_scope_uses_last_used_sorting(monkeypatch):
 def test_asset_use_count_omits_zero_and_counts_concurrent_uses():
     from concurrent.futures import ThreadPoolExecutor
 
-    created = create_prompt_asset("使用计数", _segments(), [])
+    created = seed_prompt("使用计数", _segments(), [])
     assert created.use_count == 0
     assert "use_count" not in created.model_dump(mode="json")
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -148,7 +122,7 @@ def test_media_dimensions_survive_storage_and_legacy_content_remains_readable():
     assert parsed.model_dump(mode="json") == legacy
 
 
-def test_media_assets_are_deduplicated_and_edit_in_place():
+def test_project_media_assets_are_deduplicated():
     created = create_media_asset_from_bytes(
         title="测试图",
         body=_PNG,
@@ -166,44 +140,6 @@ def test_media_assets_are_deduplicated_and_edit_in_place():
         )
     assert duplicate.value.asset_id == created.asset_id
 
-    updated = update_media_asset_from_bytes(
-        created.asset_id,
-        title="改名后的图",
-        tags=["新标签"],
-    )
-    assert updated.asset_id == created.asset_id
-    assert updated.content == created.content
-    assert updated.title == "改名后的图"
-
-    old_blob = creation_asset_media_path(created.asset_id)
-    replaced = update_media_asset_from_bytes(
-        created.asset_id,
-        title="替换后的图",
-        tags=["新标签"],
-        body=_PNG + b"replacement",
-        filename="replacement.png",
-        mime_type="image/png",
-    )
-    assert replaced.asset_id == created.asset_id
-    assert creation_asset_media_path(created.asset_id).is_file()
-    assert not old_blob.exists()
-
-
-def test_physical_delete_removes_catalog_entry_and_orphan_blob():
-    created = create_media_asset_from_bytes(
-        title="待删除",
-        body=_PNG,
-        filename="delete.png",
-        mime_type="image/png",
-        tags=[],
-    )
-    blob = creation_asset_media_path(created.asset_id)
-    assert blob.is_file()
-
-    delete_creation_asset(created.asset_id)
-
-    assert list_creation_assets().assets == []
-    assert not blob.exists()
 
 
 def test_legacy_canvas_prompts_and_images_migrate_once(isolated_data_root):
@@ -255,23 +191,7 @@ def test_legacy_canvas_prompts_and_images_migrate_once(isolated_data_root):
     assert migrate_legacy_canvas_libraries() == 0
 
 
-def test_creation_asset_http_api_exposes_single_content_edit_and_delete(client: TestClient):
-    created = client.post("/api/creation-assets/prompts", json={
-        "title": "镜头模板",
-        "segments": _segments(),
-        "tags": ["镜头"],
-    })
-    assert created.status_code == 201, created.json()
-    prompt = created.json()
-
-    updated = client.put(
-        f"/api/creation-assets/{prompt['asset_id']}/prompt",
-        json={"title": "镜头资产", "segments": _segments("机械犬"), "tags": ["构图"]},
-    )
-    assert updated.status_code == 200, updated.json()
-    assert updated.json()["asset_id"] == prompt["asset_id"]
-    assert "versions" not in updated.json()
-
+def test_project_reference_http_upload_and_content(client: TestClient):
     image = client.post(
         "/api/creation-assets/media/upload",
         files={"file": ("dog.png", _PNG, "image/png")},
@@ -283,21 +203,10 @@ def test_creation_asset_http_api_exposes_single_content_edit_and_delete(client: 
     assert content.status_code == 200
     assert content.content == _PNG
 
-    # D13：删除改为归档，「已归档」里可还原；不再提供物理删除。
-    archived = client.post(f"/api/creation-assets/{prompt['asset_id']}/archive")
-    assert archived.status_code == 204
-    listed = client.get("/api/creation-assets").json()["assets"]
-    assert prompt["asset_id"] not in [asset["asset_id"] for asset in listed]
-    shelf = client.get("/api/creation-assets", params={"archived": "true"}).json()["assets"]
-    assert [asset["asset_id"] for asset in shelf] == [prompt["asset_id"]]
-    assert client.post(f"/api/creation-assets/{prompt['asset_id']}/restore").status_code == 204
-    assert prompt["asset_id"] in [asset["asset_id"] for asset in client.get("/api/creation-assets").json()["assets"]]
-    assert client.delete(f"/api/creation-assets/{prompt['asset_id']}").status_code in {403, 405}
-
 
 def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestClient):
     project = create_canvas_project("资产画布")
-    prompt = create_prompt_asset("镜头", _segments(), ["镜头"])
+    prompt = seed_prompt("镜头", _segments(), ["镜头"])
 
     inserted = client.post(
         f"/api/canvas/projects/{project.project_id}/creation-assets/{prompt.asset_id}/insert",
@@ -313,13 +222,7 @@ def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestCli
     )
     assert frozen["origin"] == {"kind": "creation_asset_snapshot", "title": "镜头"}
 
-    update_prompt_asset(
-        prompt.asset_id,
-        title="改名后的资产",
-        segments=_segments("狐狸"),
-        tags=[],
-    )
-    delete_creation_asset(prompt.asset_id)
+    remove_fixture_record(prompt.asset_id)
     unchanged = read_canvas_document(project.project_id)
     assert unchanged.content_versions[node["data"]["current_version_id"]].text == frozen["text"]
     assert unchanged.content_versions[node["data"]["current_version_id"]].origin.title == "镜头"
@@ -553,7 +456,7 @@ def _newer_origin(asset: CreationAsset) -> AdoptionOrigin:
 
 
 def test_replace_adopted_asset_overwrites_content_and_keeps_identity(isolated_data_root):
-    from character_workflow.lib.creation_assets import replace_adopted_asset
+    from character_workflow.lib.project_reference_assets import replace_adopted_asset
 
     old_body, new_body = _png_of((1, 2, 3)), _png_of((4, 5, 6))
     asset = mark_creation_asset_used(_adopted_media(old_body).asset_id, "p2")
@@ -575,10 +478,10 @@ def test_replace_adopted_asset_overwrites_content_and_keeps_identity(isolated_da
 
 
 def test_replace_adopted_asset_keeps_blob_still_used_elsewhere(isolated_data_root):
-    from character_workflow.lib.creation_assets import replace_adopted_asset
+    from character_workflow.lib.project_reference_assets import replace_adopted_asset
 
     shared = _png_of((7, 8, 9))
-    from character_workflow.lib.creation_assets import create_generation_asset
+    from character_workflow.lib.project_reference_assets import create_generation_asset
     from character_workflow.lib.schemas import GenerationRecipe
 
     asset = _adopted_media(shared)
@@ -602,7 +505,7 @@ def test_replace_adopted_asset_keeps_blob_still_used_elsewhere(isolated_data_roo
 
 
 def test_replace_adopted_asset_rejects_local_missing_and_blobless(isolated_data_root):
-    from character_workflow.lib.creation_assets import replace_adopted_asset
+    from character_workflow.lib.project_reference_assets import replace_adopted_asset
 
     local = create_media_asset_from_bytes(
         title="本机", body=_png_of((1, 1, 1)), filename="l.png", mime_type="image/png", tags=[],
@@ -620,7 +523,7 @@ def test_replace_adopted_asset_rejects_local_missing_and_blobless(isolated_data_
             adopted_from=adopted.adopted_from,
         )
     ghost = content.model_copy(update={
-        "sha256": "e" * 64, "path": f"creation-assets/blobs/{'e' * 64}.png",
+        "sha256": "e" * 64, "path": f"project-references/blobs/{'e' * 64}.png",
     })
     with pytest.raises(FileNotFoundError):
         replace_adopted_asset(
@@ -632,7 +535,7 @@ def test_replace_adopted_asset_rejects_local_missing_and_blobless(isolated_data_
 
 def test_replace_adopted_raw_asset_rejects_content_already_in_library(isolated_data_root):
     """原始文件按内容去重：新内容已是另一条媒体资产，就不能再覆盖出第二份。"""
-    from character_workflow.lib.creation_assets import replace_adopted_asset
+    from character_workflow.lib.project_reference_assets import replace_adopted_asset
 
     taken = _png_of((5, 5, 5))
     existing = create_media_asset_from_bytes(
