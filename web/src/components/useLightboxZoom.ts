@@ -1,7 +1,21 @@
-import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent, type TransitionEvent } from 'react';
+import { wheelGestureZooms } from '@/lib/canvasTrackpad';
+import { prefersReducedMotion } from '@/lib/motion';
 
 export const LIGHTBOX_ZOOM_STEP = 1.12;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+// 离散缩放（预设、键盘、双击）是屏上 A→B 的位移：slow + in-out。跟手的滚轮、拖动不加过渡。
+const ZOOM_TRANSITION = 'transform var(--motion-slow) var(--ease-atelier-in-out)';
+
+/** 过渡中途平面实际所在的位置：computed transform 是 matrix() 或 matrix3d()。 */
+function visualTransform(element: HTMLElement) {
+  const value = getComputedStyle(element).transform;
+  if (!value || value === 'none') return null;
+  const n = value.slice(value.indexOf('(') + 1, -1).split(',').map(Number);
+  if (n.length === 6) return { scale: n[0], x: n[4], y: n[5] };
+  if (n.length === 16) return { scale: n[0], x: n[12], y: n[13] };
+  return null;
+}
 
 export function useLightboxZoom(src: string) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -9,8 +23,11 @@ export function useLightboxZoom(src: string) {
   const image = useRef<HTMLImageElement>(null);
   const view = useRef({ scale: null as number | null, x: 0, y: 0 });
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+  const animating = useRef(false);
   const [preset, setPreset] = useState<null | 1 | 2 | 'custom'>(null);
   const [percent, setPercent] = useState(100);
+  // 整张图在原尺寸下就放得下（fit 封顶为 1）：「适配」与「100%」画面相同。
+  const [fitsWhole, setFitsWhole] = useState(false);
   const reported = useRef(100);
 
   const measure = useCallback(() => {
@@ -23,7 +40,7 @@ export function useLightboxZoom(src: string) {
   }, []);
 
   const geometry = useRef<ReturnType<typeof measure>>();
-  const paint = useCallback((size = measure()) => {
+  const paint = useCallback((size = measure(), animated = false) => {
     geometry.current = size;
     const state = view.current;
     if (!size || !plane.current || !viewport.current) return;
@@ -32,8 +49,14 @@ export function useLightboxZoom(src: string) {
     const my = Math.max(0, (size.height * scale - size.rect.height) / 2);
     state.x = clamp(state.x, -mx, mx);
     state.y = clamp(state.y, -my, my);
+    // 过渡进行中再换目标，浏览器从当前视觉位置接着过渡。
+    if (animated && !prefersReducedMotion()) {
+      plane.current.style.transition = ZOOM_TRANSITION;
+      animating.current = true;
+    }
     plane.current.style.transform = `translate3d(${state.x}px,${state.y}px,0) scale(${scale / size.fit})`;
     viewport.current.dataset.pannable = String(Boolean(mx || my));
+    setFitsWhole(size.fit >= 1);
     const rounded = Math.round(scale * 100);
     if (reported.current !== rounded) {
       reported.current = rounded;
@@ -41,7 +64,27 @@ export function useLightboxZoom(src: string) {
     }
   }, [measure]);
 
-  const zoomTo = useCallback((next: number | null, point?: { x: number; y: number }) => {
+  /** 跟手操作（滚轮、捏合、拖动）开始：去掉过渡，从平面当前的视觉位置接上，不先跳到上一次过渡的终点。 */
+  const settle = useCallback(() => {
+    const el = plane.current;
+    if (!animating.current || !el) return;
+    animating.current = false;
+    const size = geometry.current;
+    const visual = visualTransform(el);
+    el.style.removeProperty('transition');
+    if (!size || !visual) return;
+    const state = view.current;
+    const scale = visual.scale * size.fit;
+    if (Math.abs(scale - (state.scale ?? size.fit)) > 1e-3) {
+      state.scale = scale;
+      setPreset('custom');
+    }
+    state.x = visual.x;
+    state.y = visual.y;
+    paint(size);
+  }, [paint]);
+
+  const zoomTo = useCallback((next: number | null, point?: { x: number; y: number }, animated = true) => {
     const size = measure();
     if (!size) return;
     const state = view.current;
@@ -52,11 +95,11 @@ export function useLightboxZoom(src: string) {
     const y = point ? point.y - size.rect.top - size.rect.height / 2 : 0;
     view.current = { scale, x: scale === null ? 0 : x - factor * (x - state.x),
       y: scale === null ? 0 : y - factor * (y - state.y) };
-    paint(size);
+    paint(size, animated);
   }, [measure, paint]);
-  const zoomBy = useCallback((factor: number, point?: { x: number; y: number }) => {
+  const zoomBy = useCallback((factor: number, point?: { x: number; y: number }, animated = true) => {
     const scale = view.current.scale ?? measure()?.fit;
-    if (scale) zoomTo(scale * factor, point);
+    if (scale) zoomTo(scale * factor, point, animated);
   }, [measure, zoomTo]);
 
   useLayoutEffect(() => {
@@ -64,25 +107,37 @@ export function useLightboxZoom(src: string) {
     if (!el) return;
     view.current = { scale: null, x: 0, y: 0 };
     drag.current = null;
+    animating.current = false;
     delete el.dataset.dragging;
-    if (plane.current) plane.current.style.removeProperty('transform');
+    if (plane.current) {
+      plane.current.style.removeProperty('transform');
+      plane.current.style.removeProperty('transition');
+    }
     setPreset(null);
     reported.current = 100;
     setPercent(100);
     paint();
     const observer = new ResizeObserver(() => paint());
     observer.observe(el);
+    // 鼠标、触控板与画布同一套判别（lib/canvasTrackpad）：捏合缩放；触控板双指滑动平移。
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
-      if (!event.deltaY) return;
+      settle();
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1;
+      if (!wheelGestureZooms(event)) {
+        view.current.x -= event.deltaX * unit;
+        view.current.y -= event.deltaY * unit;
+        paint(geometry.current);
+        return;
+      }
+      if (!event.deltaY) return;
       const delta = event.deltaY * unit;
       zoomBy(event.ctrlKey ? Math.exp(-delta / 100) : LIGHTBOX_ZOOM_STEP ** (-delta / 100),
-        { x: event.clientX, y: event.clientY });
+        { x: event.clientX, y: event.clientY }, false);
     };
     el.addEventListener('wheel', wheel, { passive: false });
     return () => { el.removeEventListener('wheel', wheel); observer.disconnect(); };
-  }, [src, paint, zoomBy]);
+  }, [src, paint, zoomBy, settle]);
 
   const endDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.id !== event.pointerId) return;
@@ -90,9 +145,16 @@ export function useLightboxZoom(src: string) {
     delete event.currentTarget.dataset.dragging;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return { viewport, plane, image, percent, preset, paint, zoomTo, zoomBy, handlers: {
+  return { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, handlers: {
     onClick: (event: React.MouseEvent<HTMLDivElement>) => { if (event.currentTarget.dataset.pannable === 'true') event.stopPropagation(); },
-    onDoubleClick: () => zoomTo(view.current.scale === 1 ? null : 1),
+    // 朝双击处放大：想看的那块细节留在指针下。
+    onDoubleClick: (event: React.MouseEvent<HTMLDivElement>) =>
+      zoomTo(view.current.scale === 1 ? null : 1, { x: event.clientX, y: event.clientY }),
+    onTransitionEnd: (event: TransitionEvent<HTMLDivElement>) => {
+      if (event.target !== plane.current || event.propertyName !== 'transform') return;
+      animating.current = false;
+      plane.current.style.removeProperty('transition');
+    },
     onPointerDown: (event: PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0 || event.currentTarget.dataset.pannable !== 'true' || drag.current) return;
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -102,6 +164,8 @@ export function useLightboxZoom(src: string) {
     onPointerMove: (event: PointerEvent<HTMLDivElement>) => {
       const previous = drag.current;
       if (previous?.id !== event.pointerId) return;
+      // 真动起来才打断过渡：双击的两次按下不算拖动。
+      settle();
       view.current.x += event.clientX - previous.x;
       view.current.y += event.clientY - previous.y;
       previous.x = event.clientX;

@@ -69,15 +69,17 @@ it.each([
   } as unknown as ReturnType<typeof motion.animate>);
   const { unmount } = render(<Lightbox src="/image.png" sourceRect={rect} onClose={vi.fn()} />);
   await loadPhoto();
+  // 缩放预设组的滑动底色也走 animate，只数图片本身的开合。
+  const imageCalls = () => animate.mock.calls.filter(([target]) => !(target instanceof HTMLSpanElement));
   const copy = document.body.querySelector(':scope > img[aria-hidden="true"]');
   expect(Boolean(copy)).toBe(flying);
   if (!reduced) {
-    expect(animate.mock.calls[0][1]).toEqual(flying
+    expect(imageCalls()[0][1]).toEqual(flying
       ? { x: [-60, 0], y: [-30, 0], scaleX: [.25, 1], scaleY: [.25, 1], opacity: [1, 1] }
       : { scale: [.96, 1] });
   }
   fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-  expect(animate).toHaveBeenCalledTimes(reduced ? 0 : 2);
+  expect(imageCalls()).toHaveLength(reduced ? 0 : 2);
   expect(Boolean(document.body.querySelector(':scope > img[aria-hidden="true"]'))).toBe(flying);
   unmount();
   expect(document.body.querySelector(':scope > img[aria-hidden="true"]')).toBeNull();
@@ -120,14 +122,14 @@ it('distinguishes Fit from actual pixels at the same percentage and clears prese
   const viewport = await loadPhoto(400, 250);
   const pressed = (name: string) => screen.getByRole('button', { name, pressed: true });
   expect(screen.getByLabelText('当前缩放')).toHaveTextContent('100%');
-  expect(pressed('适配')).toBeVisible();
+  expect(pressed('100%')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '适配' })).toBeNull();
   fireEvent.keyDown(window, { key: '1' });
   expect(pressed('100%')).toBeVisible();
-  expect(screen.getByRole('button', { name: '适配', pressed: false })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '200%' }));
   expect(pressed('200%')).toBeVisible();
   fireEvent.wheel(viewport, { deltaY: 100 });
   expect(screen.queryByRole('button', { pressed: true })).toBeNull();
   fireEvent.keyDown(window, { key: '0' });
-  expect(pressed('适配')).toBeVisible();
+  expect(pressed('100%')).toBeVisible();
 });

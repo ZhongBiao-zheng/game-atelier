@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom';
 import { AddImageIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, DeleteIcon, DownloadIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { RevealImage } from '@/components/ui/reveal-image';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { MetaTag } from '@/components/MetaTag';
@@ -100,7 +102,7 @@ export function Lightbox({
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
-  const { viewport, plane, image, percent, preset, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
+  const { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
   const { transition, cancel: cancelTransition } = useLightboxTransition(image, viewport, sourceRect, src);
   const closeTimer = useRef<number>();
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
@@ -273,10 +275,14 @@ export function Lightbox({
   const mediaStage = <>
     <div role="group" aria-label="图片缩放" className="relative z-10 mx-auto my-1 flex shrink-0 items-center gap-1 rounded-full border border-border bg-card p-1"
       onClick={event => event.stopPropagation()}>
-      {([['适配', null], ['100%', 1], ['200%', 2]] as const).map(([label, scale]) =>
-        <Button key={label} size="sm" variant="ghost" aria-pressed={preset === scale}
-          className="h-7 rounded-full px-2 tabular-nums aria-pressed:bg-secondary aria-pressed:text-secondary-foreground"
-          onClick={() => { cancelTransition(); zoomTo(scale); }}>{label}</Button>)}
+      {/* 选中底色是滑动的独立层；整张图原尺寸就放得下时「适配」与「100%」同画面，只留 100%。 */}
+      <div className="relative isolate flex items-center gap-1">
+        <SelectionHighlight className="rounded-full ring-0" />
+        {([['适配', null], ['100%', 1], ['200%', 2]] as const).filter(([, scale]) => !(fitsWhole && scale === null)).map(([label, scale]) =>
+          <Button key={label} size="sm" variant="ghost" aria-pressed={preset === scale || (fitsWhole && preset === null && scale === 1)}
+            className="h-7 rounded-full px-2 tabular-nums aria-pressed:text-secondary-foreground aria-pressed:hover:bg-transparent"
+            onClick={() => { cancelTransition(); zoomTo(scale); }}>{label}</Button>)}
+      </div>
       <output aria-label="当前缩放" className="min-w-12 border-l border-border px-2 text-center text-xs tabular-nums text-muted-foreground">{percent}%</output>
     </div>
     <div ref={viewport} data-lightbox-viewport="" {...handlers}
@@ -371,7 +377,7 @@ export function Lightbox({
                         <SwapIcon swapKey={copyState === 'copied'} variant="pop">
                           {copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}
                         </SwapIcon>
-                        <span>{copyState === 'copied' ? '已复制' : '复制'}</span>
+                        <SwapLabel active={copyState === 'copied'} on="已复制" off="复制" />
                       </Button>
                     )}
                   </div>
@@ -421,7 +427,7 @@ export function Lightbox({
                     <SwapIcon swapKey={copyState === 'copied'} variant="pop">
                       {copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}
                     </SwapIcon>
-                    {copyState === 'copied' ? '已复制' : '复制提示词'}
+                    <SwapLabel active={copyState === 'copied'} on="已复制" off="复制提示词" />
                   </Button>
                 )}
                 {onDownload ? (

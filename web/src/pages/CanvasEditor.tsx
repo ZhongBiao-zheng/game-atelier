@@ -214,7 +214,7 @@ import {
   buildCanvasMentionReferences,
   removeCanvasMentionTokens,
 } from '@/lib/canvasMentions';
-import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
+import { shouldPreventCanvasHistoryNavigation, WHEEL_ZOOMS_BY_DEFAULT } from '@/lib/canvasTrackpad';
 import {
   CANVAS_LOCAL_VERSION_SHA,
   CANVAS_DEFAULT_NODE_SIZE,
@@ -483,10 +483,8 @@ interface CanvasClipboardPayload {
 // 触控板双指滑动或 Space/Ctrl+拖动移动，用鼠标的画师在空白处按中键完全没反应。左键留给
 // selectionOnDrag 框选，右键留给上下文菜单，所以这里只放中键。
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [1];
-// 滚轮语义必须按输入设备分：鼠标滚轮要缩放，触控板双指滑动要平移。两者用的是同一个 wheel
-// 事件、deltaMode 也都是 0，运行时区分不了，所以只能按平台近似（macOS 触控板优先，其余鼠标
-// 优先）。捏合缩放走 zoomOnPinch，两个平台都保留。
-const CANVAS_WHEEL_ZOOMS = !/Mac/i.test(navigator.userAgent);
+// 滚轮缩放还是平移按平台近似，判别与大图查看器共用（见 lib/canvasTrackpad）。捏合缩放走 zoomOnPinch。
+const CANVAS_WHEEL_ZOOMS = WHEEL_ZOOMS_BY_DEFAULT;
 // 删除节点的按键也得按平台分。macOS 键盘上那个「delete」键发出来的是 Backspace（物理上没有
 // 独立的 Delete 键），所以 mac 必须收 Backspace；Windows / Linux 有独立 Delete 键，而 Backspace
 // 在那边就是纯粹的「退格」—— 画师在文本节点里打错字按退格，整个节点直接没了（2026-08-27 实测
