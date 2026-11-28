@@ -47,7 +47,7 @@ export function MentionTabs({ value, change }: { value: string; change: (v: stri
     <TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="subjects">主体</TabsTrigger>
   </TabsList></Tabs>;
 }
-export function SubjectFeedback({ prompt, model, explicit, rows }: { prompt: string; model?: string | null; explicit: number; rows: LibrarySubject[] }) {
+export function SubjectFeedback({ prompt, model, explicit, rows, mode = 'image', frameMode }: { mode?: string; frameMode?: string; prompt: string; model?: string | null; explicit: number; rows: LibrarySubject[] }) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [hover, setHover] = useState<{ row: LibrarySubject; x: number; y: number } | null>(null);
   useEffect(() => {
@@ -56,12 +56,12 @@ export function SubjectFeedback({ prompt, model, explicit, rows }: { prompt: str
     const timer = setTimeout(() => {
       void requestJson<{ warnings: string[] }>('/api/library/subject-preview', '读取参考数量', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ prompt, model: model || '', explicit }),
+        body: JSON.stringify({ prompt, model: model || '', explicit, mode, frame_mode: frameMode }),
       }).then(result => { if (!controller.signal.aborted) setWarnings(result.warnings); })
         .catch(() => { if (!controller.signal.aborted) setWarnings([]); });
     }, 180);
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [prompt, model, explicit, rows]);
+  }, [prompt, model, explicit, rows, mode, frameMode]);
   useEffect(() => {
     if (!prompt.includes('@[subject:')) return;
     const over = (e: Event) => {

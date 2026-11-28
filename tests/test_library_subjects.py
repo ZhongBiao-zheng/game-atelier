@@ -83,3 +83,12 @@ def test_canvas_reproduce_restores_chip_and_refreezes_only_subject_images():
     assert job.prompt.count("橙色短发") == 1
     assert job.params.subjects[0].item_ids == ids
     assert len(job.params.reference_images) == 2
+
+
+def test_subject_description_does_not_add_images_to_explicit_video_frame_slots():
+    token, _ = seed_subject("阿橙", "橙色短发", 2)
+    params = JobParams(frame_mode="first", reference_images=["first.png"])
+    assert expand(token, params, "seedance-2", mode="video") == "阿橙：橙色短发。\n阿橙"
+    assert params.reference_images == ["first.png"]
+    assert params.subjects[0].item_ids == []
+    assert params.warnings == ["@阿橙 只带上了 0/2 张参考"]

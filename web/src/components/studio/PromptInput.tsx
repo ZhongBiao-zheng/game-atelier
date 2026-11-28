@@ -1358,7 +1358,8 @@ export function PromptInput({
         />
         </div>
         </div>
-        <SubjectFeedback prompt={text} rows={subjects} model={model} explicit={referenceImages.length} />
+        <SubjectFeedback prompt={text} rows={subjects} model={model} mode={isVideo ? 'video' : 'image'}
+          frameMode={isVideo && videoMode === 'firstlast' ? 'firstlast' : undefined} explicit={isMj ? mjRefs.image.length : referenceImages.length} />
         {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
         {onSavePromptAsset && !collapsed && text.trim() && (
           <Button variant="bare"

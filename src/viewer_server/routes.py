@@ -2354,7 +2354,7 @@ def _create_user_job(
 
     from character_workflow.lib.library_subjects import expand
     try:
-        prompt = expand(prompt, params, model_id)
+        prompt = expand(prompt, params, model_id, mode=body.kind.value)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 

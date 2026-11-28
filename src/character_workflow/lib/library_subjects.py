@@ -13,7 +13,7 @@ from character_workflow.lib.schemas import JobParams, SubjectSnapshot
 _TOKEN = re.compile(r"@\[subject:(sbj_[a-f0-9]{32}):([^\]\n]*)\]")
 
 
-def expand(prompt: str, params: JobParams, model: str, *, limit: int | None = None, preview=False) -> str:
+def expand(prompt: str, params: JobParams, model: str, *, mode: str = "image", preview=False) -> str:
     # Ignore any snapshots in the request. Only the editor tokens select local subjects.
     params.subjects = None
     params.subject_prompt = None
@@ -21,7 +21,10 @@ def expand(prompt: str, params: JobParams, model: str, *, limit: int | None = No
     if not matches:
         return prompt
     explicit = list(params.reference_images or [])
-    available = max(0, (max_reference_images(model) if limit is None else limit) - len(explicit))
+    # Frame slots are explicitly assigned by the editor; extra references cannot occupy them.
+    frames = mode == "video" and params.frame_mode in {"first", "last", "firstlast"}
+    limit = 0 if frames or mode == "audio" else max_reference_images(model)
+    available = max(0, limit - len(explicit))
     rows = {}
     candidates = {}
     with library.transaction() as tx:

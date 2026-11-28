@@ -80,15 +80,17 @@ class SubjectPreview(BaseModel):
     prompt: str = Field(max_length=40000)
     model: str = Field(max_length=200)
     explicit: int = Field(ge=0, le=200)
+    mode: Literal["image", "video", "text", "audio"] = "image"
+    frame_mode: Literal["first", "last", "firstlast", "auto"] | None = None
 
 
 @router.post("/subject-preview")
 def subject_preview(body: SubjectPreview):
     from character_workflow.lib.library_subjects import expand
     from character_workflow.lib.schemas import JobParams
-    params = JobParams(reference_images=[""] * body.explicit)
+    params = JobParams(reference_images=[""] * body.explicit, frame_mode=body.frame_mode)
     with errors():
-        expand(body.prompt, params, body.model, preview=True)
+        expand(body.prompt, params, body.model, mode=body.mode, preview=True)
     return {"warnings": params.warnings or []}
 
 

@@ -44,6 +44,8 @@ interface CanvasPromptInputProps {
   references: readonly CanvasMentionReference[];
   mentionsEnabled?: boolean;
   subjectModel?: string;
+  subjectMode?: string;
+  subjectFrameMode?: string;
   disabledMentionHint?: string;
   onChange: (value: string) => void;
   /** ⌘↵ / Ctrl+↵ 提交（D5）；Enter 仍是换行，输入法组合期间的 Enter 不处理。 */
@@ -63,6 +65,8 @@ export function CanvasPromptInput({
   references,
   mentionsEnabled = true,
   subjectModel,
+  subjectMode,
+  subjectFrameMode,
   disabledMentionHint,
   onChange,
   onSubmit,
@@ -463,7 +467,7 @@ export function CanvasPromptInput({
           setEditing(false);
         }}
       />
-      {subjectModel != null && <SubjectFeedback prompt={value} model={subjectModel} explicit={references.filter(r => r.kind === 'image').length} rows={subjects} />}
+      {subjectModel != null && <SubjectFeedback prompt={value} model={subjectModel} mode={subjectMode} frameMode={subjectFrameMode} explicit={references.filter(r => r.kind === 'image').length} rows={subjects} />}
       {showDisabledMentionHint && (
         <span className="pointer-events-none absolute bottom-2 left-3 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
           {disabledMentionHint}

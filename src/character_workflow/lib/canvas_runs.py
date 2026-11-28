@@ -1464,8 +1464,7 @@ def _commit_frozen_run(
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
     from character_workflow.lib.library_subjects import expand
-    final_prompt = expand(final_prompt, job_params, model.id,
-                          limit=0 if mode == "audio" or job_params.frame_mode in {"first", "last", "firstlast"} else None)
+    final_prompt = expand(final_prompt, job_params, model.id, mode=mode)
     if job_params.subjects:
         normalized = {**normalized, "subjects": [s.model_dump() for s in job_params.subjects],
                       "subject_prompt": result_draft.prompt if result_draft else job_params.subject_prompt}
