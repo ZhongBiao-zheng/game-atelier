@@ -260,41 +260,16 @@ describe('Studio', () => {
     expect(shell).toHaveClass('h-auto', 'px-4', 'py-2');
   });
 
-  it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
-    const audio = {
-      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [], category: null,
-      created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
-      content: { kind: 'media', path: 'creation-assets/blobs/a.mp3', mime_type: 'audio/mpeg', bytes: 3, sha256: 'a'.repeat(64), filename: 'drum.mp3' },
-    };
-    const image = { ...audio, asset_id: 'asset-img', title: '城堡', content: { ...audio.content, mime_type: 'image/png', filename: 'castle.png' } };
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    const fallback = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
-      const href = String(url);
-      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [] } as any);
-      if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [audio, image] }) } as any);
-      if (href === '/api/creation-assets/asset-bgm/use') return Promise.resolve({ ok: true, json: async () => audio } as any);
-      if (href === '/api/creation-assets/asset-img/use') return Promise.resolve({ ok: true, json: async () => image } as any);
-      if (href === '/api/creation-assets/asset-img/content') return Promise.resolve({ ok: true, blob: async () => new Blob(['png'], { type: 'image/png' }) } as any);
-      return fallback(url, init);
-    });
+  it('素材库的音频不进入图片参考，图片能接着加入', async () => {
     renderStudio();
     await screen.findByText('Volcengine Ark');
-
     fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.mouseDown(await screen.findByRole('tab', { name: '素材库' }));
-    fireEvent.mouseDown(await screen.findByRole('tab', { name: /媒体/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /战鼓/ }));
-    fireEvent.click(screen.getByRole('button', { name: '使用' }));
-    expect(await screen.findByText('当前模式不支持音频参考')).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-bgm/content')).toBe(false);
-
-    // 用完面板不关（规格 2.5）：回到列表接着用下一项。
-    fireEvent.click(screen.getByRole('button', { name: '返回资产列表' }));
-    fireEvent.click(await screen.findByRole('button', { name: /城堡/ }));
-    fireEvent.click(screen.getByRole('button', { name: '使用' }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-img/content')).toBe(true));
-    await waitFor(() => expect(screen.queryByLabelText('添加参考图')).not.toBeInTheDocument());
+    const audio = vi.fn();
+    const image = vi.fn(async () => new File(['png'], 'castle.png', { type: 'image/png' }));
+    await act(async () => { await assetPanelProps.current!.onHistoryReference([{ kind: 'audio', read: audio }, { kind: 'image', read: image }]); });
+    expect(audio).not.toHaveBeenCalled();
+    expect(image).toHaveBeenCalledOnce();
+    expect(await screen.findByText('只加入了 1 项')).toBeInTheDocument();
   });
 
   it('资产入口已内聚进输入壳工具栏，与其它控制芯片同高', () => {
@@ -2300,6 +2275,9 @@ function mockPanelEndpoints(keys?: unknown, inputResponse?: (order: number) => P
   const fallback = fetchMock.getMockImplementation()!;
   fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
+    if (href === '/api/library') return Promise.resolve({ ok: true, json: async () => ({
+      subjects: [], items: {}, folders: [{ id: 'fld-choice', name: '包装终稿', parent_id: null, item_ids: [] }],
+    }) } as any);
     if (keys === 'never' && href === '/api/keys') return new Promise(() => {});
     if (keys && href === '/api/keys') return Promise.resolve({ ok: true, json: async () => keys } as any);
     if (inputResponse && href.startsWith('/api/creation-assets/gen-1/inputs/')) {
@@ -2752,7 +2730,7 @@ describe('Studio 生成结果保存为创作资产', () => {
     fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
       const href = String(url);
       if (jobs && href === sessionJobsPath) return Promise.resolve({ ok: true, json: async () => ({ jobs: jobs }) } as any);
-      if (href === '/api/creation-assets/generation/from-job') {
+      if (href === '/api/library/fld-choice/history') {
         return Promise.resolve({ ok: true, status: 201, json: async () => generationAsset(recipe()) } as any);
       }
       return fallback(url, init);
@@ -2766,31 +2744,29 @@ describe('Studio 生成结果保存为创作资产', () => {
     ...overrides,
   });
   const fromJobBody = (fetchMock: ReturnType<typeof vi.fn>) => {
-    const call = fetchMock.mock.calls.find(([url]) => url === '/api/creation-assets/generation/from-job');
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/library/fld-choice/history');
     return call ? JSON.parse(String(call[1]!.body)) : null;
   };
 
-  it('图片结果存成生成资产，来源是该 job 的 output_index（= 结果下标）', async () => {
+  it('图片结果复制到所选文件夹，来源是该 job 的 output_index（= 结果下标）', async () => {
     const fetchMock = mockJobs();
     renderStudio();
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
     fireEvent.click(await screen.findByLabelText('保存生成结果 2 到资产'));
     expect(assetPanelProps.current!.initialKind).toBe('media');
-    expect(await screen.findByAltText('媒体资产预览')).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+    fireEvent.click(await screen.findByRole('button', { name: '包装终稿' }));
 
     await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
     expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-studio-1', output_index: 1 });
   });
 
-  it('视频结果也能存成生成资产，预览按视频渲染', async () => {
+  it('视频结果按来源下标复制到所选文件夹', async () => {
     const fetchMock = mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
     renderStudio();
 
     fireEvent.click(await screen.findByLabelText('保存生成视频 1 为资产'));
-    expect((await screen.findByLabelText('媒体资产预览')).tagName).toBe('VIDEO');
-    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+    fireEvent.click(await screen.findByRole('button', { name: '包装终稿' }));
 
     await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
     expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-s', output_index: 0 });
@@ -2802,8 +2778,9 @@ describe('Studio 生成结果保存为创作资产', () => {
 
     fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
     fireEvent.click(await screen.findByLabelText('保存生成结果 1 到资产'));
-    expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '保存生成资产' })).not.toBeInTheDocument();
+    expect(await screen.findByText('选择文件夹')).toBeVisible();
+    expect(assetPanelProps.current!.saveRequest).toMatchObject({ kind: 'media', sourcePath: '/tmp/studio/job-s/v1.png' });
+    expect(assetPanelProps.current!.saveRequest.source).toBeUndefined();
   });
 });
 
@@ -2866,7 +2843,7 @@ describe('Studio 响应团队资产动作', () => {
     act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
     expect(claimed).toBe(true);
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '素材库' })).toHaveAttribute('aria-selected', 'true'));
     expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -2877,8 +2854,8 @@ describe('Studio 响应团队资产动作', () => {
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
-    await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveTextContent('画布二'));
-    await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('美术库'));
+    expect(await screen.findByText('暂无共享素材')).toBeVisible();
+    expect(assetPanelProps.current).toMatchObject({ initialTeamProjectId: 'canvas-2', initialTeamLibraryId: 'lib-art' });
   });
 
   it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
@@ -2976,7 +2953,7 @@ describe('Studio 响应团队资产动作', () => {
     });
     render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '素材库' })).toHaveAttribute('aria-selected', 'true'));
     expect(history).toEqual(['/studio']);
   });
 
