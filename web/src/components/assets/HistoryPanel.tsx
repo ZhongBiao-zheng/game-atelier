@@ -309,7 +309,7 @@ export function AssetItemList({ pages, position, onReference, onScrollTop, onCan
       if (moving) await libraryWrite(moving.job_id + '/move', { target: f.id });
     }} />
     <Dialog open={!!renaming} onOpenChange={v => { if (!v) setRenaming(null); }}><DialogContent><DialogTitle>重命名</DialogTitle>
-      <form className="grid gap-3" onSubmit={e => { e.preventDefault(); if (renaming) void libraryWrite(renaming.job_id, { title: newTitle }, 'PATCH')
+      <form autoComplete="off" className="grid gap-3" onSubmit={e => { e.preventDefault(); if (renaming) void libraryWrite(renaming.job_id, { title: newTitle }, 'PATCH')
         .then(() => setRenaming(null)).catch(err => notify.error(errorText(err))); }}>
         <Input autoFocus value={newTitle} maxLength={160} aria-label="素材名称" onChange={e => setNewTitle(e.target.value)} />
         <Button disabled={!newTitle.trim()}>保存</Button></form>

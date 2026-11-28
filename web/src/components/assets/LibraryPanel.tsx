@@ -119,7 +119,7 @@ export function LibraryPanel({ target, onTarget, onReference, onCanvas, onSubjec
       </motion.div>
     </AnimatePresence>
     <Dialog open={!!form} onOpenChange={v => { if (!v) setForm(null); }}><DialogContent><DialogTitle>{form?.id ? '重命名' : '新建文件夹'}</DialogTitle>
-      <form className="grid gap-4" onSubmit={e => { e.preventDefault(); void perform(createFolder); }}><Input autoFocus aria-label="文件夹名称" value={name} maxLength={160} onChange={e => setName(e.target.value)} />
+      <form autoComplete="off" className="grid gap-4" onSubmit={e => { e.preventDefault(); void perform(createFolder); }}><Input autoFocus aria-label="文件夹名称" value={name} maxLength={160} onChange={e => setName(e.target.value)} />
         <Button disabled={!name.trim()}>保存</Button></form></DialogContent></Dialog>
     <FolderPicker open={!!move} root onClose={() => setMove(null)} allowed={f => !f.parent_id && f.id !== move?.id && !folders.some(c => c.parent_id === move?.id)}
       onChoose={async f => { if (move) await libraryWrite(move.id, { parent_id: f.id || null }, 'PATCH'); }} />
