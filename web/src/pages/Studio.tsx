@@ -322,6 +322,11 @@ function StudioFull() {
   // 当前仍打开的那次口令会话：关闭或换目标后，旧会话晚到的鉴权结果既不关新弹窗，也不分享素材。
   const activeSharedAuth = useRef(sharedAuth);
   activeSharedAuth.current = sharedAuth;
+  // 卸载（离开创作台）同样作废：页面不在了，晚到的鉴权结果不再投送。StrictMode 重挂时由 effect 写回。
+  useEffect(() => {
+    activeSharedAuth.current = sharedAuth;
+    return () => { activeSharedAuth.current = null; };
+  }, [sharedAuth]);
   const roundCanvasOptions = useMemo<CanvasTarget[]>(() => [
     ...canvasTargetOptions, ...sharedTargets.map(card => ({
       projectId: card.peer_key + '/' + card.project_id, name: card.name, sharedBy: card.display_name,

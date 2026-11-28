@@ -262,7 +262,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   // 「模型详情」里删掉的、带单价或自己起了名的行：原位留「已删除 · 撤销」8 秒。
   const [removedRow, setRemovedRow] = useState<{ row: EditableModel; index: number; checked: boolean } | null>(null);
   // 正在收起的行（_rowId）：grid-rows 1fr→0fr 播完 150ms 再真正移除。
-  const [leavingRows, setLeavingRows] = useState<ReadonlySet<number>>(() => new Set());
+  // 正在收起的行：点删除时已从待保存的 models 里拿掉，这里只留一份显示副本播完 150ms 退场。
+  const [leavingRows, setLeavingRows] = useState<ReadonlyMap<number, { row: EditableModel; index: number }>>(() => new Map());
   useEffect(() => {
     if (!removedRow) return;
     const timer = window.setTimeout(() => setRemovedRow(null), UNDO_DURATION_MS);
@@ -562,22 +563,29 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   // 删除 / 撤销同时改预览里的勾选：否则保存时 mergedModels() 又按勾选把删掉的行加回来。
   const dropModelRow = (index: number) => {
     const row = models[index];
+    if (!row) return;
     const id = row.id.trim();
     const rowId = row._rowId;
-    if (rowId == null || leavingRows.has(rowId)) return;
+    if (rowId == null) return;
     const checked = fetchedChecked.has(id);
     const named = row.name.trim() && row.name.trim() !== id;
     const priced = [priceText(row), priceInText(row), priceOutText(row)].some(value => value.trim());
-    const remove = () => {
-      setLeavingRows(current => { const next = new Set(current); next.delete(rowId); return next; });
-      setModels(current => current.filter(item => item._rowId !== rowId));
-      if (checked) setFetchedChecked(current => new Set([...current].filter(item => item !== id)));
-      setRemovedRow(named || priced ? { row, index, checked } : null);
-    };
-    if (!motionAvailable() || prefersReducedMotion()) { remove(); return; }
-    setLeavingRows(current => new Set(current).add(rowId));
-    window.setTimeout(remove, MOTION_DURATION.fast * 1000);
+    const notice = named || priced ? { row, index, checked } : null;
+    // 待保存数据立刻更新：退场期间点保存，也不会把这一行写回去。
+    setModels(models.filter((_, i) => i !== index));
+    if (checked) setFetchedChecked(new Set([...fetchedChecked].filter(item => item !== id)));
+    if (!motionAvailable() || prefersReducedMotion()) { setRemovedRow(notice); return; }
+    setLeavingRows(current => new Map(current).set(rowId, { row, index }));
+    window.setTimeout(() => {
+      setLeavingRows(current => { const next = new Map(current); next.delete(rowId); return next; });
+      setRemovedRow(notice);
+    }, MOTION_DURATION.fast * 1000);
   };
+  // 显示用的行：待保存的 models，加上还在退场的副本（插回原位置，不可交互）。
+  const shownModelRows: { model: EditableModel; index: number; leaving: boolean }[] = models.map((model, index) => ({ model, index, leaving: false }));
+  for (const { row, index } of [...leavingRows.values()].sort((a, b) => a.index - b.index)) {
+    shownModelRows.splice(Math.min(index, shownModelRows.length), 0, { model: row, index: -1, leaving: true });
+  }
   const restoreModelRow = () => {
     if (!removedRow) return;
     const { row, index, checked } = removedRow;
@@ -1013,11 +1021,11 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                   <span>模型 ID</span>
                 </div>
                 <div className="space-y-2">
-                  {models.flatMap((model, index) => [
+                  {shownModelRows.flatMap(({ model, index, leaving }) => [
                     ...(removedRow && removedRow.index === index ? [removedRowNotice] : []),
-                    // 删除：grid-rows 1fr→0fr 收起并淡出 150ms（同历史卡片），播完再移除。
-                    <div key={model._rowId} className={cn('grid transition-[grid-template-rows,opacity] duration-150',
-                      model._rowId != null && leavingRows.has(model._rowId) ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr]')}>
+                    // 删除：grid-rows 1fr→0fr 收起并淡出 150ms（同历史卡片）；退场的是显示副本，不可交互。
+                    <div key={model._rowId} aria-hidden={leaving || undefined} className={cn('grid transition-[grid-template-rows,opacity] duration-150',
+                      leaving ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr]')}>
                     <div className="min-h-0 overflow-hidden">
                     <div className="grid grid-cols-2 items-start gap-2">
                       <Label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</Label>
