@@ -8,7 +8,9 @@ from PIL import Image
 from character_workflow.lib import job_runner, library
 from character_workflow.lib.library_subjects import expand
 from character_workflow.lib.schemas import JobParams
-pytest_plugins = ["tests.test_studio_jobs"]
+from tests import test_studio_jobs
+
+studio_client = test_studio_jobs.client
 
 
 def seed_subject(name, description, count):
@@ -39,7 +41,7 @@ def test_round_robin_and_explicit_priority():
         expand(a, JobParams(), "gpt-image-2")
 
 
-def test_submit_to_local_fake_model(client, monkeypatch):
+def test_submit_to_local_fake_model(studio_client, monkeypatch):
     token, ids = seed_subject("阿橙", "橙色短发少女", 1)
     captured = {}
     def fake_model(*, prompt, output_dir, params, **kwargs):
@@ -48,7 +50,7 @@ def test_submit_to_local_fake_model(client, monkeypatch):
         Image.open(params["reference_images"][0]).save(output)
         return [str(output)]
     monkeypatch.setattr(job_runner, "dispatch", fake_model)
-    response = client.post("/api/studio/jobs", json={"prompt": token + "站在海边", "model": "gpt-image-2", "params": {}})
+    response = studio_client.post("/api/studio/jobs", json={"prompt": token + "站在海边", "model": "gpt-image-2", "params": {}})
     assert response.status_code == 201, response.text
     job = job_runner.run_job(response.json()["job_id"])
     assert job.status == "done", job.error
