@@ -1,7 +1,7 @@
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AudioIcon, BookmarkIcon, CanvasIcon, CheckIcon, CopyIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
+import { AddImageIcon, AudioIcon, BookmarkIcon, CanvasIcon, CheckIcon, CopyIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
 import type { JobErrorAction } from '@/lib/errorPresentation';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
 
@@ -42,12 +42,13 @@ import {
   useResultAspect,
 } from './RoundMotion';
 import { AnimatePresence, motion } from 'motion/react';
-import { MOTION_DURATION, MOTION_EASE } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, MOTION_SPRING } from '@/lib/motion';
 import { RevealImage } from '@/components/ui/reveal-image';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Disclosure } from '@/components/ui/disclosure';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { pathFileName } from '@/lib/pathName';
 
@@ -558,7 +559,8 @@ export function RoundList({
         onRegenerate={onRegenerate}
         regenerateHint={regenerateHint}
         onDeleteBatch={fadeThen(onDeleteBatch)}
-        onDeleteResult={onDeleteResult}
+        // 只有一张时删它就是删整轮：和操作行的「删除这一轮」一样先淡出。
+        onDeleteResult={r.imagePaths.length === 1 ? fadeThen(onDeleteResult) : onDeleteResult}
         canvasTargets={canvasTargets}
         onAddToCanvas={onAddToCanvas}
         onLightbox={setLightboxSrc}
@@ -907,11 +909,13 @@ function ReferenceStack({
   return (
     <>
       <div className="relative shrink-0">
-        <Hint label={canPreview ? '点击查看参考大图' : '点击复用这组参考素材'}><Button variant="bare"
+        <Hint label={onReuse ? (canPreview ? '复用参考（双击看大图）' : '复用参考') : '查看大图'}><Button variant="bare"
           type="button"
           data-testid="reference-stack"
           aria-label="复用这组参考素材"
-          onClick={() => {
+          onClick={(event) => {
+            // 双击的第二下只看大图，不再复用一遍。
+            if (event.detail > 1) return;
             if (canPreview && !onReuse) {
               setLightboxSrc(refImageSrc(activeSrc, jobId));
               return;
@@ -1249,38 +1253,6 @@ export interface SaveResultAssetRequest {
 
 type SaveResultAssetHandler = (request: SaveResultAssetRequest) => void;
 
-function SaveResultButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <Hint label="保存到资产"><Button variant="bare"
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      aria-label={label}
-      className={RESULT_ACTION_CLASS}
-    >
-      <SaveAssetIcon aria-hidden />
-    </Button></Hint>
-  );
-}
-
-function ShareResultButton({ index, onClick }: { index: number; onClick: () => void }) {
-  return (
-    <Hint label="分享到团队库"><Button variant="bare"
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      aria-label={`分享生成结果 ${index + 1}`}
-      className={RESULT_ACTION_CLASS}
-    >
-      <ShareIcon aria-hidden />
-    </Button></Hint>
-  );
-}
-
 /** 单张结果的「更多」菜单。没有可做的事就不渲染；删除排在最后，分隔线隔开，destructive 色。 */
 function ResultMoreMenu({
   index, onSave, onShare, canvasTargets, onAddToCanvas, onReEdit, onDelete, deleteLabel,
@@ -1415,8 +1387,8 @@ function DoneBatch({
   const resultMenu = (index: number, path: string, mediaKind: 'image' | 'video') => (
     <ResultMoreMenu
       index={index}
-      onSave={mediaKind === 'image' && saveResult ? () => saveResult(index, path, mediaKind) : undefined}
-      onShare={mediaKind === 'image' && share ? () => share(round.jobId, index, path, round.config) : undefined}
+      onSave={saveResult ? () => saveResult(index, path, mediaKind) : undefined}
+      onShare={share ? () => share(round.jobId, index, path, round.config) : undefined}
       canvasTargets={round.shareable ? canvasTargets : undefined}
       onAddToCanvas={onAddToCanvas ? projectId => { void onAddToCanvas(round.jobId, index, projectId); } : undefined}
       onReEdit={!showActions && onReEdit ? () => { void onReEdit(round.config, round.jobId); } : undefined}
@@ -1468,6 +1440,8 @@ function DoneBatch({
         </div>
       </div>}
       <div className={embedded ? "contents" : ROUND_MEDIA_CLASS}>
+        {/* 删一张：它 150ms 淡出缩小并让出位置，其余结果滑过去补位。 */}
+        <AnimatePresence mode="popLayout" initial={false}>
         {round.config.kind === 'video'
           ? round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
@@ -1499,15 +1473,6 @@ function DoneBatch({
                 >
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {resultMenu(index, path, 'video')}
-                    {share && (
-                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
-                    )}
-                    {saveResult && (
-                      <SaveResultButton
-                        label={`保存生成视频 ${index + 1} 为资产`}
-                        onClick={() => saveResult(index, path, 'video')}
-                      />
-                    )}
 
                     <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
                       type="button"
@@ -1598,20 +1563,21 @@ function DoneBatch({
                       <DownloadIcon aria-hidden />
                     </a></Hint>
                   </div>
-                  {/* 左下角编辑：把这张图导入下方输入框作参考图，继续图生图微调。 */}
+                  {/* 左下角用作参考：把这张图导入下方输入框作参考图，继续图生图微调。 */}
                   {onEditAsReference && (
-                    <Hint label="编辑（导入为参考图）"><Button variant="bare"
+                    <Hint label="用作参考"><Button variant="bare"
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onEditAsReference(path); }}
-                      aria-label={`编辑生成结果 ${index + 1}（导入为参考图）`}
+                      aria-label={`生成结果 ${index + 1} 用作参考`}
                       className={`absolute bottom-2 left-2 ${RESULT_ACTION_CLASS}`}
                     >
-                      <EditIcon aria-hidden />
+                      <AddImageIcon aria-hidden />
                     </Button></Hint>
                   )}
                 </ResultFrame>
               );
             })}
+        </AnimatePresence>
       </div>
       {showActions && <div className={ROUND_ACTIONS_CLASS + (embedded ? " basis-full" : "")}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
@@ -1624,7 +1590,7 @@ function DoneBatch({
         {(onSavePromptAsset || deletable) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <ActionButton compact aria-label="更多操作">...</ActionButton>
+            <ActionButton compact aria-label="更多操作"><MoreIcon size="sm" aria-hidden /></ActionButton>
           </DropdownMenuTrigger>
           {/* 空间不够时 Radix 自动翻到左侧，不再按断点手动改方向 */}
           <DropdownMenuContent data-testid="studio-more-menu" side="right" align="start" className="w-48 rounded-xl">
@@ -1659,7 +1625,10 @@ function DoneBatch({
 
 /** 结果卡：与占位卡同一个按目标比例的框（读到真实尺寸后改用真实比例）。
  *  刚生成完的结果先垫着占位交接层，媒体解码后在它上面淡入；历史结果直接在卡片底色上淡入。 */
-function ResultFrame({ config, batchNumber, uniformSquare = false, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }: {
+const RESULT_EXIT = { opacity: 0, scale: 0.96, transition: { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle } };
+
+// forwardRef：AnimatePresence popLayout 要拿到 figure 才能让退场的那张让出位置。
+const ResultFrame = forwardRef<HTMLElement, {
   config: RoundConfig;
   batchNumber?: number;
   uniformSquare?: boolean;
@@ -1673,11 +1642,16 @@ function ResultFrame({ config, batchNumber, uniformSquare = false, justCompleted
   onClick?: () => void;
   media: (handlers: { onSize: (width: number, height: number) => void; onReady: () => void }) => ReactNode;
   children: ReactNode;
-}) {
+}>(function ResultFrame({ config, batchNumber, uniformSquare = false, justCompleted, startedAt, progressKey, roundJob, testId, className, onClick, media, children }, ref) {
   const [style, onSize] = useResultAspect(aspectStyle(config));
   const [revealed, setRevealed] = useState(false);
   return (
-    <figure data-round-job={roundJob} data-testid={testId} style={uniformSquare ? undefined : style} className={className} onClick={onClick}>
+    <motion.figure
+      ref={ref}
+      layout="position"
+      exit={RESULT_EXIT}
+      transition={{ layout: MOTION_SPRING.snappy }}
+      data-round-job={roundJob} data-testid={testId} style={uniformSquare ? undefined : style} className={className} onClick={onClick}>
       {justCompleted && (
         <CompletionUnderlay
           revealed={revealed}
@@ -1693,9 +1667,9 @@ function ResultFrame({ config, batchNumber, uniformSquare = false, justCompleted
         </span>
       )}
       {children}
-    </figure>
+    </motion.figure>
   );
-}
+});
 
 // forwardRef：作为 DropdownMenuTrigger 的 asChild 子元素要接住 ref 与注入的事件
 const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { compact?: boolean }>(
@@ -1745,7 +1719,6 @@ function FailedCard({
   const { config } = round;
   const planned = config?.n ?? 1;
   const summary = round.canceled ? round.reason : round.failure?.message ?? failureSummary(round.reason);
-  const [detailOpen, setDetailOpen] = useState(false);
   const [copyState, copy] = useCopyFeedback();
   const actionRowShown = Boolean(config && showActions);
   // 主修复动作至多一个；「重试」与操作行的「再次生成」是同一件事，那时不重复给。
@@ -1807,22 +1780,18 @@ function FailedCard({
           </p>
           {!round.canceled && summary !== round.reason && (
             <>
-              {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}
-              <div className="mt-1 flex items-center gap-3">
-                <Button variant="bare"
-                  type="button"
-                  aria-expanded={detailOpen}
-                  onClick={() => setDetailOpen(open => !open)}
-                  className="rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  {detailOpen ? '收起技术详情' : '查看技术详情'}
-                </Button>
+              {/* 折叠区拆进这一行：标题与「复制详情」并排，原文在整行下方展开。 */}
+              <div className="mt-1 flex flex-wrap items-center gap-x-3">
+                <Disclosure summary="查看技术详情" className="contents" triggerClassName="text-muted-foreground/80"
+                  contentClassName="order-last basis-full">
+                  <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>
+                </Disclosure>
                 <Button variant="link" size="sm"
                   type="button"
                   onClick={() => copy(detail)}
                   className="h-auto gap-1 p-0 text-xs font-normal text-muted-foreground/80 hover:text-foreground hover:no-underline"
                 >
-                  <SwapIcon swapKey={copyState === 'copied'}>{copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}</SwapIcon>
+                  <SwapIcon swapKey={copyState === 'copied'} variant="pop">{copyState === 'copied' ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}</SwapIcon>
                   复制详情
                 </Button>
               </div>

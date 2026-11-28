@@ -622,11 +622,13 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   /** 删除对话；返回回收站条目 id（没进回收站时为 null），调用方用它发撤销 toast。 */
   const removeSession = (id: string, revision: number) => run(async () => {
     const trashId = await deleteCanvasAgentSession(projectId, id, revision);
+    // 删完立刻返回，撤销提示不等切会话与刷新列表。
+    setSessions(current => current.filter(item => item.session_id !== id));
     if (sessionIdRef.current === id) {
-      if (projectId === null) await selectSession(DEFAULT_STUDIO_SESSION_ID);
+      if (projectId === null) void selectSession(DEFAULT_STUDIO_SESSION_ID);
       else newSession();
     }
-    await refreshList();
+    void refreshList().catch(() => undefined);
     return trashId;
   });
 

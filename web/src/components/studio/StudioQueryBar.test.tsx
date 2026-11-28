@@ -11,7 +11,8 @@ describe('StudioQueryBar', () => {
     expect(chip).toHaveTextContent('筛选');
     expect(chip).not.toHaveClass('text-primary');
     fireEvent.click(chip);
-    for (const name of ['时间筛选列表', '生成模式列表', '操作类型列表']) {
+    expect(screen.getByRole('radiogroup', { name: '时间筛选' })).toBeInTheDocument();
+    for (const name of ['生成模式列表', '操作类型列表']) {
       expect(screen.getByRole('listbox', { name })).toBeInTheDocument();
     }
   });
@@ -65,8 +66,8 @@ describe('StudioQueryBar', () => {
   it('点选选项后面板保持展开', () => {
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '筛选' }));
-    fireEvent.click(screen.getByRole('option', { name: '最近一周' }));
-    expect(screen.getByRole('listbox', { name: '时间筛选列表' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '最近一周' }));
+    expect(screen.getByRole('radiogroup', { name: '时间筛选' })).toBeInTheDocument();
   });
 
   it('操作类型选喜欢回传 op=favorite', () => {

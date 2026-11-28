@@ -5,6 +5,7 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import * as canvasApi from '@/api/canvas';
+import { notify } from '@/lib/notify';
 import type { StudioAgentSession } from '@/schema/canvas';
 import { DEFAULT_STUDIO_SESSION_ID } from './studioDraft';
 const sessionJobsPath = '/api/studio/agent/sessions/' + DEFAULT_STUDIO_SESSION_ID + '/jobs';
@@ -1329,14 +1330,15 @@ describe('Studio', () => {
       }
       return defaultFetch(url, init);
     });
+    const errorToast = vi.spyOn(notify, 'error');
     renderStudio();
 
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '保留当前编辑内容');
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
 
-    // 不弹原生 alert：原因落在输入壳上方的状态条里。
-    expect(await screen.findByText(/取回参考图失败/)).toBeInTheDocument();
+    // 不弹原生 alert：原因走错误提示。
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/取回参考图失败/)));
     expect(editor.textContent).toContain('保留当前编辑内容');
     expect(editor.textContent).not.toContain('一个身披白床单');
   });
@@ -2152,7 +2154,7 @@ describe('Studio 图卡编辑导入参考图', () => {
     (globalThis.URL as any).revokeObjectURL ??= vi.fn();
 
     renderStudio();
-    const editBtns = await screen.findAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
+    const editBtns = await screen.findAllByRole('button', { name: /^生成结果 \d+ 用作参考$/ });
     fireEvent.click(editBtns[0]);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2193,7 +2195,7 @@ describe('Studio 图卡编辑导入参考图', () => {
     globalThis.fetch = fetchMock as any;
 
     renderStudio();
-    const editBtns = await screen.findAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
+    const editBtns = await screen.findAllByRole('button', { name: /^生成结果 \d+ 用作参考$/ });
     fireEvent.click(editBtns[0]);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/gallery/image?path='));
@@ -2593,6 +2595,7 @@ describe('Studio 分享：边界', () => {
   it('视频结果分享时对话框里没有预览图', async () => {
     mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
     renderStudio();
+    fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
     fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.querySelector('img')).toBeNull();
@@ -2650,13 +2653,14 @@ describe('Studio 复刻：边界', () => {
 
   it('参考取回失败时输入框保持原样', async () => {
     mockPanelEndpoints(undefined, async () => new Response('', { status: 404 }));
+    const errorToast = vi.spyOn(notify, 'error');
     renderStudio();
     await screen.findByText('Volcengine Ark');
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
     await openPanelAndReproduce(generationAsset(recipe()));
-    expect(await screen.findByText(/取回复刻参考素材失败/)).toBeInTheDocument();
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/取回复刻参考素材失败/)));
     expect(editor.textContent).toContain('我正在写的');
     expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite');
   });
@@ -2788,7 +2792,8 @@ describe('Studio 生成结果保存为创作资产', () => {
     const fetchMock = mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
     renderStudio();
 
-    fireEvent.click(await screen.findByLabelText('保存生成视频 1 为资产'));
+    fireEvent.keyDown(await screen.findByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByLabelText('保存生成结果 1 到资产'));
     expect((await screen.findByLabelText('媒体资产预览')).tagName).toBe('VIDEO');
     fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
 
@@ -2937,11 +2942,12 @@ describe('Studio 响应团队资产动作', () => {
       }
       return fallback(url, init);
     });
+    const errorToast = vi.spyOn(notify, 'error');
     renderStudio();
     await screen.findByText('Volcengine Ark');
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
-    expect(await screen.findByText(/这条资产还没同步完整/)).toBeInTheDocument();
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/这条资产还没同步完整/)));
     expect(screen.getByLabelText('生图 prompt').textContent).not.toContain('橘猫坐在窗台');
   });
 

@@ -34,11 +34,12 @@ function TurnAttachmentStack({ urls, onLightbox }: { urls: { src: string; alt: s
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false); setActive(null); }}
+      // 宽度固定为散开后的宽度：散开只靠子项位移，同一行的文字不跟着每帧重排。
       style={{
-        width: TURN_REF_W + Math.max(0, urls.length - 1) * (TURN_REF_W - (hover ? TURN_REF_OVERLAP_HOVER : TURN_REF_OVERLAP_REST)),
+        width: TURN_REF_W + Math.max(0, urls.length - 1) * (TURN_REF_W - TURN_REF_OVERLAP_HOVER),
         height: TURN_REF_H,
       }}
-      className="relative z-20 flex shrink-0 items-center transition-[width] duration-200 ease-in-out"
+      className="relative z-20 flex shrink-0 items-center"
     >
       {urls.map((item, i) => {
         const angle = TURN_REF_ROTATIONS[i % TURN_REF_ROTATIONS.length];

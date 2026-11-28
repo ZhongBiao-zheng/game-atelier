@@ -42,7 +42,7 @@ export function CanvasAgentPermissionMenu({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const hint = auto
-    ? `Auto${confirmAbove === null ? '' : `：超过 ${formatGenerationCost(confirmAbove)} 先确认`}`
+    ? `Auto${confirmAbove === null ? '' : `：超过 ${formatGenerationCost(confirmAbove)} 的生成先确认`}`
     : '审查：每一步都先确认';
   return (
     <>
