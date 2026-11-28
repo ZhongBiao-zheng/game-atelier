@@ -167,11 +167,12 @@ it('时间、生成模式、喜欢和任务提示词均以整轮为筛选单位'
   const manual = () => screen.queryByText('第一幅草图');
   const toggle = (label: string) => fireEvent.click(screen.getByLabelText(label, { exact: true }));
   const pick = (label: string) => fireEvent.click(screen.getByRole('option', { name: label }));
+  const pickTime = (label: string) => fireEvent.click(screen.getByRole('radio', { name: label }));
   toggle('筛选');
-  pick('最近一周');
+  pickTime('最近一周');
   expect(turn()).toBeVisible();
   expect(manual()).toBeNull();
-  pick('全部');
+  pickTime('全部');
   pick('图片');
   expect(turn()).toBeNull();
   expect(manual()).toBeVisible();

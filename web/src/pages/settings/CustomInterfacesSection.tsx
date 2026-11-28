@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import { useRetained, useRetainedSession } from '@/components/ui/retained';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Hint } from '@/components/ui/tooltip';
+import { AddIcon, ChevronRightIcon, MoreIcon } from '@/components/ui/icons';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 import { errorText } from '@/lib/errorText';
 import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
@@ -55,9 +55,9 @@ export function CustomInterfacesSection() {
   return (
     <section aria-label="自定义接口" className="space-y-2 border-t border-border pt-6">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-xs font-medium text-muted-foreground">自定义接口</h2>
+        <h2 className="text-sm font-medium text-foreground">自定义接口</h2>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" type="button">新建</Button></DropdownMenuTrigger>
+          <DropdownMenuTrigger asChild><Button variant="outline" size="sm" type="button" className="px-3"><AddIcon size="sm" aria-hidden />新建</Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {(Object.keys(KIND_LABELS) as HttpProtocolKind[]).map(kind => (
               <DropdownMenuItem key={kind} onSelect={() => setCreating(kind)}>{KIND_LABELS[kind]}接口</DropdownMenuItem>
@@ -82,20 +82,29 @@ export function CustomInterfacesSection() {
                 transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.out }}
                 className="overflow-hidden"
               >
-                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{row.name}</p>
-                    <p className={`text-xs ${row.available ? 'text-muted-foreground' : 'text-destructive'}`}>
+                {/* 与供应商行同一写法：整行点开编辑，删除收在行尾「更多」。 */}
+                <div className="group/row flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-secondary/40">
+                  <Button variant="bare" type="button" aria-label={`编辑 ${row.name}`} onClick={() => setEditing(row)}
+                    className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                    <span className="block truncate text-sm">{row.name}</span>
+                    <span className={`block text-xs ${row.available ? 'text-muted-foreground' : 'text-destructive'}`}>
                       {row.available
                         ? `${row.kind ? KIND_LABELS[row.kind] : ''} · ${row.used_by.length ? `${row.used_by.length} 个模型` : '未使用'}`
                         : row.error}
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" type="button" onClick={() => setEditing(row)}>编辑</Button>
-                  <Hint label={row.used_by.length ? '还有模型在使用' : undefined}>
-                    <span><Button variant="ghost" size="sm" type="button" disabled={row.used_by.length > 0}
-                      onClick={() => setDeleting(row)}>删除</Button></span>
-                  </Hint>
+                    </span>
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" type="button" aria-label={`${row.name} 的更多操作`}
+                      className="size-7 text-muted-foreground hover:text-foreground"><MoreIcon size="sm" aria-hidden /></Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem destructive disabled={row.used_by.length > 0} onSelect={() => setDeleting(row)}>
+                        删除{row.used_by.length > 0 && <span className="ml-auto pl-3 text-xs text-muted-foreground">使用中</span>}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <span aria-hidden onClick={() => setEditing(row)} className="cursor-pointer p-1 text-muted-foreground transition-colors duration-150 group-hover/row:text-foreground">
+                    <ChevronRightIcon size="sm" className="transition-transform duration-150 motion-safe:group-hover/row:translate-x-0.5" />
+                  </span>
                 </div>
               </motion.li>
             ))}

@@ -60,10 +60,10 @@ it('同页添加区按分组平铺、支持查找与点击弹窗添加自定义�
   const tuziBtn = within(catalog).getByRole('button', { name: /Tuzi/ });
   expect(tuziBtn).not.toHaveClass('bg-card');
   expect(within(catalog).getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
-  fireEvent.change(within(catalog).getByRole('textbox', { name: '查找可添加的供应商' }), { target: { value: 'Tuzi' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: 'Tuzi' } });
   expect(within(catalog).getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
   expect(within(catalog).queryByRole('button', { name: /OpenAI-HK/ })).not.toBeInTheDocument();
-  fireEvent.change(within(catalog).getByRole('textbox', { name: '查找可添加的供应商' }), { target: { value: '' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: '' } });
   fireEvent.click(within(catalog).getByRole('button', { name: /自定义供应商/ }));
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
   expect(screen.getByLabelText('请求地址')).toBeInTheDocument();

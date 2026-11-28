@@ -53,7 +53,7 @@ it('pastes a key, detects models and preselects only known image and video model
   await waitFor(() => expect(previewModels).toHaveBeenCalledWith(expect.objectContaining({
     access_key: 'sk-onboarding-test', base_url: 'https://api.tu-zi.com', include_all: false,
   })));
-  expect(await screen.findByRole('radio', { name: '已选 3' })).toBeInTheDocument();
+  expect(await screen.findByRole('radio', { name: '已启用 3' })).toBeInTheDocument();
   expect(await screen.findByRole('status')).toHaveTextContent('密钥有效');
   expect(probeKey).toHaveBeenCalledWith('tuzi', 'sk-onboarding-test', 'https://api.tu-zi.com');
   // 控制台里的自动校验不记首启漏斗事件；只有首启引导（guided）才记。
@@ -76,7 +76,7 @@ it('preselects the preset chat model with its protocol and image input so Agent 
   });
   open();
   paste();
-  expect(await screen.findByRole('radio', { name: '已选 2' })).toBeInTheDocument();
+  expect(await screen.findByRole('radio', { name: '已启用 2' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '保存并开始' }));
   await waitFor(() => expect(createKey).toHaveBeenCalled());
   const payload = vi.mocked(createKey).mock.calls[0][0];
@@ -103,9 +103,9 @@ it('keeps many preselected models valid for the selection view and the save payl
   paste();
   // 模型目录认不出的写法（veo3.1）不预选，其余 21 个全选上。
   const count = 21;
-  expect(await screen.findByRole('radio', { name: `已选 ${count}` })).toBeInTheDocument();
-  // 已选视图里每个预选模型都有一枚可点的芯片，保存按钮可用。
-  expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(count);
+  expect(await screen.findByRole('radio', { name: `已启用 ${count}` })).toBeInTheDocument();
+  // 已启用视图里每个预选模型都有一枚带移除按钮的芯片，保存按钮可用。
+  expect(screen.getAllByRole('button', { name: /^移除 / })).toHaveLength(count);
   fireEvent.click(screen.getByRole('button', { name: '保存并开始' }));
   await waitFor(() => expect(createKey).toHaveBeenCalled());
   const models = vi.mocked(createKey).mock.calls[0][0].models ?? [];
@@ -132,7 +132,7 @@ it('keeps the preset models and shows the fetch error when detection fails', asy
   open();
   paste();
   expect(await screen.findByText('拉取模型列表失败：上游 401')).toBeInTheDocument();
-  expect(screen.getByRole('radio', { name: '已选 3' })).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: '已启用 3' })).toBeInTheDocument();
   expect(screen.queryByText(/密钥有效|密钥无效/)).not.toBeInTheDocument();
 });
 

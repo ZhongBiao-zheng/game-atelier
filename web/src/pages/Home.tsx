@@ -13,6 +13,7 @@ import { HomeDottedBackground } from '@/components/HomeDottedBackground';
 import { Studio } from './Studio';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { SKELETON_DELAY_MS } from '@/lib/motion';
 
 type State =
   | { kind: 'loading' }
@@ -28,6 +29,13 @@ export function Home() {
   // 大图按身份（路径）记当前项：隐藏一张后列表变了也不会错位。
   const [viewingPath, setViewingPath] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // 与项目列表、供应商页同一延迟：本机读取多半在这之前就回来，不闪骨架。
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  useEffect(() => {
+    if (state.kind !== 'loading') { setShowSkeleton(false); return; }
+    const timer = window.setTimeout(() => setShowSkeleton(true), SKELETON_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [state.kind]);
 
   useEffect(() => {
     let cancel = false;
@@ -97,8 +105,8 @@ export function Home() {
       <h2 className="mb-5 text-base font-medium text-foreground">作品展示</h2>
 
       {/* Loading 状态 */}
-      {state.kind === 'loading' && (
-        <div className="flex items-start gap-6">
+      {state.kind === 'loading' && showSkeleton && (
+        <div className="content-swap-in flex items-start gap-6">
           {distributeColumns(SKELETON_HEIGHTS, colCount).map((col, ci) => (
             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-6">
               {col.map((height, i) => (

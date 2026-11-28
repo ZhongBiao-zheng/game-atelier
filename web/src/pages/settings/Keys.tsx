@@ -20,13 +20,14 @@ import { CustomInterfacesSection } from './CustomInterfacesSection';
 import { ProviderCatalogSection } from './ProviderCatalogSection';
 import { presetInitial, type ProviderPreset } from './providerPresets';
 import { Button } from '@/components/ui/button';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { notify } from '@/lib/notify';
 import { useRetained } from '@/components/ui/retained';
 import { Collapse } from '@/components/ui/collapse';
 import { Disclosure } from '@/components/ui/disclosure';
-import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion, SKELETON_DELAY_MS } from '@/lib/motion';
 
 /** 首次读取超过 250ms 才出骨架：本机毫秒级就绪时直接淡入内容，不闪骨架。 */
-const SKELETON_DELAY_MS = 250;
 
 interface Props {
   /** 首启向导复用同一个供应商表单。 */
@@ -67,6 +68,8 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   // 删除确认：删供应商不可恢复，给更轻的「改为停用」（规格 2.1）。
   const [deleting, setDeleting] = useState<{ row: KeyRow; fromForm: boolean } | null>(null);
   const shownDeleting = useRetained(deleting);
+  // 删除请求期间确认框留着，按钮显示「删除中…」，成功后再关。
+  const [removing, setRemoving] = useState(false);
   const formView = useRetained(showForm ? { session: formSession, editing: editingKey, preset: formPreset } : null);
   // 用量页「未计价」带 ?edit=<供应商>&price=<模型> 进来：列表读回后直接打开那条，展开到单价框。
   const [deepLink] = useState(() => {
@@ -183,11 +186,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     key.provider === 'custom' ? '自定义' : '', providerHost(key)].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   const activeKeys = filteredKeys.filter(key => !closedAliases.has(key.alias));
   const closedKeys = filteredKeys.filter(key => closedAliases.has(key.alias));
-  const closedOpen = showClosed || query.trim() !== '';
+  const closedOpen = showClosed;
   const animateRows = listMotion === 'reveal';
   const reduced = prefersReducedMotion();
   const updateQuery = (next: string) => {
     setListMotion('instant');
+    // 开始查找时展开已关闭的分组；之后折叠与否听用户的。
+    if (next.trim() && !query.trim()) setShowClosed(true);
     setQuery(next);
   };
   const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key} saved={savedAlias === key.alias}
@@ -319,7 +324,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
               </Collapse>
             )}
           </div>
-          {embedded && <ProviderCatalogSection keys={keys} onSelect={openPreset} />}
+          {embedded && <ProviderCatalogSection keys={keys} query={query} onSelect={openPreset} />}
           {embedded && <CustomInterfacesSection />}
         </div>
       )}
@@ -344,13 +349,20 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   );
 
   const removeKey = async (target: KeyRow, fromForm: boolean) => {
-    setDeleting(null);
+    setRemoving(true);
     try {
       await deleteKey(target.alias);
+      setDeleting(null);
       if (fromForm) closeForm();
       window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
       void refresh();
-    } catch (e) { setError(errorText(e)); }
+    } catch (e) {
+      // 表单弹窗会挡住页面顶部的报错条：失败走提示。
+      setDeleting(null);
+      notify.error(errorText(e));
+    } finally {
+      setRemoving(false);
+    }
   };
   const disableKey = (target: KeyRow, fromForm: boolean) => {
     setDeleting(null);
@@ -367,7 +379,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         <AlertDialogCancel>取消</AlertDialogCancel>
         {shownDeleting.row.enabled !== false && <Button variant="outline" type="button"
           onClick={() => disableKey(shownDeleting.row, shownDeleting.fromForm)}>改为停用</Button>}
-        <AlertDialogAction destructive onClick={event => { event.preventDefault(); void removeKey(shownDeleting.row, shownDeleting.fromForm); }}>删除</AlertDialogAction>
+        <AlertDialogAction destructive disabled={removing} onClick={event => { event.preventDefault(); void removeKey(shownDeleting.row, shownDeleting.fromForm); }}>
+          <SwapLabel active={removing} on="删除中…" off="删除" />
+        </AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>;

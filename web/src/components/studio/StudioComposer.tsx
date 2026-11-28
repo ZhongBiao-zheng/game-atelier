@@ -13,6 +13,7 @@ import { Collapse } from '@/components/ui/collapse';
 import { Button } from '@/components/ui/button';
 import { ErrorIcon } from '@/components/ui/icons';
 import { canvasAgentSetupNotice } from '@/components/agent/canvasAgentSetupNotice';
+import { shakeOnError, useAnimateOnChange } from '@/lib/motion';
 
 export function useStudioComposer(home = false) {
   const [location, navigate] = useLocation();
@@ -103,9 +104,12 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
     fallbackTried.current = key;
     void updateSettings({ model_alias: fallback.alias, model: fallback.model });
   }, [fallback, settings.model_alias, settings.model, updateSettings]);
+  // 设置写入失败：值已退回，抖一下这排设置控件。
+  const controlsRef = useRef<HTMLDivElement>(null);
+  useAnimateOnChange(agent.settingsFailures, () => shakeOnError(controlsRef.current));
   const triggerClassName = studioControlClass + ' shrink-0 w-auto';
   const menuDirection = props.menuDirection ?? 'up';
-  const controls = state.home ? <>
+  const controls = <div ref={controlsRef} className="flex shrink-0 gap-2">{state.home ? <>
     <CanvasAgentModelPicker triggerClassName={triggerClassName} direction={menuDirection} models={agent.models} alias={settings.model_alias ?? null} model={settings.model ?? null}
             disabled={busy} onSelect={choice => void agent.updateSettings({ model_alias: choice.alias, model: choice.model })} />
     <CanvasAgentPreferencePicker triggerClassName={triggerClassName} direction={menuDirection} label="出图模型" models={agent.generationModels} mode={creation} auto={settings.auto_models ?? true}
@@ -123,14 +127,15 @@ export function StudioComposer({ state, onOpenProviders, ...props }: {
             onConfirmAboveChange={agent.updateConfirmAbove} />
     <CanvasAgentSkillPicker triggerClassName={triggerClassName} direction={menuDirection} label={skill ?? '技能'} skills={agent.skills} selected={skill}
             onSelect={name => setSkill(name === skill ? null : name)} disabled={busy} onChanged={agent.reloadSkills} />
-  </>;
+  </>}</div>;
   const agentProps = state.mode === 'agent' ? {
     value: state.text, onValueChange: state.setText,
     referenceImages: state.files, onReferenceImagesChange: state.setFiles,
     onSubmit: state.send, onSavePromptAsset: undefined, estimateLabel: null,
     disabled: props.disabled || !ready || busy || agent.waitingForSession,
     onStop: running ? agent.stop : undefined, agentControls: controls,
-    submitErrorKey: agent.error,
+    // 设置写入失败抖的是设置控件，不抖发送按钮。
+    submitErrorKey: agent.error !== agent.settingsError ? agent.error : null,
   } : {};
   // 报错行用 Collapse 从上沿展开，收起时保留最后一条文案播完退场。
   const lastError = useRef(agent.error);

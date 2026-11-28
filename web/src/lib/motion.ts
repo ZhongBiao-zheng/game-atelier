@@ -19,6 +19,9 @@ export const MOTION_SPRING = {
   pop: { type: 'spring', visualDuration: 0.28, bounce: 0.18 },
 } as const satisfies Record<string, Transition>;
 
+/** 骨架屏延迟出现（毫秒）：本机读取多半在这之前就回来，不闪一下骨架。 */
+export const SKELETON_DELAY_MS = 250;
+
 /** 错峰出场的间隔（秒）。 */
 export const MOTION_STAGGER = 0.05;
 export const MOTION_SPLIT_STAGGER = 0.02;

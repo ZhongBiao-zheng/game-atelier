@@ -123,7 +123,6 @@ describe('Anthropic 预置', () => {
     render(<KeyForm presetId="anthropic" initial={{ ...presetInitial(anthropic), access_key: 'sk-ant-0123' }}
       onCreated={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.queryByRole('combobox', { name: '对话接口' })).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '新增模型类型' })).toHaveTextContent('对话');
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(createKey).toHaveBeenCalled());
     const payload = vi.mocked(createKey).mock.calls[0][0];

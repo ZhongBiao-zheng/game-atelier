@@ -4,6 +4,7 @@ import { AiIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, 
 import { ToolbarPopover } from './ToolbarPopover';
 import { DEFAULT_HISTORY_FILTERS, type GenMode, type HistoryFilters, type TimeFilter } from '@/lib/historyFilters';
 import { Input } from '@/components/ui/input';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 
 const TIME_OPTS: { key: TimeFilter; label: string }[] = [
@@ -19,7 +20,7 @@ const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
   { key: 'favorite', label: '喜欢', icon: <FavoriteIcon size="sm" aria-hidden /> },
-  { key: 'hidden', label: '隐藏', icon: <HideIcon size="sm" aria-hidden /> },
+  { key: 'hidden', label: '不在首页', icon: <HideIcon size="sm" aria-hidden /> },
 ];
 
 /** 查询面板 chip——复用 PromptInput ControlButton 配方（h-7 rounded-md token 色）。 */
@@ -98,6 +99,13 @@ export function StudioQueryBar({
           tabIndex={searchOpen ? 0 : -1}
           onChange={(e) => onChange({ ...filters, search: e.target.value })}
           onBlur={() => { if (!filters.search) setSearchOpen(false); }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape' || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            onChange({ ...filters, search: '' });
+            setSearchOpen(false);
+            e.currentTarget.blur();
+          }}
           className={`h-7 min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none transition-opacity duration-150 ${
             searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
@@ -140,14 +148,15 @@ export function StudioQueryBar({
           </div>
           <div>
             <div className={sectionCls}>时间</div>
-            <div role="listbox" aria-label="时间筛选列表" className="grid grid-cols-2 gap-1 rounded-lg bg-popover p-1">
+            <Segmented aria-label="时间筛选" className="grid-cols-2 gap-1 p-1">
               {TIME_OPTS.map((o) => (
-                <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
-                  onClick={() => onChange({ ...filters, time: o.key })}>
-                  <span>{o.label}</span>
-                </Button>
+                <SegmentedItem key={o.key} value={o.key} selected={filters.time === o.key}
+                  onSelect={() => onChange({ ...filters, time: o.key })}
+                  className="px-2 text-xs font-medium text-muted-foreground hover:text-foreground data-[state=on]:text-foreground">
+                  {o.label}
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </div>
           <div>
             <div className={sectionCls}>生成模式</div>

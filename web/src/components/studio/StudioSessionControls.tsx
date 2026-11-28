@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
-import { listTrash, restoreTrash } from '@/api/trash';
+import { restoreTrash } from '@/api/trash';
 import { Button } from '@/components/ui/button';
 import { ChevronDownIcon, DeleteIcon, EditIcon, NewChatIcon } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/tooltip';
 import { errorText } from '@/lib/errorText';
 import { notify } from '@/lib/notify';
+import { shakeOnError } from '@/lib/motion';
 import { DEFAULT_STUDIO_SESSION_ID } from '@/pages/studioDraft';
 import type { StudioComposerState } from './StudioComposer';
 import { ToolbarPopover } from './ToolbarPopover';
@@ -27,6 +28,9 @@ export function StudioSessionControls({ agent, disabled = false }: {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<{ id: string; scope: 'header' | 'list'; draft: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  // 改名请求期间先显示新名；删除点下就藏起那一行，失败再放回。
+  const [pendingTitle, setPendingTitle] = useState<{ id: string; title: string } | null>(null);
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
   const anchor = useRef<HTMLButtonElement>(null);
   const busy = disabled || agent.pending;
   function newChat() {
@@ -46,29 +50,33 @@ export function StudioSessionControls({ agent, disabled = false }: {
     setEditing(null);
     if (!trimmed || trimmed === displayTitle(id, original)) return;
     setSaving(true);
+    setPendingTitle({ id, title: trimmed });
     try {
       await agent.renameSession(id, trimmed);
     } catch (error) {
       notify.error(errorText(error, '重命名失败'));
+      shakeOnError(anchor.current);
     } finally {
       setSaving(false);
+      setPendingTitle(null);
     }
   }
   // 删除不确认：对话进回收站，作品留在默认对话，给 8 秒撤销。
   async function remove(sessionId: string, revision: number) {
-    await agent.removeSession(sessionId, revision);
-    const entry = await listTrash()
-      .then(items => items.find(item => item.kind === 'conversation' && item.meta.session_id === sessionId))
-      .catch(() => undefined);
-    if (!entry) return;
+    setHiddenIds(ids => new Set(ids).add(sessionId));
+    const trashId = await agent.removeSession(sessionId, revision);
+    setHiddenIds(ids => { const next = new Set(ids); next.delete(sessionId); return next; });
+    // undefined：删除失败（报错由 agent.error 显示），行已放回；null：没进回收站，无从撤销。
+    if (!trashId) return;
     notify.undo('已删除对话，作品已移至默认对话', () => {
-      void restoreTrash(entry.trash_id)
+      void restoreTrash(trashId)
         .then(() => agent.selectSession(sessionId))
         .catch(error => notify.error(errorText(error)));
     });
   }
   const current = agent.session ?? agent.sessions.find(s => s.session_id === agent.selectedSessionId);
-  const title = current ? displayTitle(current.session_id, current.title)
+  const shownTitle = (id: string, value: string) => pendingTitle?.id === id ? pendingTitle.title : displayTitle(id, value);
+  const title = current ? shownTitle(current.session_id, current.title)
     : agent.selectedSessionId === DEFAULT_STUDIO_SESSION_ID ? DEFAULT_TITLE : '新对话';
   const canRenameCurrent = Boolean(current) && !busy && !saving;
 
@@ -120,8 +128,8 @@ export function StudioSessionControls({ agent, disabled = false }: {
       <Button variant="ghost" size="sm" className="h-10 w-full justify-start" disabled={busy} onClick={newChat}>
         <NewChatIcon size="sm" />新对话
       </Button>
-      {agent.sessions.map(item => {
-        const label = displayTitle(item.session_id, item.title);
+      {agent.sessions.filter(item => !hiddenIds.has(item.session_id)).map(item => {
+        const label = shownTitle(item.session_id, item.title);
         const isEditingRow = editing?.scope === 'list' && editing.id === item.session_id;
         return (
           <div key={item.session_id} className="group relative">

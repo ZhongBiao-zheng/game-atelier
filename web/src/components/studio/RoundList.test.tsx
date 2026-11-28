@@ -463,7 +463,7 @@ describe('RoundList 图卡编辑（导入为参考图）', () => {
   it('传了 onEditAsReference 时每张图渲染编辑按钮，点击回传该图 path', () => {
     const onEditAsReference = vi.fn();
     render(<RoundList rounds={[imageDone]} onEditAsReference={onEditAsReference} />);
-    const buttons = screen.getAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
+    const buttons = screen.getAllByRole('button', { name: /^生成结果 \d+ 用作参考$/ });
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[1]);
     expect(onEditAsReference).toHaveBeenCalledWith('/data/studio/job-edit-1/v2.png');
@@ -893,6 +893,7 @@ describe('RoundList 分享到团队库', () => {
     const onShareResult = vi.fn();
     render(<RoundList rounds={[{ ...videoDone, shareable: true } as RoundState]} onShareResult={onShareResult} />);
 
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByLabelText('分享生成结果 1'));
     expect(onShareResult).toHaveBeenCalledWith('job-vid-1', 0, '/data/studio/job-vid-1/v1.mp4', videoDone.config);
   });
@@ -947,7 +948,8 @@ describe('RoundList 保存为创作资产', () => {
     const onSaveResultAsset = vi.fn();
     render(<RoundList rounds={[{ ...videoDone, shareable: true } as RoundState]} onSaveResultAsset={onSaveResultAsset} />);
 
-    fireEvent.click(screen.getByLabelText('保存生成视频 1 为资产'));
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
+    fireEvent.click(screen.getByLabelText('保存生成结果 1 到资产'));
     expect(onSaveResultAsset).toHaveBeenCalledWith({
       jobId: 'job-vid-1',
       index: 0,

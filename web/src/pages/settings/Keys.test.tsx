@@ -667,7 +667,7 @@ describe('KeyForm 模型选择器', () => {
     expect(JSON.parse(previewCalls(fetchMock)[1][1].body).include_all).toBe(true);
     // 「不可生成」这一档只在全量态出现；重拉不该把刚点完的勾清掉
     expect(screen.getByRole('radio', { name: '不可生成 2' })).toBeInTheDocument();
-    expect(screen.getByText('已选 1 个模型')).toBeInTheDocument();
+    expect(screen.getByText('勾选 1')).toBeInTheDocument();
   });
 
   it('未识别模型必须显式二选一，不静默按图片入库', async () => {
@@ -715,11 +715,11 @@ describe('KeyForm 模型选择器', () => {
     fireEvent.click(screen.getByRole('radio', { name: '视频 2' }));
     fireEvent.click(screen.getByRole('button', { name: '全选当前 2 个' }));
     // 只勾中两个视频，图片模型没被带上
-    expect(screen.getByText('已选 2 个模型')).toBeInTheDocument();
+    expect(screen.getByText('勾选 2')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /seedance-2\.0/ })).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: '清空选择' }));
-    expect(screen.getByText('已选 0 个模型')).toBeInTheDocument();
+    expect(screen.getByText('勾选 0')).toBeInTheDocument();
   });
 
   it('chip 计数跟随搜索词（否则搜完列表剩 2 行、chip 还写全部 4）', async () => {

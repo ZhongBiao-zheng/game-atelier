@@ -13,6 +13,7 @@ import type {
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 type Kind = 'image' | 'video';
 const KINDS: Kind[] = ['image', 'video'];
@@ -56,6 +57,11 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
 
   function toggle(item: CanvasAgentGenerationModel) {
     const ref = { alias: item.alias, model: item.model };
+    // 自动开着时点某个模型：关掉自动并只选它，一次完成。
+    if (auto) {
+      onChange({ auto_models: false, preferred_models: [ref] });
+      return;
+    }
     onChange({ preferred_models: isChosen(ref)
       ? preferred.filter(existing => !sameRef(existing, ref)) : [...preferred, ref] });
   }
@@ -97,17 +103,13 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
           <p className="text-sm font-medium">模型偏好</p>
           <Label className="flex items-center gap-2 text-xs text-muted-foreground">
             自动
-            <Button variant="bare"
-              type="button"
-              role="switch"
-              aria-checked={auto}
+            <Switch
+              size="sm"
+              checked={auto}
               aria-label="自动选择模型"
               disabled={disabled}
-              onClick={() => onChange({ auto_models: !auto })}
-              className={cn('relative h-5 w-9 rounded-full transition-colors', auto ? 'bg-primary' : 'bg-secondary')}
-            >
-              <span className={cn('absolute top-0.5 size-4 rounded-full bg-background transition-transform', auto ? 'translate-x-[1.125rem]' : 'translate-x-0.5')} />
-            </Button>
+              onCheckedChange={checked => onChange({ auto_models: checked })}
+            />
           </Label>
         </div>
         <Tabs activationMode="manual" value={activeKind} onValueChange={value => setTab(value as typeof activeKind)}>
@@ -142,10 +144,13 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, tri
                       type="button"
                       role="option"
                       aria-selected={checked}
-                      aria-disabled={auto || disabled}
-                      disabled={auto || disabled}
+                      aria-disabled={disabled}
+                      disabled={disabled}
                       onClick={() => toggle(item)}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
+                      className={cn(
+                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-secondary/60 disabled:opacity-50 disabled:hover:bg-transparent aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60',
+                        auto && 'opacity-60 hover:opacity-100',
+                      )}
                     >
                       <span className={checked ? 'text-foreground' : 'text-muted-foreground'}>
                         <ModelBrandIcon brand={modelBrand(item.model)} size="md" />

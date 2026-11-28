@@ -574,7 +574,7 @@ function StudioFull() {
       files = await fetchRoundReferences(config, jobId);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
-      setAssetNotice(errorText(error, '参考素材恢复失败'));
+      notify.error(errorText(error, '参考素材恢复失败'));
       return;
     }
     // 取素材期间切了对话或又点了别的：旧结果不写进当前输入。
@@ -937,7 +937,7 @@ function StudioFull() {
       : sizeParams;
     const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
-      setAssetNotice(preparedSize.error);
+      notify.error(preparedSize.error);
       return;
     }
     const effectiveSizeParams = preparedSize.params!;
@@ -967,7 +967,7 @@ function StudioFull() {
     try {
       sessionId = await submissionSession(prompt);
     } catch (error) {
-      setAssetNotice(errorText(error));
+      notify.error(errorText(error));
       setPending(false);
       return;
     }
@@ -1124,7 +1124,7 @@ function StudioFull() {
     try {
       sessionId = await submissionSession(prompt);
     } catch (error) {
-      setAssetNotice(errorText(error));
+      notify.error(errorText(error));
       setPending(false);
       return;
     }
@@ -1450,10 +1450,11 @@ function StudioFull() {
             onClick={scrollToBottom}
             tabIndex={dockCollapsed ? 0 : -1}
             aria-hidden={!dockCollapsed}
-            className={`absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-[opacity,translate,background-color] duration-300 ease-in-out hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+            className={`absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-[opacity,translate,background-color] hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              // 浮现 300ms in-out；隐去是退场，150ms subtle（默认曲线）。
               dockCollapsed
-                ? 'pointer-events-auto opacity-100 translate-x-0 translate-y-0'
-                : 'pointer-events-none opacity-0 translate-x-3 -translate-y-2'
+                ? 'pointer-events-auto opacity-100 translate-x-0 translate-y-0 duration-300 ease-in-out'
+                : 'pointer-events-none opacity-0 translate-x-3 -translate-y-2 duration-150'
             }`}
           >
             <ScrollBottomIcon size="sm" aria-hidden />
@@ -1716,7 +1717,7 @@ function StudioFull() {
       // 与面板里的「复刻」一致：先记一次使用。
       requestReproduceRef.current(await markCreationAssetUsed(asset.asset_id));
     } catch (error) {
-      setAssetNotice(errorText(error, '复刻失败'));
+      notify.error(errorText(error, '复刻失败'));
     }
   }
 
@@ -1732,7 +1733,7 @@ function StudioFull() {
       projects = canvases;
       projectId = mounts.find(mount => mount.library_id === libraryId)?.project_id;
     } catch (error) {
-      setAssetNotice(errorText(error, '读取团队库失败'));
+      notify.error(errorText(error, '读取团队库失败'));
       return;
     }
     if (!projectId || !projects.some(project => project.project_id === projectId)) {
@@ -1794,7 +1795,7 @@ function StudioFull() {
       setRecipeNotice(missingModel || warnings.length > 0 ? { missingModel, warnings } : null);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
-      setAssetNotice(errorText(error, '参考素材恢复失败'));
+      notify.error(errorText(error, '参考素材恢复失败'));
     }
   }
 
@@ -1848,7 +1849,7 @@ function StudioFull() {
     try {
       const file = await readCreationMediaFile(asset.asset_id, content);
       addReferenceFile(file, content.mime_type, asset.title);
-    } catch (error) { setAssetNotice(errorText(error)); }
+    } catch (error) { notify.error(errorText(error)); }
   }
 
   async function deleteFailedRound(jobId: string) {
@@ -1886,7 +1887,7 @@ function StudioFull() {
       offerUndo(before);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
-      setAssetNotice(errorText(error, '参考素材恢复失败'));
+      notify.error(errorText(error, '参考素材恢复失败'));
     }
   }
 

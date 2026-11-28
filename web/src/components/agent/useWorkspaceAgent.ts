@@ -20,6 +20,7 @@ import {
 } from '@/api/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { ApiError } from '@/api/http';
+import { errorText } from '@/lib/errorText';
 import { OUTGOING_MESSAGE_PREFIX } from './canvasAgentTimeline';
 import { DEFAULT_STUDIO_SESSION_ID, readStudioView, updateStudioView } from '@/pages/studioDraft';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
@@ -74,7 +75,7 @@ function rememberedCreation(): RememberedCreation {
 }
 
 // 首页和创作台切换会重挂输入框。新页面读取同一会话前，先等上一个页面发出的偏好修改落盘。
-const studioPreferenceWrites = new Map<string, Promise<StudioAgentSession>>();
+const studioPreferenceWrites = new Map<string, Promise<unknown>>();
 async function readWorkspaceSession(projectId: string | null, id: string) {
   if (projectId === null) await studioPreferenceWrites.get(id)?.catch(() => undefined);
   return getCanvasAgentSession(projectId, id);
@@ -119,8 +120,15 @@ function withOutgoing<T extends CanvasAgentSession | StudioAgentSession>(session
   return { ...session, messages: [...session.messages, message] };
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** 还在排队写入的设置并进服务端返回的会话：前一次写入的回包不会把后一次的本地修改冲掉。 */
+function withQueuedSettings<T extends CanvasAgentSession | StudioAgentSession>(
+  session: T, queued: readonly { sessionId: string; update: CanvasAgentSessionUpdate }[],
+): T {
+  return queued.reduce((current, { sessionId, update }) => {
+    if (sessionId !== current.session_id) return current;
+    const { effort, title: _title, ...rest } = update;
+    return { ...current, ...rest, ...(effort !== undefined ? { effort: effort === 'off' ? null : effort } : {}) };
+  }, session);
 }
 
 /** 新会话沿用的设置：模型、思考、权限、创作模式、模型偏好。 */
@@ -171,6 +179,13 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   const [usage, setUsage] = useState<{ sessionId: string; value: CanvasAgentSessionUsage } | null>(null);
   const [plan, setPlan] = useState<{ sessionId: string; value: CanvasAgentPlan | null } | null>(null);
   const [confirmAbove, setConfirmAbove] = useState<number | null>(() => CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
+  // 设置类修改（模型、权限、自动、确认金额）本地先生效，写入排队进行，不进 pending：输入壳不置灰、不抢焦点。
+  const settingsWrite = useRef<Promise<unknown>>(Promise.resolve());
+  const queuedSettings = useRef<{ sessionId: string; update: CanvasAgentSessionUpdate }[]>([]);
+  const savedConfirmAbove = useRef<number | null>(CONTROLS_CACHE_ENABLED ? cachedConfirmAbove : null);
+  const confirmAboveWrites = useRef(0);
+  // 设置写入失败：count 供调用方抖动设置控件，message 用来区分报错来自设置还是发送。
+  const [settingsFailure, setSettingsFailure] = useState<{ count: number; message: string | null }>({ count: 0, message: null });
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
     const model = rememberedModel();
@@ -187,7 +202,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
 
   const acceptSession = useCallback((updated: CanvasAgentSession | StudioAgentSession) => {
     if (sessionIdRef.current !== updated.session_id) return;
-    setSession(current => current?.session_id === updated.session_id && current.revision > updated.revision ? current : updated);
+    setSession(current => current?.session_id === updated.session_id && current.revision > updated.revision
+      ? current : withQueuedSettings(updated, queuedSettings.current));
   }, []);
 
   const refreshList = useCallback(async () => {
@@ -229,7 +245,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       await loadSession(sessionId);
     } catch (loadError) {
       if (sessionIdRef.current !== sessionId) return;  // 期间又切到了别的会话，由那次收尾
-      setError(messageOf(loadError));
+      setError(errorText(loadError));
       const shown = shownSessionIdRef.current;
       sessionIdRef.current = shown;
       setSelecting(false);
@@ -283,7 +299,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(messageOf(loadError));
+          setError(errorText(loadError));
           setRestoring(false);
         }
       }
@@ -297,7 +313,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     let generation = 0;
     function refresh() {
       const request = ++generation;
-      const onError = (error: unknown) => { if (request === generation) setError(messageOf(error)); };
+      const onError = (error: unknown) => { if (request === generation) setError(errorText(error)); };
       void (async () => {
         let result = await listCanvasAgentChatModels();
         if (request !== generation) return;
@@ -327,8 +343,9 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     getCanvasAgentSettings().then(settings => {
       if (!active) return;
       cachedConfirmAbove = settings.confirm_above_cny;
-      setConfirmAbove(settings.confirm_above_cny);
-    }, loadError => { if (active) setError(messageOf(loadError)); });
+      savedConfirmAbove.current = settings.confirm_above_cny;
+      if (confirmAboveWrites.current === 0) setConfirmAbove(settings.confirm_above_cny);
+    }, loadError => { if (active) setError(errorText(loadError)); });
     return () => { active = false; };
   }, [loadControls]);
 
@@ -336,7 +353,7 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     listCanvasAgentSkills().then(result => {
       cachedSkills = result.skills;
       setSkills(result.skills);
-    }, loadError => setError(messageOf(loadError)));
+    }, loadError => setError(errorText(loadError)));
   }, []);
   useEffect(() => { if (loadControls) reloadSkills(); }, [loadControls, reloadSkills]);
 
@@ -394,11 +411,25 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     try {
       return await action();
     } catch (actionError) {
-      setError(messageOf(actionError));
+      setError(errorText(actionError));
       return undefined;
     } finally {
       setPending(false);
     }
+  }, []);
+
+  /** 设置写入按顺序排队；失败时由 rollback 退回，报错并记一次失败。 */
+  const saveSetting = useCallback(<T,>(write: () => Promise<T>, rollback: () => void): Promise<T | undefined> => {
+    setError(null);
+    const request = settingsWrite.current.catch(() => undefined).then(write);
+    settingsWrite.current = request;
+    return request.catch((writeError: unknown) => {
+      rollback();
+      const message = errorText(writeError);
+      setError(message);
+      setSettingsFailure(current => ({ count: current.count + 1, message }));
+      return undefined;
+    });
   }, []);
 
   /** 新会话沿用当前会话的模型 / 思考 / 权限；没有当前会话时用上次选过的模型。 */
@@ -449,40 +480,68 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     const changesModels = update.auto_models !== undefined || update.preferred_models !== undefined;
     const preferenceTarget = projectId === null && changesModels
       ? session?.session_id ?? (home ? homePreferenceSession.current : null) : null;
-    if (preferenceTarget) return run(async () => {
-      const request = updateCanvasAgentSession(null, preferenceTarget, update);
-      studioPreferenceWrites.set(preferenceTarget, request);
-      try {
-        const updated = await request;
-        const preferences = { auto_models: updated.auto_models, preferred_models: updated.preferred_models };
-        remember({ ...creation, ...preferences });
-        if (session) acceptSession(updated);
-        else setDraft(current => ({ ...current, ...preferences }));
-        return updated;
-      } catch (error) {
-        if (!home || !(error instanceof ApiError) || error.status !== 409 || error.code !== 'SESSION_BUSY') throw error;
-        // 旧对话运行中或待审批时，首页可独立开始新对话，保留另一对话正在执行的模型范围。
-        const preferences = { auto_models: draft.auto_models ?? true, preferred_models: draft.preferred_models ?? [], ...creation };
-        remember(preferences);
-        setDraft(current => ({ ...current, ...preferences }));
-        homePreferenceSession.current = null;
-        if (readStudioView().activeSessionId === preferenceTarget) updateStudioView({ activeSessionId: null });
-        return undefined;
-      } finally {
-        if (studioPreferenceWrites.get(preferenceTarget) === request) studioPreferenceWrites.delete(preferenceTarget);
-      }
-    });
-    remember(creation);
-    if (!session) {
+    if (!preferenceTarget) remember(creation);
+    if (!session && !preferenceTarget) {
       setDraft(current => ({ ...current, ...update }));
       return Promise.resolve(undefined);
     }
-    return run(async () => {
-      const updated = await updateCanvasAgentSession(projectId, session.session_id, update);
-      acceptSession(updated);
-      return updated;
-    });
-  }, [acceptSession, draft, home, projectId, run, session]);
+    // 先在本地生效：有会话就叠到会话上，首页还没有会话就改草稿。
+    const previous = session;
+    const previousDraft = draft;
+    const queued = session ? { sessionId: session.session_id, update } : null;
+    if (queued) {
+      queuedSettings.current = [...queuedSettings.current, queued];
+      setSession(current => current?.session_id === queued.sessionId ? withQueuedSettings(current, [queued]) : current);
+    } else setDraft(current => ({ ...current, ...update }));
+    const settle = () => { if (queued) queuedSettings.current = queuedSettings.current.filter(item => item !== queued); };
+    const rollback = () => {
+      if (!previous) { setDraft(previousDraft); return; }
+      // 回到写入前的值（之后排队的修改照样叠上去），再读一次服务端为准。
+      setSession(current => current?.session_id === previous.session_id && current.revision === previous.revision
+        ? withQueuedSettings(previous, queuedSettings.current) : current);
+      void loadSession(previous.session_id).catch(() => undefined);
+    };
+    if (preferenceTarget) {
+      const request = saveSetting(async () => {
+        try {
+          const updated = await updateCanvasAgentSession(null, preferenceTarget, update);
+          settle();
+          const preferences = { auto_models: updated.auto_models, preferred_models: updated.preferred_models };
+          remember({ ...creation, ...preferences });
+          if (session) acceptSession(updated);
+          else setDraft(current => ({ ...current, ...preferences }));
+          return updated;
+        } catch (error) {
+          settle();
+          if (!home || !(error instanceof ApiError) || error.status !== 409 || error.code !== 'SESSION_BUSY') throw error;
+          // 旧对话运行中或待审批时，首页可独立开始新对话，保留另一对话正在执行的模型范围。
+          const preferences = { auto_models: draft.auto_models ?? true, preferred_models: draft.preferred_models ?? [], ...creation };
+          remember(preferences);
+          setDraft(current => ({ ...current, ...preferences }));
+          homePreferenceSession.current = null;
+          if (readStudioView().activeSessionId === preferenceTarget) updateStudioView({ activeSessionId: null });
+          return undefined;
+        }
+      }, rollback);
+      studioPreferenceWrites.set(preferenceTarget, request);
+      void request.then(() => {
+        if (studioPreferenceWrites.get(preferenceTarget) === request) studioPreferenceWrites.delete(preferenceTarget);
+      });
+      return request;
+    }
+    const sessionId = previous!.session_id;
+    return saveSetting(async () => {
+      try {
+        const updated = await updateCanvasAgentSession(projectId, sessionId, update);
+        settle();
+        acceptSession(updated);
+        return updated;
+      } catch (writeError) {
+        settle();
+        throw writeError;
+      }
+    }, rollback);
+  }, [acceptSession, draft, home, loadSession, projectId, saveSetting, session]);
 
   // 切会话期间显示的还是旧会话：这时发出去会发进旧会话，等新会话读到再发。
   // 目标会话与显示的会话不一致（读取中或读取失败尚未退回）时同样拦住发送与审批。
@@ -502,6 +561,8 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
       ? { ...current, sessionId: target.session_id, revision: target.revision } : current);
     return run(async () => {
       try {
+        // 刚改的设置还在写入：等它落盘再发，这一轮按新设置跑。
+        await settingsWrite.current.catch(() => undefined);
         return await action(claim);
       } finally {
         setOutgoing(current => current?.id === id ? null : current);
@@ -561,11 +622,13 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
   /** 删除对话；返回回收站条目 id（没进回收站时为 null），调用方用它发撤销 toast。 */
   const removeSession = (id: string, revision: number) => run(async () => {
     const trashId = await deleteCanvasAgentSession(projectId, id, revision);
+    // 删完立刻返回，撤销提示不等切会话与刷新列表。
+    setSessions(current => current.filter(item => item.session_id !== id));
     if (sessionIdRef.current === id) {
-      if (projectId === null) await selectSession(DEFAULT_STUDIO_SESSION_ID);
+      if (projectId === null) void selectSession(DEFAULT_STUDIO_SESSION_ID);
       else newSession();
     }
-    await refreshList();
+    void refreshList().catch(() => undefined);
     return trashId;
   });
 
@@ -593,17 +656,26 @@ export function useWorkspaceAgent(projectId: string | null, open: boolean, home 
     return updated;
   }), [acceptSession, projectId, run, session]);
 
-  const updateConfirmAbove = useCallback((value: number) => run(async () => {
-    const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
-    setConfirmAbove(saved.confirm_above_cny);
-    return saved;
-  }), [run]);
+  const updateConfirmAbove = useCallback((value: number) => {
+    const write = ++confirmAboveWrites.current;
+    setConfirmAbove(value);
+    return saveSetting(async () => {
+      const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
+      savedConfirmAbove.current = saved.confirm_above_cny;
+      cachedConfirmAbove = saved.confirm_above_cny;
+      if (write === confirmAboveWrites.current) setConfirmAbove(saved.confirm_above_cny);
+      return saved;
+    }, () => {
+      if (write === confirmAboveWrites.current) setConfirmAbove(savedConfirmAbove.current);
+    });
+  }, [saveSetting]);
 
   const clearError = useCallback(() => setError(null), []);
 
   const displayedSession = withOutgoing(session, outgoing);
   return {
     sessions, session: displayedSession, draft, streaming, tool, models, generationModels, skills, error, pending: pending || selecting,
+    settingsFailures: settingsFailure.count, settingsError: settingsFailure.message,
     usage: usage && usage.sessionId === session?.session_id ? usage.value : null,
     plan: plan && plan.sessionId === session?.session_id ? plan.value : null,
     confirmAbove,
