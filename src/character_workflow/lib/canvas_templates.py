@@ -13,6 +13,9 @@ from tempfile import TemporaryDirectory
 
 from character_workflow.lib import data_root, trash
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
+from character_workflow.lib.canvas_paste import paste_from_document
+from character_workflow.lib.canvas_agent_layout import DEFAULT_SIZE
+from character_workflow.lib.schemas import CanvasPoint, CanvasDocument
 from character_workflow.lib.canvas_projects import (
     _now, _read_canvas_document_unlocked, _recover_canvas_transactions_unlocked,
     _resolve_canvas_media_version, canvas_project_lock_path,
@@ -200,3 +203,66 @@ def delete_template(template_id):
 def template_cover(template_id):
     return _directory(template_id) / "media/cover.webp"
 
+
+
+def _remap_bindings(value, ids):
+    """Canvas and host plugin payloads use *_node_id(s) for bindings."""
+    if isinstance(value, list):
+        for item in value:
+            _remap_bindings(item, ids)
+    elif isinstance(value, dict):
+        for field, item in value.items():
+            if field.endswith("_node_id") and isinstance(item, str):
+                value[field] = ids.get(item)
+            elif field.endswith("_node_ids") and isinstance(item, list):
+                value[field] = [ids[key] for key in item if isinstance(key, str) and key in ids]
+            else:
+                _remap_bindings(item, ids)
+
+
+def paste_template(project_id: str, template_id: str, center: CanvasPoint, revision: int):
+    with _locked(template_id) as directory:
+        record = _read(directory)
+        payload = record["payload"]
+        nodes = payload["nodes"]
+        ids = {node["id"]: f"{node['type']}-{secrets.token_hex(12)}" for node in nodes}
+        group = next(node for node in nodes if node["type"] == "group")
+        size = group.get("size") or {"width": DEFAULT_SIZE[0], "height": DEFAULT_SIZE[1]}
+        dx = center.x - group["position"]["x"] - size["width"] / 2
+        dy = center.y - group["position"]["y"] - size["height"] / 2
+        group["title"] = record["name"]
+        for node in nodes:
+            node["id"] = ids[node["id"]]
+            node["position"]["x"] += dx
+            node["position"]["y"] += dy
+            data = node["data"]
+            _remap_bindings(data, ids)
+            if draft := data.get("generation_draft"):
+                draft["prompt"] = re.sub(r"@\[node:([^\]]+)\]", lambda m: (
+                    f"@[node:{ids[m[1]]}]" if m[1] in ids else ""
+                ), draft.get("prompt", ""))
+            for layer in data.get("layers", []):
+                layer["id"] = f"layer-{secrets.token_hex(12)}"
+        for edge in payload["connections"]:
+            edge.update(id=f"connection-{secrets.token_hex(12)}",
+                        source_node_id=ids[edge["source_node_id"]], target_node_id=ids[edge["target_node_id"]])
+
+        # Validate the clipboard in canvas coordinates. The reader supplies the bytes
+        # from template ownership; this virtual uploads path is never opened.
+        files = {}
+        for vid, version in payload["content_versions"].items():
+            if version["kind"] == "text":
+                continue
+            path = version["path"]
+            if not re.fullmatch(r"media/[0-9a-f]{64}\.[a-z0-9]+", path):
+                raise ValueError("模板媒体路径无效")
+            files[vid] = directory / path
+            version["path"] = "uploads/" + Path(path).name
+        source = CanvasDocument(project_id=template_id, updated_at=record["updated_at"],
+                                nodes=nodes, connections=payload["connections"],
+                                content_versions=payload["content_versions"])
+        document = paste_from_document(
+            project_id=project_id, source=source, nodes=source.nodes, connections=source.connections,
+            document_revision=revision, media_reader=lambda version: files[version.version_id].read_bytes(),
+        )
+        return group["id"], document

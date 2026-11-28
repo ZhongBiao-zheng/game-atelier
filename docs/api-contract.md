@@ -1743,3 +1743,7 @@ ComfyUI 的 `params.workflow_inputs` 按来源模型声明的创作控件 ID 保
 `PATCH /{template_id}` 接收 `{name}`，`POST /{template_id}/duplicate` 创建独立副本，
 `GET /{template_id}/cover` 返回 WebP，`DELETE /{template_id}` 返回 `{trash_id}`。
 路径均相对上述资产库。模板文件位于 `library/templates/<id>/`，连同媒体可从回收站还原。
+
+`POST /api/canvas/projects/{project_id}/templates/{template_id}/paste` 接收视口中心的画布坐标
+`{x, y}` 和目标修订号 `If-Match`，返回 `{group_id, document}` 及新 ETag。
+每次添加独立复制节点、版本、媒体、组内连线与生成草稿，目标画布保留原视口。

@@ -64,3 +64,39 @@ def test_rename_duplicate_delete_and_restore(client):
     trash.restore(removed)
     assert client.get(path + "/cover").status_code == 200
 
+
+
+def test_paste_twice_after_source_deletion_keeps_media_draft_and_internal_edges(client):
+    from character_workflow.lib.canvas_packages import delete_canvas_project
+    pid, _ = source_group()
+    saved = templates.save_template(pid, "group", "卡面")
+    delete_canvas_project(pid, projects.read_canvas_document(pid).revision)
+    target = projects.create_canvas_project("目标").project_id
+    path = f"/api/canvas/projects/{target}/templates/{saved['id']}/paste"
+    center = {"x": 50, "y": 80}
+    groups, node_ids, version_ids, edges, files = set(), set(), set(), set(), set()
+    for revision in range(2):
+        res = client.post(path, json=center, headers={"If-Match": str(revision)})
+        assert res.status_code == 200, res.text
+        result = res.json()
+        doc = result["document"]
+        group = next(n for n in doc["nodes"] if n["id"] == result["group_id"])
+        members = set(group["data"]["member_node_ids"])
+        assert group["position"] == {"x": -270, "y": -70}
+        assert len(members) == 2 and members.isdisjoint(node_ids)
+        assert group["id"] not in groups
+        image, = [n for n in doc["nodes"] if n["id"] in members and n["type"] == "image"]
+        text, = [n for n in doc["nodes"] if n["id"] in members and n["type"] == "text"]
+        assert text["data"]["generation_draft"]["prompt"] == "node-text"
+        version = doc["content_versions"][image["data"]["current_version_id"]]
+        assert version["path"] not in files and version["version_id"] not in version_ids
+        assert (projects.canvas_project_dir(target) / version["path"]).read_bytes() == _png()
+        edge, = [e for e in doc["connections"] if e["source_node_id"] == image["id"]]
+        assert edge["target_node_id"] == text["id"] and edge["id"] not in edges
+        groups.add(group["id"])
+        node_ids.update(members)
+        files.add(version["path"])
+        version_ids.add(version["version_id"])
+        edges.add(edge["id"])
+    assert client.post(path, json=center, headers={"If-Match": "0"}).status_code == 409
+    assert len(projects.read_canvas_document(target).nodes) == 6

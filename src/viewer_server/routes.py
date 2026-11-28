@@ -49,7 +49,7 @@ from character_workflow.lib.schemas import (
     AccentThemes, AccentThemesUpdate,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionId, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
-    CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
+    CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasPoint, CanvasReproduceRequest,
     CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
@@ -3234,6 +3234,22 @@ def post_canvas_creation_asset_reproduce(
     except ValueError as error:
         # 非生成资产、配方拼不出合法草稿（ValidationError 也是 ValueError）→ 422；
         # 画布存档本身坏了（CanvasStorageError）→ 500，见 _canvas_document_http_error。
+        raise _canvas_document_http_error(error) from error
+
+
+@router.post("/canvas/projects/{project_id}/templates/{template_id}/paste")
+def post_template_paste(project_id: str, template_id: str, center: CanvasPoint, response: Response,
+                        if_match: str | None = Header(default=None, alias="If-Match")):
+    from character_workflow.lib.canvas_templates import paste_template
+    try:
+        group_id, document = paste_template(project_id, template_id, center, _canvas_if_match(if_match, "画布"))
+        response.headers["ETag"] = f'"{document.revision}"'
+        return {"group_id": group_id, "document": document}
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(404, "找不到模板、画布或媒体") from None
+    except ValueError as error:
         raise _canvas_document_http_error(error) from error
 
 

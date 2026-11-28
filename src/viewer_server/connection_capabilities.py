@@ -244,6 +244,7 @@ GET /api/team-libraries/{library_id}/specs
 PUT /api/team-libraries/{library_id}/specs/team
 PUT /api/team-libraries/{library_id}/specs/categories/{name:path}
 POST /api/canvas/projects/{project_id}/paste
+POST /api/canvas/projects/{project_id}/templates/{template_id}/paste
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations
