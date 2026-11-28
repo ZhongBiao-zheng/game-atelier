@@ -478,6 +478,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(collab_transfer_local_router)
     from viewer_server.history_routes import router as history_router
     app.include_router(history_router)
+    from viewer_server.library_routes import router as library_router
+    app.include_router(library_router)
     app.include_router(router)
     from viewer_server.canvas_group_routes import router as group_router
     app.include_router(group_router)
