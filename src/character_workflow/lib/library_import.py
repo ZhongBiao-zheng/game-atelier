@@ -97,12 +97,6 @@ def _import_catalog(source, catalog):
         project_assets._write_catalog_unlocked(current, [*current.assets, *kept],
             migrated_canvas_project_ids=list(dict.fromkeys([*current.migrated_canvas_project_ids,
                                                             *catalog.migrated_canvas_project_ids])))
-        archive = source / "archived.json"
-        if archive.is_file():
-            archived = project_assets._read_archived_unlocked()
-            keep_ids = {a.asset_id for a in retained}
-            archived.update({k: v for k, v in json.loads(read_text_with_retry(archive))["assets"].items() if k in keep_ids})
-            project_assets._write_archived_unlocked(archived)
     return {"folder_id": folder, "items": count, "retained": len(retained)}
 
 

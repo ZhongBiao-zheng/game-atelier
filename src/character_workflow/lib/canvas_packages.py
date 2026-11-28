@@ -1337,7 +1337,7 @@ def discard_empty_canvas_project(project_id: str, expected_revision: int) -> boo
     from character_workflow.lib.project_reference_assets import list_creation_assets
     from character_workflow.lib.team_library import list_mounts
 
-    if list_mounts(project_id) or list_creation_assets(project_id=project_id, archived=None).assets:
+    if list_mounts(project_id) or list_creation_assets(project_id=project_id).assets:
         return False
     with (
         file_lock(_lifecycle_lock_path()),

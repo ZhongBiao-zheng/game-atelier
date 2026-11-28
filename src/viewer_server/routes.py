@@ -2867,7 +2867,6 @@ def get_creation_assets(
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
     has_category: bool | None = Query(default=None),
-    archived: bool = Query(default=False),
 ):
     from character_workflow.lib.project_reference_assets import list_creation_assets
     try:
@@ -2876,7 +2875,6 @@ def get_creation_assets(
             scope=scope,
             project_id=project_id,
             has_category=has_category,
-            archived=archived,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)

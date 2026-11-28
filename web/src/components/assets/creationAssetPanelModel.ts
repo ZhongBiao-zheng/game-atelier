@@ -1,9 +1,5 @@
-import type { CreationAsset, CreationMediaAssetContent } from '@/schema/creationAssets';
-import type { UseTeamMedia, UseTeamPrompt } from './teamAssetUse';
+import type { HistoryReference } from '@/api/history';
 import type { CreationPromptSegment } from '@/schema/creationAssets';
-
-/** 本机创作资产、团队库与项目参考库视图。 */
-export type CreationAssetPanelMode = 'prompt' | 'media' | 'team' | 'reference';
 
 /** 生成结果的来源：有它时保存为带配方的生成资产，而不是普通媒体。 */
 export type CreationGenerationSource =
@@ -38,34 +34,12 @@ export function errorMessage(error: unknown): string {
 }
 
 export interface CreationAssetPanelProps {
-  embedded?: boolean;
-  refreshKey?: number;
-  onAssetsChanged?: () => Promise<void>;
   className?: string;
   projectId?: string;
-  canvasTargets?: { projectId: string; name: string }[];
-  initialKind?: CreationAssetPanelMode;
+  openLibrary?: boolean;
   saveRequest?: CreationAssetSaveRequest | null;
   onSaveRequestHandled?: (requestId: string) => void;
   onClose: () => void;
-  onUsePrompt: (
-    asset: CreationAsset,
-    renderedPrompt: string,
-  ) => void;
-  onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
-  onUseTeamMedia?: UseTeamMedia;
-  onUseTeamPrompt?: UseTeamPrompt;
-  /** 复刻生成资产（asset.kind 恒为 'generation'）；传了才显示「复刻」。 */
-  onReproduce?: (asset: CreationAsset) => void;
-  /** 透传给团队栏：有值时「相关配方」按参考 sha256 命中。 */
-  teamRelatedSha256?: string | null;
-  /** 团队栏初始选中的库；不在当前画布的挂载列表里就忽略。 */
-  initialTeamLibraryId?: string | null;
-  /** 没有 projectId（Studio）时团队栏初始落在哪个画布；不在 canvasTargets 里就退回第一个。 */
-  initialTeamProjectId?: string | null;
-}
-
-export interface CreationAssetPanelHandle {
-  requestClose: () => void;
-  requestTransition: (action: () => void) => void;
+  onHistoryReference: (items: HistoryReference[], placeOnCanvas?: boolean) => Promise<void>;
+  onSubject?: (token: string) => void;
 }

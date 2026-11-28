@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import mimetypes
 import re
 import secrets
-import shutil
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,29 +87,6 @@ def _catalog_path() -> Path:
 
 def _catalog_lock_path() -> Path:
     return data_root.runtime_dir() / "locks" / "creation-assets.lock"
-
-
-def _archived_path() -> Path:
-    """归档清单（D13）：{asset_id: 归档时间}。单独一份 sidecar 而不是资产上的字段——资产库的
-    schema 是 extra=forbid，加字段会让降级后的旧版整库读不出；旧版读不到这份清单，只是把归档的也列出来。"""
-    return data_root.project_references_dir() / "archived.json"
-
-
-def _read_archived_unlocked() -> dict[str, str]:
-    try:
-        raw = json.loads(_archived_path().read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, ValueError):
-        logger.warning("creation asset archive list unreadable; treating as empty", exc_info=True)
-        return {}
-    rows = raw.get("assets") if isinstance(raw, dict) else None
-    return {key: value for key, value in rows.items()
-            if isinstance(key, str) and isinstance(value, str)} if isinstance(rows, dict) else {}
-
-
-def _write_archived_unlocked(archived: dict[str, str]) -> None:
-    atomic_write_json(_archived_path(), {"assets": archived})
 
 
 def _empty_catalog() -> CreationAssetCatalog:
@@ -451,114 +427,6 @@ def _preview_image(body: bytes, mime_type: str) -> PromptPreviewImage:
     )
 
 
-def _replace_previews(catalog: CreationAssetCatalog, asset: CreationAsset,
-                      previews: list[PromptPreviewImage]) -> CreationAsset:
-    updated = asset.model_copy(update={
-        "content": asset.content.model_copy(update={"preview_images": previews}), "updated_at": _now(),
-    })
-    _replace_asset(catalog, updated)
-    return updated
-
-
-def add_prompt_previews(asset_id: str, uploads: list[tuple[bytes, str]], *,
-                        replace_file: str | None = None) -> CreationAsset:
-    if not uploads or len(uploads) > PROMPT_PREVIEW_LIMIT:
-        raise ValueError("请选择 1–8 张效果图")
-    prepared = [(_preview_image(body, mime), body)
-                for body, mime in uploads]
-    with file_lock(_catalog_lock_path()):
-        catalog = _read_catalog_unlocked()
-        asset = _preview_asset(catalog, asset_id)
-        previous = list(asset.content.preview_images)
-        if replace_file is not None:
-            if len(prepared) != 1:
-                raise ValueError("更换时只能选择一张图片")
-            if replace_file not in {item.file for item in previous}:
-                raise KeyError(replace_file)
-            replacement = prepared[0][0]
-            # 同图更换幂等；更换成已有图时保留它的来源元数据和唯一文件。
-            replacement = next((p for p in previous if p.file == replacement.file), replacement)
-            previews = [replacement if p.file == replace_file else p for p in previous
-                        if p.file == replace_file or p.file != replacement.file]
-        else:
-            previews = list(previous)
-            for preview, _body in prepared:
-                if preview.file not in {p.file for p in previews}:
-                    previews.append(preview)
-        if len(previews) > PROMPT_PREVIEW_LIMIT:
-            raise ValueError("每条提示词最多 8 张效果图")
-        created: list[Path] = []
-        try:
-            for preview, body in prepared:
-                path = _preview_path(asset_id, preview.file)
-                if path.exists():
-                    if path.read_bytes() != body:
-                        raise ValueError("效果图文件校验不一致")
-                else:
-                    atomic_write_bytes(path, body)
-                    created.append(path)
-            if [p.file for p in previews] == [p.file for p in previous]:
-                return asset
-            updated = _replace_previews(catalog, asset, previews)
-        except Exception:
-            for path in created:
-                path.unlink(missing_ok=True)
-            raise
-        retained = {p.file for p in previews}
-        for preview in previous:
-            if preview.file not in retained:
-                _preview_path(asset_id, preview.file).unlink(missing_ok=True)
-        return updated
-
-
-def delete_prompt_preview(asset_id: str, file: str) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        catalog = _read_catalog_unlocked()
-        asset = _preview_asset(catalog, asset_id)
-        if file not in {p.file for p in asset.content.preview_images}:
-            raise KeyError(file)
-        path = _preview_path(asset_id, file)
-        updated = _replace_previews(catalog, asset, [p for p in asset.content.preview_images if p.file != file])
-        path.unlink(missing_ok=True)
-        return updated
-
-
-def reorder_prompt_previews(asset_id: str, files: list[str]) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        catalog = _read_catalog_unlocked()
-        asset = _preview_asset(catalog, asset_id)
-        by_file = {p.file: p for p in asset.content.preview_images}
-        if len(files) != len(by_file) or set(files) != set(by_file):
-            raise ValueError("排序必须包含当前的全部效果图，且不能重复")
-        return _replace_previews(catalog, asset, [by_file[file] for file in files])
-
-
-def prompt_preview_bytes(asset_id: str, file: str, width: int | None = None) -> tuple[bytes, str]:
-    from PIL import Image, ImageOps
-    from character_workflow.lib.team_library_index import _THUMB_WIDTHS
-    with file_lock(_catalog_lock_path()):
-        asset = _preview_asset(_read_catalog_unlocked(), asset_id)
-        preview = next((p for p in asset.content.preview_images if p.file == file), None)
-        if preview is None:
-            raise KeyError(file)
-        body = _preview_path(asset_id, file).read_bytes()
-    if width is None:
-        return body, preview.mime_type
-    snapped = next((w for w in _THUMB_WIDTHS if w >= width), _THUMB_WIDTHS[-1])
-    cache = data_root.runtime_dir() / "thumbs" / "prompt-previews" / f"{asset_id}-{file}-{snapped}.webp"
-    if cache.is_file():
-        return cache.read_bytes(), "image/webp"
-    with Image.open(BytesIO(body)) as opened:
-        image = ImageOps.exif_transpose(opened)
-        image.thumbnail((snapped, snapped))
-        result = BytesIO()
-        image.convert("RGBA" if image.mode in {"RGBA", "LA", "P"} else "RGB").save(result, "WEBP", quality=80)
-        body = result.getvalue()
-    atomic_write_bytes(cache, body)
-    return body, "image/webp"
-
-
-
 def validate_prompt_preview(preview: PromptPreviewImage, body: bytes) -> None:
     checked = _preview_image(body, preview.mime_type)
     if (checked.file, checked.width, checked.height) != (preview.file, preview.width, preview.height):
@@ -616,25 +484,6 @@ def _staged_adopted_previews(asset: CreationAsset, bodies: dict[str, bytes] | No
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
         raise
-
-
-def create_prompt_asset(
-    title: str,
-    segments: list[CreationPromptSegment] | list[dict[str, str]],
-    tags: list[str],
-    project_id: str | None = None,
-) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = _new_asset(
-            kind="prompt",
-            title=title,
-            tags=tags,
-            content=_prompt_content(segments),
-            project_id=project_id,
-        )
-        _write_catalog_unlocked(current, [asset, *current.assets])
-        return asset
 
 
 def create_generation_asset(
@@ -695,7 +544,6 @@ def create_media_asset_from_bytes(
         duplicate = _media_duplicate(current, content.sha256)
         if duplicate:
             # 再存一次已归档的同一个文件：把它还原回来，不然「已在资产库中」指向一个看不见的资产。
-            _set_archived_unlocked([duplicate.asset_id], False)
             if not allow_existing:
                 raise CreationAssetDuplicateError(duplicate.asset_id)
             project_ids = _normalize_project_ids([
@@ -784,91 +632,21 @@ def list_creation_assets(
     scope: Literal["all", "project"] = "all",
     project_id: str | None = None,
     has_category: bool | None = None,
-    archived: bool | None = False,
 ) -> CreationAssetList:
-    """archived：False 只列在用的（默认），True 只列已归档的，None 两者都列。"""
     migrate_legacy_canvas_libraries()
     if scope == "project" and not project_id:
         raise ValueError("按项目查看资产时必须提供 project_id")
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
-        hidden = _read_archived_unlocked()
         rows = [
             asset
             for asset in current.assets
             if (kind is None or asset.kind == kind)
             and (project_id is None or project_id in asset.project_ids)
             and (has_category is None or bool(asset.category) == has_category)
-            and (archived is None or (asset.asset_id in hidden) == archived)
         ]
         rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
         return CreationAssetList(revision=current.revision, assets=rows)
-
-
-def list_prompt_asset_index(
-    *,
-    tags: list[str] | None = None,
-    query: str | None = None,
-    project_id: str | None = None,
-    limit: int = 20,
-) -> dict:
-    """Agent 用的提示词资产索引：不带正文，服务端过滤，附全库标签词表。
-
-    tags 为「全部命中」（大小写不敏感）；query 是标题子串。排序：归属当前项目的在前，
-    再按最近使用 / 创建时间倒序。tag_facets 统计的是全部提示词资产，不受过滤影响——
-    Agent 靠它知道库里有哪些标签可选。
-    """
-    migrate_legacy_canvas_libraries()
-    wanted = {tag.strip().casefold() for tag in (tags or []) if tag.strip()}
-    needle = (query or "").strip().casefold()
-    with file_lock(_catalog_lock_path()):
-        hidden = _read_archived_unlocked()
-        prompts = [asset for asset in _read_catalog_unlocked().assets
-                   if asset.kind == "prompt" and asset.asset_id not in hidden]
-    counts: dict[str, int] = {}
-    labels: dict[str, str] = {}
-    for asset in prompts:
-        for tag in asset.tags:
-            key = tag.casefold()
-            counts[key] = counts.get(key, 0) + 1
-            labels.setdefault(key, tag)
-    facets = [{"tag": labels[key], "count": counts[key]}
-              for key in sorted(counts, key=lambda k: (-counts[k], labels[k]))]
-    rows = [
-        asset for asset in prompts
-        if wanted <= {tag.casefold() for tag in asset.tags}
-        and (not needle or needle in asset.title.casefold())
-    ]
-    rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
-    if project_id:
-        rows.sort(key=lambda asset: 0 if project_id in asset.project_ids else 1)
-    return {
-        "assets": [{
-            "asset_id": asset.asset_id,
-            "title": asset.title,
-            "tags": asset.tags,
-            "last_used_at": asset.last_used_at,
-        } for asset in rows[:limit]],
-        "total": len(rows),
-        "tag_facets": facets,
-    }
-
-
-def read_prompt_asset(asset_id: str, project_id: str | None = None) -> dict:
-    """读一条提示词资产全文并记一次使用（Agent 只读它准备采用的那条；浏览走索引接口）。"""
-    if get_creation_asset(asset_id).kind != "prompt":
-        raise ValueError("只有提示词资产可以通过这个入口读取")
-    asset = mark_creation_asset_used(asset_id, project_id)
-    segments = asset.content.segments
-    return {
-        "asset_id": asset.asset_id,
-        "title": asset.title,
-        "tags": asset.tags,
-        "segments": [segment.model_dump() for segment in segments],
-        "variables": [{"name": segment.name, "default_value": segment.default_value}
-                      for segment in segments if segment.kind == "variable"],
-        "prompt": render_prompt_segments(segments, {}),
-    }
 
 
 def update_creation_asset_category(asset_id: str, category: str | None) -> CreationAsset:
@@ -917,114 +695,6 @@ def update_canvas_categories(project_id: str, categories: list[str]):
         })
         atomic_write_json(canvas_project_dir(project_id) / "project.json", updated.model_dump(mode="json"))
         return updated
-
-
-def update_prompt_asset(
-    asset_id: str,
-    *,
-    title: str,
-    segments: list[CreationPromptSegment] | list[dict[str, str]],
-    tags: list[str],
-) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        if asset.kind != "prompt":
-            raise ValueError("只有提示词资产可以使用这个编辑入口")
-        updated = asset.model_copy(update={
-            "title": _required_text(title, "资产标题"),
-            "tags": _normalize_tags(tags),
-            "content": _prompt_content(segments).model_copy(update={
-                "preview_images": asset.content.preview_images,
-            }),
-            "updated_at": _now(),
-        })
-        _replace_asset(current, updated)
-        return updated
-
-
-def update_media_asset_from_bytes(
-    asset_id: str,
-    *,
-    title: str,
-    tags: list[str],
-    body: bytes | None = None,
-    filename: str = "media",
-    mime_type: str | None = None,
-) -> CreationAsset:
-    orphan_paths: list[Path] = []
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        if asset.kind != "media":
-            raise ValueError("只有媒体资产可以使用这个编辑入口")
-        replacement = store_media_blob(body, filename, mime_type) if body is not None else None
-        content = replacement or asset.content
-        assert content.kind == "media"
-        duplicate = _media_duplicate(current, content.sha256)
-        if duplicate and duplicate.asset_id != asset_id:
-            raise CreationAssetDuplicateError(duplicate.asset_id)
-        updated = asset.model_copy(update={
-            "title": _required_text(title, "资产标题"),
-            "tags": _normalize_tags(tags),
-            "content": content,
-            "updated_at": _now(),
-        })
-        _replace_asset(current, updated)
-        orphan_paths = _orphan_blob_paths(
-            _asset_blob_paths(asset),
-            [updated if row.asset_id == asset_id else row for row in current.assets],
-        )
-    for path in orphan_paths:
-        path.unlink(missing_ok=True)
-    return updated
-
-
-def _set_archived_unlocked(asset_ids: list[str], archived: bool) -> None:
-    current = _read_archived_unlocked()
-    if archived:
-        timestamp = _now()
-        updated = {**current, **{asset_id: current.get(asset_id, timestamp) for asset_id in asset_ids}}
-    else:
-        updated = {key: value for key, value in current.items() if key not in set(asset_ids)}
-    if updated != current:
-        _write_archived_unlocked(updated)
-
-
-def set_creation_assets_archived(asset_ids: list[str], archived: bool) -> list[str]:
-    """归档 / 还原一批资产（D13：个人资产不物理删除）。返回实际存在的 id；全都不存在时 KeyError。
-    归档只是从列表里收起：文件、项目引用、参考库关系都不动，还原后原样回来。"""
-    with file_lock(_catalog_lock_path()):
-        known = {asset.asset_id for asset in _read_catalog_unlocked().assets}
-        found = list(dict.fromkeys(asset_id for asset_id in asset_ids if asset_id in known))
-        if not found:
-            raise KeyError(asset_ids[0] if asset_ids else "")
-        _set_archived_unlocked(found, archived)
-    return found
-
-
-def delete_creation_asset(asset_id: str) -> None:
-    """Physically remove one asset and delete its blobs when no other asset uses them.
-    界面不再提供（D13 改为归档）；只给测试与将来「彻底删除」用。"""
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        remaining = [row for row in current.assets if row.asset_id != asset_id]
-        orphan_paths = _orphan_blob_paths(_asset_blob_paths(asset), remaining)
-        _write_catalog_unlocked(current, remaining)
-        _set_archived_unlocked([asset_id], False)
-        if asset.kind == "prompt":
-            preview_dir = _preview_dir(asset.asset_id)
-            if preview_dir.exists():
-                shutil.rmtree(preview_dir)
-    for path in orphan_paths:
-        path.unlink(missing_ok=True)
 
 
 def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> CreationAsset:
