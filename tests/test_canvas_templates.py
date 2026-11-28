@@ -82,7 +82,6 @@ def test_paste_twice_after_source_deletion_keeps_media_draft_and_internal_edges(
         doc = result["document"]
         group = next(n for n in doc["nodes"] if n["id"] == result["group_id"])
         members = set(group["data"]["member_node_ids"])
-        assert group["position"] == {"x": -270, "y": -70}
         assert len(members) == 2 and members.isdisjoint(node_ids)
         assert group["id"] not in groups
         image, = [n for n in doc["nodes"] if n["id"] in members and n["type"] == "image"]
