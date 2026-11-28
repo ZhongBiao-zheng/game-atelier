@@ -42,13 +42,20 @@ interface SubmissionAttempt {
   refreshRevision?: boolean;
 }
 
+/** 打开过、还没提交的弹窗草稿（按 画布 + 节点）：房主重启要重新鉴权时操作条会卸载，重新打开时照原样恢复。
+ *  只有用户关闭弹窗或提交成功才清。 */
+interface OpenDraft { prompt: string; prefill: string; count: number; source: Source; chosen: string }
+const openDrafts = new Map<string, OpenDraft>();
+
 function pendingAttempt(key: string): SubmissionAttempt | null {
   const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null');
   return saved?.body ? saved : null;
 }
 
 function priceLabel(model: Choice) {
-  if (model.cost_cny != null) return formatGenerationCost(model.cost_cny) + (model.cost_unit === 'song' ? '/首' : '/次');
+  // 房主目录的视频价按固定示例规格算，不是这次的价格。
+  if (model.cost_cny != null) return formatGenerationCost(model.cost_cny)
+    + (model.cost_unit === 'song' ? '/首' : model.mode === 'video' ? '（5 秒 720p 示例）' : '/次');
   if (model.cost_unit === '1000_chars' && model.unit_cost_cny != null) return formatGenerationCost(model.unit_cost_cny) + '/千字';
   if (model.cost_unit === 'million_tokens') {
     const rates = [];
@@ -59,10 +66,14 @@ function priceLabel(model: Choice) {
   return '';
 }
 
-export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revision, owner, allowBorrow, disabled = false }: {
+export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revision, owner, allowBorrow, disabled = false, inputKinds = [] }: {
   peerKey: string; projectId: string; node: CanvasNode; frozen?: CanvasFrozenGeneration | null; revision: number; owner: string; allowBorrow: boolean;
   disabled?: boolean;
+  /** 连到这个节点的输入素材类型：提交时房主会带上它们，估价也要算进去。 */
+  inputKinds?: readonly string[];
 }) {
+  const storageKey = 'shared-generation:' + JSON.stringify([peerKey, projectId, node.id]);
+  const restored = useRef<OpenDraft | undefined>(undefined);
   const [open, setOpen] = useState(false);
   const draft = 'generation_draft' in node.data ? node.data.generation_draft : null;
   const mode = draft?.mode ?? (node.type === 'layer_stack' || node.type === 'image_edit' ? 'image' : node.type);
@@ -82,7 +93,14 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const [prefill, setPrefill] = useState('');
   const [count, setCount] = useState(1);
   const base = remoteProjectPath(peerKey, projectId);
-  const storageKey = 'shared-generation:' + JSON.stringify([peerKey, projectId, node.id]);
+  // 打开期间随改随记；卸载（重新鉴权）不清。
+  useEffect(() => {
+    if (open) openDrafts.set(storageKey, {prompt, prefill, count, source, chosen});
+  }, [open, prompt, prefill, count, source, chosen, storageKey]);
+  function changeOpen(next: boolean) {
+    if (!next) openDrafts.delete(storageKey);
+    setOpen(next);
+  }
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -107,6 +125,9 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       const failure = [mineResult, hostResult].find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') setError(errorText(failure.reason));
       setMine(local); setHost(remote);
+      const kept = restored.current;
+      restored.current = undefined;
+      if (kept) { setSource(kept.source); setChosen(kept.chosen); return; }
       const saved = pendingAttempt(storageKey);
       setSource(saved?.source ?? (!local.length && remote.length ? 'borrowed' : 'local'));
       setChosen(saved ? JSON.stringify([saved.body.channel_id ?? saved.body.alias, saved.body.model]) : '');
@@ -120,10 +141,14 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   const original = draft?.model || frozen?.model_id || (node.type === 'layer_stack' ? node.data.model : null);
   const choice = chosen ? choices.find(item => value(item) === chosen)
     : choices.find(item => item.model === original) ?? (!original ? choices[0] : undefined);
-  // 总价只按最终提交参数估（自己的供应商）。房主目录价是示例规格（视频 5 秒 720p），不当总价显示，单价留在模型菜单里。
-  const estimate = choice?.key && (mode === 'image' || mode === 'video')
-    ? estimateGenerationCostForSubmission(choice.key, choice.model, mode,
-      {...(frozen?.params ?? {}), ...(draft?.params ?? {}), n: count} as JobParams)
+  // 总价只按最终提交参数估（自己的供应商），连线输入一并算：接了视频或音频（时长未知）就不显示。
+  // 房主目录价是示例规格，不当总价显示，单价留在模型菜单里。
+  const unpricedInputs = inputKinds.some(kind => kind === 'video' || kind === 'audio');
+  const estimate = choice?.key && (mode === 'image' || mode === 'video') && !unpricedInputs
+    ? estimateGenerationCostForSubmission(choice.key, choice.model, mode, {
+      ...(frozen?.params ?? {}), ...(draft?.params ?? {}), n: count,
+      ...(mode === 'image' && inputKinds.includes('image') ? {image_edit: {}} : {}),
+    } as JobParams)
     : null;
   async function submit() {
     if (!choice || submitting.current) return;
@@ -150,7 +175,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
         method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body),
       });
       sessionStorage.removeItem(storageKey);
-      setOpen(false);
+      changeOpen(false);
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409 && attempt) {
         // The next click can accept a newer revision while keeping the same billing intent.
@@ -163,13 +188,16 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
   }
   return <>
     <Button size="sm" disabled={disabled} onClick={() => {
+      const kept = openDrafts.get(storageKey);
+      restored.current = kept;
+      if (kept) { setPrompt(kept.prompt); setPrefill(kept.prefill); setCount(kept.count); setOpen(true); return; }
       const saved = pendingAttempt(storageKey)?.body;
       const initialPrompt = saved?.prompt ?? (draft?.prompt || frozen?.prompt || (node.type === 'layer_stack' ? node.data.prompt : ''));
       setPrompt(initialPrompt); setPrefill(initialPrompt);
       setCount(saved?.requested_count ?? Math.max(1, Math.min(4, Number(draft?.params.n ?? frozen?.params.n) || 1)));
       setOpen(true);
     }}>生成…</Button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent aria-describedby={undefined} dirty={prompt !== prefill}>
+    <Dialog open={open} onOpenChange={changeOpen}><DialogContent aria-describedby={undefined} dirty={prompt !== prefill}>
       <DialogHeader><DialogTitle>{node.type === 'layer_stack' ? '拆分图层' : node.type === 'image_edit' ? '图片编辑' : '生成'}</DialogTitle></DialogHeader>
       {(allowBorrow || source === 'borrowed') && <Tabs value={source} onValueChange={next => { setSource(next === 'borrowed' ? 'borrowed' : 'local'); setChosen(''); }}>
         <TabsList><TabsTrigger value="local">我的供应商</TabsTrigger><TabsTrigger value="borrowed" disabled={!allowBorrow}>房主供应商</TabsTrigger></TabsList>
@@ -190,7 +218,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
         // 与画布提示词框一致：⌘↵ / Ctrl+↵ 生成，Enter 换行，输入法组合期间不处理。
         if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.nativeEvent.isComposing) return;
         event.preventDefault();
-        if (!loading && !pending && choice) void submit();
+        if (!loading && !pending && !disabled && choice) void submit();
       }} />
       {['image', 'text'].includes(node.type) && <div className="flex items-center justify-between gap-3">
         <span className="text-sm">生成数量</span>
@@ -202,7 +230,7 @@ export function SharedCanvasGenerate({ peerKey, projectId, node, frozen, revisio
       <Collapse open={Boolean(error)}><p role="alert" className="text-sm text-destructive">{shownError}</p></Collapse>
       <div className="flex items-center justify-end gap-3">
         {estimate != null && <span className="text-xs tabular-nums text-muted-foreground">约 {formatGenerationCost(estimate)}</span>}
-        <Button ref={submitButton} disabled={loading || pending || !choice} onClick={() => void submit()}>
+        <Button ref={submitButton} disabled={loading || pending || disabled || !choice} onClick={() => void submit()}>
           <SwapLabel active={pending} on="提交中…" off="生成" />
         </Button>
       </div>

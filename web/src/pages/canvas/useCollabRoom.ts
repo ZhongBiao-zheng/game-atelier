@@ -87,6 +87,8 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
   const [,setHistoryTick] = useState(0);
   const history = useRef(new PerUserUndoStack());
   const pending = useRef(new Map<string, PendingOp>());
+  /** 已确认的 op_id → revision：迟到回执与幂等重试的回执只进一次撤销栈，重试直接拿已有结果。 */
+  const confirmed = useRef(new Map<string, number>());
   const presence = useRef({selected_node_ids:[] as string[], positions:{} as Record<string, CanvasPoint>});
   const presenceTimer = useRef<number>();
   const onUpdate = useRef(onRevision);
@@ -101,6 +103,8 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
     let tries = 0;
     let roomClosed = false;
     history.current = new PerUserUndoStack();
+    confirmed.current = new Map();
+    const confirmedOps = confirmed.current;
     latest.current = null;
     setDocument(null);
     setClosed('');
@@ -149,8 +153,12 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
           else { socket.close(); return; }
           if (event.client_id === self) {
             const item = pendingOps.get(event.op_id);
-            if (item) history.current.applied({opId:event.op_id, revision:event.revision, touched:event.touched_node_ids}, item.stack);
-            item?.settle?.resolve(event.revision);
+            if (item && !confirmedOps.has(event.op_id)) {
+              history.current.applied({opId:event.op_id, revision:event.revision, touched:event.touched_node_ids}, item.stack);
+              confirmedOps.set(event.op_id, event.revision);
+              if (confirmedOps.size > 200) confirmedOps.delete(confirmedOps.keys().next().value!);
+            }
+            item?.settle?.resolve(confirmedOps.get(event.op_id) ?? event.revision);
             pendingOps.delete(event.op_id);
           } else if (event.touched_node_ids) history.current.changed(event.touched_node_ids, event.revision);
           else if (before) {
@@ -206,6 +214,8 @@ export function useCollabRoom(path: string | null, onRevision?: (revision:number
         resolve: revision => { window.clearTimeout(timer); resolve({opId, revision}); },
         reject: error => { window.clearTimeout(timer); reject(error); },
       };
+      const known = confirmed.current.get(opId);
+      if (known !== undefined) { resolve({opId, revision:known}); return; }
       if (!send(op, baseRevision, null, undefined, settle, opId)) { reject(new Error('连接已断开，重连后再保存')); return; }
       timer = window.setTimeout(() => {
         // 记录留着：迟到的确认照样进撤销栈，只是不再回调。

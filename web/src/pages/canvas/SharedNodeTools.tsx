@@ -1,7 +1,7 @@
 import { CanvasInpaintEditor } from '@/components/canvas/CanvasInpaintEditor';
 import { CanvasOutpaintEditor } from '@/components/canvas/CanvasOutpaintEditor';
 import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import { SwapLabel } from '@/components/ui/swap-label';
@@ -37,22 +37,45 @@ export function SharedNodeEdit({open, node, doc, room, close}: {
   const draft = useRef({title, content, open});
   draft.current = {title, content, open};
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  // StrictMode 会先清理再重建 effect：建立时恢复 true，否则开发环境里保存永远不收尾。
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  /** 本次提交的锁：在第一个 await 之前就拿住，摘要算完前再点一次不会生成第二份版本。 */
+  const locked = useRef(false);
+  type Submission = {title:string; content:string; op:Parameters<CollabRoom['submitAndWait']>[0]; revision:number; opId:string; versionId?:string};
   /** 上一次没等到确认的提交：同一份草稿重试沿用它的 op_id 与提交体，房主已落盘时只回原结果。 */
-  const attempt = useRef<{title:string; content:string; op:Parameters<CollabRoom['submitAndWait']>[0]; revision:number; opId:string} | null>(null);
+  const attempt = useRef<Submission | null>(null);
+  function settled(snapshot:{title:string; content:string}, revision:number, versionId:string | undefined) {
+    if (!alive.current) return;
+    const now = draft.current;
+    // 只关仍停在这份快照上的弹窗；等待期间又改了的留着，基线换成刚确认的那一份。
+    if (now.open && now.title === snapshot.title && now.content === snapshot.content) close();
+    else setInitial(current => ({revision, title: snapshot.title.trim(), content: snapshot.content, versionId: versionId ?? current.versionId}));
+  }
+  function conflict(message:string) {
+    setInitial(current => ({...current, versionId: textVersionId}));
+    setError(message);
+    shakeOnError(saveButton.current);
+  }
   async function save(event:React.FormEvent) {
     event.preventDefault();
-    if (saving) return;
+    if (locked.current) return;
+    locked.current = true;
+    try { await submit(); } finally { locked.current = false; }
+  }
+  async function submit() {
     // 先锁定这次提交的快照：摘要计算和等待确认期间的新输入不算在这次里。
     const snapshot = {title, content};
     const previous = attempt.current;
     let submission = previous && previous.title === snapshot.title && previous.content === snapshot.content ? previous : null;
+    if (submission?.versionId) {
+      // 同稿重试前先核对重连后的快照：已是这次的版本就当已成功；出现第三个版本就留着草稿提示冲突；仍是原基线才幂等重发。
+      if (textVersionId === submission.versionId) { attempt.current = null; settled(snapshot, doc.revision, submission.versionId); return; }
+      if (textVersionId !== initial.versionId) { attempt.current = null; conflict('正文已被他人更新，再次保存将覆盖'); return; }
+    }
     if (!submission) {
       // 重连回来后正文已被别人改过：先提示一次，再点保存才覆盖。
       if (node.type === 'text' && snapshot.content !== initial.content && textVersionId !== initial.versionId) {
-        setInitial(current => ({...current, versionId: textVersionId}));
-        setError('正文已被他人更新，再次保存将覆盖');
-        shakeOnError(saveButton.current);
+        conflict('正文已被他人更新，再次保存将覆盖');
         return;
       }
       const patch: Record<string, unknown> = {};
@@ -70,7 +93,7 @@ export function SharedNodeEdit({open, node, doc, room, close}: {
       }
       if (!Object.keys(patch).length) { close(); return; }
       submission = {...snapshot, op:{kind:'node_update',node_id:node.id, patch,text_versions:versions},
-        revision:initial.revision, opId:crypto.randomUUID()};
+        revision:initial.revision, opId:crypto.randomUUID(), versionId:versions[0]?.version_id};
       attempt.current = submission;
     }
     // 等房主确认再关：被拒、断线或超时都留在弹窗里，正文不丢。
@@ -78,14 +101,7 @@ export function SharedNodeEdit({open, node, doc, room, close}: {
     try {
       const {revision} = await room.submitAndWait(submission.op, submission.revision, submission.opId);
       if (attempt.current === submission) attempt.current = null;
-      if (!alive.current) return;
-      const now = draft.current;
-      // 只关仍停在这份快照上的弹窗；等待期间又改了的留着，基线换成刚确认的那一份。
-      if (now.open && now.title === snapshot.title && now.content === snapshot.content) close();
-      else {
-        const version = submission.op.kind === 'node_update' ? submission.op.text_versions?.[0]?.version_id : undefined;
-        setInitial(current => ({revision, title: snapshot.title.trim(), content: snapshot.content, versionId: version ?? current.versionId}));
-      }
+      settled(snapshot, revision, submission.versionId);
     } catch (reason) {
       if (!alive.current) return;
       setError(errorText(reason));
@@ -112,26 +128,38 @@ export function SharedAnnotation({open,room,node,version,url,close}:{
   const width = version.width ?? 1024;
   const height = version.height ?? 1024;
   const annotation = node.data.annotation;
-  const shared = useMemo(() => annotation?.elements ?? [], [annotation]);
-  // 没确认的笔画连同它基于的那份标注留在本地：房主确认这一笔才清；断线、被拒都留着，重连后补发。
-  const [pendingDraft, setPendingDraft] = useState<AnnotationDraft | null>(null);
+  // 节点还是打开时那张图：换了图，房主那份标注属于新图，不拿来合并，也不往新图上补发。
+  const sameImage = node.data.current_version_id === version.version_id;
+  const shared = useMemo(() => annotation && annotation.version_id === version.version_id ? annotation.elements : [],
+    [annotation, version.version_id]);
+  const draftKey = node.id + ':' + version.version_id;
+  const [, rerender] = useReducer((count:number) => count + 1, 0);
+  const pendingDraft = annotationDrafts.get(draftKey) ?? null;
   const elements = useMemo(() => pendingDraft ? mergeAnnotation(shared, pendingDraft) : shared, [shared, pendingDraft]);
   const warned = useRef(false);
+  function storeDraft(key:string, next:AnnotationDraft | null) {
+    if (next) annotationDrafts.set(key, next); else annotationDrafts.delete(key);
+    rerender();
+  }
+  function warn(message:string) {
+    if (warned.current) return;
+    warned.current = true;
+    notify.error(message);
+  }
   function commit(next:AnnotationElement[]) {
-    setPendingDraft({elements:next, base:shared});
+    const key = draftKey;
+    storeDraft(key, {elements:next, base:shared});
+    if (!sameImage) { warn('节点图片已被更换，标注未保存'); return; }
     room.submitAndWait({kind:'annotation_update',node_id:node.id,
       patch:{data:{annotation:next.length ? {version_id:version.version_id,elements:next,visible:true,rendered_version_id:null,markup_version_id:null} : null}}})
       .then(() => {
         warned.current = false;
-        setPendingDraft(current => current?.elements === next ? null : current);
-      }, reason => {
-        if (warned.current) return;
-        warned.current = true;
-        notify.error(room.connected ? errorText(reason) : '连接已断开，重连后自动保存');
-      });
+        if (annotationDrafts.get(key)?.elements === next) storeDraft(key, null);
+      }, reason => warn(room.connected ? errorText(reason) : '连接已断开，重连后自动保存'));
   }
+  // 重连（含收起后仍挂着、重新打开）时补发：每次都从最新房主快照按元素 ID 合并，不拿旧节点整份覆盖。
   const resend = useRef(() => {});
-  resend.current = () => { if (pendingDraft) commit(elements); };
+  resend.current = () => { if (pendingDraft && sameImage) commit(elements); };
   useEffect(() => { if (room.connected) resend.current(); }, [room.connected]);
   const editor = useAnnotationEditor({enabled:open,width,height,elements,
     onCommit:commit,onError:notify.error,onExit:close,undo:room.undo,redo:room.redo});
@@ -140,6 +168,8 @@ export function SharedAnnotation({open,room,node,version,url,close}:{
 }
 
 interface AnnotationDraft { elements: AnnotationElement[]; base: AnnotationElement[] }
+/** 没确认的标注草稿，按「节点:图片版本」存在模块里：收起、重挂、重新鉴权都不丢，换了图也不会补发到新图上。 */
+const annotationDrafts = new Map<string, AnnotationDraft>();
 
 /** 本地草稿与房主那份按元素 ID 合并：本地改过或删掉的以本地为准（冲突时保留草稿）；
  *  本地没碰的跟随房主（别人改了就用别人的，别人删了就删）；别人新加的接在后面。 */
