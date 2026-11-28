@@ -107,7 +107,10 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
 
   /** 保存或关掉表单后重新判断：有可用模型就结束；ComfyUI 还没工作流就转到编辑态导入。 */
   const settle = async (saved: FormState | null) => {
+    // 绑定发起检查时的表单会话：期间打开了别的表单，就不再动它（不关、不结束引导）。
+    const session = formSession.current.n;
     const { keys } = await listKeys().catch(() => ({ keys: [] as KeyView[] }));
+    if (formSession.current.n !== session) return;
     if (hasUsableModel(keys)) { onDone(); return; }
     if (saved?.path === 'comfyui' && saved.mode === 'create') {
       const created = keys.filter(key => key.provider === 'comfyui').sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0];
