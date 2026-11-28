@@ -105,7 +105,7 @@ export function HistoryPanel({ onReference }: { onReference: Reference }) {
 function HistoryList({ position, onReference, onScrollTop }: {
   position: Position; onReference: Reference; onScrollTop: (top: number) => void;
 }) {
-  const { items, more, reload, removeOutputs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
+  const { items, more, reload, refreshHead, removeOutputs, loading, error, hasMore } = useHistoryPages(position.kind, position.q);
   const [selection, setSelection] = useState(new Set<string>());
   const [preview, setPreview] = useState<HistoryItem | null>(null);
   const [previewRect, setPreviewRect] = useState<DOMRect | null>(null);
@@ -124,7 +124,15 @@ function HistoryList({ position, onReference, onScrollTop }: {
   // 撤销删除后回到原位的卡片：描边约 1.5 秒，不在可见区时滚过去。
   const [restored, setRestored] = useState<ReadonlySet<string>>(new Set());
   const revealedRestore = useRef(false);
-  const selected = items.filter(item => selection.has(historyKey(item)));
+  const restoreTimer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(restoreTimer.current), []);
+  // 选中时记下整条记录：列表刷新、合并后某行暂时不在 items 里，批量操作也不漏项。
+  const selectedRecords = useRef(new Map<string, HistoryItem>());
+  const remember = (rows: readonly HistoryItem[]) => { for (const row of rows) selectedRecords.current.set(historyKey(row), row); };
+  const selected = [...selection].flatMap(key => {
+    const row = selectedRecords.current.get(key);
+    return row ? [row] : [];
+  });
   const groups = useMemo(() => {
     const days = new Map<string, HistoryItem[]>();
     for (const item of items) {
@@ -148,11 +156,10 @@ function HistoryList({ position, onReference, onScrollTop }: {
       clear();
       reload();
     };
-    // 新结果只追加在顶部：不清选择，滚动位置照旧。
+    // 新结果（或重连后补回的）按 historyKey 合并到顶部：已载入的页、选择与滚动都保留。
     const arrive = () => {
       arrivedAfter.current = latestItems.current.reduce((newest, item) => Math.max(newest, Date.parse(item.submitted_at) || 0), 0);
-      restore.current = list.current?.scrollTop ?? 0;
-      reload();
+      refreshHead();
     };
     window.addEventListener(HISTORY_CHANGED, refresh);
     window.addEventListener(HISTORY_JOB_FINISHED, arrive);
@@ -160,16 +167,17 @@ function HistoryList({ position, onReference, onScrollTop }: {
       window.removeEventListener(HISTORY_CHANGED, refresh);
       window.removeEventListener(HISTORY_JOB_FINISHED, arrive);
     };
-  }, [reload]);
+  }, [reload, refreshHead]);
 
+  // 计时器跟着这一次还原走：之后分页或新结果改了列表，也不会把它清掉、让描边一直留着。
   useEffect(() => {
     if (!restored.size || revealedRestore.current) return;
     const first = items.find(item => restored.has(historyKey(item)));
     if (!first) return;
     revealedRestore.current = true;
     list.current?.querySelector(`[data-history-key="${CSS.escape(historyKey(first))}"]`)?.scrollIntoView({ block: 'nearest' });
-    const timer = window.setTimeout(() => setRestored(new Set()), 1500);
-    return () => window.clearTimeout(timer);
+    window.clearTimeout(restoreTimer.current);
+    restoreTimer.current = window.setTimeout(() => setRestored(new Set()), 1500);
   }, [items, restored]);
 
   useLayoutEffect(() => {
@@ -195,6 +203,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
   function clear() {
     selectRequest.current++;
     anchor.current = undefined;
+    selectedRecords.current.clear();
     setSelection(new Set());
   }
   useEffect(() => {
@@ -214,6 +223,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
     const key = historyKey(item);
     const start = items.findIndex(row => historyKey(row) === anchor.current);
     const end = items.indexOf(item);
+    remember(range && start >= 0 ? items.slice(Math.min(start, end), Math.max(start, end) + 1) : [item]);
     setSelection(current => {
       const next = new Set(current);
       if (range && start >= 0) {
@@ -226,11 +236,12 @@ function HistoryList({ position, onReference, onScrollTop }: {
     list.current?.focus({ preventScroll: true });
   }
 
-  async function action(key: HistoryAction, rows: HistoryItem[]) {
-    if (busy || !rows.length) return;
+  /** accepted：删除被服务端受理（或失败）时立即回报，大图据此决定翻不翻页。 */
+  async function action(key: HistoryAction, rows: HistoryItem[], accepted?: (ok: boolean) => void) {
+    if (busy || !rows.length) { accepted?.(false); return; }
     setBusy(true);
     try {
-      if (key === 'delete') { await remove(rows); return; }
+      if (key === 'delete') { await remove(rows, accepted); return; }
       if (key === 'download') await downloadHistory(rows);
       else {
         await onReference(rows.map(row => ({
@@ -241,7 +252,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
     } catch (err) { notify.error(errorText(err)); }
     finally { setBusy(false); }
   }
-  async function remove(rows: HistoryItem[]) {
+  async function remove(rows: HistoryItem[], accepted?: (ok: boolean) => void) {
     const jobs = new Map<string, number[]>();
     for (const row of rows) {
       if (!jobs.has(row.job_id)) jobs.set(row.job_id, []);
@@ -256,6 +267,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
         for (const slot of slots) done.add(`${id}/${slot}`);
       }
     } catch (err) { notify.error(errorText(err)); }
+    accepted?.(done.size > 0);
     if (!done.size) return;
     setRemoving(done);
     await new Promise(resolve => setTimeout(resolve, MOTION_DURATION.slow * 1000));
@@ -287,7 +299,11 @@ function HistoryList({ position, onReference, onScrollTop }: {
         if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'a' || busy) return;
         event.preventDefault(); event.stopPropagation();
         const id = ++selectRequest.current;
-        void more(true).then(rows => { if (id === selectRequest.current) setSelection(new Set(rows.map(historyKey))); }).catch(() => {});
+        void more(true).then(rows => {
+          if (id !== selectRequest.current) return;
+          remember(rows);
+          setSelection(new Set(rows.map(historyKey)));
+        }).catch(() => {});
       }}>
       {groups.map(([label, rows]) => <section key={label}>
         <h3 className="sticky top-0 z-10 bg-panel py-2 text-xs font-normal text-muted-foreground">{label}</h3>
@@ -298,7 +314,7 @@ function HistoryList({ position, onReference, onScrollTop }: {
             onPreview={rect => { setPreviewRect(rect); setPreview(row); }} onAction={key => void action(key, [row])} />
         }</AssetMasonry>
       </section>)}
-      {loading && <LoadingIcon aria-label="加载中" className="delayed-reveal mx-auto my-4 animate-spin text-muted-foreground" />}
+      {loading && <div className="delayed-reveal my-4 flex justify-center"><LoadingIcon aria-label="加载中" className="animate-spin text-muted-foreground" /></div>}
       {error && <div role="alert" className="p-3 text-sm">{error}<Button variant="ghost" size="icon" aria-label="重试" onClick={() => void more().catch(() => {})}><RetryIcon /></Button></div>}
       {!loading && !error && !items.length && <p className="py-8 text-center text-sm text-muted-foreground">{position.kind !== 'all' || position.q.trim() ? '没有匹配的记录' : '还没有生成记录'}</p>}
     </div>
@@ -315,7 +331,8 @@ function HistoryList({ position, onReference, onScrollTop }: {
     </motion.div>}</AnimatePresence>
     {preview?.kind === 'image' && <HistoryLightbox item={preview} items={items} sourceRect={previewRect}
       onNavigate={row => { setPreviewRect(null); setPreview(row); }} onClose={() => setPreview(null)}
-      onReference={row => void action('reference', [row])} onDelete={row => void action('delete', [row])} />}
+      deleting={busy} onReference={row => void action('reference', [row])}
+      onDelete={row => new Promise<boolean>(resolve => { void action('delete', [row], resolve); })} />}
     {shownPreview && <Dialog open={Boolean(preview && preview.kind !== 'image')} onOpenChange={open => { if (!open) setPreview(null); }}><DialogContent>
       <DialogTitle>{shownPreview.filename}</DialogTitle>
       {shownPreview.kind === 'video' ? <video controls autoPlay playsInline src={shownPreview.url} className="max-h-[70vh] w-full" />
@@ -326,10 +343,10 @@ function HistoryList({ position, onReference, onScrollTop }: {
 }
 
 /** 历史里的大图：只在图片之间翻页，带「用作参考」「删除」，从被点的卡片飞入。 */
-function HistoryLightbox({ item, items, sourceRect, onNavigate, onClose, onReference, onDelete }: {
-  item: HistoryItem; items: HistoryItem[]; sourceRect: DOMRect | null;
+function HistoryLightbox({ item, items, sourceRect, deleting, onNavigate, onClose, onReference, onDelete }: {
+  item: HistoryItem; items: HistoryItem[]; sourceRect: DOMRect | null; deleting: boolean;
   onNavigate: (item: HistoryItem) => void; onClose: () => void;
-  onReference: (item: HistoryItem) => void; onDelete: (item: HistoryItem) => void;
+  onReference: (item: HistoryItem) => void; onDelete: (item: HistoryItem) => Promise<boolean>;
 }) {
   const images = items.filter(row => row.kind === 'image');
   const index = images.findIndex(row => historyKey(row) === historyKey(item));
@@ -340,6 +357,6 @@ function HistoryLightbox({ item, items, sourceRect, onNavigate, onClose, onRefer
     onPrevious={previous ? () => onNavigate(previous) : undefined}
     onNext={next ? () => onNavigate(next) : undefined}
     onUseAsReference={() => onReference(item)}
-    onDelete={() => onDelete(item)}
+    onDelete={() => onDelete(item)} deleting={deleting}
     onClose={onClose} />;
 }

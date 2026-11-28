@@ -25,12 +25,15 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
   useEffect(() => { if (tab) shownOnce.current = true; }, [tab]);
   useEffect(() => {
     let active = true;
-    const settle = (saved: Tab) => {
+    void loadUiPrefs().then(prefs => {
+      // 只认早于用户操作、面板仍开着时回来的读取：慢请求不改刚选的页签，也不改下次首帧用的缓存。
+      if (!active || interacted.current) return;
+      // 读取失败（null）沿用有效缓存，不把「素材库」改回「历史」。
+      if (!prefs) { setTab(current => current ?? lastTab ?? 'history'); return; }
+      const saved: Tab = prefs['asset-panel'] === 'library' ? 'library' : 'history';
       lastTab = saved;
-      if (active && !interacted.current) setTab(saved);
-    };
-    void loadUiPrefs().then(prefs => settle(prefs?.['asset-panel'] === 'library' ? 'library' : 'history'),
-      () => settle('history'));
+      setTab(saved);
+    });
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -60,7 +63,7 @@ export const AssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPane
     <div className="relative min-h-0 flex-1">
       <AnimatePresence initial={false}>
         {tab && <motion.div key={tab} className="absolute inset-0 flex min-h-0 flex-col bg-panel"
-          initial={shownOnce.current ? { opacity: 0 } : false} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: 'none' }}
+          initial={shownOnce.current ? { opacity: 0 } : false} animate={{ opacity: 1, pointerEvents: 'auto' }} exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: MOTION_DURATION.base, ease: MOTION_EASE.subtle }}>
           {tab === 'history' ? <HistoryPanel onReference={props.onHistoryReference} /> : <CreationAssetPanel {...props} ref={library} embedded />}
         </motion.div>}

@@ -136,7 +136,12 @@ function AppShellContent() {
       if (status === 'done' || status === 'partial') window.dispatchEvent(new Event(HISTORY_JOB_FINISHED));
     },
     onGatewayTask: publishGatewayTask,
-    onConnect: () => { reminderRef.current?.refreshProfile(); publishGatewayConnected(); },
+    onConnect: reconnected => {
+      reminderRef.current?.refreshProfile();
+      publishGatewayConnected();
+      // 断线期间完成的任务收不到事件：重连后让历史面板补取一次顶部。
+      if (reconnected) window.dispatchEvent(new Event(HISTORY_JOB_FINISHED));
+    },
   });
 
   const ContentTag = onSettings ? 'div' : 'main';
