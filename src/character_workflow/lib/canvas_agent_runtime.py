@@ -140,47 +140,14 @@ class TurnContext:
 # ── 权限 ────────────────────────────────────────────────────────────────────────
 
 def needs_confirmation(tool: str, mode: str) -> bool:
-    """审查模式：所有写操作都确认。Auto：出图、修改、删除都不询问（2026-10-09 定），
-    唯一例外是估价超过确认金额的生成（2026-11-19 定，见 generation_over_threshold）。"""
-    return tool not in READ_TOOLS and not _plugin_tool_is_read_only(tool) and mode != "auto"
-
-
-def confirmation_required(project_id: str, tool: str, arguments: dict, mode: str) -> bool:
-    """一次工具调用要不要停下来等用户确认。审查模式：写操作都确认。
-    Auto：只有这里列出的情况确认（新增一种就在这里加一条，别散到别处）：
-    - 生成估价超过确认金额。run_group 首次只读报价，执行按整组总额比较，等于阈值也直接执行。删除维持不确认（2026-11-19 飙哥再次确认）。
-    - 插件工具声明了 always_confirm（ADR-0043）：PS 联动的脚本执行，每次都确认（2026-11-19 管理会话定）。"""
-    if tool == "run_group":
-        if not arguments.get("quote_id"):
-            return False
-        try:
-            plan = group_plan(project_id, arguments["group_id"])
-        except (KeyError, FileNotFoundError):
-            return True  # A missing quote cannot authorize an automatic paid submission.
-        if arguments["quote_id"] != quote_id(project_id, arguments["group_id"], plan):
+    """审查模式确认写操作，插件可声明每次都要确认。生成费用另按本轮累计判断。"""
+    if tool.startswith(PLUGIN_TOOL_PREFIX):
+        spec = plugin_tools().get(tool, {})
+        if spec.get("always_confirm"):
             return True
-        return mode != "auto" or plan["needs_confirmation"]
-    if tool.startswith(PLUGIN_TOOL_PREFIX) and plugin_tools().get(tool, {}).get("always_confirm"):
-        return True
-    if needs_confirmation(tool, mode):
-        return True
-    if tool == "run_generation":
-        return generation_over_threshold(project_id, arguments)
-    if tool == "run_generations":
-        return generations_over_threshold(project_id, arguments)
-    return False
-
-
-def generation_over_threshold(project_id: str, arguments: dict) -> bool:
-    """Auto 下 run_generation 估价超过确认金额时也要确认；未计价不拦。"""
-    estimate = cost.generation_estimate(project_id, str(arguments.get("surface_node_id", "")),
-                                        _count(arguments))
-    return cost.needs_cost_confirmation(estimate["estimate_cny"])
-
-
-def generations_over_threshold(project_id: str, arguments: dict) -> bool:
-    """Auto 下 run_generations 按合计估价判断；未计价的项不计入合计，也不单独拦。"""
-    return cost.needs_cost_confirmation(_generations_estimate(project_id, arguments, [])["total"])
+        if spec.get("read_only"):
+            return False
+    return tool not in READ_TOOLS and mode != "auto"
 
 
 def generation_prices(project_id, tool, arguments):
@@ -244,10 +211,6 @@ def plugin_tools() -> dict[str, dict]:
                 "always_confirm": tool.always_confirm, "summary_field": tool.summary_field,
             }
     return found
-
-
-def _plugin_tool_is_read_only(tool: str) -> bool:
-    return tool.startswith(PLUGIN_TOOL_PREFIX) and bool(plugin_tools().get(tool, {}).get("read_only"))
 
 
 def _execute_plugin_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, list[str]]:
@@ -776,16 +739,30 @@ def build_tools() -> list:
             turn.created_node_ids.update(created)
             return text
 
-        async def approval(ctx, arguments: dict, _call_id: str) -> bool:
+        async def approval(ctx, arguments: dict, call_id: str) -> bool:
             turn: TurnContext = ctx.context
             if not arguments_valid(turn.project_id, name, arguments):
                 return False  # 执行时会因校验失败直接返回错误，没有任何副作用
-            if name in cost.GENERATION_TOOLS and turn.permission_mode == "auto":
+            if name == "run_group" and not arguments.get("quote_id"):
+                return False  # 首次只取报价
+            if await asyncio.to_thread(needs_confirmation, name, turn.permission_mode):
+                return True
+
+            if name == "run_group":
+                try:
+                    group_id = arguments["group_id"]
+                    plan = await asyncio.to_thread(group_plan, turn.project_id, group_id)
+                except (KeyError, FileNotFoundError):
+                    return True
+                if arguments["quote_id"] != quote_id(turn.project_id, group_id, plan):
+                    return True
+                prices = [plan["total_cny"]]
+            elif name in cost.GENERATION_TOOLS:
                 prices = await asyncio.to_thread(generation_prices, turn.project_id, name, arguments)
-                quotes[_call_id] = prices
-                return turn.spend.requires_approval(_call_id, prices)
-            return await asyncio.to_thread(confirmation_required, turn.project_id, name,
-                                           arguments, turn.permission_mode)
+                quotes[call_id] = prices
+            else:
+                return False
+            return turn.spend.requires_approval(call_id, prices)
 
         # 只读工具直接给 False：部分模型（Tuzi 的 Claude）对无参工具传空字符串参数，SDK 判为
         # 「参数无法解析」后会无视回调、一律要求人工确认，读画布也弹确认卡。

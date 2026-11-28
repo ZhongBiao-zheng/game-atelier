@@ -71,3 +71,72 @@ def test_group_approval_compares_total_with_confirmed_limit(monkeypatch, mode, p
         result = json.loads(asyncio.run(tool.on_invoke_tool(ctx, json.dumps(args))))
         assert result["submitted_estimate_cny"] == 2 * price
         assert len(runs.list_runs(pid)) == 1
+
+
+@pytest.fixture
+def nine_yuan_calls(monkeypatch):
+    pid = create_canvas_project("本轮累计估价").project_id
+    doc = group_document(pid, drafts=["a", "b"])
+    first = doc.nodes[-1]
+    first.data.member_node_ids = ["a"]
+    second = first.model_copy(deep=True, update={"id": "other"})
+    second.data.member_node_ids = ["b"]
+    doc.nodes.append(second)
+    (canvas_project_dir(pid) / "canvas.json").write_text(doc.model_dump_json())
+    monkeypatch.setattr(agent.cost, "_estimate", lambda *args: 9)
+    turn = agent.TurnContext(pid, "auto")
+    tools = {t.name: t for t in agent.build_tools()}
+    return turn, tools
+
+
+async def quoted_group(tool, turn, group_id):
+    args = {"group_id": group_id}
+    ctx = SimpleNamespace(context=turn, tool_call_id=f"quote-{group_id}")
+    assert not await tool.needs_approval(ctx, args, ctx.tool_call_id)
+    quote = json.loads(await tool.on_invoke_tool(ctx, json.dumps(args)))
+    assert quote["total_cny"] == 9
+    return {**args, "quote_id": quote["quote_id"]}
+
+
+@pytest.mark.asyncio
+async def test_group_confirms_after_single_node_submission(nine_yuan_calls, monkeypatch):
+    turn, tools = nine_yuan_calls
+    group = tools["run_group"]
+    args = await quoted_group(group, turn, "group")
+    single = tools["run_generation"]
+    ctx = SimpleNamespace(context=turn, tool_call_id="single")
+    node = {"surface_node_id": "b"}
+    assert not await single.needs_approval(ctx, node, "single")
+    # Stub the submission only. The SDK callback still records its accepted estimate.
+    monkeypatch.setattr(agent, "run_tool_safely", lambda *_: ('{"run_id":"accepted"}', []))
+    result = json.loads(await single.on_invoke_tool(ctx, json.dumps(node)))
+    assert result["submitted_estimate_cny"] == 9
+    ctx.tool_call_id = "group"
+    assert await group.needs_approval(ctx, args, "group")
+
+
+@pytest.mark.asyncio
+async def test_parallel_groups_reserve_against_the_same_limit(nine_yuan_calls):
+    turn, tools = nine_yuan_calls
+    group = tools["run_group"]
+
+    async def check(group_id):
+        args = await quoted_group(group, turn, group_id)
+        ctx = SimpleNamespace(context=turn, tool_call_id=group_id)
+        return await group.needs_approval(ctx, args, group_id)
+
+    decisions = await asyncio.gather(check("group"), check("other"))
+    assert sorted(decisions) == [False, True]
+    assert not runs.list_runs(turn.project_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group_id", ["group", "missing"])
+async def test_unverifiable_group_quote_requires_confirmation(nine_yuan_calls, group_id):
+    turn, tools = nine_yuan_calls
+    group = tools["run_group"]
+    ctx = SimpleNamespace(context=turn, tool_call_id="execute")
+    args = {"group_id": group_id, "quote_id": "expired"}
+    assert await group.needs_approval(ctx, args, ctx.tool_call_id)
+    valid = await quoted_group(group, turn, "group")
+    assert not await group.needs_approval(ctx, valid, "valid")
