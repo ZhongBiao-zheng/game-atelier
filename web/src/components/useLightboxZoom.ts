@@ -3,6 +3,8 @@ import { wheelGestureZooms } from '@/lib/canvasTrackpad';
 import { prefersReducedMotion } from '@/lib/motion';
 
 export const LIGHTBOX_ZOOM_STEP = 1.12;
+/** 缩放栏 − / + 的离散档位；键盘 + / - 与滚轮仍按连续倍率走。 */
+const LIGHTBOX_ZOOM_LEVELS = [.25, .5, .75, 1, 1.5, 2, 3, 4];
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 // 离散缩放（预设、键盘、双击）是屏上 A→B 的位移：slow + in-out。跟手的滚轮、拖动不加过渡。
 const ZOOM_TRANSITION = 'transform var(--motion-slow) var(--ease-atelier-in-out)';
@@ -102,6 +104,15 @@ export function useLightboxZoom(src: string) {
     if (scale) zoomTo(scale * factor, point, animated);
   }, [measure, zoomTo]);
 
+  const zoomStep = useCallback((direction: 1 | -1) => {
+    const current = view.current.scale ?? measure()?.fit;
+    if (!current) return;
+    const next = direction > 0
+      ? LIGHTBOX_ZOOM_LEVELS.find(level => level > current + 1e-3)
+      : [...LIGHTBOX_ZOOM_LEVELS].reverse().find(level => level < current - 1e-3);
+    if (next) zoomTo(next);
+  }, [measure, zoomTo]);
+
   useLayoutEffect(() => {
     const el = viewport.current;
     if (!el) return;
@@ -145,7 +156,7 @@ export function useLightboxZoom(src: string) {
     delete event.currentTarget.dataset.dragging;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, handlers: {
+  return { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, zoomStep, handlers: {
     onClick: (event: React.MouseEvent<HTMLDivElement>) => { if (event.currentTarget.dataset.pannable === 'true') event.stopPropagation(); },
     // 朝双击处放大：想看的那块细节留在指针下。
     onDoubleClick: (event: React.MouseEvent<HTMLDivElement>) =>

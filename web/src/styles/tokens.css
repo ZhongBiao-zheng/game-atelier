@@ -53,6 +53,7 @@
   --color-ring: var(--ring);
   --color-glass: var(--glass);
   --color-scrim: var(--scrim);
+  --color-scrim-strong: var(--scrim-strong);
 
   --color-status-pending: var(--status-pending);
   --color-status-running: var(--status-running);
@@ -118,6 +119,8 @@
   /* 玻璃与遮罩：深度靠玻璃不靠阴影（DESIGN.md Elevation） */
   --glass: rgba(17, 17, 19, 0.66);
   --scrim: rgba(0, 0, 0, 0.62);
+  /* 遮罩上白色图标按钮的悬停底：两套主题都要够深，白图标始终看得见 */
+  --scrim-strong: rgba(0, 0, 0, 0.82);
   /* 画布节点里的浮层（尺寸、定稿、播放条…）：不透明度更高的平底，代替玻璃 */
   --canvas-chip: rgba(17, 17, 19, 0.88);
 
@@ -190,6 +193,7 @@
 
   --glass: rgba(255, 255, 255, 0.66);
   --scrim: rgba(0, 0, 0, 0.45);
+  --scrim-strong: rgba(0, 0, 0, 0.72);
   --canvas-chip: rgba(255, 255, 255, 0.9);
 
   /* 发丝边界：纯黑 alpha。输入框比发丝边高一档，保留可点感 */

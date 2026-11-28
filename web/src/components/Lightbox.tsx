@@ -2,10 +2,9 @@ import { FrozenGenerationDetails } from '@/components/canvas/FrozenGenerationDet
 import type { CanvasFrozenGeneration } from '@/schema/canvas';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AddImageIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, CopyIcon, DeleteIcon, DownloadIcon } from '@/components/ui/icons';
+import { AddIcon, AddImageIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, CollapseIcon, CopyIcon, DeleteIcon, DownloadIcon, ExpandIcon, MinusIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { RevealImage } from '@/components/ui/reveal-image';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Hint } from '@/components/ui/tooltip';
@@ -15,6 +14,7 @@ import { modelBrand } from '@/lib/modelCatalog';
 import { useCopyFeedback } from '@/lib/useCopyFeedback';
 import { MOTION_DURATION, motionAvailable } from '@/lib/motion';
 import { LIGHTBOX_ZOOM_STEP, useLightboxZoom } from './useLightboxZoom';
+import { ZOOM_DOCK_BUTTON_CLASS, ZOOM_DOCK_PERCENT_CLASS } from './zoomDock';
 import { useLightboxTransition } from './useLightboxTransition';
 
 export interface LightboxMediaMeta {
@@ -34,12 +34,14 @@ export interface LightboxMediaMeta {
 }
 
 // 遮罩已是不透明度足够的纯色 bg-scrim，按钮不再叠毛玻璃：全屏 backdrop-filter 每帧重算模糊，开合与翻页都卡。
-const CONTROL_CLASS = 'absolute size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 border-0 disabled:pointer-events-none disabled:opacity-30';
+const CONTROL_CLASS = 'absolute size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-scrim-strong border-0 disabled:pointer-events-none disabled:opacity-30';
 // 箭头走 ghost 配方（bare 控件只减不增），这里把它的悬停底色与描边压回大图层的样式。
 const ARROW_CLASS = 'top-1/2 -translate-y-1/2 [&_svg]:size-5 hover:border-transparent hover:text-white';
+// 缩放栏按钮：画布缩放栏同款外观，走 ghost 配方（bare 控件只减不增），压掉 ghost 的悬停描边与玻璃。
+const DOCK_BUTTON_CLASS = `${ZOOM_DOCK_BUTTON_CLASS} hover:border-transparent hover:backdrop-blur-none`;
 // 右上角动作组里的按钮：与关闭按钮同一外观，但排在 flex 行里，不各自绝对定位。
 // 走 ghost 配方（bare 控件只减不增），悬停描边与文字色压回大图层的样式。
-const ACTION_CLASS = 'size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 hover:border-transparent hover:text-white [&_svg]:size-6';
+const ACTION_CLASS = 'size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-scrim-strong hover:border-transparent hover:text-white [&_svg]:size-6';
 
 
 type Layer = { src: string; phase: 'incoming' | 'shown' | 'leaving' };
@@ -102,7 +104,7 @@ export function Lightbox({
 }) {
   const [closing, setClosing] = useState(false);
   const [layers, setLayers] = useState<Layer[]>(() => [{ src, phase: 'incoming' }]);
-  const { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, handlers } = useLightboxZoom(src);
+  const { viewport, plane, image, percent, preset, fitsWhole, paint, zoomTo, zoomBy, zoomStep, handlers } = useLightboxZoom(src);
   const { transition, cancel: cancelTransition } = useLightboxTransition(image, viewport, sourceRect, src);
   const closeTimer = useRef<number>();
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
@@ -273,17 +275,22 @@ export function Lightbox({
   const hasFooterActions = Boolean(onUseAsReference || onDownload || downloadName || showFooterCopy || onDelete);
 
   const mediaStage = <>
+    {/* 与画布右下角缩放栏同一形态：− 百分比 +，再加一颗「适配 / 实际大小」切换。图片原尺寸就放得下时两者同画面，切换禁用。 */}
     <div role="group" aria-label="图片缩放" className="relative z-10 mx-auto my-1 flex shrink-0 items-center gap-1 rounded-full border border-border bg-card p-1"
       onClick={event => event.stopPropagation()}>
-      {/* 选中底色是滑动的独立层；整张图原尺寸就放得下时「适配」与「100%」同画面，只留 100%。 */}
-      <div className="relative isolate flex items-center gap-1">
-        <SelectionHighlight className="rounded-full ring-0" />
-        {([['适配', null], ['100%', 1], ['200%', 2]] as const).filter(([, scale]) => !(fitsWhole && scale === null)).map(([label, scale]) =>
-          <Button key={label} size="sm" variant="ghost" aria-pressed={preset === scale || (fitsWhole && preset === null && scale === 1)}
-            className="h-7 rounded-full px-2 tabular-nums aria-pressed:text-secondary-foreground aria-pressed:hover:bg-transparent"
-            onClick={() => { cancelTransition(); zoomTo(scale); }}>{label}</Button>)}
-      </div>
-      <output aria-label="当前缩放" className="min-w-12 border-l border-border px-2 text-center text-xs tabular-nums text-muted-foreground">{percent}%</output>
+      <Button variant="ghost" size="icon" type="button" aria-label="缩小" disabled={percent <= 25} className={DOCK_BUTTON_CLASS}
+        onClick={() => { cancelTransition(); zoomStep(-1); }}><MinusIcon aria-hidden="true" /></Button>
+      <output aria-label="当前缩放" className={`${ZOOM_DOCK_PERCENT_CLASS} grid place-items-center`}>{percent}%</output>
+      <Button variant="ghost" size="icon" type="button" aria-label="放大" disabled={percent >= 400} className={DOCK_BUTTON_CLASS}
+        onClick={() => { cancelTransition(); zoomStep(1); }}><AddIcon aria-hidden="true" /></Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <Hint label={preset === null ? '实际大小' : '适配'}>
+        <Button variant="ghost" size="icon" type="button" aria-label={preset === null ? '实际大小' : '适配'}
+          disabled={fitsWhole && (preset === null || preset === 1)} className={DOCK_BUTTON_CLASS}
+          onClick={() => { cancelTransition(); zoomTo(preset === null ? 1 : null); }}>
+          <SwapIcon swapKey={preset === null}>{preset === null ? <ExpandIcon aria-hidden="true" /> : <CollapseIcon aria-hidden="true" />}</SwapIcon>
+        </Button>
+      </Hint>
     </div>
     <div ref={viewport} data-lightbox-viewport="" {...handlers}
       onPointerDownCapture={cancelTransition} onWheelCapture={cancelTransition}
@@ -492,7 +499,7 @@ export function Lightbox({
           <Button variant="ghost" size="icon" type="button" aria-label="下载图片" onClick={onDownload} className={ACTION_CLASS}>
             <DownloadIcon size="lg" aria-hidden />
           </Button>
-        </Hint> : downloadName && (
+        </Hint> : downloadName && <Hint label="下载">
           <a
             href={src}
             download={downloadName}
@@ -501,7 +508,7 @@ export function Lightbox({
           >
             <DownloadIcon size="lg" aria-hidden />
           </a>
-        )}
+        </Hint>}
         {onDelete && <Hint label="删除（⌫）">
           <Button variant="ghost" size="icon" type="button" aria-label="删除" onClick={deleteCurrent} className={ACTION_CLASS}>
             <DeleteIcon size="lg" aria-hidden />
