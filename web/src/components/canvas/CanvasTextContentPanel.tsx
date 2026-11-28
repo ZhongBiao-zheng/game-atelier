@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 
 import { CanvasModelPicker, type CanvasModelChoice } from '@/components/canvas/CanvasGenerationControls';
 import { canvasNodeRunState } from '@/components/canvas/CanvasNodeRunStatus';
@@ -8,8 +9,9 @@ import { Button } from '@/components/ui/button';
 import { AiIcon, CloseIcon, LoadingIcon, StopIcon } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 import { Textarea } from '@/components/ui/textarea';
-import { shakeOnError } from '@/lib/motion';
+import { MOTION_DURATION, MOTION_EASE, prefersReducedMotion, shakeOnError } from '@/lib/motion';
 import { routeChannel, storedAlias } from '@/lib/modelRoutes';
 import { cn } from '@/lib/utils';
 import { canvasGenerationModelSupportsMode, normalizeCanvasTextParams } from '@/pages/canvasEditorModel';
@@ -187,15 +189,22 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
       </div>
       <div className="mt-2 flex flex-col gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <div className="flex items-center gap-1.5">
-          {selectedCount > 0 && (
-            <span className="flex shrink-0 items-center gap-0.5 rounded-sm bg-secondary py-0.5 pl-2 pr-0.5 text-xs tabular-nums text-foreground">
-              选中 {selectedCount} 字
-              <Button type="button" variant="ghost" size="icon" className="size-5 rounded-sm"
-                aria-label="取消选区" onClick={() => setSelection(null)}>
-                <CloseIcon size="sm" aria-hidden="true" />
-              </Button>
-            </span>
-          )}
+          {/* 胶囊进出时宽度一起收放，输入框跟着平滑让位，不被一下挤窄。减弱动态效果时只淡入淡出。 */}
+          <AnimatePresence initial={false}>{selectedCount > 0 && (
+            <motion.span key="selection" className="-mr-1.5 flex shrink-0 overflow-hidden"
+              initial={{ opacity: 0, width: prefersReducedMotion() ? 'auto' : 0 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              exit={{ opacity: 0, width: prefersReducedMotion() ? 'auto' : 0 }}
+              transition={{ duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle }}>
+              <span className="mr-1.5 flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-sm bg-secondary py-0.5 pl-2 pr-0.5 text-xs tabular-nums text-foreground">
+                选中 {selectedCount} 字
+                <Button type="button" variant="ghost" size="icon" className="size-5 rounded-sm"
+                  aria-label="取消选区" onClick={() => setSelection(null)}>
+                  <CloseIcon size="sm" aria-hidden="true" />
+                </Button>
+              </span>
+            </motion.span>
+          )}</AnimatePresence>
           <Input
             ref={instructionRef}
             aria-label="改写要求"
@@ -214,19 +223,20 @@ export function CanvasTextContentPanel({ node, draft, context, header, embedded 
           <CanvasModelPicker fit="content" choices={choices} alias={draft.alias ?? null} model={draft.model}
             params={draft.params} onSelect={selectModel} />
           <span className="flex-1" />
-          {running && !activeJob ? null : (
-            <Button ref={submitRef} type="button" size="sm" variant={running ? 'outline' : 'default'}
-              className="shrink-0 transition-colors"
-              disabled={running ? Boolean(activeJob?.cancel_requested_at) : submitting || !value.trim()}
-              onClick={running ? () => void context.cancelRun(activeJob!.canvas_run!.run_id) : submitRevision}>
-              <SwapIcon swapKey={running ? 'running' : submitting ? 'submitting' : 'idle'}>
-                {submitting || activeJob?.cancel_requested_at
-                  ? <LoadingIcon className="animate-spin" aria-hidden="true" />
-                  : running ? <StopIcon aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
-              </SwapIcon>
-              {activeJob?.cancel_requested_at ? '停止中…' : running ? '停止' : submitting ? '提交中…' : '改写'}
-            </Button>
-          )}
+          {/* 任务还没回到列表（running 但没有 activeJob）时按钮留在原地转圈，不整个消失。 */}
+          <Button ref={submitRef} type="button" size="sm" variant={running ? 'outline' : 'default'}
+            className="shrink-0 transition-colors"
+            disabled={running ? !activeJob || Boolean(activeJob.cancel_requested_at) : submitting || !value.trim()}
+            onClick={running ? () => { if (activeJob) void context.cancelRun(activeJob.canvas_run!.run_id); } : submitRevision}>
+            <SwapIcon swapKey={running ? 'running' : submitting ? 'submitting' : 'idle'}>
+              {submitting || activeJob?.cancel_requested_at || (running && !activeJob)
+                ? <LoadingIcon className="animate-spin" aria-hidden="true" />
+                : running ? <StopIcon aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
+            </SwapIcon>
+            {/* 「停止中…」与「提交中…」等宽，「停止」与「改写」等宽：两段叠格占宽，换态时按钮不跳。 */}
+            <SwapLabel active={submitting || Boolean(activeJob?.cancel_requested_at) || (running && !activeJob)}
+              on={activeJob?.cancel_requested_at ? '停止中…' : '提交中…'} off={running ? '停止' : '改写'} />
+          </Button>
         </div>
       </div>
     </section>

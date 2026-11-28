@@ -5308,11 +5308,8 @@ function CanvasEditorInner({
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
       setMediaOperation(null);
-      announceToolNotice(
-        editsLayer ? '已更新图层素材' : operation.kind === 'split'
-          ? `已生成 ${result.created_node_ids.length} 个切图节点`
-          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成抠图节点',
-      );
+      // 切图、裁剪、抠图的结果就在原图旁淡入并被选中，那是原位反馈，不再配文字。
+      if (editsLayer) announceToolNotice('已更新图层素材');
       requestAnimationFrame(() => editorRegionRef.current?.focus());
     } catch (operationError) {
       reportError((operationError as Error).message);

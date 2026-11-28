@@ -1199,12 +1199,11 @@
   .canvas-toolbar-presence[data-phase='entering'] { translate: 0 4px; }
 }
 
+/* 整组跑完：勾在原位停约 1 秒再淡出（退场 fast + subtle）。只动透明度，减弱动态效果时照播。
+   成员节点上的勾同步淡出，useCanvasGroupRuns 的 GROUP_RUN_FINISH_MS 与这里的 1s + fast 对齐。 */
 @keyframes group-run-finished {
   to { opacity: 0; }
 }
 .group-run-finished {
-  animation: group-run-finished var(--motion-fast) var(--ease-atelier-out) var(--motion-slow) both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .group-run-finished { visibility: hidden; }
+  animation: group-run-finished var(--motion-fast) var(--ease-atelier-subtle) 1s both;
 }
