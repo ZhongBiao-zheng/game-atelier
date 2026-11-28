@@ -260,7 +260,9 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
   // 「已启用 / 全部」只切视图：勾选留在预览里，保存时一并写入；提交只走「启用所选」。
   const [modelView, setModelView] = useState<'enabled' | 'all'>('all');
   // 「模型详情」里删掉的、带单价或自己起了名的行：原位留「已删除 · 撤销」8 秒。
-  const [removedRow, setRemovedRow] = useState<{ row: EditableModel; index: number } | null>(null);
+  const [removedRow, setRemovedRow] = useState<{ row: EditableModel; index: number; checked: boolean } | null>(null);
+  // 正在收起的行（_rowId）：grid-rows 1fr→0fr 播完 150ms 再真正移除。
+  const [leavingRows, setLeavingRows] = useState<ReadonlySet<number>>(() => new Set());
   useEffect(() => {
     if (!removedRow) return;
     const timer = window.setTimeout(() => setRemovedRow(null), UNDO_DURATION_MS);
@@ -557,25 +559,42 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
     setPreview(null);
   };
   const showPicker = Boolean(preview) && modelView === 'all';
+  // 删除 / 撤销同时改预览里的勾选：否则保存时 mergedModels() 又按勾选把删掉的行加回来。
   const dropModelRow = (index: number) => {
     const row = models[index];
-    setModels(models.filter((_, i) => i !== index));
-    const named = row.name.trim() && row.name.trim() !== row.id.trim();
+    const id = row.id.trim();
+    const rowId = row._rowId;
+    if (rowId == null || leavingRows.has(rowId)) return;
+    const checked = fetchedChecked.has(id);
+    const named = row.name.trim() && row.name.trim() !== id;
     const priced = [priceText(row), priceInText(row), priceOutText(row)].some(value => value.trim());
-    setRemovedRow(named || priced ? { row, index } : null);
+    const remove = () => {
+      setLeavingRows(current => { const next = new Set(current); next.delete(rowId); return next; });
+      setModels(current => current.filter(item => item._rowId !== rowId));
+      if (checked) setFetchedChecked(current => new Set([...current].filter(item => item !== id)));
+      setRemovedRow(named || priced ? { row, index, checked } : null);
+    };
+    if (!motionAvailable() || prefersReducedMotion()) { remove(); return; }
+    setLeavingRows(current => new Set(current).add(rowId));
+    window.setTimeout(remove, MOTION_DURATION.fast * 1000);
   };
   const restoreModelRow = () => {
     if (!removedRow) return;
-    const { row, index } = removedRow;
+    const { row, index, checked } = removedRow;
     setModels([...models.slice(0, index), row, ...models.slice(index)]);
+    if (checked) setFetchedChecked(new Set([...fetchedChecked, row.id.trim()]));
     setRemovedRow(null);
   };
-  const removedRowNotice = removedRow && <motion.div key={`removed-${removedRow.row._rowId}`} {...modelRowMotion()} className="overflow-hidden">
+  /** 上游判不出分类的模型：详情里选的分类与「全部」里的类型选择是同一份，两边任改一处都算数。 */
+  const syncModalityPick = (id: string, modality: ModelModality) => {
+    if (preview?.models.some(item => item.id === id && !item.modality)) setModalityPick(current => ({ ...current, [id]: modality }));
+  };
+  const removedRowNotice = removedRow && <div key={`removed-${removedRow.row._rowId}`} className="content-swap-in">
     <p role="status" className="flex h-8 items-center gap-1.5 text-xs text-muted-foreground">
       已删除 {removedRow.row.name.trim() || removedRow.row.id.trim()} ·
       <Button variant="link" size="sm" type="button" onClick={restoreModelRow} className="h-auto p-0 text-xs">撤销</Button>
     </p>
-  </motion.div>;
+  </div>;
   const shownGatewayError = useRetained(gatewayError);
   const shownConnectionFailure = useRetained(connectionTest && !connectionTest.ok ? connectionTest : null);
   // 「已启用」显示保存时会写入的模型：已有的加上预览里勾选的。
@@ -632,7 +651,8 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
             : model.input_modalities ?? [];
           const bound = provider === 'custom' && model.protocol === 'declarative' && model.declarative_id;
           return {
-            name: model.name.trim(),
+            // 别名留空用 ID：与「已启用」的计数同一判定（有 ID 就算）。
+            name: model.name.trim() || model.id.trim(),
             id: model.id.trim(),
             modality,
             protocol: bound ? 'declarative' : model.protocol === 'declarative' ? null : model.protocol ?? null,
@@ -953,6 +973,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                         {/* 判不出类型的行常驻类型选择：选了就勾上，不用先勾选再找按钮。 */}
                         {!model.modality && <Select value={modalityPick[model.id] ?? ''} onValueChange={value => {
                           setModalityPick({ ...modalityPick, [model.id]: value as ModelModality });
+                          setModels(current => current.map(row => row.id.trim() === model.id && !row._locked ? { ...row, modality: value as ModelModality } : row));
                           if (!checked) toggleFetched(model.id);
                         }}>
                           <SelectTrigger size="sm" aria-label={`类型 ${model.id}`} aria-invalid={checked && !modalityPick[model.id]} className="w-24 shrink-0"><SelectValue placeholder="选类型" /></SelectTrigger>
@@ -992,10 +1013,12 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                   <span>模型 ID</span>
                 </div>
                 <div className="space-y-2">
-                  <AnimatePresence initial={false}>
                   {models.flatMap((model, index) => [
                     ...(removedRow && removedRow.index === index ? [removedRowNotice] : []),
-                    <motion.div key={model._rowId} {...modelRowMotion()} className="overflow-hidden">
+                    // 删除：grid-rows 1fr→0fr 收起并淡出 150ms（同历史卡片），播完再移除。
+                    <div key={model._rowId} className={cn('grid transition-[grid-template-rows,opacity] duration-150',
+                      model._rowId != null && leavingRows.has(model._rowId) ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr]')}>
+                    <div className="min-h-0 overflow-hidden">
                     <div className="grid grid-cols-2 items-start gap-2">
                       <Label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</Label>
                       <Input
@@ -1021,7 +1044,10 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                           setModels(models.map((m, i) => i === index ? { ...m, id: e.target.value } : m));
                           // 预览开着时手填了上游里有的 ID：一并勾上，保存时不会被当成「取消勾选」丢掉。
                           const id = e.target.value.trim();
-                          if (preview?.models.some(item => item.id === id) && !fetchedChecked.has(id)) setFetchedChecked(new Set([...fetchedChecked, id]));
+                          if (preview?.models.some(item => item.id === id) && !fetchedChecked.has(id)) {
+                            setFetchedChecked(new Set([...fetchedChecked, id]));
+                            syncModalityPick(id, model.modality ?? 'image');
+                          }
                         }}
                         className="font-mono"
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
@@ -1042,6 +1068,7 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                             onValueChange={value => {
                               if (!value) return;
                               const mod = value as ModelModality;
+                              syncModalityPick(model.id.trim(), mod);
                               setModels(models.map((m, i) => i === index ? {
                                 ...m,
                                 modality: mod,
@@ -1147,10 +1174,10 @@ export function KeyForm({ open = true, initial, presetId, onCreated, onCancel, o
                         <CloseIcon size="sm" aria-hidden />
                       </Button>
                     </div>
-                    </motion.div>,
+                    </div>
+                    </div>,
                   ])}
                   {removedRow && removedRow.index >= models.length && removedRowNotice}
-                  </AnimatePresence>
                 </div>
 
                   </div>
@@ -1227,15 +1254,6 @@ function IssueText({ issue, className }: { issue: FormIssue | null; className?: 
   </div>;
 }
 
-/** 模型详情的行：删除时高度收起淡出；减弱动态效果时只淡出；测试环境（无 matchMedia）直接增删。 */
-function modelRowMotion() {
-  if (!motionAvailable()) return {};
-  const exit = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
-  return prefersReducedMotion()
-    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0, transition: exit }, transition: exit }
-    : { initial: { opacity: 0, height: 0 }, animate: { opacity: 1, height: 'auto' }, exit: { opacity: 0, height: 0, transition: exit },
-      transition: { duration: MOTION_DURATION.slow, ease: MOTION_EASE.inOut } };
-}
 
 const BUILTIN_INTERFACE = '__builtin';
 const DEFAULT_CATALOG = '__models';

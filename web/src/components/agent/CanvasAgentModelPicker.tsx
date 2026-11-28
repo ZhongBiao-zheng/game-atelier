@@ -51,7 +51,8 @@ export function CanvasAgentModelPicker({ models, alias, model, triggerClassName,
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
+        // 每次打开都从空搜索开始；关闭时不清，退场期间列表内容不变。
+        onClick={() => { if (!open) setQuery(''); setOpen(!open); }}
         className={cn(
           'flex h-7 min-w-0 max-w-44 items-center gap-1.5 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50',
           open && 'bg-secondary text-foreground',
@@ -65,7 +66,7 @@ export function CanvasAgentModelPicker({ models, alias, model, triggerClassName,
       </Button></Hint>
       <ToolbarPopover
         open={open}
-        onClose={() => { setOpen(false); setQuery(''); }}
+        onClose={() => setOpen(false)}
         anchorRef={anchorRef}
         direction={direction}
         align="start"

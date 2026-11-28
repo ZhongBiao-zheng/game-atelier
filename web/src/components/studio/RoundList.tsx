@@ -909,22 +909,13 @@ function ReferenceStack({
   const canPreview = activeSrc && isImagePath(activeSrc);
   return (
     <>
-      <div className="relative shrink-0">
-        <Hint label={onReuse ? (canPreview ? '复用参考（双击看大图）' : '复用参考') : '查看大图'}><Button variant="bare"
+      {/* 单击看大图；复用（会替换输入框里的参考）是独立的按钮，悬停浮现，不和查看混在一次点击里。 */}
+      <div className="group/stack relative shrink-0">
+        <Hint label={canPreview ? '查看大图' : undefined}><Button variant="bare"
           type="button"
           data-testid="reference-stack"
-          aria-label="复用这组参考素材"
-          onClick={(event) => {
-            // 双击的第二下只看大图，不再复用一遍。
-            if (event.detail > 1) return;
-            if (canPreview && !onReuse) {
-              setLightboxSrc(refImageSrc(activeSrc, jobId));
-              return;
-            }
-            if (onReuse) void onReuse(config, jobId);
-            else if (canPreview) setLightboxSrc(refImageSrc(activeSrc, jobId));
-          }}
-          onDoubleClick={() => {
+          aria-label="查看参考大图"
+          onClick={() => {
             if (canPreview) setLightboxSrc(refImageSrc(activeSrc, jobId));
           }}
           onMouseEnter={() => setHover(true)}
@@ -944,10 +935,9 @@ function ReferenceStack({
                 key={i}
                 onMouseEnter={() => setActive(i)}
                 onClick={e => {
-                  if (isImagePath(src) && e.detail === 1 && !onReuse) {
-                    e.stopPropagation();
-                    setLightboxSrc(refImageSrc(src, jobId));
-                  }
+                  if (!isImagePath(src)) return;
+                  e.stopPropagation();
+                  setLightboxSrc(refImageSrc(src, jobId));
                 }}
                 style={{
                   width: REF_CARD_W,
@@ -965,6 +955,12 @@ function ReferenceStack({
             );
           })}
         </Button></Hint>
+        {onReuse && <Hint label="复用参考"><Button variant="secondary" size="icon"
+          type="button"
+          aria-label="复用这组参考素材"
+          onClick={() => { void onReuse(config, jobId); }}
+          className="absolute -bottom-1.5 -right-1.5 z-30 size-8 rounded-full bg-scrim text-white transition-opacity duration-150 opacity-0 group-hover/stack:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        ><AddImageIcon size="sm" aria-hidden /></Button></Hint>}
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>

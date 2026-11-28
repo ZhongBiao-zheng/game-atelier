@@ -113,7 +113,8 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => setOpen(value => !value)}
+        // 每次打开都从空搜索开始；关闭时不清，退场期间列表内容不变。
+        onClick={() => { if (!open) setQuery(''); setOpen(!open); }}
         className={cn(
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           selected && 'text-primary',
@@ -123,7 +124,7 @@ export function CanvasAgentSkillPicker({ skills, selected, triggerClassName, dir
       ><SkillIcon />{label}</Button></Hint>
       <ToolbarPopover
         open={open}
-        onClose={() => { setOpen(false); setQuery(''); }}
+        onClose={() => setOpen(false)}
         anchorRef={anchorRef}
         direction={direction}
         align="start"
