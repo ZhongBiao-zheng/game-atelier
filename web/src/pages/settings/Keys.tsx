@@ -374,15 +374,16 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     if (fromForm) closeForm();
     void toggleKey(target, false);
   };
-  const deleteDialog = shownDeleting && <AlertDialog open={Boolean(deleting)} onOpenChange={next => { if (!next) setDeleting(null); }}>
+  // 删除请求发出后锁住取消、改为停用与关闭：已发出的 DELETE 不能被另一个选择「盖掉」。
+  const deleteDialog = shownDeleting && <AlertDialog open={Boolean(deleting)} onOpenChange={next => { if (!next && !removing) setDeleting(null); }}>
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>删除供应商「{shownDeleting.row.alias}」？</AlertDialogTitle>
         <AlertDialogDescription>删除后不能恢复，它的模型会从智能路由里移除。只是暂时不用可以改为停用。</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>取消</AlertDialogCancel>
-        {shownDeleting.row.enabled !== false && <Button variant="outline" type="button"
+        <AlertDialogCancel disabled={removing}>取消</AlertDialogCancel>
+        {shownDeleting.row.enabled !== false && <Button variant="outline" type="button" disabled={removing}
           onClick={() => disableKey(shownDeleting.row, shownDeleting.fromForm)}>改为停用</Button>}
         <AlertDialogAction destructive disabled={removing} onClick={event => { event.preventDefault(); void removeKey(shownDeleting.row, shownDeleting.fromForm); }}>
           <SwapLabel active={removing} on="删除中…" off="删除" />

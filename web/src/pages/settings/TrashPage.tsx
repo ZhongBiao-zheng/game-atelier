@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
 import { emptyTrash, listTrash, purgeTrash, restoreTrash, TRASH_KIND_LABEL, type TrashEntry } from '@/api/trash';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +7,8 @@ import { useRetained } from '@/components/ui/retained';
 import { errorText } from '@/lib/errorText';
 import { notify } from '@/lib/notify';
 import { formatBeijingTime } from '@/lib/time';
-import { MOTION_DURATION, MOTION_EASE, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { MOTION_DURATION, motionAvailable, prefersReducedMotion } from '@/lib/motion';
+import { cn } from '@/lib/utils';
 import { SwapLabel } from '@/components/ui/swap-label';
 
 /** 删一轮里的单张也记成 round，带 `output_slot`：单独标出来，不然和整轮删除长得一样。 */
@@ -20,17 +20,17 @@ function trashKindLabel(entry: TrashEntry): string {
 
 type Pending = { scope: 'one'; entry: TrashEntry } | { scope: 'all' };
 
-function TrashRow({ entry, busy, onRestore, onPurge }: {
+function TrashRow({ entry, busy, leaving, onRestore, onPurge }: {
   entry: TrashEntry;
   busy: boolean;
+  /** 还原或彻底删除成功：grid-rows 1fr→0fr 收起淡出，播完由父级移除。 */
+  leaving: boolean;
   onRestore: () => void;
   onPurge: () => void;
 }) {
-  // 还原或彻底删除后这一行 150ms 收起淡出，下面的行跟着上移；减弱动态效果时只淡出。
-  const exit = { duration: MOTION_DURATION.fast, ease: MOTION_EASE.subtle };
-  return <motion.li
-    exit={motionAvailable() ? (prefersReducedMotion() ? { opacity: 0, transition: exit } : { opacity: 0, height: 0, transition: exit }) : undefined}
-    className="group/row overflow-hidden">
+  return <li aria-hidden={leaving || undefined} className={cn('group/row grid transition-[grid-template-rows,opacity] duration-150',
+    leaving ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr]')}>
+    <div className="min-h-0 overflow-hidden">
     <div className="flex items-center gap-4 py-3 group-first/row:pt-0 group-last/row:pb-0">
     <Badge variant="secondary" className="shrink-0">{trashKindLabel(entry)}</Badge>
     <div className="min-w-0 flex-1 space-y-1">
@@ -43,7 +43,8 @@ function TrashRow({ entry, busy, onRestore, onPurge }: {
     <Button variant="ghost" size="sm" type="button" disabled={busy} onClick={onPurge}
       className="text-destructive hover:text-destructive">彻底删除</Button>
     </div>
-  </motion.li>;
+    </div>
+  </li>;
 }
 
 export function TrashPage() {
@@ -66,7 +67,17 @@ export function TrashPage() {
     if (busy) next.add(id); else next.delete(id);
     return next;
   });
-  const drop = (ids: ReadonlySet<string>) => setEntries(current => current?.filter(entry => !ids.has(entry.trash_id)) ?? current);
+  // 收起中的行：列表与它所在的容器留到收起播完，再移除（清空最后一项也不提前切空态）。
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(() => new Set());
+  const drop = (ids: ReadonlySet<string>) => {
+    const remove = () => {
+      setEntries(current => current?.filter(entry => !ids.has(entry.trash_id)) ?? current);
+      setLeaving(current => new Set([...current].filter(id => !ids.has(id))));
+    };
+    if (!motionAvailable() || prefersReducedMotion()) { remove(); return; }
+    setLeaving(current => new Set([...current, ...ids]));
+    window.setTimeout(remove, MOTION_DURATION.fast * 1000);
+  };
 
   async function restore(entry: TrashEntry) {
     setBusy(entry.trash_id, true);
@@ -88,7 +99,7 @@ export function TrashPage() {
       if (target.scope === 'all') {
         setEmptying(true);
         await emptyTrash();
-        setEntries([]);
+        drop(new Set(entries?.map(entry => entry.trash_id) ?? []));
       } else {
         setBusy(target.entry.trash_id, true);
         await purgeTrash(target.entry.trash_id);
@@ -112,10 +123,9 @@ export function TrashPage() {
       <p className="font-display text-display italic text-foreground/70">回收站是空的</p>
     </div>}
     {entries && entries.length > 0 && <ul aria-label="回收站" className="divide-y divide-border rounded-xl border border-border bg-card p-5">
-      <AnimatePresence initial={false}>
-        {entries.map(entry => <TrashRow key={entry.trash_id} entry={entry} busy={emptying || busyIds.has(entry.trash_id)}
-          onRestore={() => void restore(entry)} onPurge={() => setPending({ scope: 'one', entry })} />)}
-      </AnimatePresence>
+      {entries.map(entry => <TrashRow key={entry.trash_id} entry={entry} busy={emptying || busyIds.has(entry.trash_id) || leaving.has(entry.trash_id)}
+        leaving={leaving.has(entry.trash_id)}
+        onRestore={() => void restore(entry)} onPurge={() => setPending({ scope: 'one', entry })} />)}
     </ul>}
     {!entries && !loadError && <p role="status" className="delayed-reveal text-xs text-muted-foreground">加载中…</p>}
     {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
